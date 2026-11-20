@@ -265,6 +265,76 @@ public static partial class TrRmExecutableCompiler
         uint ClassTypeSpecReference,
         ImmutableArray<SourceClassMemberExport> MemberExports);
 
+    private static byte[] EncodeEN1ImportedClassConstructionClause(
+        BoundStandardClassMethodDeclaration method,
+        BoundGenericNominalTypeIdentity owner,
+        Dictionary<(BoundGenericNominalTypeIdentity Owner,
+            uint FieldDefinitionId), int> fieldRows,
+        Dictionary<(BoundGenericNominalTypeIdentity Owner,
+            uint MethodDefinitionId), int> methodRows)
+    {
+        if (method.ConstructionRole == 1)
+        {
+            var members = new List<uint>(
+                method.InitializedMemberDefinitionIds.Length);
+            foreach (var memberDefinitionId
+                in method.InitializedMemberDefinitionIds)
+            {
+                if ((memberDefinitionId >> 24) != 0x14
+                    || !fieldRows.TryGetValue((owner,
+                        memberDefinitionId), out var fieldRow))
+                {
+                    throw Unsupported(
+                        "An EN1 imported initializer guarantee refers to an unretained FieldDef.");
+                }
+
+                members.Add(0x1400_0000u
+                    | checked((uint)fieldRow));
+            }
+
+            members.Sort();
+            for (var index = 1; index < members.Count; index++)
+            {
+                if (members[index - 1] == members[index])
+                {
+                    throw new InvalidDataException(
+                        "An EN1 imported initializer repeats an initialized FieldDef.");
+                }
+            }
+
+            var payload = new byte[checked(
+                sizeof(byte) * 4 + sizeof(uint)
+                    + members.Count * sizeof(uint))];
+            payload[0] = 1;
+            BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(4),
+                checked((uint)members.Count));
+            for (var index = 0; index < members.Count; index++)
+            {
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    payload.AsSpan(8 + (index * sizeof(uint))),
+                    members[index]);
+            }
+
+            return payload;
+        }
+
+        if (method.ConstructionRole == 2
+            && method.InitializedMemberDefinitionIds.IsEmpty
+            && methodRows.TryGetValue((owner,
+                method.InitializerMethodDefinitionId),
+                out var initializerMethodDefRow))
+        {
+            var payload = new byte[8];
+            payload[0] = 2;
+            BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(4),
+                checked((uint)initializerMethodDefRow));
+            return payload;
+        }
+
+        throw Unsupported(
+            "An EN1 imported projection does not reference its retained initializer MethodDef.");
+    }
+
     private static byte[] EmitC1EnumClosureDeclarationLibrary(
         BoundProgram program, string moduleIdentity, string schemaIdentity,
         uint moduleTargetRequirement, TrRmArtifactSchema schema,
@@ -2561,6 +2631,10 @@ public static partial class TrRmExecutableCompiler
         var standardClassFieldRowsByIdentity = new Dictionary<(
             BoundGenericNominalTypeIdentity Owner, uint FieldDefinitionId),
             int>();
+        var standardClassMethodRowsByIdentity = new Dictionary<(
+            BoundGenericNominalTypeIdentity Owner, uint MethodDefinitionId),
+            int>();
+        var hasImportedClassConstructionMethods = false;
         var standardFieldImportRows = new Dictionary<(
             uint ExpectedDefinitionId, string ProducerIdentity,
             string ExportKey), int>();
@@ -3698,6 +3772,200 @@ public static partial class TrRmExecutableCompiler
                 }
             }
 
+            var importedConstructorMethods
+                = new List<(BoundStandardClassMethodDeclaration Method,
+                    int MethodDefRow,
+                    ImmutableArray<BoundStandardClassMethodExpectation>
+                        Expectations)>();
+            foreach (var methodGroup in emission.MethodExpectations
+                .GroupBy(static expectation =>
+                    expectation.ExpectedDefinitionId)
+                .OrderBy(static group => group.Key))
+            {
+                var methodExpectations = methodGroup
+                    .OrderBy(static expectation => expectation.ExportKey,
+                        StringComparer.Ordinal)
+                    .ToImmutableArray();
+                var methodExpectation = methodExpectations[0];
+                var method = classView.Methods.SingleOrDefault(candidate =>
+                    candidate.DefinitionId
+                        == methodExpectation.ExpectedDefinitionId);
+                if (method is null
+                    || !IsSupportedClassConstructorMethod(method)
+                    || emission.Import
+                        is not C1EnumClosureImport classTypeImport
+                    || classTypeImport.RootImportRow <= 0
+                    || methodExpectation.OwnerImportRow
+                        != classTypeImport.RootImportRow
+                    || methodExpectation.ExpectedOwnerDefinitionId
+                        != classView.Identity.DefinitionId
+                    || methodExpectation.ExpectedDefinitionId
+                        != method.DefinitionId
+                    || (methodExpectation.ProviderDefinitionId >> 24)
+                        != 0x16
+                    || (methodExpectation.ProviderDefinitionId
+                        & 0x00FF_FFFF) == 0
+                    || (methodExpectation.ProviderOwnerDefinitionId >> 24)
+                        != 0x13
+                    || (methodExpectation.ProviderOwnerDefinitionId
+                        & 0x00FF_FFFF) == 0)
+                {
+                    throw Unsupported(
+                        "An EN1 imported class constructor expectation does not retain one exact owner and Construction declaration.");
+                }
+
+                if (methodExpectations.Any(expectation =>
+                        expectation.ExpectedOwnerDefinitionId
+                            != methodExpectation.ExpectedOwnerDefinitionId
+                        || expectation.ProviderDefinitionId
+                            != methodExpectation.ProviderDefinitionId
+                        || expectation.ProviderOwnerDefinitionId
+                            != methodExpectation.ProviderOwnerDefinitionId
+                        || expectation.OwnerImportRow
+                            != methodExpectation.OwnerImportRow
+                        || !StringComparer.Ordinal.Equals(
+                            expectation.Provider.ModuleIdentity,
+                            methodExpectation.Provider.ModuleIdentity)
+                        || expectation.Provider.TargetRequirement
+                            != methodExpectation.Provider.TargetRequirement
+                        || expectation.Provider.RuntimePolicy
+                            != methodExpectation.Provider.RuntimePolicy
+                        || !expectation.Provider.ProviderArtifactDigest
+                            .AsSpan().SequenceEqual(
+                                methodExpectation.Provider
+                                    .ProviderArtifactDigest.AsSpan()))
+                    || methodExpectations.Any(expectation =>
+                        !BoundEnumTypes.IsValidModuleDeclarationKey(
+                            expectation.ExportKey))
+                    || methodExpectations.Select(
+                            static expectation => expectation.ExportKey)
+                        .Distinct(StringComparer.Ordinal).Count()
+                        != methodExpectations.Length
+                    || (methodExpectation.ProviderDefinitionId >> 24)
+                        != 0x16
+                    || (methodExpectation.ProviderOwnerDefinitionId
+                        >> 24) != 0x13
+                    || !StringComparer.Ordinal.Equals(
+                        methodExpectation.Provider.ModuleIdentity,
+                        classTypeImport.ProducerIdentity)
+                    || methodExpectation.Provider.TargetRequirement
+                        != classTypeImport.TargetRequirement
+                    || methodExpectation.Provider.RuntimePolicy
+                        != classTypeImport.RuntimePolicy)
+                {
+                    throw Invalid(
+                        "An EN1 imported class constructor alias changed its selected provider origin.");
+                }
+
+                var methodDefRow = checked(methodRows.Count + 1);
+                var signatureRow = checked(
+                    methodSignatureRows.Count + 1);
+                var parameterFirst = method.Parameters.IsEmpty
+                    ? 0 : checked(parameterRows.Count + 1);
+                var returnTypeSpec = RemapStandardClassTypeSpecReference(
+                    method.ReturnTypeSpecReference, 0);
+                var receiverTypeSpec = method.ReceiverTypeSpecReference == 0
+                    ? 0
+                    : RemapStandardClassTypeSpecReference(
+                        method.ReceiverTypeSpecReference, 0);
+                for (var ordinal = 0;
+                    ordinal < method.Parameters.Length; ordinal++)
+                {
+                    var parameter = method.Parameters[ordinal];
+                    if (parameter.Mode != 0 || parameter.Flags != 0
+                        || parameter.DefaultValue is not null)
+                    {
+                        throw Unsupported(
+                            "EN1 imported constructor MethodDefs require ordinary parameters without defaults.");
+                    }
+
+                    parameterRows.Add(new TrRmParamRow(signatureRow,
+                        ordinal,
+                        RemapStandardClassTypeSpecReference(
+                            parameter.TypeSpecReference, 0),
+                        parameter.Mode, parameter.Flags));
+                    if (schema.UsesMethodParameterLabels())
+                    {
+                        methodParameterLabelRows.Add((
+                            methodDefRow, ordinal, parameter.Name));
+                        _ = AddString(parameter.Name);
+                    }
+                }
+
+                methodSignatureRows.Add(new TrRmMethodSigRow(
+                    returnTypeSpec, receiverTypeSpec, parameterFirst,
+                    method.Parameters.Length, 0, 0));
+                methodRows.Add(new TrRmMethodDefRow(typeDefRow,
+                    AddString(method.Name), signatureRow, method.Flags,
+                    0, 0, 0));
+                if (!standardClassMethodRowsByIdentity.TryAdd((
+                        classView.Identity, method.DefinitionId),
+                        methodDefRow))
+                {
+                    throw Invalid(
+                        "An EN1 imported class MethodDef identity was emitted more than once.");
+                }
+
+                importedConstructorMethods.Add((method, methodDefRow,
+                    methodExpectations));
+            }
+            hasImportedClassConstructionMethods
+                |= importedConstructorMethods.Count != 0;
+
+            foreach (var (method, methodDefRow, methodExpectations)
+                in importedConstructorMethods)
+            {
+                var constructionPayload
+                    = EncodeEN1ImportedClassConstructionClause(method,
+                        classView.Identity);
+                var contractFirst = contractRows.Count + 1;
+                var contractCount = 0;
+                if (method.EffectsMask != 0)
+                {
+                    contractRows.Add(new TrRmContractRow(
+                        0x1600_0000u | checked((uint)methodDefRow), 1,
+                        s_effectPayloads[method.EffectsMask]));
+                    contractCount++;
+                }
+
+                if (contractFirst == 0)
+                {
+                    contractFirst = contractRows.Count + 1;
+                }
+                contractRows.Add(new TrRmContractRow(
+                    0x1600_0000u | checked((uint)methodDefRow),
+                    0x0003, constructionPayload));
+                contractCount++;
+                methodRows[methodDefRow - 1] = methodRows[
+                    methodDefRow - 1] with {
+                    ContractFirst = contractFirst,
+                    ContractCount = contractCount,
+                };
+
+                foreach (var expectation in methodExpectations)
+                {
+                    var providerKey = (
+                        expectation.Provider.ModuleIdentity,
+                        expectation.Provider.TargetRequirement,
+                        expectation.Provider.RuntimePolicy);
+                    if (!moduleRefRowsByProvider.TryGetValue(providerKey,
+                            out var moduleRefRow))
+                    {
+                        moduleRefRow = moduleRefRows.Count + 1;
+                        moduleRefRows.Add(new TrRmModuleRefRow(
+                            AddString(expectation.Provider.ModuleIdentity),
+                            expectation.Provider.TargetRequirement,
+                            expectation.Provider.RuntimePolicy));
+                        moduleRefRowsByProvider.Add(providerKey,
+                            moduleRefRow);
+                    }
+
+                    importRows.Add(new TrRmImportRow(moduleRefRow,
+                        AddString(expectation.ExportKey),
+                        0x1600_0000u | checked((uint)methodDefRow)));
+                }
+            }
+
             var layoutFirst = checked(layoutRows.Count + 1);
             layoutRows.Add(new TrRmLayoutRow(typeDefRow, 0, layout.Kind,
                 layout.Flags, layout.Alignment, layout.Pack,
@@ -4373,7 +4641,8 @@ public static partial class TrRmExecutableCompiler
             featureRows.Add(TrRmFeatureRow.TypedFrozenValues);
         }
         if (schema.UsesObjectConstruction()
-            && sourceClassConstructorPlans.Count != 0)
+            && (sourceClassConstructorPlans.Count != 0
+                || hasImportedClassConstructionMethods))
         {
             featureRows.Add(TrRmFeatureRow.ClassConstructionBodiesCandidate);
         }

@@ -1939,8 +1939,8 @@ internal sealed class TrRmC1EnumClosureSourceTests
     [Test]
     public void ReemitsImportedConstructorMethodExpectations()
     {
-        foreach (var schemaIdentity in s_initializerCopyEvidenceSchemaIdentities
-            .Skip(4))
+        foreach (var schemaIdentity in
+            s_initializerCopyEvidenceSchemaIdentities)
         {
             var providerTree = SyntaxTree.Parse("""
                 namespace Demo {
@@ -1955,11 +1955,17 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 string.Join(Environment.NewLine,
                     providerCompilation.Diagnostics));
             var providerProgram = (BoundProgram)providerCompilation.Program!;
+            var schema = SchemaFor(schemaIdentity);
             var providerClassExport
-                = CreateSourceClassExportWithProjection(providerProgram,
-                    providerTree, "Child", "type.child",
-                    "constructor.child", "constructor.child.project",
-                    (0, "field.child.value"));
+                = schema.UsesObjectConstruction()
+                    ? CreateSourceClassExportWithProjection(
+                        providerProgram, providerTree, "Child",
+                        "type.child", "constructor.child",
+                        "constructor.child.project",
+                        (0, "field.child.value"))
+                    : CreateSourceClassExport(providerProgram,
+                        providerTree, "Child", "type.child",
+                        "constructor.child", (0, "field.child.value"));
             var providerArtifact = EmitClassArtifact(providerProgram,
                 "ChildProvider", schemaIdentity, [providerClassExport]);
             var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
@@ -2027,8 +2033,10 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 static declaration =>
                     declaration.Declaration.Name == "Child"
                     && !declaration.Expectations.IsEmpty);
+            var expectedMethodCount = schema.UsesObjectConstruction()
+                ? 2 : 1;
             Assert.That(childDeclaration.Expectations.Single()
-                .MethodExpectations, Has.Length.EqualTo(2),
+                .MethodExpectations, Has.Length.EqualTo(expectedMethodCount),
                 schemaIdentity);
             var incompatibleProviderTree = SyntaxTree.Parse("""
                 namespace Demo {
@@ -2046,10 +2054,17 @@ internal sealed class TrRmC1EnumClosureSourceTests
             var incompatibleProviderProgram
                 = (BoundProgram)incompatibleProviderCompilation.Program!;
             var incompatibleProviderClassExport
-                = CreateSourceClassExportWithProjection(
-                    incompatibleProviderProgram, incompatibleProviderTree,
-                    "Child", "type.child", "constructor.child",
-                    "constructor.child.project", (0, "field.child.value"));
+                = schema.UsesObjectConstruction()
+                    ? CreateSourceClassExportWithProjection(
+                        incompatibleProviderProgram,
+                        incompatibleProviderTree, "Child",
+                        "type.child", "constructor.child",
+                        "constructor.child.project",
+                        (0, "field.child.value"))
+                    : CreateSourceClassExport(
+                        incompatibleProviderProgram,
+                        incompatibleProviderTree, "Child", "type.child",
+                        "constructor.child", (0, "field.child.value"));
             var incompatibleProviderArtifact = EmitClassArtifact(
                 incompatibleProviderProgram, "ChildProvider",
                 schemaIdentity, [incompatibleProviderClassExport]);
@@ -2071,6 +2086,14 @@ internal sealed class TrRmC1EnumClosureSourceTests
             var reemittedTables = TrRmStructuralMetadataValidator
                 .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
                     reemitted, SchemaFor(schemaIdentity)));
+            var reemittedMethodImports = Enumerable.Range(1,
+                    reemittedTables.Imports.Count)
+                .Where(importRow => reemittedTables.Imports
+                    .GetExpectedDefinitionForImportRow(importRow) >> 24
+                        == 0x16)
+                .ToArray();
+            Assert.That(reemittedMethodImports,
+                Has.Length.EqualTo(expectedMethodCount), schemaIdentity);
             var childTypeDefRow = Enumerable.Range(1,
                     reemittedTables.TypeDefs.Count)
                 .Single(row => reemittedTables.TypeDefs.GetName(row)
@@ -2080,7 +2103,8 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 .Where(row => reemittedTables.Methods.GetOwnerType(row)
                     == childTypeDefRow)
                 .ToArray();
-            Assert.That(childMethodRows, Has.Length.EqualTo(2),
+            Assert.That(childMethodRows,
+                Has.Length.EqualTo(expectedMethodCount),
                 schemaIdentity);
             var childMethodRoles = new List<byte>(childMethodRows.Length);
             foreach (var methodRow in childMethodRows)
@@ -2096,8 +2120,10 @@ internal sealed class TrRmC1EnumClosureSourceTests
                     .GetConstructionClause(methodRow).RoleTag);
             }
 
+            var expectedRoles = schema.UsesObjectConstruction()
+                ? new byte[] { 1, 2 } : new byte[] { 1 };
             Assert.That(childMethodRoles.OrderBy(static role => role),
-                Is.EqualTo(new byte[] { 1, 2 }), schemaIdentity);
+                Is.EqualTo(expectedRoles), schemaIdentity);
             var initializerRow = childMethodRows.Single(methodRow =>
                 reemittedTables.Contracts.GetConstructionClause(methodRow)
                     .RoleTag == 1);
@@ -2108,11 +2134,30 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 schemaIdentity);
             Assert.That(reemittedTables.Imports.IsExpectedDefinition(
                 initializedField), Is.True, schemaIdentity);
-            Assert.That(reemittedTables.Contracts
-                .GetConstructionClause(childMethodRows.Single(methodRow =>
-                    reemittedTables.Contracts.GetConstructionClause(
-                        methodRow).RoleTag == 2)).InitializerMethodDefRow,
-                Is.EqualTo((uint)initializerRow), schemaIdentity);
+            if (schema.UsesObjectConstruction())
+            {
+                Assert.That(reemittedTables.Contracts
+                    .GetConstructionClause(childMethodRows.Single(
+                        methodRow =>
+                            reemittedTables.Contracts
+                                .GetConstructionClause(methodRow).RoleTag
+                                == 2)).InitializerMethodDefRow,
+                    Is.EqualTo((uint)initializerRow), schemaIdentity);
+            }
+
+            var reloadedReference
+                = TrRmExecutableCompiler.CreateStandardReference(
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        reemitted),
+                    "OwnerConsumer", [providerInput], ["type.owner"]);
+            var reloadedChildDeclaration
+                = reloadedReference.StandardClassDeclarations.Single(
+                    static declaration =>
+                        declaration.Declaration.Name == "Child"
+                        && !declaration.Expectations.IsEmpty);
+            Assert.That(reloadedChildDeclaration.Expectations.Single()
+                    .MethodExpectations,
+                Has.Length.EqualTo(expectedMethodCount), schemaIdentity);
         }
     }
 
