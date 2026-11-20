@@ -891,6 +891,8 @@ public static partial class TrRmExecutableCompiler
         var allowMultipleClassQueryProviders = false;
         var packedClassModuleIdentities
             = new HashSet<string>(StringComparer.Ordinal);
+        string? packedStructureModuleIdentity = null;
+        var packedModuleIdentityOrder = new List<string>();
         if (hasStandardClassDeclarations)
         {
             if (schema.UsesPropertyInitializedState())
@@ -1132,8 +1134,63 @@ public static partial class TrRmExecutableCompiler
                     }
                 }
 
+                if (!program.Structures.IsEmpty)
+                {
+                    var structureModuleIdentities
+                        = new HashSet<string>(StringComparer.Ordinal);
+                    foreach (var structure in program.Structures)
+                    {
+                        var origin = structure.StandardTypeOrigin;
+                        if (origin is null
+                            || origin.ExpectedDeclaration is null
+                            || !origin.Expectations.IsDefaultOrEmpty
+                            || !origin.AdditionalExpectedDeclarations
+                                .IsDefaultOrEmpty
+                            || !StringComparer.Ordinal.Equals(
+                                origin.Provider.SchemaIdentity,
+                                schemaIdentity)
+                            || origin.Provider.TargetRequirement
+                                != moduleTargetRequirement
+                            || origin.Provider.RuntimePolicy
+                                != (uint)program.RuntimePolicy
+                            || (origin.DefinitionId >> 24) != 0x13
+                            || (origin.DefinitionId & 0x00FF_FFFF) == 0)
+                        {
+                            throw Unsupported(
+                                "The EN1 packed class closure requires direct non-generic struct provider declarations.");
+                        }
+
+                        _ = structureModuleIdentities.Add(
+                            origin.Provider.ModuleIdentity);
+                    }
+
+                    if (structureModuleIdentities.Count != 1)
+                    {
+                        throw Unsupported(
+                            "The EN1 packed class closure currently supports inline structs from one provider Module.");
+                    }
+
+                    packedStructureModuleIdentity
+                        = structureModuleIdentities.Single();
+                    if (StringComparer.Ordinal.Equals(
+                            packedStructureModuleIdentity, moduleIdentity)
+                        && packedClassModuleIdentities.Any(identity =>
+                            !StringComparer.Ordinal.Equals(identity,
+                                moduleIdentity)))
+                    {
+                        throw Unsupported(
+                            "The EN1 packed class closure cannot partition root-owned inline structs beside external class Modules.");
+                    }
+
+                    if (!StringComparer.Ordinal.Equals(
+                            packedStructureModuleIdentity, moduleIdentity))
+                    {
+                        _ = packedClassModuleIdentities.Add(
+                            packedStructureModuleIdentity);
+                    }
+                }
+
                 if (!program.Classes.IsEmpty
-                    || !program.Structures.IsEmpty
                     || !program.EnumDefinitions.IsEmpty
                     || !program.NativePointerTypes.IsEmpty
                     || !program.NativeFixedArrayTypes.IsEmpty
@@ -1142,6 +1199,113 @@ public static partial class TrRmExecutableCompiler
                 {
                     throw Unsupported(
                         "The EN1 packed class provider closure currently requires class-only TypeDef and Body rows.");
+                }
+
+                var packedStructureTypeStates
+                    = new byte[program.Structures.Length];
+                bool IsPackedClassClosureFieldType(PrimitiveType type)
+                {
+                    if (BoundGenericNominalTypeTypes.IsType(type))
+                    {
+                        var instanceIndex
+                            = BoundGenericNominalTypeTypes.Index(type);
+                        if ((uint)instanceIndex
+                            >= (uint)program.GenericNominalTypeInstances
+                                .Length)
+                        {
+                            throw Invalid(
+                                "A packed class closure FieldDef has an invalid nominal instance.");
+                        }
+
+                        var instance = program.GenericNominalTypeInstances[
+                            instanceIndex];
+                        var definition
+                            = program.GenericNominalTypeDefinitions
+                                .FirstOrDefault(candidate =>
+                                    candidate.Identity == instance.Definition);
+                        var declaration
+                            = standardClassDeclarations.SingleOrDefault(
+                                candidate =>
+                                    candidate.Declaration.Identity
+                                    == instance.Definition);
+                        return definition is not null
+                            && definition.NominalKind == 2
+                            && definition.Formals.IsEmpty
+                            && instance.Arguments.IsEmpty
+                            && instance.Qualifiers == 0
+                            && declaration is not null
+                            && (selectedClassHandleTypeIdentities.Contains(
+                                    instance.Definition)
+                                || classQueryRootIdentities.Contains(
+                                    instance.Definition)
+                                || !declaration.SelectedExportKeys
+                                    .IsDefaultOrEmpty)
+                            && (StringComparer.Ordinal.Equals(
+                                    declaration.Declaration.Provider
+                                        .ModuleIdentity,
+                                    moduleIdentity)
+                                || packedClassModuleIdentities.Contains(
+                                    declaration.Declaration.Provider
+                                        .ModuleIdentity));
+                    }
+
+                    if (BoundEnumTypes.IsType(type)
+                        || BoundSpanTypeTypes.IsType(type)
+                        || ManagedClassTypes.IsClass(type)
+                        || NativePointerTypes.IsType(type)
+                        || NativeFixedArrayTypes.IsType(type)
+                        || NativeFunctionPointerTypes.IsType(type)
+                        || CheckedReferenceTypes.IsType(type))
+                    {
+                        return false;
+                    }
+
+                    var structureIndex = (int)type - 100;
+                    if ((uint)structureIndex
+                        >= (uint)program.Structures.Length)
+                    {
+                        return structureIndex < 0
+                            && IsStandardClassTypeOnlyComposedFieldType(type);
+                    }
+                    if (packedStructureTypeStates[structureIndex] == 2)
+                    {
+                        return true;
+                    }
+                    if (packedStructureTypeStates[structureIndex] == 1)
+                    {
+                        throw Invalid(
+                            "The packed inline-struct TypeDef closure contains a cycle.");
+                    }
+
+                    var structure = program.Structures[structureIndex];
+                    var origin = structure.StandardTypeOrigin;
+                    if (origin is null
+                        || origin.ExpectedDeclaration is null
+                        || !origin.Expectations.IsDefaultOrEmpty
+                        || !origin.AdditionalExpectedDeclarations
+                            .IsDefaultOrEmpty
+                        || !StringComparer.Ordinal.Equals(
+                            origin.Provider.ModuleIdentity,
+                            packedStructureModuleIdentity)
+                        || origin.Provider.TargetRequirement
+                            != moduleTargetRequirement
+                        || origin.Provider.RuntimePolicy
+                            != (uint)program.RuntimePolicy)
+                    {
+                        return false;
+                    }
+
+                    packedStructureTypeStates[structureIndex] = 1;
+                    foreach (var field in structure.Fields)
+                    {
+                        if (!IsPackedClassClosureFieldType(field.Type))
+                        {
+                            return false;
+                        }
+                    }
+
+                    packedStructureTypeStates[structureIndex] = 2;
+                    return true;
                 }
 
                 foreach (var declaration in standardClassDeclarations.Where(
@@ -1155,13 +1319,37 @@ public static partial class TrRmExecutableCompiler
                 {
                     if (!declaration.Declaration.Methods.IsEmpty
                         || declaration.Declaration.Fields.Any(field =>
-                            !BoundGenericNominalTypeTypes.IsType(field.Type)
-                            && !IsStandardClassTypeOnlyComposedFieldType(
-                                field.Type)))
+                            !IsPackedClassClosureFieldType(field.Type)))
                     {
                         throw Unsupported(
-                            "The EN1 packed class provider closure supports scalar and packed class-handle fields only.");
+                            "The EN1 packed class provider closure supports scalar, packed class-handle and one-module inline-struct fields only.");
                     }
+                }
+
+                for (var structureIndex = 0;
+                    structureIndex < program.Structures.Length;
+                    structureIndex++)
+                {
+                    if (!IsPackedClassClosureFieldType(
+                            (PrimitiveType)(100 + structureIndex)))
+                    {
+                        throw Unsupported(
+                            "The EN1 packed class provider closure contains a structure outside its direct provider closure.");
+                    }
+                }
+
+                packedModuleIdentityOrder.AddRange(
+                    packedClassModuleIdentities
+                        .Where(identity =>
+                            !StringComparer.Ordinal.Equals(identity,
+                                packedStructureModuleIdentity))
+                        .OrderBy(static identity => identity,
+                            StringComparer.Ordinal));
+                if (packedStructureModuleIdentity is string structureModule
+                    && !StringComparer.Ordinal.Equals(structureModule,
+                        moduleIdentity))
+                {
+                    packedModuleIdentityOrder.Add(structureModule);
                 }
             }
 
@@ -1676,17 +1864,35 @@ public static partial class TrRmExecutableCompiler
                         GetDirectClassFieldExpectations(classView)));
             }
 
+            var packedModuleOrderByIdentity = packedModuleIdentityOrder
+                .Select((identity, index) => (identity, index))
+                .ToDictionary(static item => item.identity,
+                    static item => item.index, StringComparer.Ordinal);
+            int GetTypeDefOwnerOrder(string ownerIdentity)
+            {
+                if (StringComparer.Ordinal.Equals(ownerIdentity,
+                        moduleIdentity))
+                {
+                    return -1;
+                }
+
+                if (!packedModuleOrderByIdentity.TryGetValue(ownerIdentity,
+                        out var order))
+                {
+                    throw Invalid(
+                        "An EN1 class TypeDef owner is outside the emitted Module closure.");
+                }
+
+                return order;
+            }
+
             standardClassEmissions.Sort((left, right) =>
             {
                 var leftOwner = left.OwnerModuleIdentity ?? moduleIdentity;
                 var rightOwner = right.OwnerModuleIdentity ?? moduleIdentity;
-                var leftOwnerOrder
-                    = StringComparer.Ordinal.Equals(
-                        leftOwner, moduleIdentity) ? 0 : 1;
-                var rightOwnerOrder
-                    = StringComparer.Ordinal.Equals(
-                        rightOwner, moduleIdentity) ? 0 : 1;
-                var ownerOrder = leftOwnerOrder.CompareTo(rightOwnerOrder);
+                var ownerOrder
+                    = GetTypeDefOwnerOrder(leftOwner).CompareTo(
+                        GetTypeDefOwnerOrder(rightOwner));
                 if (ownerOrder != 0)
                 {
                     return ownerOrder;
@@ -2414,6 +2620,15 @@ public static partial class TrRmExecutableCompiler
                 var origin = structure.StandardTypeOrigin
                     ?? throw Invalid(
                         "A mixed EN1 struct re-emission lost its TypeDef origin.");
+                var packedDirectStructure
+                    = packedStructureModuleIdentity is string
+                        packedStructureOwner
+                        && packedClassModuleIdentities.Contains(
+                            packedStructureOwner)
+                        && StringComparer.Ordinal.Equals(
+                            origin.Provider.ModuleIdentity,
+                            packedStructureOwner)
+                        && origin.Expectations.IsDefaultOrEmpty;
                 var directForeignStructure
                     = origin.Expectations.IsDefaultOrEmpty
                         && !StringComparer.Ordinal.Equals(
@@ -2499,6 +2714,49 @@ public static partial class TrRmExecutableCompiler
                     ]);
                     sourceStructExportsByIndex.Add(structureIndex, []);
                 }
+                else if (packedDirectStructure)
+                {
+                    if (!IsSelectedC1EnumClosureSchemaIdentity(
+                            origin.Provider.SchemaIdentity)
+                        || !StringComparer.Ordinal.Equals(
+                            origin.Provider.SchemaIdentity, schemaIdentity)
+                        || GetForeignInvocationSchema(
+                            origin.Provider.SchemaIdentity) != schema
+                        || origin.Provider.TargetRequirement
+                            != moduleTargetRequirement
+                        || origin.Provider.RuntimePolicy
+                            != (uint)program.RuntimePolicy
+                        || origin.SelectedExportKeys.Any(key =>
+                            !origin.ExportKeys.Contains(key,
+                                StringComparer.Ordinal))
+                        || (origin.DefinitionId >> 24) != 0x13
+                        || (origin.DefinitionId & 0x00FF_FFFF) == 0)
+                    {
+                        throw Invalid(
+                            "An EN1 packed inline structure changed its provider or TypeDef ExportKey snapshot.");
+                    }
+
+                    var typeKeys = origin.ExportKeys.ToList();
+                    var typeModuleExportKeys = GetModuleExportKeys(
+                        origin.Provider.ModuleIdentity);
+                    foreach (var exportKey in typeKeys)
+                    {
+                        if (!BoundEnumTypes.IsValidModuleDeclarationKey(
+                                exportKey)
+                            || !typeModuleExportKeys.Add(exportKey))
+                        {
+                            throw Invalid(
+                                "Packed EN1 struct TypeDef ExportKeys are invalid or duplicated within their Module.");
+                        }
+                    }
+
+                    sourceStructExportsByIndex.Add(structureIndex,
+                        typeKeys);
+                    rootTypeDefRowsByStructureIndex.Add((structureIndex,
+                        origin.Provider.ModuleIdentity,
+                        checked((int)(origin.DefinitionId
+                            & 0x00FF_FFFF))));
+                }
                 else if (directForeignStructure)
                 {
                     if (!IsSelectedC1EnumClosureSchemaIdentity(
@@ -2549,14 +2807,16 @@ public static partial class TrRmExecutableCompiler
                     }
 
                     var typeKeys = origin.ExportKeys.ToList();
+                    var typeModuleExportKeys = GetModuleExportKeys(
+                        origin.Provider.ModuleIdentity);
                     foreach (var exportKey in typeKeys)
                     {
                         if (!BoundEnumTypes.IsValidModuleDeclarationKey(
                                 exportKey)
-                            || !usedExportKeys.Add(exportKey))
+                            || !typeModuleExportKeys.Add(exportKey))
                         {
                             throw Invalid(
-                                "Mixed EN1 struct TypeDef ExportKeys are invalid or duplicated.");
+                                "Mixed EN1 struct TypeDef ExportKeys are invalid or duplicated within their Module.");
                         }
                     }
                     sourceStructExportsByIndex.Add(structureIndex,
@@ -2593,7 +2853,45 @@ public static partial class TrRmExecutableCompiler
                             "Mixed EN1 struct re-emission cannot weaken its retained FieldDef snapshot.");
                     }
 
-                    if (directForeignStructure)
+                    if (packedDirectStructure)
+                    {
+                        if (!SameA2SourceTypeProviderSnapshot(
+                                origin.Provider, fieldOrigin.Provider)
+                            || fieldOrigin.ExportKeys.IsDefault
+                            || (!fieldOrigin.SelectedExportKeys
+                                    .IsDefaultOrEmpty
+                                && fieldOrigin.SelectedExportKeys.Any(key =>
+                                    !fieldOrigin.ExportKeys.Contains(key,
+                                        StringComparer.Ordinal)))
+                            || !fieldOrigin.AdditionalExpectedDeclarations
+                                .IsDefaultOrEmpty)
+                        {
+                            throw Invalid(
+                                "A packed EN1 struct FieldDef changed its provider or ExportKey snapshot.");
+                        }
+
+                        var fieldKeys = fieldOrigin.ExportKeys;
+                        var fieldModuleExportKeys = GetModuleExportKeys(
+                            origin.Provider.ModuleIdentity);
+                        foreach (var exportKey in fieldKeys)
+                        {
+                            if (!BoundEnumTypes
+                                    .IsValidModuleDeclarationKey(exportKey)
+                                || !fieldModuleExportKeys.Add(exportKey))
+                            {
+                                throw Invalid(
+                                    "Packed EN1 struct FieldDef ExportKeys are invalid or duplicated within their Module.");
+                            }
+                        }
+
+                        if (!fieldKeys.IsEmpty)
+                        {
+                            sourceStructFieldExportsByIndex.Add(
+                                (structureIndex, fieldIndex),
+                                [.. fieldKeys]);
+                        }
+                    }
+                    else if (directForeignStructure)
                     {
                         if (!SameA2SourceTypeProviderSnapshot(
                                 origin.Provider, fieldOrigin.Provider)
@@ -2623,6 +2921,8 @@ public static partial class TrRmExecutableCompiler
                     else if (SameA2SourceTypeProviderSnapshot(rootSnapshot,
                             fieldOrigin.Provider))
                     {
+                        var fieldModuleExportKeys = GetModuleExportKeys(
+                            fieldOrigin.Provider.ModuleIdentity);
                         if (!origin.Expectations.IsDefaultOrEmpty
                             || fieldOrigin.ExportKeys.IsDefault
                             || fieldOrigin.ExportKeys.IsEmpty)
@@ -2635,10 +2935,10 @@ public static partial class TrRmExecutableCompiler
                         {
                             if (!BoundEnumTypes.IsValidModuleDeclarationKey(
                                     exportKey)
-                                || !usedExportKeys.Add(exportKey))
+                                || !fieldModuleExportKeys.Add(exportKey))
                             {
                                 throw Invalid(
-                                    "Mixed EN1 struct FieldDef ExportKeys are invalid or duplicated.");
+                                    "Mixed EN1 struct FieldDef ExportKeys are invalid or duplicated within their Module.");
                             }
                         }
                         sourceStructFieldExportsByIndex.Add(
@@ -3540,13 +3840,22 @@ public static partial class TrRmExecutableCompiler
             = new Dictionary<string,
                 TrRmStructuralMetadataValidator.ValidatedExecutionTables>(
                 StringComparer.Ordinal);
-        foreach (var emission in standardClassDeclarationsByTypeDef)
+        var standardClassProviderSnapshotsByIdentity = new Dictionary<
+            string, BoundSourceTypeProviderSnapshot>(StringComparer.Ordinal);
+        void AddStandardClassProviderTables(
+            BoundSourceTypeProviderSnapshot provider)
         {
-            var provider = emission.View.Provider;
-            if (standardClassRootTablesByProvider.ContainsKey(
-                    provider.ModuleIdentity))
+            if (standardClassProviderSnapshotsByIdentity.TryGetValue(
+                    provider.ModuleIdentity, out var existingProvider))
             {
-                continue;
+                if (!SameA2SourceTypeProviderSnapshot(existingProvider,
+                        provider))
+                {
+                    throw Invalid(
+                        "An EN1 class or struct provider Module has conflicting snapshots.");
+                }
+
+                return;
             }
 
             var providerTables = ValidateForeignInvocationArtifact(
@@ -3557,6 +3866,23 @@ public static partial class TrRmExecutableCompiler
                 createA3ResourceLedger: false);
             standardClassRootTablesByProvider.Add(
                 provider.ModuleIdentity, providerTables);
+            standardClassProviderSnapshotsByIdentity.Add(
+                provider.ModuleIdentity, provider);
+        }
+
+        foreach (var emission in standardClassDeclarationsByTypeDef)
+        {
+            AddStandardClassProviderTables(emission.View.Provider);
+        }
+        foreach (var structure in program.Structures)
+        {
+            if (structure.StandardTypeOrigin is
+                    BoundStandardTypeOrigin structureOrigin
+                && structure.Fields.Any(static field =>
+                    BoundGenericNominalTypeTypes.IsType(field.Type)))
+            {
+                AddStandardClassProviderTables(structureOrigin.Provider);
+            }
         }
         var typeDefRows = new List<TrRmTypeDefRow>(
             emittedEnums.Count + retainedClassIndexes.Count
@@ -3959,6 +4285,42 @@ public static partial class TrRmExecutableCompiler
                 ? FieldTypeSpecReference(field.Type)
                 : RemapStandardClassTypeSpecReference(
                     field.TypeSpecReference, 0, provider);
+
+        uint StandardStructFieldTypeSpecReference(
+            BoundStructField field,
+            BoundSourceTypeProviderSnapshot provider)
+        {
+            if (!BoundGenericNominalTypeTypes.IsType(field.Type))
+            {
+                return FieldTypeSpecReference(field.Type);
+            }
+
+            var instanceIndex
+                = BoundGenericNominalTypeTypes.Index(field.Type);
+            if ((uint)instanceIndex
+                    >= (uint)program.GenericNominalTypeInstances.Length
+                || !BoundGenericNominalTypeContract.IsNominalClassType(
+                    field.Type, program.GenericNominalTypeInstances,
+                    program.GenericNominalTypeDefinitions))
+            {
+                throw Invalid(
+                    "An EN1 Standard struct FieldDef has an invalid class handle.");
+            }
+
+            var instance = program.GenericNominalTypeInstances[
+                instanceIndex];
+            if (instance.TypeSpecReference == 0
+                || !StringComparer.Ordinal.Equals(
+                    instance.TypeSpecProviderIdentity,
+                    provider.ModuleIdentity))
+            {
+                throw Invalid(
+                    "An EN1 Standard struct class handle lost its provider TypeSpec origin.");
+            }
+
+            return RemapStandardClassTypeSpecReference(
+                instance.TypeSpecReference, 0, provider);
+        }
 
         uint RemapStandardClassTypeSpecReference(uint sourceTypeSpec,
             int depth,
@@ -5681,11 +6043,13 @@ public static partial class TrRmExecutableCompiler
                             "An EN1 source-free public class MethodDef has no retained ExportKey.");
                     }
 
+                    var methodModuleExportKeys = GetModuleExportKeys(
+                        emission.OwnerModuleIdentity ?? moduleIdentity);
                     foreach (var exportKey in method.ExportKeys)
                     {
                         if (!BoundEnumTypes.IsValidModuleDeclarationKey(
                                 exportKey)
-                            || !usedExportKeys.Add(exportKey))
+                            || !methodModuleExportKeys.Add(exportKey))
                         {
                             throw Invalid(
                                 "An EN1 source-free class MethodDef ExportKey is invalid or duplicated.");
@@ -5782,6 +6146,18 @@ public static partial class TrRmExecutableCompiler
         foreach (var structureIndex in retainedStructureIndexes)
         {
             var structure = program.Structures[structureIndex];
+            var structureOwnerModuleIdentity
+                = packedStructureModuleIdentity is string
+                    packedStructureOwner
+                    && packedClassModuleIdentities.Contains(
+                        packedStructureOwner)
+                    && structure.StandardTypeOrigin is
+                        BoundStandardTypeOrigin structureOrigin
+                    && StringComparer.Ordinal.Equals(
+                        structureOrigin.Provider.ModuleIdentity,
+                        packedStructureOwner)
+                    ? packedStructureOwner
+                    : moduleIdentity;
             string namespaceName;
             string typeName;
             if (sourceStructDeclarationsByIndex.TryGetValue(structureIndex,
@@ -5841,8 +6217,14 @@ public static partial class TrRmExecutableCompiler
                 var fieldFlags = visibility
                     | (field.IsMutable ? 0x04u : 0u);
                 var fieldDefRow = fieldRows.Count + 1;
+                var fieldTypeSpecReference
+                    = structure.StandardTypeOrigin is
+                        BoundStandardTypeOrigin structureOrigin
+                        ? StandardStructFieldTypeSpecReference(field,
+                            structureOrigin.Provider)
+                        : FieldTypeSpecReference(field.Type);
                 fieldRows.Add(new TrRmFieldDefRow(typeDefRow, 0,
-                    FieldTypeSpecReference(field.Type), fieldFlags));
+                    fieldTypeSpecReference, fieldFlags));
                 fieldNames.Add(field.Name);
                 layoutFieldRows.Add(new TrRmLayoutFieldRow(
                     layoutRows.Count + 1, fieldOrdinal, fieldDefRow));
@@ -5885,7 +6267,7 @@ public static partial class TrRmExecutableCompiler
                     foreach (var fieldImport in fieldImports)
                     {
                         var fieldOwnerModuleIdentity
-                            = emission.OwnerModuleIdentity ?? moduleIdentity;
+                            = structureOwnerModuleIdentity;
                         var moduleRefRow = GetOrAddModuleRef(
                             fieldOwnerModuleIdentity,
                             fieldImport.ProducerIdentity,
@@ -5934,7 +6316,7 @@ public static partial class TrRmExecutableCompiler
             typeDefRows.Add(new TrRmTypeDefRow(0, 0, typeDefFlags,
                 fieldFirst, structure.Fields.Length, 0, 0,
                 checked((uint)layoutRow), 1, 0, 0));
-            typeDefModuleIdentities.Add(moduleIdentity);
+            typeDefModuleIdentities.Add(structureOwnerModuleIdentity);
             typeDefNames.Add((namespaceName, typeName));
             layoutRows.Add(new TrRmLayoutRow(typeDefRow, 0, 0, 0, 0, 0,
                 layoutFieldFirst, structure.Fields.Length));
@@ -6696,13 +7078,13 @@ public static partial class TrRmExecutableCompiler
         var packedClassProvidersByIdentity
             = new Dictionary<string,
                 BoundSourceTypeProviderSnapshot>(StringComparer.Ordinal);
-        foreach (var emission in standardClassDeclarationsByTypeDef)
+        void AddPackedClassProvider(
+            BoundSourceTypeProviderSnapshot provider)
         {
-            var provider = emission.View.Provider;
             if (!packedClassModuleIdentities.Contains(
                     provider.ModuleIdentity))
             {
-                continue;
+                return;
             }
 
             if (packedClassProvidersByIdentity.TryGetValue(
@@ -6722,6 +7104,19 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
+        foreach (var emission in standardClassDeclarationsByTypeDef)
+        {
+            AddPackedClassProvider(emission.View.Provider);
+        }
+        foreach (var structure in program.Structures)
+        {
+            if (structure.StandardTypeOrigin is
+                BoundStandardTypeOrigin origin)
+            {
+                AddPackedClassProvider(origin.Provider);
+            }
+        }
+
         if (packedClassModuleIdentities.Count
             != packedClassProvidersByIdentity.Count)
         {
@@ -6730,21 +7125,22 @@ public static partial class TrRmExecutableCompiler
         }
         if (!packedClassModuleIdentities.IsEmpty
             && (!retainedClassIndexes.IsEmpty
-                || !retainedStructureIndexes.IsEmpty
-                || !emittedEnums.IsEmpty))
+                || !emittedEnums.IsEmpty
+                || retainedStructureIndexes.Any(structureIndex =>
+                    !StringComparer.Ordinal.Equals(
+                        program.Structures[structureIndex]
+                            .StandardTypeOrigin?.Provider.ModuleIdentity,
+                        packedStructureModuleIdentity))))
         {
             throw Unsupported(
-                "The EN1 packed class closure currently requires class-only TypeDef, FieldDef and MethodDef dependencies.");
+                "The EN1 packed class closure requires inline structs from its single packed provider Module.");
         }
 
         var outputModuleIdentities = new List<string>(
             1 + packedClassModuleIdentities.Count) {
             moduleIdentity,
         };
-        outputModuleIdentities.AddRange(
-            packedClassModuleIdentities
-                .OrderBy(static identity => identity,
-                    StringComparer.Ordinal));
+        outputModuleIdentities.AddRange(packedModuleIdentityOrder);
         var outputFeatureRows = new List<TrRmFeatureRow>();
         var moduleFeatureRanges
             = new Dictionary<string, (int First, int Count)>(

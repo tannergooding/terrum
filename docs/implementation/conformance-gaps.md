@@ -115,12 +115,18 @@ rejection cases are also added but unverified. External Imports in packed
 class closures now retain class TypeDef expectations and owner-scoped
 ModuleRefs plus selected FieldDef alias Imports; an imported-class
 query/re-emission regression is added but remains unverified. Non-class and
-class-Method Imports, pointer/other non-scalar struct dependencies, unselected
-private class dependencies nested through inline-struct fields, and broader
-multi-function/provider dependency closure remain open. Selected direct
-class-handle TypeSpecs inside composed inline structs now survive reference
-composition and source-free query/load/re-emission; the regression is added
-but remains unverified under the active hold.
+class-Method Imports and imported struct TypeDef closure remain open. Packed
+class closures now also retain direct inline-struct TypeDefs from one provider
+Module, preserving Module ownership and TypeDef/FieldDef ExportKeys while
+remapping nested packed class handles. An unexported nested class-handle
+query/load/re-emission and incompatible replacement rejection regressions
+are added but remain unverified. Struct dependencies spanning multiple
+provider Modules, enum/pointer/other
+non-scalar struct fields, and broader multi-function/provider dependency
+closure remain open. Selected direct class-handle TypeSpecs inside composed
+inline structs now survive reference composition and source-free
+query/load/re-emission; the regression is added but remains unverified under
+the active hold.
 
 Other proposals remain unapproved unless their owner and approval status say
 otherwise; see the [proposal index](../proposals/README.md).
