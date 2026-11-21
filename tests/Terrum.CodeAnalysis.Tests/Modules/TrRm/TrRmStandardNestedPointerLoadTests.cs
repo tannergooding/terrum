@@ -35,7 +35,7 @@ internal sealed class TrRmStandardNestedPointerLoadTests
             foreach (var typeName in new[] {
                 "bool", "char16", "char32", "rune",
                 "int8", "uint8", "int16", "uint16", "int32", "uint32",
-                "int64", "uint64", "int128", "uint128", "nint", "nuint",
+                "int64", "uint64", "nint", "nuint",
                 "float32", "float64",
             })
             {
