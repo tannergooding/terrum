@@ -1993,8 +1993,8 @@ internal sealed class NativeCoreRegistrationTests
             using Terrum.Interop;
             [Blittable] [Layout(LayoutKind.Sequential)]
             public struct Point {
-                public int32 X;
-                public int32 Y;
+                public int64 X;
+                public int64 Y;
             }
             [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
             [ForeignNativeInterface(VTableByteOffset: uint32(0))]
@@ -2079,6 +2079,11 @@ internal sealed class NativeCoreRegistrationTests
         var loadedProvider = TrRmExecutableCompiler.LoadStandard(
             providerInput, "provider.module", []);
         AssertAggregateOutputFunction(loadedProvider, "InvokePoint");
+        var providerImage = NativeEmitter.EmitLibrary(loadedProvider,
+            ["InvokePoint"], NativeRuntimePolicy.FailFast);
+        Assert.That(providerImage[..2], Is.EqualTo(new byte[] {
+            (byte)'M', (byte)'Z',
+        }));
 
         var providerReference = TrRmExecutableCompiler.CreateStandardReference(
             providerInput, "provider.module", []);
@@ -2125,10 +2130,22 @@ internal sealed class NativeCoreRegistrationTests
         AssertAggregateOutputBody(consumerBody, 0x1C);
 
         var providers = new[] { providerInput };
+        var malformedD5Artifact = RewriteD5Home(consumerArtifact, schema,
+            "InvokeImportedPoint", 1, 2);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    malformedD5Artifact), "consumer.module", providers));
+
         var loadedConsumer = TrRmExecutableCompiler.LoadStandard(
             consumerInput, "consumer.module", providers);
         AssertAggregateOutputFunction(loadedConsumer,
             "InvokeImportedPoint");
+        var consumerImage = NativeEmitter.EmitLibrary(loadedConsumer,
+            ["InvokeImportedPoint"], NativeRuntimePolicy.FailFast);
+        Assert.That(consumerImage[..2], Is.EqualTo(new byte[] {
+            (byte)'M', (byte)'Z',
+        }));
         var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(
             loadedConsumer, "consumer.module", schemaIdentity, 1, []);
         var reloadedConsumer = TrRmExecutableCompiler.LoadStandard(
@@ -2194,6 +2211,47 @@ internal sealed class NativeCoreRegistrationTests
             Assert.That(((BoundRead)fallbackReturn.Value).Variable,
                 Is.EqualTo(2));
         }
+
+        static byte[] RewriteD5Home(byte[] artifact,
+            TrRmArtifactSchema schema, string methodName, int blockIndex,
+            ushort replacementHome)
+        {
+            var index = new TrRmArtifactIndex(artifact, schema);
+            Assert.That(index.TryGetSection(0x0020, out var bodySection,
+                out var bodyCount), Is.True);
+            var bodySectionBytes = bodySection.ToArray();
+            var tables = TrRmStructuralMetadataValidator
+                .ValidateAndGetExecutionTables(index);
+            var method = Enumerable.Range(1, tables.Methods.Count).Single(row =>
+                tables.Methods.GetName(row) == methodName);
+            var bodyRow = tables.Methods.GetBodyRow(method);
+            var body = tables.Bodies.GetRegisterBody(bodyRow,
+                tables.Contracts.Count);
+            var bodyRowEnd = checked((bodyCount + 1) * sizeof(uint)
+                + (int)BinaryPrimitives.ReadUInt32LittleEndian(
+                    bodySectionBytes.AsSpan(bodyRow * sizeof(uint),
+                        sizeof(uint))));
+            var codeStart = bodyRowEnd - body.CodeByteLength;
+            var block = body.GetBlock(blockIndex);
+            var blockCodeStart = checked(codeStart
+                + (int)BinaryPrimitives.ReadUInt32LittleEndian(block));
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                bodySectionBytes.AsSpan(blockCodeStart + 2, sizeof(ushort)),
+                replacementHome);
+            var sections = new TrRmSection[index.SectionCount];
+            for (var sectionIndex = 0;
+                sectionIndex < index.SectionCount;
+                sectionIndex++)
+            {
+                index.GetSection(sectionIndex, out var kind, out var flags,
+                    out var bytes, out var count);
+                sections[sectionIndex] = new TrRmSection(kind, flags,
+                    checked((uint)count),
+                    kind == 0x0020 ? bodySectionBytes : bytes.ToArray());
+            }
+
+            return TrRmArtifactWriter.Encode(sections, schema);
+        }
     }
 
     [Test]
@@ -2201,6 +2259,8 @@ internal sealed class NativeCoreRegistrationTests
     {
         const string schemaIdentity
             = "trrm/1-draft-foreign-native-interface-aggregate-output-consumption-1";
+        const string typeProviderSchemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
         var (native, output) = NativeOutputCoreRegistrationTests
             .CreateCombinedRegistrations(includeForeignNativeInterface: true);
         var options = new CompilationOptions {
@@ -2208,54 +2268,47 @@ internal sealed class NativeCoreRegistrationTests
             LayoutCoreRegistration = CreateLayoutRegistration(native),
             NativeOutputCoreRegistration = output,
         };
+        var typeProviderOptions = new CompilationOptions {
+            LayoutCoreRegistration = CreateLayoutRegistration(native),
+        };
         var typeProviderCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse("""
-                using Terrum.Interop;
                 [Blittable] [Layout(LayoutKind.Sequential)]
-                public struct Point {
+                public struct Coordinates {
                     public int32 X;
                     public int32 Y;
                 }
-                [NativeCallable(
-                    CallConv: NativeCallingConvention.Cdecl)]
-                [ForeignNativeInterface(
-                    VTableByteOffset: uint32(0))]
-                public interface ILayoutProbe {
-                    public unsafe int32 ReadPoint(ptr<Point> point);
+                [Blittable] [Layout(LayoutKind.Sequential)]
+                public struct Point {
+                    public Coordinates Position;
                 }
-                """), options);
+                """), typeProviderOptions);
         Assert.That(typeProviderCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine,
                 typeProviderCompilation.Diagnostics));
         var typeProviderProgram = typeProviderCompilation.Program
             ?? throw new AssertionException(
                 "Expected a bound aggregate provider.");
-        var typeProviderMember = typeProviderProgram.Interfaces.Single()
-            .Members.Single();
         var typeProviderArtifact = TrRmExecutableCompiler.EmitStandard(
-            typeProviderProgram, "type.module", schemaIdentity, 1, [
-                new TrRmSourceTypeExport("", "Point", "type/Point") {
-                    FieldExports = [
-                        new TrRmSourceFieldExport("X", "type/Point.X"),
-                        new TrRmSourceFieldExport("Y", "type/Point.Y"),
-                    ],
+            typeProviderProgram, "type.module",
+            typeProviderSchemaIdentity, 1, [
+                new TrRmSourceTypeExport("", "Coordinates",
+                    "type/Coordinates") {
                 },
-                new TrRmSourceTypeExport("", "ILayoutProbe",
-                    "type/ILayoutProbe") {
-                    GenericArity = 0,
-                    InterfaceMethodExports = [
-                        new TrRmSourceInterfaceMethodExport(
-                            typeProviderMember.SourceInputOrdinal,
-                            typeProviderMember.SourceDeclarationSpan,
-                            "type/ILayoutProbe.ReadPoint"),
-                    ],
+                new TrRmSourceTypeExport("", "Point", "type/Point") {
                 },
             ]);
+        typeProviderArtifact = AddLayoutQueriesFeature(
+            typeProviderArtifact);
         var typeProviderInput = new TrRmStandardArtifactInput(
-            schemaIdentity, typeProviderArtifact);
+            typeProviderSchemaIdentity, typeProviderArtifact);
         var typeProviderReference
             = TrRmExecutableCompiler.CreateStandardReference(
                 typeProviderInput, "type.module", []);
+        Assert.That(typeProviderReference.Structures.Single(
+            static structure => structure.Name == "Point")
+            .StandardTypeOrigin!.Provider.SchemaIdentity,
+            Is.EqualTo(typeProviderSchemaIdentity));
         var methodProviderCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse("""
                 using Terrum.Interop;
@@ -2272,6 +2325,16 @@ internal sealed class NativeCoreRegistrationTests
                         [Terrum.CodeAnalysis.ForwardsBacking(
                             this, nameof(source))]
                         write ptr<Point> value);
+                }
+                Point InvokePoint(ptr<void> receiver, ptr<int32> source,
+                    Point fallback) {
+                    init Point value;
+                    unsafe {
+                        int32 status = IProbe.TryReadPoint(
+                            receiver, source, &init value);
+                        if (status != 0) { return value; }
+                        return fallback;
+                    }
                 }
                 """), typeProviderReference, options);
         Assert.That(methodProviderCompilation.HasErrors, Is.False,
@@ -2305,24 +2368,72 @@ internal sealed class NativeCoreRegistrationTests
                 1, methodProviderTables.TypeDefs.Count).Single(row =>
                 methodProviderTables.TypeDefs.GetName(row) == "Point"
                 && methodProviderTables.TypeDefs.GetOwnerModule(row) == 1);
+        var expectedCoordinatesTypeDef = Enumerable.Range(
+                1, methodProviderTables.TypeDefs.Count).Single(row =>
+                methodProviderTables.TypeDefs.GetName(row)
+                    == "Coordinates"
+                && methodProviderTables.TypeDefs.GetOwnerModule(row) == 1);
         Assert.That(methodProviderTables.TypeDefs.HasDeclaredCopy(
             expectedPointTypeDef), Is.True);
+        Assert.That(methodProviderTables.TypeDefs.HasDeclaredCopy(
+            expectedCoordinatesTypeDef), Is.True);
+        var methodProviderInput = new TrRmStandardArtifactInput(
+            schemaIdentity, methodProviderArtifact);
+        var loadedMethodProvider = TrRmExecutableCompiler.LoadStandard(
+            methodProviderInput, "method.module", [typeProviderInput]);
+        var loadedMethod = loadedMethodProvider.Functions.Single(function =>
+            function.Name == "InvokePoint");
+        Assert.That(loadedMethod.Body.Statements.OfType<BoundIf>().Count(),
+            Is.EqualTo(1));
+        var methodProviderImage = NativeEmitter.EmitLibrary(
+            loadedMethodProvider, ["InvokePoint"],
+            NativeRuntimePolicy.FailFast);
+        Assert.That(methodProviderImage[..2], Is.EqualTo(new byte[] {
+            (byte)'M', (byte)'Z',
+        }));
+        var reemittedMethodProviderArtifact
+            = TrRmExecutableCompiler.EmitStandard(loadedMethodProvider,
+                "method.module", schemaIdentity, 1, []);
+        var reloadedMethodProvider = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                reemittedMethodProviderArtifact), "method.module",
+            [typeProviderInput]);
+        Assert.That(reloadedMethodProvider.Functions.Single(function =>
+                function.Name == "InvokePoint").Body.Statements
+                .OfType<BoundIf>().Count(), Is.EqualTo(1));
 
         var typeProviderIndex = new TrRmArtifactIndex(
             typeProviderArtifact,
-            TrRmArtifactSchema
-                .ForeignNativeInterfaceAggregateOutputConsumptionDraft);
+            TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
         Assert.That(typeProviderIndex.TryGetSection(0x0013,
                 out var typeDefSection, out _), Is.True);
         var typeDefBytes = typeDefSection.ToArray();
-        var typeProviderTables
-            = TrRmStructuralMetadataValidator
-                .ValidateAndGetExecutionTables(typeProviderIndex);
+        var typeProviderTables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+                typeProviderIndex);
         Assert.That(typeProviderTables.Exports.TryGetDefinitionForKey(1,
                 "type/Point", out var pointDefinition), Is.True);
         var pointTypeDef = checked((int)(
             pointDefinition & 0x00FF_FFFF));
-        var pointFlagsOffset = checked((pointTypeDef - 1) * 44 + 8);
+        Assert.That(typeProviderTables.Exports.TryGetDefinitionForKey(1,
+                "type/Coordinates", out var coordinatesDefinition), Is.True);
+        var coordinatesTypeDef = checked((int)(
+            coordinatesDefinition & 0x00FF_FFFF));
+        Assert.That(typeProviderTables.TypeDefs.HasDeclaredCopy(
+            pointTypeDef), Is.True);
+        Assert.That(typeProviderTables.TypeDefs.HasDeclaredCopy(
+            coordinatesTypeDef), Is.True);
+        Assert.That(TrRmFeatureManifestValidator.Requires(
+            typeProviderTables.Features, typeProviderTables.Modules, 1,
+            TrRmFeatureTableReader.RootlessNativeValuesFeatureId,
+            TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft),
+            Is.True);
+        Assert.That(TrRmFeatureManifestValidator.Requires(
+            typeProviderTables.Features, typeProviderTables.Modules, 1,
+            TrRmFeatureTableReader.LayoutQueriesFeatureId,
+            TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft),
+            Is.True);
+        var pointFlagsOffset = checked((coordinatesTypeDef - 1) * 44 + 8);
         var pointFlags = BinaryPrimitives.ReadUInt32LittleEndian(
             typeDefBytes.AsSpan(pointFlagsOffset));
         BinaryPrimitives.WriteUInt32LittleEndian(
@@ -2341,20 +2452,110 @@ internal sealed class NativeCoreRegistrationTests
 
         var missingCopyProviderArtifact
             = TrRmArtifactWriter.Encode(malformedSections,
-                TrRmArtifactSchema
-                    .ForeignNativeInterfaceAggregateOutputConsumptionDraft);
+                TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
         var missingCopyProviderInput = new TrRmStandardArtifactInput(
-            schemaIdentity, missingCopyProviderArtifact);
-        _ = TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
+            typeProviderSchemaIdentity, missingCopyProviderArtifact);
+        _ = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
             new TrRmArtifactIndex(missingCopyProviderArtifact,
-                TrRmArtifactSchema
-                    .ForeignNativeInterfaceAggregateOutputConsumptionDraft));
+                TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft));
+
+        var methodInput = methodProviderInput;
+        var methodReference = TrRmExecutableCompiler.CreateStandardReference(
+            methodInput, "method.module", [typeProviderInput]);
+        Assert.That(methodReference.Structures.Any(structure =>
+                structure.Name == "Point"
+                && structure.DeclaredCopyEvidence == true
+                && structure.StandardTypeOrigin is { IsLookupRoot: true }
+                    origin
+                && StringComparer.Ordinal.Equals(
+                    origin.Provider.SchemaIdentity,
+                    typeProviderSchemaIdentity)), Is.True);
 
         Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.CreateStandardReference(
-                new TrRmStandardArtifactInput(schemaIdentity,
-                    methodProviderArtifact), "method.module",
+                methodInput, "method.module",
                 [missingCopyProviderInput]));
+        var changedLayoutProvider = RewriteTypeDefLayoutKind(
+            typeProviderArtifact, pointTypeDef, 2);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(methodInput,
+                "method.module", [
+                    new TrRmStandardArtifactInput(
+                        typeProviderSchemaIdentity, changedLayoutProvider),
+                ]));
+
+        static byte[] AddLayoutQueriesFeature(byte[] artifact)
+        {
+            var index = TrRmArtifactIndex
+                .ForForeignInvocationStorageFixedArrayCopyDraft(artifact);
+            Assert.That(index.TryGetSection(0x0001, out var moduleSection,
+                out var moduleCount), Is.True);
+            Assert.That(moduleCount, Is.EqualTo(1));
+            Assert.That(index.TryGetSection(0x0004, out var featureSection,
+                out var featureCount), Is.True);
+            Assert.That(featureCount, Is.EqualTo(1));
+            var moduleBytes = moduleSection.ToArray();
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                moduleBytes.AsSpan(24), 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                moduleBytes.AsSpan(28), 2);
+            var featureBytes = TrRmFeatureTableWriter.Encode([
+                TrRmFeatureRow.RootlessNativeValues,
+                TrRmFeatureRow.LayoutQueries,
+            ], TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
+            var sections = new TrRmSection[index.SectionCount];
+            for (var sectionIndex = 0;
+                sectionIndex < index.SectionCount;
+                sectionIndex++)
+            {
+                index.GetSection(sectionIndex, out var kind, out var flags,
+                    out var bytes, out var count);
+                sections[sectionIndex] = new TrRmSection(kind, flags,
+                    kind == 0x0004 ? 2u : checked((uint)count),
+                    kind switch {
+                        0x0001 => moduleBytes,
+                        0x0004 => featureBytes,
+                        _ => bytes.ToArray(),
+                    });
+            }
+
+            return TrRmArtifactWriter.Encode(sections,
+                TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
+        }
+
+        static byte[] RewriteTypeDefLayoutKind(byte[] artifact,
+            int typeDefRow, byte layoutKind)
+        {
+            var schema
+                = TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft;
+            var index = TrRmArtifactIndex.ForForeignInvocationStorageFixedArrayCopyDraft(
+                artifact);
+            Assert.That(index.TryGetSection(0x0015, out var layoutSection,
+                out _), Is.True);
+            var layoutBytes = layoutSection.ToArray();
+            var tables = TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+                    index);
+            var layoutRow = tables.Layouts.GetLayoutForProfile(typeDefRow,
+                TrRmTargetProfileTableReader.WindowsX64NativeProfileId,
+                TrRmTargetProfileTableReader
+                    .WindowsX64NativeProfileRuleRevision);
+            layoutBytes[(layoutRow - 1) * 28 + 8] = layoutKind;
+            var sections = new TrRmSection[index.SectionCount];
+            for (var sectionIndex = 0;
+                sectionIndex < index.SectionCount;
+                sectionIndex++)
+            {
+                index.GetSection(sectionIndex, out var kind, out var flags,
+                    out var bytes, out var count);
+                sections[sectionIndex] = new TrRmSection(kind, flags,
+                    checked((uint)count),
+                    kind == 0x0015 ? layoutBytes : bytes.ToArray());
+            }
+
+            return TrRmArtifactWriter.Encode(sections, schema);
+        }
     }
 
     [Test]

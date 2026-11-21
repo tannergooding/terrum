@@ -158,7 +158,7 @@ public static partial class TrRmExecutableCompiler
             return cachedDefinitions;
         }
 
-        if (context.Schema.UsesForeignNativeInterface())
+        if (context.Schemas[artifactIndex].UsesForeignNativeInterface())
         {
             if (!context.ForeignNativeInterfaceModulesBeingLoaded.Add(
                     cacheKey))

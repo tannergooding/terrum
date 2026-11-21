@@ -621,6 +621,12 @@ public static partial class TrRmExecutableCompiler
                 IsSelectedInitializationReferenceSchemaIdentity);
         var includesInitializationReferenceBodies
             = initializationReferenceBodySchemaIdentity is not null;
+        var allowsAc1ProviderSchemaSelections
+            = schemaIdentities.Length != 0
+                && StringComparer.Ordinal.Equals(schemaIdentities[0],
+                    StandardForeignNativeInterfaceAggregateOutputConsumptionSchemaIdentity)
+                && schemaIdentities.Skip(1).All(
+                    IsSelectedFniAggregateProviderSchemaIdentity);
         var initializationReferenceLocalFieldLayoutSchemaIdentity
             = schemaIdentities.FirstOrDefault(
                 IsSelectedInitializationReferenceLocalFieldLayoutSchemaIdentity);
@@ -645,7 +651,8 @@ public static partial class TrRmExecutableCompiler
         if (includesInitializationReferenceBodies
             && schemaIdentities.Any(identity =>
                 !StringComparer.Ordinal.Equals(identity,
-                    initializationReferenceBodySchemaIdentity)))
+                    initializationReferenceBodySchemaIdentity))
+            && !allowsAc1ProviderSchemaSelections)
         {
             throw Unsupported(
                 "The initialization-reference Body operation requires the exact profile identity for every supplied artifact.");
@@ -4816,9 +4823,10 @@ public static partial class TrRmExecutableCompiler
                         StandardLayoutQueriesSchemaIdentity));
         var includesInitializationReferenceBodyClosure
             = schemaIdentities.Length != 0
-                && schemaIdentities.All(schemaIdentity =>
-                    StringComparer.Ordinal.Equals(schemaIdentity,
-                        schemaIdentities[0]))
+                && (schemaIdentities.All(schemaIdentity =>
+                        StringComparer.Ordinal.Equals(schemaIdentity,
+                            schemaIdentities[0]))
+                    || allowsAc1ProviderSchemaSelections)
                 && IsSelectedInitializationReferenceSchemaIdentity(
                     schemaIdentities[0]);
         var identities = new HashSet<string>(StringComparer.Ordinal);
@@ -4917,6 +4925,7 @@ public static partial class TrRmExecutableCompiler
                     = StringComparer.Ordinal.Equals(schemaIdentities[index],
                         StandardLayoutQueriesSchemaIdentity)
                     || supportsForeignNativeInterface
+                    || supportsA2Features
                     || IsSelectedGeneralPredicateGraphsSchemaIdentity(
                         schemaIdentities[index]);
                 var supportsInitializationReferenceBodies

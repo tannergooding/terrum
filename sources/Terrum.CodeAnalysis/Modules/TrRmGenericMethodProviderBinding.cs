@@ -18,6 +18,8 @@ public static partial class TrRmExecutableCompiler
         internal ImmutableArray<byte>[] Digests { get; }
         internal string SchemaIdentity { get; }
         internal TrRmArtifactSchema Schema { get; }
+        internal ImmutableArray<string> SchemaIdentities { get; }
+        internal ImmutableArray<TrRmArtifactSchema> Schemas { get; }
         internal ImmutableArray<TrRmStandardModuleSelection>
             ModuleSelections { get; }
         internal Dictionary<string, (int ArtifactIndex, int ModuleRow)>
@@ -759,16 +761,35 @@ public static partial class TrRmExecutableCompiler
                         $"{nameof(providers)}[{index - 1}]");
             }
 
+            SchemaIdentities = [.. inputs.Select(
+                static selectedInput => selectedInput.SchemaIdentity)];
+            var selectedSchemas
+                = ImmutableArray.CreateBuilder<TrRmArtifactSchema>(
+                    inputs.Length);
+            for (var index = 0; index < inputs.Length; index++)
+            {
+                selectedSchemas.Add(StringComparer.Ordinal.Equals(
+                        SchemaIdentities[index], SchemaIdentity)
+                    ? Schema
+                    : TrRmExecutableCompiler.GetForeignInvocationSchema(
+                        SchemaIdentities[index]));
+            }
+            Schemas = selectedSchemas.MoveToImmutable();
             Artifacts = new byte[inputs.Length][];
             Digests = new ImmutableArray<byte>[inputs.Length];
             for (var index = 0; index < inputs.Length; index++)
             {
-                if (!StringComparer.Ordinal.Equals(
-                        inputs[index].SchemaIdentity,
-                        SchemaIdentity))
+                if (index != 0
+                    && !StringComparer.Ordinal.Equals(
+                        inputs[index].SchemaIdentity, SchemaIdentity)
+                    && (!Schema
+                            .UsesForeignNativeInterfaceAggregateOutputConsumption()
+                        || !SupportsForeignNativeInterfaceProviderSchema(
+                            inputs[index].SchemaIdentity,
+                            Schemas[index])))
                 {
                     throw Unsupported(
-                        "The generic-method source reference requires the selected exact schema for every supplied artifact.");
+                        "The selected FNI provider schema is not supported by this exact AC1 source-reference operation.");
                 }
 
                 Artifacts[index] = inputs[index].Artifact.ToArray();
@@ -780,14 +801,19 @@ public static partial class TrRmExecutableCompiler
             for (var index = 0; index < Artifacts.Length; index++)
             {
                 var artifactIndex = new TrRmArtifactIndex(Artifacts[index],
-                    Schema);
-                var tables = Schema.UsesForeignNativeInterface()
+                    Schemas[index]);
+                var tables = Schemas[index].UsesForeignNativeInterface()
                     ? TrRmStructuralMetadataValidator
                         .ValidateAndGetExecutionTables(artifactIndex)
-                    : TrRmStructuralMetadataValidator
-                        .ValidateGenericMethodCallsDraftAndGetExecutionTables(
-                            artifactIndex);
-                if (!Schema.UsesForeignNativeInterface())
+                    : Schemas[index].UsesGenericMethodCalls()
+                        ? TrRmStructuralMetadataValidator
+                            .ValidateGenericMethodCallsDraftAndGetExecutionTables(
+                                artifactIndex)
+                        : TrRmExecutableCompiler
+                            .ValidateForeignInvocationArtifact(
+                                artifactIndex, SchemaIdentities[index], null,
+                                createA3ResourceLedger: false);
+                if (Schemas[index].UsesGenericMethodCalls())
                 {
                     ValidateGenericMethodCallBodies(tables);
                 }
@@ -798,7 +824,7 @@ public static partial class TrRmExecutableCompiler
                     if (!Modules.TryAdd(identity, (index, moduleRow)))
                     {
                         throw Invalid(
-                            "The supplied G1 artifacts contain an ambiguous Module identity.");
+                            "The supplied Standard artifacts contain an ambiguous Module identity.");
                     }
 
                     var requirements
@@ -821,6 +847,29 @@ public static partial class TrRmExecutableCompiler
             }
             ModuleSelections = moduleSelections.MoveToImmutable();
         }
+
+        internal TrRmStructuralMetadataValidator.ValidatedExecutionTables
+            GetValidatedForeignNativeInterfaceArtifact(int artifactIndex)
+        {
+            var schema = Schemas[artifactIndex];
+            var index = new TrRmArtifactIndex(Artifacts[artifactIndex],
+                schema);
+            return schema.UsesForeignNativeInterface()
+                ? TrRmStructuralMetadataValidator
+                    .ValidateAndGetExecutionTables(index)
+                : TrRmExecutableCompiler
+                    .ValidateForeignInvocationArtifact(index,
+                        SchemaIdentities[artifactIndex], null,
+                        createA3ResourceLedger: false);
+        }
+
+        private static bool SupportsForeignNativeInterfaceProviderSchema(
+            string schemaIdentity, TrRmArtifactSchema schema)
+            => TrRmExecutableCompiler
+                    .IsSelectedFniAggregateProviderSchemaIdentity(
+                        schemaIdentity)
+                && TrRmExecutableCompiler.GetForeignInvocationSchema(
+                    schemaIdentity) == schema;
 
         internal void CompleteBindings()
         {

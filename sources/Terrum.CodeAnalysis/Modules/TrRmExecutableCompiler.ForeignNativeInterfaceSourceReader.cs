@@ -531,7 +531,7 @@ public static partial class TrRmExecutableCompiler
             var providerSnapshot = structureProviderSnapshot
                 ??= CreateA2SourceTypeProviderSnapshot(tables,
                     context.Artifacts[artifactIndex],
-                    context.SchemaIdentity, moduleRow);
+                    context.SchemaIdentities[artifactIndex], moduleRow);
             var fields = structure.Fields.ToBuilder();
             var (fieldStart, fieldEnd)
                 = tables.TypeDefs.GetFieldRange(typeDefRow);
@@ -652,12 +652,8 @@ public static partial class TrRmExecutableCompiler
                 }
 
                 var providerTables
-                    = TrRmStructuralMetadataValidator
-                        .ValidateAndGetExecutionTables(
-                            new TrRmArtifactIndex(
-                                context.Artifacts[
-                                    providerSelection.ArtifactIndex],
-                                context.Schema));
+                    = context.GetValidatedForeignNativeInterfaceArtifact(
+                        providerSelection.ArtifactIndex);
                 var providerModuleRow = providerSelection.ModuleRow;
                 if (providerTables.Modules.GetRequirements(
                         providerModuleRow)
@@ -1052,9 +1048,8 @@ public static partial class TrRmExecutableCompiler
                 providerKey, out var providerInterface))
         {
             var providerTables = TrRmStructuralMetadataValidator
-                .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
-                    context.Artifacts[providerArtifactIndex],
-                    context.Schema));
+                .GetValidatedForeignNativeInterfaceArtifact(
+                    providerArtifactIndex);
             _ = CreateGenericInterfaceDefinitions(providerTables, context,
                 providerArtifactIndex, providerModuleRow);
         }
@@ -1629,12 +1624,13 @@ public static partial class TrRmExecutableCompiler
         GetForeignNativeInterfaceStructureTypeDefClosure(
         TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
         int moduleRow, IReadOnlyList<int>? rootTypeDefRows,
-        out HashSet<int> structureImportRows)
+        out HashSet<int> structureImportRows,
+        IReadOnlyList<int>? selectedInterfaceDefs = null)
     {
-        var typeDefStates = new byte[tables.TypeDefs.Count + 1];
-        var typeSpecStates = new byte[tables.TypeSpecs.Count + 1];
-        var typeSpecExportStates = new byte[tables.TypeSpecs.Count + 1];
-        var methodStates = new byte[tables.Methods.Count + 1];
+        var typeDefStates = new Dictionary<int, byte>();
+        var typeSpecStates = new Dictionary<int, byte>();
+        var typeSpecExportStates = new Dictionary<int, byte>();
+        var methodStates = new Dictionary<int, byte>();
         var includedTypeDefRows = new HashSet<int>();
         structureImportRows = [];
         var exportedTypeDefs = tables.Exports.GetExportsForModule(moduleRow)
@@ -1649,12 +1645,13 @@ public static partial class TrRmExecutableCompiler
                 throw Unsupported(
                     "The F+I aggregate TypeSpec closure exceeds the supported depth.");
             }
-            if (methodStates[methodRow] == 1)
+            if (methodStates.TryGetValue(methodRow, out var methodState)
+                && methodState == 1)
             {
                 throw Invalid(
                     "The F+I aggregate and function-pointer signature closure is cyclic.");
             }
-            if (methodStates[methodRow] == 2)
+            if (methodState == 2)
             {
                 return;
             }
@@ -1740,7 +1737,9 @@ public static partial class TrRmExecutableCompiler
                 _ = structureImportRows.Add(structureImportRow);
             }
 
-            if (typeDefStates[typeDefRow] == 1)
+            if (typeDefStates.TryGetValue(typeDefRow,
+                    out var typeDefState)
+                && typeDefState == 1)
             {
                 if (throughPointer)
                 {
@@ -1749,7 +1748,7 @@ public static partial class TrRmExecutableCompiler
                 throw Invalid(
                     "An F+I inline aggregate TypeDef is recursively defined.");
             }
-            if (typeDefStates[typeDefRow] == 2)
+            if (typeDefState == 2)
             {
                 return;
             }
@@ -1801,14 +1800,18 @@ public static partial class TrRmExecutableCompiler
             {
                 if (reference.IsRow)
                 {
-                    if (typeSpecStates[reference.Row] == 1)
+                    if (typeSpecStates.TryGetValue(reference.Row,
+                            out var typeSpecState)
+                        && typeSpecState == 1)
                     {
                         throw Invalid(
                             "An F+I aggregate pointer TypeSpec is cyclic.");
                     }
-                    if (typeSpecStates[reference.Row] == 2
+                    if (typeSpecState == 2
                         && (!requireExport
-                            || typeSpecExportStates[reference.Row] == 2))
+                            || typeSpecExportStates.TryGetValue(
+                                reference.Row, out var typeSpecExportState)
+                                && typeSpecExportState == 2))
                     {
                         return;
                     }
@@ -1841,18 +1844,8 @@ public static partial class TrRmExecutableCompiler
                 depth + 1);
         }
 
-        for (var foreignInterfaceRow = 1;
-            foreignInterfaceRow <= tables.ForeignNativeInterfaces.Count;
-            foreignInterfaceRow++)
+        void VisitInterface(int interfaceDef)
         {
-            var interfaceDef = checked((int)tables.ForeignNativeInterfaces
-                .GetOwnerInterfaceDef(foreignInterfaceRow));
-            var typeDef = tables.Interfaces.GetOwnerTypeDef(interfaceDef);
-            if (tables.TypeDefs.GetOwnerModule(typeDef) != moduleRow)
-            {
-                continue;
-            }
-
             var (firstMethod, methodCount)
                 = tables.Interfaces.GetMethodRange(interfaceDef);
             for (var methodOrdinal = 0; methodOrdinal < methodCount;
@@ -1860,6 +1853,37 @@ public static partial class TrRmExecutableCompiler
             {
                 VisitMethodSignature(tables.InterfaceMethods
                     .GetMethodDefRow(firstMethod + methodOrdinal), 0);
+            }
+        }
+
+        if (selectedInterfaceDefs is not null)
+        {
+            foreach (var interfaceDef in selectedInterfaceDefs)
+            {
+                var typeDef = tables.Interfaces.GetOwnerTypeDef(interfaceDef);
+                if (tables.TypeDefs.GetOwnerModule(typeDef) != moduleRow)
+                {
+                    throw Invalid(
+                        "A selected ForeignNativeInterface definition belongs to a different Module.");
+                }
+
+                VisitInterface(interfaceDef);
+            }
+        }
+        else
+        {
+            for (var foreignInterfaceRow = 1;
+                foreignInterfaceRow <= tables.ForeignNativeInterfaces.Count;
+                foreignInterfaceRow++)
+            {
+                var interfaceDef = checked((int)
+                    tables.ForeignNativeInterfaces.GetOwnerInterfaceDef(
+                        foreignInterfaceRow));
+                var typeDef = tables.Interfaces.GetOwnerTypeDef(interfaceDef);
+                if (tables.TypeDefs.GetOwnerModule(typeDef) == moduleRow)
+                {
+                    VisitInterface(interfaceDef);
+                }
             }
         }
 
@@ -1933,7 +1957,7 @@ public static partial class TrRmExecutableCompiler
                     nativePointerTypeDefinitions);
                 BoundConstant? defaultValue = null;
                 string parameterName;
-                if (context.Schema
+                if (tables.Schema
                     .UsesForeignNativeInterfaceParameterSurface())
                 {
                     if (!tables.MethodParameterLabels.TryGetNameStringRow(

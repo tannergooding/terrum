@@ -1375,8 +1375,13 @@ selection. Its current slice carries nominal Copy evidence, checks closed
 rootless aggregate storage and Feature 2/13 closure, and emits/decodes
 success-correlated aggregate D5 reads with an explicit fallback. A
 local/imported source-free load and re-emission regression is added but remains
-unverified under the hold. Provider schema/replacement binding, complete
-remapping, native lowering and qualification remain open.
+unverified under the hold. The same regression requests local/imported PE
+emission of a 16-byte result; this is also unverified and is not execution
+evidence. The source reader now selects provider schemas per artifact for an
+AC1 root, including A2 Copy-bearing TypeDef providers; a missing-Copy A2
+replacement and changed-layout regression, plus malformed D5/Home rejection,
+are added but remain unverified. Broader provider composition/remapping,
+native lowering and qualification remain open.
 Pointer output reads, other side-effecting argument expressions,
 defaults/constants, multiple calls, other condition expressions and Body
 control-flow shapes, nonreturning-call shapes beyond the terminal subset and

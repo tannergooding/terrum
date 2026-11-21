@@ -300,13 +300,35 @@ public static class TrRmStructuralMetadataValidator
                 return;
             }
 
-            for (var module = 1; module <= Modules.Count; module++)
+            var interfaceDefsByModule = new Dictionary<int, List<int>>();
+            for (var foreignInterface = 1;
+                foreignInterface <= ForeignNativeInterfaces.Count;
+                foreignInterface++)
+            {
+                A3LayoutResourceLedger?.ConsumeWork();
+                var interfaceDef = checked((int)
+                    ForeignNativeInterfaces.GetOwnerInterfaceDef(
+                        foreignInterface));
+                var ownerTypeDef = Interfaces.GetOwnerTypeDef(interfaceDef);
+                var interfaceModule = TypeDefs.GetOwnerModule(ownerTypeDef);
+                if (!interfaceDefsByModule.TryGetValue(interfaceModule,
+                        out var interfaceDefs))
+                {
+                    interfaceDefs = [];
+                    interfaceDefsByModule.Add(interfaceModule,
+                        interfaceDefs);
+                }
+                interfaceDefs.Add(interfaceDef);
+            }
+
+            foreach (var (module, interfaceDefs) in
+                interfaceDefsByModule)
             {
                 A3LayoutResourceLedger?.ConsumeWork();
                 var closure = TrRmExecutableCompiler
                     .GetForeignNativeInterfaceStructureTypeDefClosure(
                         this, module, rootTypeDefRows: null,
-                        out _);
+                        out _, selectedInterfaceDefs: interfaceDefs);
                 if (closure.Count == 0)
                 {
                     continue;

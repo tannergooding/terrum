@@ -6618,28 +6618,33 @@ public static partial class TrRmExecutableCompiler
             || BinaryPrimitives.ReadUInt16LittleEndian(entryCode[8..])
                 != statusVariable
             || entryCode[10] != 0xD5 || entryCode[11] != 0
-            || BinaryPrimitives.ReadUInt16LittleEndian(entryCode[12..])
-                != statusVariable
             || entryCode[14] != 0xC2 || entryCode[15] != 0
             || entryCode[18] != 0xC3
             || entryCode[20] != 0 || entryCode[21] != 0xFF
             || entryCode[22] != 0xE4 || entryCode[23] != 0
             || successCode.Length != 6 || successCode[0] != 0xD5
             || successCode[1] != 0
-            || BinaryPrimitives.ReadUInt16LittleEndian(successCode[2..])
-                != outputVariable
             || successCode[4] != 0x17 || successCode[5] != 0
             || complementCode.Length != 6 || complementCode[0] != 0xD5
             || complementCode[1] != 0
-            || BinaryPrimitives.ReadUInt16LittleEndian(
-                complementCode[2..])
-                != (fallbackVariable >= 0
-                    ? fallbackVariable
-                    : statusVariable)
             || complementCode[4] != 0x17 || complementCode[5] != 0)
         {
             throw Unsupported(
                 "The Standard F+I conditional-output Body instructions are outside the selected subset.");
+        }
+
+        if (BinaryPrimitives.ReadUInt16LittleEndian(entryCode[12..])
+                != statusVariable
+            || BinaryPrimitives.ReadUInt16LittleEndian(successCode[2..])
+                != outputVariable
+            || BinaryPrimitives.ReadUInt16LittleEndian(
+                complementCode[2..])
+                != (fallbackVariable >= 0
+                    ? fallbackVariable
+                    : statusVariable))
+        {
+            throw Invalid(
+                "The Standard F+I conditional-output Body reads a different Home.");
         }
 
         if (BinaryPrimitives.ReadUInt16LittleEndian(entryCode[16..])
