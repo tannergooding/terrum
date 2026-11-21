@@ -79,15 +79,31 @@ internal static class NativeOutputContractValidator
         return true;
     }
 
-    internal static bool IsValidInterfaceTable(BoundProgram program)
+    internal static bool IsValidInterfaceTable(BoundProgram program) =>
+        IsValidInterfaceTable(program.Interfaces, program.Structures,
+            program.NativePointerTypes,
+            program.NativeFunctionPointerSignatures,
+            program.EnumDefinitions, program.NativeCoreRegistration,
+            program.NativeOutputCoreRegistration);
+
+    internal static bool IsValidInterfaceTable(
+        ImmutableArray<BoundInterfaceDefinition> interfaces,
+        ImmutableArray<BoundStruct> structures,
+        ImmutableArray<NativePointerTypeDefinition> pointerTypes,
+        ImmutableArray<NativeFunctionPointerSignatureDefinition>
+            functionPointerSignatures,
+        IReadOnlyList<BoundEnumDefinition>? enumDefinitions,
+        NativeCoreRegistrationSet? nativeCoreRegistration,
+        NativeOutputCoreRegistrationSet? nativeOutputCoreRegistration)
     {
-        if (program.Interfaces.IsDefault)
+        if (interfaces.IsDefault || structures.IsDefault
+            || pointerTypes.IsDefault || functionPointerSignatures.IsDefault)
         {
             return false;
         }
 
         var hasOutputs = false;
-        foreach (var definition in program.Interfaces)
+        foreach (var definition in interfaces)
         {
             if (definition is null || definition.Members.IsDefault)
             {
@@ -154,9 +170,9 @@ internal static class NativeOutputContractValidator
                         || !ValidSelectors(output, resultPrimitive)
                         || !TryGetInterfaceOutputPointee(
                             member.Parameters[output.FormalOrdinal],
-                            program.Structures, program.NativePointerTypes,
-                            program.NativeFunctionPointerSignatures,
-                            program.EnumDefinitions, out var pointeeType)
+                            structures, pointerTypes,
+                            functionPointerSignatures, enumDefinitions,
+                            out var pointeeType)
                         || pointeeType != output.PointeeType
                         || !HasValidInterfaceDependencies(output, member,
                             outputFormals))
@@ -170,9 +186,8 @@ internal static class NativeOutputContractValidator
         }
 
         return !hasOutputs
-            || (program.NativeCoreRegistration?
-                    .ForeignNativeInterface is not null
-                && program.NativeOutputCoreRegistration
+            || (nativeCoreRegistration?.ForeignNativeInterface is not null
+                && nativeOutputCoreRegistration
                     is NativeOutputCoreRegistrationSet registration
                 && registration.IsValid());
     }

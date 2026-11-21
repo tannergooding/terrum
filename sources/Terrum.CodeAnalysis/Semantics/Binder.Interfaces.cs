@@ -2657,6 +2657,15 @@ internal sealed partial class Binder
             return null;
         }
 
+        foreach (var member in members)
+        {
+            if (member.RequiresMutableReceiver)
+            {
+                _ = GetNativePointerType(PrimitiveType.Void,
+                    isWritable: true, span: member.SourceDeclarationSpan);
+            }
+        }
+
         return new BoundForeignNativeInterfaceLayout(vtableByteOffset);
     }
 

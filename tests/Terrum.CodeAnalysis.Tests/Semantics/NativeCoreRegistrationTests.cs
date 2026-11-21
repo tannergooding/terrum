@@ -278,6 +278,50 @@ internal sealed class NativeCoreRegistrationTests
     }
 
     [Test]
+    public void ForeignNativeInterfaceProjectsMutableReceiverAsWritablePointer()
+    {
+        var registration = CreateRegistration(
+            includeForeignNativeInterface: true);
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeCallable]
+            [Terrum.Interop.ForeignNativeInterface(VTableByteOffset: uint32(0))]
+            public interface IProbe {
+                public mut unsafe int32 Update();
+            }
+            """), new CompilationOptions {
+                NativeCoreRegistration = registration,
+            });
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program
+            ?? throw new AssertionException("Expected a bound program.");
+        var member = program.Interfaces.Single().Members.Single();
+        Assert.That(member.RequiresMutableReceiver, Is.True);
+        Assert.That(program.NativePointerTypes.Any(static pointer =>
+            pointer.PointeeType == PrimitiveType.Void
+            && pointer.IsWritable), Is.True);
+        SemanticVerifier.VerifyLibrary(program);
+
+        var foreignDefinition = program.Interfaces.Single();
+        var invalidSignature = foreignDefinition with {
+            Members = foreignDefinition.Members.SetItem(0,
+                member with {
+                    NativeCallableConvention =
+                        NativeCallingConvention.Vectorcall,
+                }),
+        };
+        _ = Assert.Throws<ArgumentException>(() =>
+            new CompilationReference(program.Structures, program.Functions,
+                BoundRuntimePolicy.FailFast,
+                nativeFunctionPointerSignatures:
+                    program.NativeFunctionPointerSignatures,
+                nativePointerTypes: program.NativePointerTypes,
+                nativeCoreRegistration: registration,
+                interfaces: program.Interfaces.SetItem(0, invalidSignature)));
+    }
+
+    [Test]
     public void ForeignNativeInterfaceRejectsUnsupportedInterfaceShapes()
     {
         var registration = CreateRegistration(
@@ -318,6 +362,21 @@ internal sealed class NativeCoreRegistrationTests
             [Terrum.Interop.ForeignNativeInterface(VTableByteOffset: uint32(0))]
             public interface IProbe {
                 public extern unsafe int32 Read();
+            }
+            """,
+            """
+            [Terrum.Interop.NativeCallable]
+            [Terrum.Interop.ForeignNativeInterface(VTableByteOffset: uint32(0))]
+            public interface IProbe {
+                public unsafe int32 Read(ref<int32> value);
+            }
+            """,
+            """
+            [Terrum.Interop.NativeCallable(
+                CallConv: Terrum.Interop.NativeCallingConvention.Vectorcall)]
+            [Terrum.Interop.ForeignNativeInterface(VTableByteOffset: uint32(0))]
+            public interface IProbe {
+                public unsafe int32 Read();
             }
             """,
         };

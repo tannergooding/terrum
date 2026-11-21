@@ -1295,7 +1295,11 @@ Under the explicitly provisional ForeignNativeInterface identity candidate,
 source binding now carries registered NativeOutput contracts on eligible
 explicit method formals, including result selectors, vacant/live outcome
 states and target-only DependsOn/ForwardsBacking sources with receiver
-identity kept separate. NativeParameter is not admitted on these methods.
+identity kept separate. Method signatures are limited to supported Windows
+x64 scalar, raw/typed-pointer and function-pointer values, with readonly or
+mutable opaque receiver projections and Unmanaged/Cdecl/Stdcall conventions;
+Vectorcall and checked-reference, optional, or non-native by-value forms
+reject. NativeParameter is not admitted on these methods.
 Binding and verifier regressions are added but remain
 unverified under the active hold. Foreign-interface calls, Standard/private
 identity persistence, provider replacement, dispatch and lowering remain

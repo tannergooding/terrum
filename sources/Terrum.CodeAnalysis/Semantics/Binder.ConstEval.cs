@@ -408,7 +408,8 @@ internal sealed partial class Binder
 
         return ResolvePendingNativeCallConvTypes(functions)
             && ResolvePendingInterfaceNativeCallableConventions(functions)
-            && ResolvePendingInterfaceNativeOutputConditions(functions);
+            && ResolvePendingInterfaceNativeOutputConditions(functions)
+            && ValidateForeignNativeInterfaceMethodSignatures();
     }
 
     private bool TryResolveNativeOutputConditionExpressions(
@@ -627,6 +628,24 @@ internal sealed partial class Binder
             {
                 Report("TRM3030",
                     "NativeCallable.CallConv must evaluate to one of the registered convention members.",
+                    pending.Expression.Span);
+                success = false;
+                continue;
+            }
+            if ((uint)pending.InterfaceIndex >= (uint)_interfaces.Count)
+            {
+                throw new InvalidOperationException(
+                    "A pending interface NativeCallable convention has an invalid owner index.");
+            }
+            if (_interfaces[pending.InterfaceIndex]
+                    .ForeignNativeInterface is not null
+                && convention is not (
+                    NativeCallingConvention.Unmanaged
+                    or NativeCallingConvention.Cdecl
+                    or NativeCallingConvention.Stdcall))
+            {
+                Report("TRM3030",
+                    "ForeignNativeInterface methods require an Unmanaged, Cdecl, or Stdcall convention.",
                     pending.Expression.Span);
                 success = false;
                 continue;
@@ -911,6 +930,40 @@ internal sealed partial class Binder
 
         _pendingInterfaceNativeOutputConditions.Clear();
         return true;
+    }
+
+    private bool ValidateForeignNativeInterfaceMethodSignatures()
+    {
+        var success = true;
+        foreach (var definition in _interfaces)
+        {
+            if (definition.ForeignNativeInterface is null)
+            {
+                continue;
+            }
+
+            foreach (var member in definition.Members)
+            {
+                if (ForeignNativeInterfaceContract.IsValidMethodSignature(
+                    member, [.. _nativePointerTypes],
+                    [.. _nativeFunctionPointerSignatures]))
+                {
+                    continue;
+                }
+
+                var treeIndex = (uint)member.SourceInputOrdinal
+                        < (uint)_trees.Count
+                    ? member.SourceInputOrdinal : 0;
+                SetContext(_trees[treeIndex],
+                    member.SourceDeclarationSpan);
+                Report("TRM3030",
+                    "A ForeignNativeInterface method requires a supported Windows x64 native value signature and convention.",
+                    member.SourceDeclarationSpan);
+                success = false;
+            }
+        }
+
+        return success && DiagnosticCount == 0;
     }
 
     private bool ResolvePendingNativeCallConvTypes(

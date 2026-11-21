@@ -703,6 +703,7 @@ public static partial class SemanticVerifier
             type => ValidType(type, false, program),
             program.GenericNominalTypeDefinitions,
             program.SourceGenericTypeDefinitions)
+            || !ForeignNativeInterfaceContract.IsValidTable(program)
             || !NativeOutputContractValidator.IsValidInterfaceTable(program)
             || !AreInterfaceParameterDefaultsValid(program,
                 allowUnmaterializedInterfaceDefaults))

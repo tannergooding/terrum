@@ -268,6 +268,24 @@ public sealed class CompilationReference
             throw new ArgumentException("The selected interface declarations are invalid.",
                 nameof(interfaces));
         }
+        if (!interfaces.IsDefault
+            && (!ForeignNativeInterfaceContract.IsValidTable(interfaces,
+                    nativePointerTypes.IsDefault ? [] : nativePointerTypes,
+                    nativeFunctionPointerSignatures.IsDefault
+                        ? [] : nativeFunctionPointerSignatures,
+                    nativeCoreRegistration)
+                || !NativeOutputContractValidator.IsValidInterfaceTable(
+                    interfaces, structures.IsDefault ? [] : structures,
+                    nativePointerTypes.IsDefault ? [] : nativePointerTypes,
+                    nativeFunctionPointerSignatures.IsDefault
+                        ? [] : nativeFunctionPointerSignatures,
+                    enumDefinitions.IsDefault ? [] : enumDefinitions,
+                    nativeCoreRegistration, nativeOutputCoreRegistration)))
+        {
+            throw new ArgumentException(
+                "The selected foreign interface method contracts are invalid.",
+                nameof(interfaces));
+        }
         if (!genericNominalTypeDefinitions.IsDefault
             && !BoundGenericNominalTypeContract.IsValidDefinitionTable(
                 genericNominalTypeDefinitions))
