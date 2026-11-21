@@ -2138,6 +2138,34 @@ internal sealed class NativePointerModuleTests
     }
 
     [Test]
+    public void NativePointerAggregateReadSnapshotsBeforeLaterArgumentEffects()
+    {
+        var compilation = CreateLibrary(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            struct Snapshot {
+                public mut int32 Value;
+                public Snapshot(int32 value) { Value = value; }
+            }
+            int32 Observe(Snapshot value, int32 ignored) {
+                return value.Value;
+            }
+            unsafe int32 Mutate(ptr<Snapshot> value) {
+                unsafe { (*value).Value = 99; }
+                return 0;
+            }
+            int32 Main() {
+                Snapshot value = new Snapshot(42);
+                unsafe { return Observe(*(&value), Mutate(&value)); }
+            }
+            """), LayoutOptions());
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(compilation.Program!,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(42));
+    }
+
+    [Test]
     public void InitializationReferenceInitializesPointerCellWithoutInitializingPointee()
     {
         var compilation = Create(SyntaxTree.Parse("""
