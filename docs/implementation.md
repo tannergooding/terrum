@@ -1361,10 +1361,11 @@ on either the success or complementary comparison, with the success edge
 retargeted accordingly. Local MethodDefs and imported MethodDef Imports are
 mapped by exact member identity; regressions cover
 `int32`/`uint32` result predicates, a differing `float64` output with an
-explicit fallback, local/imported output reservations and conditional reads,
-provider load/re-emission, and malformed MethodMap, success-predicate,
-branch-target and reservation rejection. They remain unverified under the
-hold.
+explicit fallback, a differing `uint8` output, reversed operands, logical
+negation and success/complement edge orientations. Local/imported output
+reservations and conditional reads, provider load/re-emission, and malformed
+MethodMap, success-predicate, branch-target and reservation rejection are
+covered by regressions; they remain unverified under the hold.
 Aggregate and pointer output reads, side-effecting argument expressions,
 defaults/constants, multiple calls, other condition expressions and Body
 control-flow shapes, nonreturning-call shapes beyond the terminal subset and

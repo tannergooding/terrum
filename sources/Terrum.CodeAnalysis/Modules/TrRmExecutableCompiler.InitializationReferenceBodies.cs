@@ -1467,23 +1467,10 @@ public static partial class TrRmExecutableCompiler
             } statusLocal
             || statusLocal.Initializer.Type != function.ReturnType
             || statements[2] is not BoundIf {
-                Condition: BoundBinary condition,
+                Condition: BoundExpression condition,
                 Then: BoundBlock { Statements.Length: 1 } thenBlock,
                 Else: null,
             }
-            || condition.Type != PrimitiveType.Bool
-            || condition.Operator is not (TokenKind.BangEquals
-                or TokenKind.GreaterEquals or TokenKind.EqualsEquals
-                or TokenKind.Less)
-            || condition.Left is not BoundRead {
-                Variable: 3,
-            } statusRead
-            || statusRead.Type != function.ReturnType
-            || condition.Right is not BoundConstant {
-                Bits.Low: 0,
-                Bits.High: 0,
-            } zero
-            || zero.Type != function.ReturnType
             || thenBlock.Statements[0] is not BoundReturn {
                 Value: BoundRead thenRead,
             }
@@ -1492,6 +1479,12 @@ public static partial class TrRmExecutableCompiler
                 Value: BoundRead finalRead,
             }
             || finalRead.Type != function.ReturnType)
+        {
+            return false;
+        }
+
+        if (!TryGetForeignNativeOutputComparison(condition, 3,
+                function.ReturnType, out var conditionOperator))
         {
             return false;
         }
@@ -1554,8 +1547,8 @@ public static partial class TrRmExecutableCompiler
             return false;
         }
 
-        successOnTrue = condition.Operator == successOperator;
-        if ((!successOnTrue && condition.Operator != failureOperator)
+        successOnTrue = conditionOperator == successOperator;
+        if ((!successOnTrue && conditionOperator != failureOperator)
             || thenRead.Variable != (successOnTrue ? 2 : 3)
             || finalRead.Variable != (successOnTrue ? 3 : 2))
         {
@@ -1603,6 +1596,109 @@ public static partial class TrRmExecutableCompiler
             TokenKind.Less => 1,
             _ => null,
         };
+
+    private static bool TryGetForeignNativeOutputComparison(
+        BoundExpression expression, int statusVariable,
+        PrimitiveType statusType, out TokenKind comparison)
+    {
+        comparison = default;
+        var negated = false;
+        while (expression is BoundUnary {
+                   Operator: TokenKind.Bang,
+                   Type: PrimitiveType.Bool,
+               } unary)
+        {
+            expression = unary.Operand;
+            negated = !negated;
+        }
+
+        if (expression is not BoundBinary binary
+            || binary.Type != PrimitiveType.Bool)
+        {
+            return false;
+        }
+
+        if (binary.Left is BoundRead {
+                Variable: var leftVariable,
+            } leftRead
+            && leftVariable == statusVariable
+            && leftRead.Type == statusType
+            && IsZeroNativeOutputResult(binary.Right, statusType))
+        {
+            comparison = binary.Operator;
+        }
+        else if (binary.Right is BoundRead {
+                     Variable: var rightVariable,
+                 } rightRead
+                 && rightVariable == statusVariable
+                 && rightRead.Type == statusType
+                 && IsZeroNativeOutputResult(binary.Left, statusType))
+        {
+            if (!TryReverseNativeOutputComparison(binary.Operator,
+                    out comparison))
+            {
+                return false;
+            }
+        }
+        else
+        {
+            return false;
+        }
+
+        if (negated)
+        {
+            if (!TryNegateNativeOutputComparison(comparison,
+                    out var negatedComparison))
+            {
+                return false;
+            }
+
+            comparison = negatedComparison;
+        }
+
+        return true;
+    }
+
+    private static bool IsZeroNativeOutputResult(BoundExpression expression,
+        PrimitiveType resultType)
+        => expression is BoundConstant {
+            Bits.Low: 0,
+            Bits.High: 0,
+        } constant && constant.Type == resultType;
+
+    private static bool TryReverseNativeOutputComparison(TokenKind comparison,
+        out TokenKind reversed)
+    {
+        reversed = comparison switch {
+            TokenKind.BangEquals => TokenKind.BangEquals,
+            TokenKind.EqualsEquals => TokenKind.EqualsEquals,
+            TokenKind.Less => TokenKind.Greater,
+            TokenKind.LessEquals => TokenKind.GreaterEquals,
+            TokenKind.Greater => TokenKind.Less,
+            TokenKind.GreaterEquals => TokenKind.LessEquals,
+            _ => default,
+        };
+        return comparison is TokenKind.BangEquals or TokenKind.EqualsEquals
+            or TokenKind.Less or TokenKind.LessEquals or TokenKind.Greater
+            or TokenKind.GreaterEquals;
+    }
+
+    private static bool TryNegateNativeOutputComparison(TokenKind comparison,
+        out TokenKind negated)
+    {
+        negated = comparison switch {
+            TokenKind.BangEquals => TokenKind.EqualsEquals,
+            TokenKind.EqualsEquals => TokenKind.BangEquals,
+            TokenKind.Less => TokenKind.GreaterEquals,
+            TokenKind.LessEquals => TokenKind.Greater,
+            TokenKind.Greater => TokenKind.LessEquals,
+            TokenKind.GreaterEquals => TokenKind.Less,
+            _ => default,
+        };
+        return comparison is TokenKind.BangEquals or TokenKind.EqualsEquals
+            or TokenKind.Less or TokenKind.LessEquals or TokenKind.Greater
+            or TokenKind.GreaterEquals;
+    }
 
     private static bool TryGetForeignInterfaceConditionalOutputCallWithFallback(
         BoundFunction function, BoundProgram program, out BoundCall call,
@@ -1684,23 +1780,10 @@ public static partial class TrRmExecutableCompiler
             || statusLocal.Initializer.Type is not (PrimitiveType.Int32
                 or PrimitiveType.UInt32)
             || statements[2] is not BoundIf {
-                Condition: BoundBinary condition,
+                Condition: BoundExpression condition,
                 Then: BoundBlock { Statements.Length: 1 } thenBlock,
                 Else: null,
             }
-            || condition.Type != PrimitiveType.Bool
-            || condition.Operator is not (TokenKind.BangEquals
-                or TokenKind.GreaterEquals or TokenKind.EqualsEquals
-                or TokenKind.Less)
-            || condition.Left is not BoundRead {
-                Variable: 4,
-            } statusRead
-            || statusRead.Type != statusLocal.Initializer.Type
-            || condition.Right is not BoundConstant {
-                Bits.Low: 0,
-                Bits.High: 0,
-            } zero
-            || zero.Type != statusLocal.Initializer.Type
             || thenBlock.Statements[0] is not BoundReturn {
                 Value: BoundRead thenRead,
             }
@@ -1709,6 +1792,12 @@ public static partial class TrRmExecutableCompiler
                 Value: BoundRead finalRead,
             }
             || finalRead.Type != function.ReturnType)
+        {
+            return false;
+        }
+
+        if (!TryGetForeignNativeOutputComparison(condition, 4,
+                statusLocal.Initializer.Type, out var conditionOperator))
         {
             return false;
         }
@@ -1770,8 +1859,8 @@ public static partial class TrRmExecutableCompiler
             return false;
         }
 
-        successOnTrue = condition.Operator == successOperator;
-        if ((!successOnTrue && condition.Operator != failureOperator)
+        successOnTrue = conditionOperator == successOperator;
+        if ((!successOnTrue && conditionOperator != failureOperator)
             || thenRead.Variable != (successOnTrue ? 3 : 2)
             || finalRead.Variable != (successOnTrue ? 2 : 3))
         {
