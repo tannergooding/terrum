@@ -50,9 +50,20 @@ public static partial class TrRmExecutableCompiler
         var signatureIndexByAnchorTypeSpec
             = new int[tables.TypeSpecs.Count + 1];
         Array.Fill(signatureIndexByAnchorTypeSpec, -1);
-        var structureTypeByTypeDef
-            = new int[tables.TypeDefs.Count + 1];
-        Array.Fill(structureTypeByTypeDef, -1);
+        var includedTypeDefRows
+            = GetForeignNativeInterfaceStructureTypeDefClosure(tables,
+                moduleRow);
+
+        var structures = LoadBlittableStructures(tables.TypeDefs,
+            tables.Fields, tables.Layouts, tables.LayoutFields,
+            tables.TargetProfiles, tables.TypeSpecs,
+            [.. context.ForeignNativeInterfaceStructures],
+            pointerTypeIndexes, out var structureTypeByTypeDef,
+            imports: tables.Imports,
+            includedTypeDefRows: includedTypeDefRows,
+            allowDuplicateImportedViews: true);
+        context.ForeignNativeInterfaceStructures.Clear();
+        context.ForeignNativeInterfaceStructures.AddRange(structures);
         ReadForeignNativeInterfaceFunctionPointerAnchors(tables, context,
             moduleRow, pointerTypeIndexes, signatureIndexByAnchorMethod,
             signatureIndexByAnchorTypeSpec, structureTypeByTypeDef);
@@ -843,7 +854,8 @@ public static partial class TrRmExecutableCompiler
                 if (!NativeFunctionPointerContract.IsValidTable(
                         candidateSignatures)
                     || !NativePointerTypeContract.IsValidTable(
-                        [.. nativePointerTypeDefinitions], [],
+                        [.. nativePointerTypeDefinitions],
+                        [.. context.ForeignNativeInterfaceStructures],
                         candidateSignatures))
                 {
                     throw Invalid(
@@ -923,7 +935,213 @@ public static partial class TrRmExecutableCompiler
             throw Invalid(
                 "The selected FNI modules contain an invalid function-pointer signature table.");
         }
+    }
 
+    private static HashSet<int>
+        GetForeignNativeInterfaceStructureTypeDefClosure(
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+        int moduleRow)
+    {
+        var typeDefStates = new byte[tables.TypeDefs.Count + 1];
+        var typeSpecStates = new byte[tables.TypeSpecs.Count + 1];
+        var typeSpecExportStates = new byte[tables.TypeSpecs.Count + 1];
+        var methodStates = new byte[tables.Methods.Count + 1];
+        var includedTypeDefRows = new HashSet<int>();
+        var exportedTypeDefs = tables.Exports.GetExportsForModule(moduleRow)
+            .Where(static export => (export.Definition >> 24) == 0x13)
+            .Select(static export => export.Definition)
+            .ToHashSet();
+
+        void VisitMethodSignature(int methodRow, int depth)
+        {
+            if (depth > SemanticVerifier.MaximumDepth)
+            {
+                throw Unsupported(
+                    "The F+I aggregate TypeSpec closure exceeds the supported depth.");
+            }
+            if (methodStates[methodRow] == 1)
+            {
+                throw Invalid(
+                    "The F+I aggregate and function-pointer signature closure is cyclic.");
+            }
+            if (methodStates[methodRow] == 2)
+            {
+                return;
+            }
+
+            methodStates[methodRow] = 1;
+            var signatureRow = tables.Methods.GetSignature(methodRow);
+            var (firstParameter, parameterCount)
+                = tables.Signatures.GetParamRange(signatureRow);
+            for (var ordinal = 0; ordinal < parameterCount; ordinal++)
+            {
+                VisitTypeSpec(tables.Parameters.GetTypeSpec(
+                    firstParameter + ordinal), false, true, depth + 1);
+            }
+            VisitTypeSpec(tables.Signatures.GetResultTypeSpec(signatureRow),
+                false, true, depth + 1);
+            methodStates[methodRow] = 2;
+        }
+
+        void VisitTypeSpec(uint typeSpecRef, bool throughPointer,
+            bool requireExport, int depth)
+        {
+            if (depth > SemanticVerifier.MaximumDepth)
+            {
+                throw Unsupported(
+                    "The F+I aggregate TypeSpec closure exceeds the supported depth.");
+            }
+
+            var reference = tables.TypeSpecs.GetTypeSpecRef(typeSpecRef);
+            if (reference.IsRow && reference.Form == 0x0D)
+            {
+                VisitMethodSignature(tables.NativeFunctionPointerAnchors
+                    .GetAnchorMethodDefRow(reference.Row), depth + 1);
+                return;
+            }
+
+            if (tables.TypeSpecs.TryGetNativePointerPointeeTypeSpecRef(
+                    typeSpecRef, out var pointeeTypeSpecRef))
+            {
+                if (reference.IsRow)
+                {
+                    if (typeSpecStates[reference.Row] == 1)
+                    {
+                        throw Invalid(
+                            "An F+I aggregate pointer TypeSpec is cyclic.");
+                    }
+                    if (typeSpecStates[reference.Row] == 2
+                        && (!requireExport
+                            || typeSpecExportStates[reference.Row] == 2))
+                    {
+                        return;
+                    }
+                    typeSpecStates[reference.Row] = 1;
+                    VisitTypeSpec(pointeeTypeSpecRef, true, requireExport,
+                        depth + 1);
+                    typeSpecStates[reference.Row] = 2;
+                    if (requireExport)
+                    {
+                        typeSpecExportStates[reference.Row] = 2;
+                    }
+                }
+                else
+                {
+                    VisitTypeSpec(pointeeTypeSpecRef, true, requireExport,
+                        depth + 1);
+                }
+
+                return;
+            }
+
+            if (reference.Form is not (0x02 or 0x03 or 0x05))
+            {
+                return;
+            }
+
+            var typeDefRow = tables.TypeSpecs.GetNominalTypeDefRow(
+                typeSpecRef, tables.TypeDefs, tables.Imports);
+            if (tables.TypeDefs.GetKind(typeDefRow) != 1)
+            {
+                return;
+            }
+            if (requireExport)
+            {
+                if ((tables.TypeDefs.GetFlags(typeDefRow) & 3) != 2)
+                {
+                    throw Invalid(
+                        "A ForeignNativeInterface aggregate pointee is not public.");
+                }
+
+                var definitionId = 0x1300_0000u
+                    | checked((uint)typeDefRow);
+                if (!exportedTypeDefs.Contains(definitionId))
+                {
+                    for (var importRow = 1;
+                        importRow <= tables.Imports.Count; importRow++)
+                    {
+                        if (tables.Imports.GetExpectedDefinitionForImportRow(
+                                importRow) != definitionId)
+                        {
+                            continue;
+                        }
+
+                        var moduleRefRow = tables.Imports
+                            .GetModuleRefForImportRow(importRow);
+                        if (tables.ModuleRefs.GetOwnerModule(moduleRefRow)
+                            == moduleRow)
+                        {
+                            throw Unsupported(
+                                "F+I aggregate TypeDef Import binding is not yet implemented.");
+                        }
+                    }
+
+                    throw Invalid(
+                        "A ForeignNativeInterface aggregate pointee has no local ExportKey or expected Import.");
+                }
+            }
+            if (typeDefStates[typeDefRow] == 1)
+            {
+                if (throughPointer)
+                {
+                    return;
+                }
+                throw Invalid(
+                    "An F+I inline aggregate TypeDef is recursively defined.");
+            }
+            if (typeDefStates[typeDefRow] == 2)
+            {
+                return;
+            }
+            if (!tables.Layouts.HasBlittableLayout(typeDefRow, 1, 1))
+            {
+                throw Unsupported(
+                    "An F+I aggregate pointee has no selected Windows x64 Blittable Layout.");
+            }
+            var (_, genericCount)
+                = tables.TypeDefs.GetGenericRange(typeDefRow);
+            if (genericCount != 0)
+            {
+                throw Unsupported(
+                    "F+I aggregate pointee TypeDefs must be nongeneric.");
+            }
+
+            typeDefStates[typeDefRow] = 1;
+            _ = includedTypeDefRows.Add(typeDefRow);
+            var (firstField, endField)
+                = tables.TypeDefs.GetFieldRange(typeDefRow);
+            for (var fieldRow = firstField; fieldRow < endField;
+                fieldRow++)
+            {
+                VisitTypeSpec(tables.Fields.GetTypeSpecRef(fieldRow),
+                    false, false, depth + 1);
+            }
+            typeDefStates[typeDefRow] = 2;
+        }
+
+        for (var foreignInterfaceRow = 1;
+            foreignInterfaceRow <= tables.ForeignNativeInterfaces.Count;
+            foreignInterfaceRow++)
+        {
+            var interfaceDef = checked((int)tables.ForeignNativeInterfaces
+                .GetOwnerInterfaceDef(foreignInterfaceRow));
+            var typeDef = tables.Interfaces.GetOwnerTypeDef(interfaceDef);
+            if (tables.TypeDefs.GetOwnerModule(typeDef) != moduleRow)
+            {
+                continue;
+            }
+
+            var (firstMethod, methodCount)
+                = tables.Interfaces.GetMethodRange(interfaceDef);
+            for (var methodOrdinal = 0; methodOrdinal < methodCount;
+                methodOrdinal++)
+            {
+                VisitMethodSignature(tables.InterfaceMethods
+                    .GetMethodDefRow(firstMethod + methodOrdinal), 0);
+            }
+        }
+
+        return includedTypeDefRows;
     }
 
     private static BoundInterfaceDefinition

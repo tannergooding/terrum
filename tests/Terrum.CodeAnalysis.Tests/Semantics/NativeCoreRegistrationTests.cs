@@ -690,6 +690,90 @@ internal sealed class NativeCoreRegistrationTests
     }
 
     [Test]
+    public void StandardForeignNativeInterfaceLoadsAggregatePointeeLayout()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-native-interface-parameter-surface-1";
+        var nativeRegistration = CreateRegistration(
+            includeForeignNativeInterface: true);
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            using Terrum.Interop;
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Point {
+                public int32 X;
+                public int32 Y;
+            }
+            [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+            [ForeignNativeInterface(VTableByteOffset: uint32(0))]
+            public interface IProbe {
+                public unsafe int32 Read(ptr<Point> point);
+            }
+            """), new CompilationOptions {
+            NativeCoreRegistration = nativeRegistration,
+            LayoutCoreRegistration =
+                CreateLayoutRegistration(nativeRegistration),
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program
+            ?? throw new AssertionException("Expected a bound program.");
+        var member = program.Interfaces.Single().Members.Single();
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "provider.module", schemaIdentity, 1, [
+                new TrRmSourceTypeExport("", "Point", "provider/Point") {
+                    FieldExports = [
+                        new TrRmSourceFieldExport("X", "provider/Point.X"),
+                        new TrRmSourceFieldExport("Y", "provider/Point.Y"),
+                    ],
+                },
+                new TrRmSourceTypeExport("", "IProbe",
+                    "provider/IProbe") {
+                    GenericArity = 0,
+                    InterfaceMethodExports = [
+                        new TrRmSourceInterfaceMethodExport(
+                            member.SourceInputOrdinal,
+                            member.SourceDeclarationSpan,
+                            "provider/IProbe.Read"),
+                    ],
+                },
+            ]);
+        var schema
+            = TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft;
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(new TrRmArtifactIndex(artifact,
+                schema));
+        Assert.That(tables.TypeDefs.Count, Is.EqualTo(2));
+        Assert.That(tables.Layouts.HasBlittableVariant(1), Is.True);
+        var signatureRow = tables.Methods.GetSignature(1);
+        var (firstParameter, parameterCount)
+            = tables.Signatures.GetParamRange(signatureRow);
+        Assert.That(parameterCount, Is.EqualTo(1));
+        var pointerTypeSpec = tables.Parameters.GetTypeSpec(firstParameter);
+        Assert.That(tables.TypeSpecs.TryGetNativePointerPointeeTypeSpecRef(
+            pointerTypeSpec, out var pointeeTypeSpec), Is.True);
+        var pointee = tables.TypeSpecs.GetTypeSpecRef(pointeeTypeSpec);
+        Assert.That(pointee.IsRow, Is.True);
+        Assert.That(pointee.Form, Is.EqualTo((byte)0x02));
+        Assert.That(tables.TypeSpecs.GetNominalTypeDefRow(pointeeTypeSpec,
+            tables.TypeDefs, tables.Imports), Is.EqualTo(1));
+
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            "provider.module", []);
+        Assert.That(reference.Structures, Has.Length.EqualTo(1));
+        Assert.That(reference.Structures.Single().Fields.Select(
+                static field => field.Name),
+            Is.EqualTo(new[] { "X", "Y" }));
+        var caller = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            int32 Invoke(ptr<void> receiver, ptr<Point> point) {
+                unsafe { return IProbe.Read(receiver, point); }
+            }
+            """), reference);
+        Assert.That(caller.HasErrors, Is.False,
+            string.Join(Environment.NewLine, caller.Diagnostics));
+    }
+
+    [Test]
     public void StandardForeignNativeInterfaceParameterProducerRetainsDefaultSurface()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""

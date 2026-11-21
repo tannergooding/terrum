@@ -5694,6 +5694,16 @@ public static partial class TrRmExecutableCompiler
         var nativePointerTypeRows = new Dictionary<PrimitiveType, int>();
         var structureTypeDefRows = new Dictionary<int, int>();
         var typeDefTypeSpecRows = new Dictionary<int, int>();
+        if (foreignNativeInterface && typeDefCount != 0)
+        {
+            MapForeignNativeInterfaceStructureTypeDefRows(program, strings,
+                GetSection(sections, 0x0001).Bytes.Span,
+                moduleRefCount, typeDefBytes.ToArray(), typeDefCount,
+                methodCount, sourceFileCount, fieldCount,
+                genericParameterRows.Count, layoutCount, contractCount,
+                GetCount(sections, 0x0004), schema,
+                structureTypeDefRows);
+        }
         var foreignFunctionPointerSignatureIndexes
             = foreignNativeInterface
                 ? GetForeignNativeFunctionPointerSignatureIndexes(
@@ -6648,6 +6658,16 @@ public static partial class TrRmExecutableCompiler
             = new Dictionary<int, int>();
         var foreignNativeTypeDefTypeSpecRows
             = new Dictionary<int, int>();
+        if (foreignNativeInterface && typeDefCount != 0)
+        {
+            MapForeignNativeInterfaceStructureTypeDefRows(program, strings,
+                GetSection(sections, 0x0001).Bytes.Span,
+                moduleRefRows.Count, typeDefBytes.ToArray(), typeDefCount,
+                methodCount, sourceFileCount, fieldCount,
+                GetCount(sections, 0x0019), layoutCount, contractCount,
+                featureCount, schema,
+                foreignNativeStructureTypeDefRows);
+        }
         var foreignFunctionPointerSignatureIndexes
             = foreignNativeInterface
                 ? GetForeignNativeFunctionPointerSignatureIndexes(
@@ -8232,6 +8252,54 @@ public static partial class TrRmExecutableCompiler
         }
 
         return [.. retained];
+    }
+
+    private static void MapForeignNativeInterfaceStructureTypeDefRows(
+        BoundProgram program, TrRmStringTableReader strings,
+        ReadOnlySpan<byte> moduleBytes, int moduleRefCount,
+        byte[] typeDefBytes, int typeDefCount, int methodCount,
+        int sourceFileCount, int fieldCount, int genericParameterCount,
+        int layoutCount, int contractCount, int featureCount,
+        TrRmArtifactSchema schema,
+        Dictionary<int, int> structureTypeDefRows)
+    {
+        var modules = new TrRmModuleTableReader(moduleBytes, 1, strings,
+            moduleRefCount, typeDefCount, methodCount, sourceFileCount,
+            featureCount);
+        var typeDefs = new TrRmTypeDefTableReader(typeDefBytes,
+            typeDefCount, strings, modules, fieldCount,
+            genericParameterCount, layoutCount, contractCount, schema);
+        var typeDefRowsByName = new Dictionary<string, int>(
+            StringComparer.Ordinal);
+        for (var typeDef = 1; typeDef <= typeDefCount; typeDef++)
+        {
+            if (typeDefs.GetKind(typeDef) != 1)
+            {
+                continue;
+            }
+
+            var namespaceName = typeDefs.GetNamespace(typeDef);
+            var name = typeDefs.GetName(typeDef);
+            var qualifiedName = namespaceName.Length == 0 ? name
+                : string.Concat(namespaceName, ".", name);
+            if (!typeDefRowsByName.TryAdd(qualifiedName, typeDef))
+            {
+                throw Invalid(
+                    "The F+I base artifact contains duplicate structure TypeDefs.");
+            }
+        }
+
+        for (var structureIndex = 0;
+            structureIndex < program.Structures.Length; structureIndex++)
+        {
+            var structure = program.Structures[structureIndex];
+            if (structure.StandardTypeOrigin is null
+                && typeDefRowsByName.TryGetValue(structure.Name,
+                    out var typeDefRow))
+            {
+                structureTypeDefRows.Add(structureIndex, typeDefRow);
+            }
+        }
     }
 
     private static void AddForeignNativeFunctionPointerAnchors(

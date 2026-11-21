@@ -70,6 +70,8 @@ public static partial class TrRmExecutableCompiler
         internal List<BoundSpanTypeDefinition> SpanTypes { get; } = [];
         internal List<NativePointerTypeDefinition>
             ForeignNativeInterfacePointerTypes { get; } = [];
+        internal List<BoundStruct> ForeignNativeInterfaceStructures
+            { get; } = [];
         internal List<NativeFunctionPointerSignatureDefinition>
             ForeignNativeInterfaceFunctionPointerSignatures { get; } = [];
         internal List<CheckedReferenceTypeDefinition>

@@ -118,7 +118,11 @@ public static partial class TrRmExecutableCompiler
         context.CompleteBindings();
         var (_, runtimePolicy) = tables.Modules.GetRequirements(moduleRow);
         var genericMethodImports = imports.ToImmutable();
-        return new CompilationReference([], [],
+        var foreignNativeStructures = context.Schema
+            .UsesForeignNativeInterface()
+                ? context.ForeignNativeInterfaceStructures.ToImmutableArray()
+                : ImmutableArray<BoundStruct>.Empty;
+        return new CompilationReference(foreignNativeStructures, [],
             (BoundRuntimePolicy)runtimePolicy,
             interfaces: interfaces,
             genericMethodImports: genericMethodImports,

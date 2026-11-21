@@ -1319,12 +1319,17 @@ fresh source. Standard `0x0D` function-pointer anchors now emit and load
 recursive scalar/pointer signatures, convention, Effects, phase-3 selectors,
 OutputState and Dependency contracts. Provider ABI rejection and callback
 round-trip/call-binding regressions are added but unverified under the active
-hold. Complete Import/Export/PS1/Contract/graph row remapping, aggregate
-pointee TypeDef/Layout closure, FNI call Body/CallSite emission,
-dispatch/native lowering, private persistence, CLI transport and runtime
-remain open. NativeParameter is not admitted on these methods or anchors, and
-neither FNI proposal is approved. General aggregate output Bodies and
-native-interface execution remain incomplete.
+hold. Local aggregate pointees now carry explicit source TypeDef/FieldDef keys,
+Blittable Layout and Feature 13 through FNI emission; source-free loading
+reconstructs the selected local layouts. This bounded producer/consumer slice
+supports scalar, raw-pointer and inline-struct fields, with a regression added
+but unverified under the active hold. Imported aggregate TypeDef expectations
+and provider replacement, typed-pointer/function-pointer aggregate fields,
+and full Import/Export/PS1/Contract/graph row remapping remain open. FNI call
+Body/CallSite emission, dispatch/native lowering, private persistence, CLI
+transport and runtime remain open. NativeParameter is not admitted on these
+methods or anchors, and neither FNI proposal is approved. General aggregate
+output Bodies and native-interface execution remain incomplete.
 [CG-004](implementation/conformance-gaps.md#cg-004) owns
 the detailed composition and qualification gates. Earlier TRRM NativeOutput
 clauses and ScalarInitOutput encoding are prototype artifacts, not a fallback
