@@ -996,6 +996,14 @@ internal sealed class NativeCoreRegistrationTests
                 """), reboundReference);
         Assert.That(reboundConsumer.HasErrors, Is.False,
             string.Join(Environment.NewLine, reboundConsumer.Diagnostics));
+        var reboundImage = NativeEmitter.EmitLibrary(
+            reboundConsumer.Program
+                ?? throw new AssertionException(
+                    "Expected a bound aggregate consumer."),
+            ["Invoke"], NativeRuntimePolicy.FailFast);
+        Assert.That(reboundImage[..2], Is.EqualTo(new byte[] {
+            (byte)'M', (byte)'Z',
+        }));
         var reemissionCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse(""), reboundReference);
         Assert.That(reemissionCompilation.HasErrors, Is.False,

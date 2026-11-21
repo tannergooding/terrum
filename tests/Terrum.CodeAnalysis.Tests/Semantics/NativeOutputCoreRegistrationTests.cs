@@ -4,6 +4,7 @@ using System;
 using System.Collections.Immutable;
 using System.Linq;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 
@@ -445,17 +446,20 @@ internal sealed class NativeOutputCoreRegistrationTests
             [Terrum.Interop.NativeCallable(
                 CallConv: Terrum.Interop.NativeCallingConvention.Cdecl)]
             [Terrum.Interop.ForeignNativeInterface(
-                VTableByteOffset: uint32(0))]
+                VTableByteOffset: uint32(0xFFFF_FFF8))]
             public interface IProbe {
+                public unsafe int32 Ping();
                 [param(value): Terrum.Interop.NativeOutput(
                     When: Terrum.Interop.NativeOutputCondition.NonNegative)]
-                public unsafe int32 TryRead(write ptr<int32> value);
+                public unsafe int32 TryRead(int32 prefix,
+                    write ptr<int32> value);
             }
 
             int32 Invoke(ptr<void> receiver) {
                 unsafe {
                     init int32 value;
-                    int32 status = IProbe.TryRead(receiver, &init value);
+                    int32 status = IProbe.TryRead(receiver,
+                        value: &init value, prefix: 10);
                     if (status >= 0) { return value; }
                 }
                 return 0;
@@ -484,10 +488,16 @@ internal sealed class NativeOutputCoreRegistrationTests
                 }
             }), Is.True);
         Assert.That(foreignCall?.ForeignInterfaceCall
-            ?.NativeOutputContracts.Single().FormalOrdinal, Is.EqualTo(0));
+            ?.NativeOutputContracts.Single().FormalOrdinal, Is.EqualTo(1));
+        Assert.That(foreignCall?.ForeignInterfaceCall?.Member.MemberOrdinal,
+            Is.EqualTo(1));
         Assert.That(foreignCall?.ForeignInterfaceCall?.Receiver.Type,
             Is.EqualTo(PrimitiveType.NativeRawPointer));
         SemanticVerifier.VerifyLibrary(program);
+        var image = NativeEmitter.EmitLibrary(program, ["Invoke"],
+            NativeRuntimePolicy.FailFast);
+        Assert.That(image[..2], Is.EqualTo(new byte[] { (byte)'M',
+            (byte)'Z' }));
     }
 
     [Test]

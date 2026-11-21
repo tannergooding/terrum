@@ -457,7 +457,11 @@ internal sealed partial class PeCompiler
                     var argumentsBase = spill + CallResultSpills(call);
                     var argumentSlots = new int[call.Arguments.Length];
                     var auxiliarySlots = new int[call.Arguments.Length];
-                    var nextArgumentSlot = argumentsBase;
+                    var nextArgumentSlot = argumentsBase
+                        + (call.ForeignInterfaceCall is
+                            BoundForeignInterfaceCall foreignCall
+                            ? SpillSlotsForType(
+                                foreignCall.Receiver.Type) : 0);
                     for (var i = 0; i < call.Arguments.Length; i++)
                     {
                         argumentSlots[i] = nextArgumentSlot;
@@ -471,7 +475,8 @@ internal sealed partial class PeCompiler
                     for (var i = 0; i < call.Arguments.Length; i++)
                     {
                         var argument = call.Arguments[i];
-                        if (ManagedClassTypes.IsManaged(argument.Type))
+                        if (call.ForeignInterfaceCall is null
+                            && ManagedClassTypes.IsManaged(argument.Type))
                         {
                             _ = slots.Add(argumentSlots[i]);
                             if (argument is BoundOutArgument)
@@ -479,7 +484,9 @@ internal sealed partial class PeCompiler
                                 _ = slots.Add(auxiliarySlots[i]);
                             }
                         }
-                        if (_normalBacking && argument is not BoundOutArgument)
+                        if (_normalBacking
+                            && call.ForeignInterfaceCall is null
+                            && argument is not BoundOutArgument)
                         {
                             var formal = call.ParameterIndex(i);
                             var target = _program.Functions[call.Function];
@@ -501,6 +508,12 @@ internal sealed partial class PeCompiler
                         {
                             CollectExpression(argument, nextArgumentSlot);
                         }
+                    }
+                    if (call.ForeignInterfaceCall is
+                        BoundForeignInterfaceCall foreignInterfaceCall)
+                    {
+                        CollectExpression(foreignInterfaceCall.Receiver,
+                            nextArgumentSlot);
                     }
                     break;
                 case BoundIndirectCall call:

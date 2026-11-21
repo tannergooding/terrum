@@ -173,8 +173,9 @@ internal static class ForeignNativeInterfaceContract
             || owner.ForeignNativeInterface is not
                 BoundForeignNativeInterfaceLayout layout
             || layout.VTableByteOffset != foreignCall.VTableByteOffset
-            || program.NativeCoreRegistration?.ForeignNativeInterface
-                is null)
+            || (program.NativeCoreRegistration?.ForeignNativeInterface
+                    is null
+                && owner.ModuleImport is null))
         {
             return false;
         }
@@ -306,8 +307,9 @@ internal static class ForeignNativeInterfaceContract
             || owner.ForeignNativeInterface is not
                 BoundForeignNativeInterfaceLayout layout
             || layout.VTableByteOffset != foreignCall.VTableByteOffset
-            || program.NativeCoreRegistration?.ForeignNativeInterface
-                is null
+            || (program.NativeCoreRegistration?.ForeignNativeInterface
+                    is null
+                && owner.ModuleImport is null)
             || !BoundInterfaceContract.TryGetInterfaceMemberDefinition(
                 foreignCall.Member, program.Interfaces, static _ => true,
                 out var member,

@@ -2315,6 +2315,7 @@ internal sealed partial class PeCompiler
                     && !BoundTreeTraversal.VisitExpressions(function.Body, expression =>
                     {
                         if (expression is BoundCall call
+                            && call.ForeignInterfaceCall is null
                             && RequiresNormalBackingCallPlan(
                                 _program.Functions[call.Function], _program))
                         {
@@ -2329,6 +2330,7 @@ internal sealed partial class PeCompiler
                 if (!BoundTreeTraversal.VisitContractExpressions(function,
                     expression => {
                         if (expression is BoundCall call
+                            && call.ForeignInterfaceCall is null
                             && RequiresNormalBackingCallPlan(
                                 _program.Functions[call.Function], _program))
                         {
@@ -3373,12 +3375,22 @@ internal sealed partial class PeCompiler
                 return ExpressionSpills(unsafeExpression.Expression, ref maximumArguments);
             case BoundCall call:
                 maximumArguments = Math.Max(maximumArguments,
-                    call.Arguments.Length + (IsIndirectResult(call.Type) ? 1 : 0)
-                        + (_sourceDependent?[call.Function] == true ? 2 : 0));
+                    call.Arguments.Length
+                    + (call.ForeignInterfaceCall is null ? 0 : 1)
+                    + (IsIndirectResult(call.Type) ? 1 : 0)
+                    + (call.ForeignInterfaceCall is null
+                        && _sourceDependent?[call.Function] == true ? 2 : 0));
                 var resultSpills = CallResultSpills(call);
                 var argumentSpills = CallArgumentSpills(call);
                 var expressionSpillBase = resultSpills + argumentSpills;
                 var maximum = expressionSpillBase;
+                if (call.ForeignInterfaceCall is
+                    BoundForeignInterfaceCall foreignCall)
+                {
+                    maximum = Math.Max(maximum, expressionSpillBase
+                        + ExpressionSpills(foreignCall.Receiver,
+                            ref maximumArguments));
+                }
                 for (var i = 0; i < call.Arguments.Length; i++)
                 {
                     if (call.Arguments[i] is BoundOutArgument output && HasDeclaredCleanup(output.Type))
@@ -3419,6 +3431,11 @@ internal sealed partial class PeCompiler
     private int CallArgumentValueSpills(BoundCall call, int index)
     {
         var argument = call.Arguments[index];
+        if (call.ForeignInterfaceCall is not null)
+        {
+            return SpillSlotsForType(argument.Type);
+        }
+
         var isAddress = IsImplicitReferenceArgument(call, index)
             || argument is BoundOutArgument or BoundReceiverLoan or BoundMutableReceiverLoan
                 or BoundFieldLoan or BoundMutableFieldLoan;
@@ -3499,7 +3516,9 @@ internal sealed partial class PeCompiler
 
     private int CallArgumentSpills(BoundCall call)
     {
-        var total = 0;
+        var total = call.ForeignInterfaceCall is
+            BoundForeignInterfaceCall foreignCall
+                ? SpillSlotsForType(foreignCall.Receiver.Type) : 0;
         for (var i = 0; i < call.Arguments.Length; i++)
         {
             total += CallArgumentValueSpills(call, i) + CallArgumentAuxiliarySpills(call.Arguments[i]);
@@ -3852,6 +3871,11 @@ internal sealed partial class PeCompiler
 
     private bool IsImplicitReferenceArgument(BoundCall call, int argumentIndex)
     {
+        if (call.ForeignInterfaceCall is not null)
+        {
+            return false;
+        }
+
         var target = _program.Functions[call.Function];
         var parameterSlot = call.ParameterIndex(argumentIndex) + (target.IsConstructor ? 1 : 0);
         return (uint)parameterSlot < (uint)target.Variables.Length
@@ -11336,6 +11360,12 @@ internal sealed partial class PeCompiler
                 }
                 break;
             case BoundCall call:
+                if (call.ForeignInterfaceCall is not null)
+                {
+                    EmitForeignNativeInterfaceCall(call, spill);
+                    break;
+                }
+
                 var targetFunction = _program.Functions[call.Function];
                 var hasNormalBackingCallPlan = _normalBacking
                     && RequiresNormalBackingCallPlan(targetFunction, _program);

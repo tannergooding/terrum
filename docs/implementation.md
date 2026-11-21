@@ -1331,10 +1331,17 @@ relocation, incompatible-layout replacement and source-free re-emission
 regressions are added but unverified under the active hold.
 Typed-pointer/function-pointer aggregate fields and full
 Import/Export/PS1/Contract/graph row remapping remain open. FNI call
-Body/CallSite emission, dispatch/native lowering, private persistence, CLI
-transport and runtime remain open. NativeParameter is not admitted on these
-methods or anchors, and neither FNI proposal is approved. General aggregate
-output Bodies and native-interface execution remain incomplete.
+lowering now stages the receiver before source-order arguments, maps explicit
+formals to the receiver-first Windows x64 ABI, and dispatches through the
+selected member ordinal and full-width vtable offset. NativeOutput reservations
+remain direct cells and the method result remains available for the verifier's
+correlated publication rules. PE-emission regressions cover reordered formals,
+slot 1, the high offset path and an imported aggregate view; they remain
+unverified under the active hold. Standard FNI Body/CallSite persistence,
+supervised native execution, private persistence and CLI transport remain
+open. NativeParameter is not admitted on these methods or anchors, and neither
+FNI proposal is approved. General aggregate output Bodies and native-interface
+execution remain incomplete.
 [CG-004](implementation/conformance-gaps.md#cg-004) owns
 the detailed composition and qualification gates. Earlier TRRM NativeOutput
 clauses and ScalarInitOutput encoding are prototype artifacts, not a fallback
