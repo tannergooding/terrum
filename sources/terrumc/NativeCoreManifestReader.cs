@@ -23,28 +23,51 @@ internal sealed record NativeCoreManifestDefinition(
     CoreEnumDefinition ResolutionPolicies,
     CoreNativeAttributeSchema NativeImport,
     CoreNativeAttributeSchema NativeCallable,
-    CoreNativeAttributeSchema NativeCallConv)
+    CoreNativeAttributeSchema NativeCallConv,
+    CoreNativeAttributeSchema? ForeignNativeInterface = null)
 {
-    internal ImmutableArray<CoreProviderDeclarationSnapshot> Declarations =>
-    [
-        CoreProviderDeclarationSnapshot.From(CallingConventions),
-        CoreProviderDeclarationSnapshot.From(ResolutionModes),
-        CoreProviderDeclarationSnapshot.From(ResolutionPolicies),
-        CoreProviderDeclarationSnapshot.From(NativeImport),
-        CoreProviderDeclarationSnapshot.From(NativeCallable),
-        CoreProviderDeclarationSnapshot.From(NativeCallConv),
-    ];
+    internal ImmutableArray<CoreProviderDeclarationSnapshot> Declarations
+    {
+        get
+        {
+            var declarations = ImmutableArray.CreateBuilder<
+                CoreProviderDeclarationSnapshot>(
+                    ForeignNativeInterface is null ? 6 : 7);
+            declarations.Add(
+                CoreProviderDeclarationSnapshot.From(CallingConventions));
+            declarations.Add(
+                CoreProviderDeclarationSnapshot.From(ResolutionModes));
+            declarations.Add(
+                CoreProviderDeclarationSnapshot.From(ResolutionPolicies));
+            declarations.Add(
+                CoreProviderDeclarationSnapshot.From(NativeImport));
+            declarations.Add(
+                CoreProviderDeclarationSnapshot.From(NativeCallable));
+            declarations.Add(
+                CoreProviderDeclarationSnapshot.From(NativeCallConv));
+            if (ForeignNativeInterface is CoreNativeAttributeSchema
+                foreignNativeInterface)
+            {
+                declarations.Add(
+                    CoreProviderDeclarationSnapshot.From(
+                        foreignNativeInterface));
+            }
+            return declarations.MoveToImmutable();
+        }
+    }
 
     internal NativeCoreRegistrationSet CreateRegistration(
         CoreProviderModuleBindings bindings)
         => NativeCoreRegistrationSet.Create(bindings, CallingConventions,
             ResolutionModes, ResolutionPolicies, NativeImport,
-            NativeCallable, NativeCallConv, nativeExport: null);
+            NativeCallable, NativeCallConv, nativeExport: null,
+            foreignNativeInterface: ForeignNativeInterface);
 }
 
 internal static class NativeCoreManifestReader
 {
-    private const string SchemaIdentity = "terrumc.native-core-manifest/1";
+    private const string SchemaIdentityV1 = "terrumc.native-core-manifest/1";
+    private const string SchemaIdentityV2 = "terrumc.native-core-manifest/2";
     private const string CallingConventionsName
         = "Terrum.Interop.NativeCallingConvention";
     private const string ResolutionModesName
@@ -104,17 +127,36 @@ internal static class NativeCoreManifestReader
                     MaxDepth = 128,
                 });
             ValidateJsonText(document.RootElement, path, "$");
-            var root = RequireObject(document.RootElement, path, "$",
-                "schema", "coreAuthorityIdentity", "usingModuleIdentity",
-                "providers", "callingConventions", "resolutionModes",
-                "resolutionPolicies", "nativeImport", "nativeCallable",
-                "nativeCallConv");
-            if (ReadText(Property(root, "schema", path, "$"), path,
-                    "$.schema") != SchemaIdentity)
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
             {
-                throw Invalid(path, "$.schema",
-                    $"expected exactly '{SchemaIdentity}'");
+                throw Invalid(path, "$", "expected an object");
             }
+            var schemaIdentity = ReadText(Property(document.RootElement,
+                "schema", path, "$"), path, "$.schema");
+            var selectsForeignNativeInterface = schemaIdentity
+                switch {
+                    SchemaIdentityV1 => false,
+                    SchemaIdentityV2 => true,
+                    _ => throw Invalid(path, "$.schema",
+                        $"expected exactly '{SchemaIdentityV1}' or '{SchemaIdentityV2}'"),
+                };
+            string[] expectedProperties = selectsForeignNativeInterface
+                ? [
+                    "schema", "coreAuthorityIdentity",
+                    "usingModuleIdentity", "providers",
+                    "callingConventions", "resolutionModes",
+                    "resolutionPolicies", "nativeImport", "nativeCallable",
+                    "nativeCallConv", "foreignNativeInterface",
+                ]
+                : [
+                    "schema", "coreAuthorityIdentity",
+                    "usingModuleIdentity", "providers",
+                    "callingConventions", "resolutionModes",
+                    "resolutionPolicies", "nativeImport", "nativeCallable",
+                    "nativeCallConv",
+                ];
+            var root = RequireObject(document.RootElement, path, "$",
+                expectedProperties);
 
             var authorityIdentity = ReadText(Property(root,
                 "coreAuthorityIdentity", path, "$"), path,
@@ -123,7 +165,7 @@ internal static class NativeCoreManifestReader
                 "usingModuleIdentity", path, "$"), path,
                 "$.usingModuleIdentity");
             var origins = ReadOrigins(Property(root, "providers", path, "$"),
-                path);
+                path, selectsForeignNativeInterface ? 7 : 6);
             var callingConventions = ReadEnum(Property(root,
                 "callingConventions", path, "$"), path,
                 "$.callingConventions", CallingConventionsName,
@@ -156,14 +198,24 @@ internal static class NativeCoreManifestReader
                 ["fnptr-type-use"],
                 ReadNativeCallConvArguments(callingConventions),
                 callingConventions, resolutionModes, resolutionPolicies);
+            var foreignNativeInterface = selectsForeignNativeInterface
+                ? ReadSchema(Property(root, "foreignNativeInterface", path,
+                        "$"), path, "$.foreignNativeInterface",
+                    "Terrum.Interop.ForeignNativeInterface",
+                    "foreign-native-interface", "primary-declaration",
+                    ["interface"], ReadForeignNativeInterfaceArguments(),
+                    callingConventions, resolutionModes, resolutionPolicies)
+                : null;
 
             ValidateUsedProviders(origins, callingConventions,
                 resolutionModes, resolutionPolicies, nativeImport.Schema,
-                nativeCallable.Schema, nativeCallConv.Schema, path);
+                nativeCallable.Schema, nativeCallConv.Schema,
+                foreignNativeInterface?.Schema, path);
             return new NativeCoreManifestDefinition(authorityIdentity,
                 usingModuleIdentity, origins, callingConventions,
                 resolutionModes, resolutionPolicies, nativeImport.Schema,
-                nativeCallable.Schema, nativeCallConv.Schema);
+                nativeCallable.Schema, nativeCallConv.Schema,
+                foreignNativeInterface?.Schema);
         }
         catch (JsonException exception)
         {
@@ -382,9 +434,13 @@ internal static class NativeCoreManifestReader
             "native-import" => CoreNativeAttributeRole.NativeImport,
             "native-callable" => CoreNativeAttributeRole.NativeCallable,
             "native-callconv" => CoreNativeAttributeRole.NativeCallConv,
+            "foreign-native-interface"
+                => CoreNativeAttributeRole.ForeignNativeInterface,
             _ => throw new InvalidOperationException(),
         };
-        var conventionIdentity = callingConventions.Identity;
+        var conventionIdentity = expectedRole
+            is "native-import" or "native-callable" or "native-callconv"
+                ? callingConventions.Identity : null;
         var resolutionModeIdentity = expectedRole == "native-import"
             ? resolutionModes.Identity : (CoreDeclarationIdentity?)null;
         var resolutionPolicyIdentity = expectedRole == "native-import"
@@ -423,6 +479,8 @@ internal static class NativeCoreManifestReader
                 => CoreNativeAttributeArgumentKind.LibraryNameLiteral,
             "entry-name-literal"
                 => CoreNativeAttributeArgumentKind.EntryNameLiteral,
+            "uint32-constant"
+                => CoreNativeAttributeArgumentKind.UInt32Constant,
             "enum" => CoreNativeAttributeArgumentKind.Enum,
             _ => throw new InvalidOperationException(),
         };
@@ -485,6 +543,13 @@ internal static class NativeCoreManifestReader
                 Set("fnptr-type-use"), null),
         ];
 
+    private static ParsedArgument[] ReadForeignNativeInterfaceArguments()
+        =>
+        [
+            new("VTableByteOffset", "uint32-constant", null, true, false,
+                true, Set("interface"), null),
+        ];
+
     internal static ParsedArgument ReadArgument(JsonElement element,
         string manifestPath, string path)
     {
@@ -497,14 +562,14 @@ internal static class NativeCoreManifestReader
         var kind = ReadText(Property(value, "kind", manifestPath, path),
             manifestPath, path + ".kind");
         if (kind is not ("library-name-literal" or "entry-name-literal"
-            or "enum"))
+            or "uint32-constant" or "enum"))
         {
             throw Invalid(manifestPath, path + ".kind",
                 "unknown native schema argument kind");
         }
         var enumType = ReadNullableIdentity(Property(value, "enumType",
             manifestPath, path), manifestPath, path + ".enumType");
-        if (kind == "enum" != (enumType is not null))
+        if ((kind == "enum") != (enumType is not null))
         {
             throw Invalid(manifestPath, path + ".enumType",
                 "enum identity is required exactly for enum arguments");
@@ -566,13 +631,15 @@ internal static class NativeCoreManifestReader
         => values.ToImmutableHashSet(StringComparer.Ordinal);
 
     internal static ImmutableArray<CoreProviderModuleOrigin> ReadOrigins(
-        JsonElement element, string manifestPath)
+        JsonElement element, string manifestPath,
+        int maximumProviderCount = 6)
     {
         if (element.ValueKind != JsonValueKind.Array
-            || element.GetArrayLength() is < 1 or > 6)
+            || element.GetArrayLength() < 1
+            || element.GetArrayLength() > maximumProviderCount)
         {
             throw Invalid(manifestPath, "$.providers",
-                "expected an array containing one through six provider origins");
+                $"expected an array containing one through {maximumProviderCount} provider origins");
         }
 
         var origins = ImmutableArray.CreateBuilder<CoreProviderModuleOrigin>(
@@ -669,6 +736,7 @@ internal static class NativeCoreManifestReader
         CoreNativeAttributeSchema nativeImport,
         CoreNativeAttributeSchema nativeCallable,
         CoreNativeAttributeSchema nativeCallConv,
+        CoreNativeAttributeSchema? foreignNativeInterface,
         string manifestPath)
     {
         var used = new HashSet<string>(StringComparer.Ordinal) {
@@ -679,6 +747,12 @@ internal static class NativeCoreManifestReader
             nativeCallable.Identity.ProviderIdentity,
             nativeCallConv.Identity.ProviderIdentity,
         };
+        if (foreignNativeInterface is CoreNativeAttributeSchema
+            selectedForeignNativeInterface)
+        {
+            _ = used.Add(
+                selectedForeignNativeInterface.Identity.ProviderIdentity);
+        }
         foreach (var enumDefinition in new[] {
             callingConventions, resolutionModes, resolutionPolicies,
         })

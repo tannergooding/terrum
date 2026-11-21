@@ -4,12 +4,17 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading.Tasks;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Modules;
+using Terrum.CodeAnalysis.Semantics;
+using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Tests.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
 
@@ -142,6 +147,248 @@ internal sealed partial class CliTests
             Assert.That(trrmError, Is.Empty);
             Assert.That(File.Exists(trrmPath), Is.True);
             Assert.That(new FileInfo(trrmPath).Length, Is.GreaterThan(0));
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
+    public async Task NativeCoreManifestV2CompilesFniOutputAndPreservesV1Async()
+    {
+        const string moduleIdentity = "cli-fni-manifest";
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-native-interface-parameter-surface-1";
+        const string source = """
+            using Terrum.Interop;
+            [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+            [ForeignNativeInterface(VTableByteOffset: uint32(0))]
+            public interface IProbe {
+                [param(value): NativeOutput(
+                    When: NativeOutputCondition.NonZero)]
+                public unsafe int32 TryRead(ptr<int32> source,
+                    [Terrum.CodeAnalysis.DependsOn(this, nameof(source))]
+                    [Terrum.CodeAnalysis.ForwardsBacking(
+                        this, nameof(source))]
+                    write ptr<int32> value);
+            }
+            """;
+        var directory = TestArtifactPaths.CreateDirectory(
+            "terrum-fni-core-manifest-v2-");
+        var sourcePath = Path.Combine(directory, "provider.terrum");
+        var nativeManifestPath = Path.Combine(directory, "native-v2.json");
+        var legacyNativeManifestPath = Path.Combine(directory,
+            "native-v1.json");
+        var malformedNativeManifestPath = Path.Combine(directory,
+            "native-v2-invalid.json");
+        var nativeOutputManifestPath = Path.Combine(directory,
+            "native-output.json");
+        var exportPath = Path.Combine(directory, "source-exports.json");
+        var artifactPath = Path.Combine(directory, "provider.trrm");
+        var legacyArtifactPath = Path.Combine(directory, "legacy.trrm");
+        var malformedArtifactPath = Path.Combine(directory,
+            "malformed.trrm");
+        byte[] retained = [0xA5, 0x5A];
+        try
+        {
+            await File.WriteAllTextAsync(sourcePath, source,
+                new UTF8Encoding(false)).ConfigureAwait(true);
+            var tree = SyntaxTree.Parse(source, sourcePath);
+            var (native, output)
+                = NativeOutputCoreRegistrationTests
+                    .CreateCombinedRegistrations(
+                        includeForeignNativeInterface: true);
+            var registrationOptions = new CompilationOptions {
+                NativeCoreRegistration = native,
+                LayoutCoreRegistration =
+                    NativeCoreRegistrationTests
+                        .CreateLayoutRegistration(native),
+                NativeOutputCoreRegistration = output,
+            };
+            var sourceCompilation = Compilation.CreateLibrary(tree,
+                registrationOptions);
+            Assert.That(sourceCompilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine,
+                    sourceCompilation.Diagnostics));
+            var member = sourceCompilation.Program!.Interfaces.Single()
+                .Members.Single();
+            var exportConfiguration = JsonSerializer.Serialize(new {
+                schemaVersion = 3,
+                sources = new[] {
+                    new {
+                        path = sourcePath,
+                        snapshotSha256 = LowercaseHex(SHA256.HashData(
+                            Encoding.Unicode.GetBytes(
+                                tree.Root.ToFullString()))),
+                    },
+                },
+                typeExports = new[] {
+                    new {
+                        @namespace = "",
+                        name = "IProbe",
+                        genericArity = 0,
+                        exportKey = "provider/IProbe",
+                        interfaceMethodExports = new[] {
+                            new {
+                                sourceInputOrdinal
+                                    = member.SourceInputOrdinal,
+                                declarationStart
+                                    = member.SourceDeclarationSpan.Start,
+                                declarationLength
+                                    = member.SourceDeclarationSpan.Length,
+                                exportKey = "provider/IProbe.TryRead",
+                            },
+                        },
+                    },
+                },
+                genericMethodExports = Array.Empty<object>(),
+            });
+            await File.WriteAllTextAsync(nativeManifestPath,
+                CreateNativeCoreManifest(usingModuleIdentity: moduleIdentity,
+                    includeForeignNativeInterface: true),
+                new UTF8Encoding(false)).ConfigureAwait(true);
+            await File.WriteAllTextAsync(legacyNativeManifestPath,
+                CreateNativeCoreManifest(usingModuleIdentity: moduleIdentity),
+                new UTF8Encoding(false)).ConfigureAwait(true);
+            await File.WriteAllTextAsync(nativeOutputManifestPath,
+                CreateNativeOutputCoreManifest(
+                    usingModuleIdentity: moduleIdentity),
+                new UTF8Encoding(false)).ConfigureAwait(true);
+            await File.WriteAllTextAsync(exportPath, exportConfiguration,
+                new UTF8Encoding(false)).ConfigureAwait(true);
+
+            var (compiled, outputText, error) = await RunAsync([],
+                "compile-trrm", sourcePath, "--identity", moduleIdentity,
+                "-o", artifactPath, "--runtime", "fail-fast",
+                "--trrm-schema", schemaIdentity, "--native-core-manifest",
+                nativeManifestPath, "--native-output-core-manifest",
+                nativeOutputManifestPath,
+                "--trrm-source-generic-method-exports", exportPath,
+                "--library", "--json").ConfigureAwait(true);
+            Assert.That(compiled, Is.Zero,
+                $"{outputText}{Environment.NewLine}{error}");
+            Assert.That(error, Is.Empty);
+            using (var document = JsonDocument.Parse(outputText))
+            {
+                Assert.That(document.RootElement.GetProperty("success")
+                    .GetBoolean(), Is.True);
+            }
+            var tables = TrRmStructuralMetadataValidator
+                .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
+                    await File.ReadAllBytesAsync(artifactPath)
+                        .ConfigureAwait(true),
+                    TrRmArtifactSchema
+                        .ForeignNativeInterfaceParameterSurfaceDraft));
+            Assert.That(tables.ForeignNativeInterfaces.Count, Is.EqualTo(1));
+            var tryRead = Enumerable.Range(1, tables.Methods.Count)
+                .Single(row => tables.Methods.GetName(row) == "TryRead");
+            Assert.That(tables.Contracts.GetNativeOutputs(tryRead).Single()
+                .FormalOrdinal, Is.EqualTo(1));
+
+            await File.WriteAllBytesAsync(legacyArtifactPath, retained)
+                .ConfigureAwait(true);
+            var (legacyExit, legacyOutput, legacyError) = await RunAsync([],
+                "compile-trrm", sourcePath, "--identity", moduleIdentity,
+                "-o", legacyArtifactPath, "--runtime", "fail-fast",
+                "--trrm-schema", schemaIdentity, "--native-core-manifest",
+                legacyNativeManifestPath, "--native-output-core-manifest",
+                nativeOutputManifestPath,
+                "--trrm-source-generic-method-exports", exportPath,
+                "--library", "--json").ConfigureAwait(true);
+            Assert.That(legacyExit, Is.EqualTo(1),
+                $"{legacyOutput}{Environment.NewLine}{legacyError}");
+            Assert.That(legacyError, Is.Empty);
+            using (var document = JsonDocument.Parse(legacyOutput))
+            {
+                Assert.That(document.RootElement.GetProperty("success")
+                    .GetBoolean(), Is.False);
+            }
+            Assert.That(await File.ReadAllBytesAsync(legacyArtifactPath)
+                .ConfigureAwait(true), Is.EqualTo(retained));
+
+            var malformedManifest = JsonNode.Parse(
+                CreateNativeCoreManifest(usingModuleIdentity: moduleIdentity,
+                    includeForeignNativeInterface: true))!.AsObject();
+            malformedManifest["foreignNativeInterface"]!["arguments"]![0]![
+                "kind"] = "integer";
+            await File.WriteAllTextAsync(malformedNativeManifestPath,
+                malformedManifest.ToJsonString(),
+                new UTF8Encoding(false)).ConfigureAwait(true);
+            await File.WriteAllBytesAsync(malformedArtifactPath, retained)
+                .ConfigureAwait(true);
+            var (invalidExit, invalidOutput, invalidError) = await RunAsync(
+                [], "compile-trrm", sourcePath, "--identity",
+                moduleIdentity, "-o", malformedArtifactPath, "--runtime",
+                "fail-fast", "--trrm-schema", schemaIdentity,
+                "--native-core-manifest", malformedNativeManifestPath,
+                "--native-output-core-manifest", nativeOutputManifestPath,
+                "--trrm-source-generic-method-exports", exportPath,
+                "--library", "--json").ConfigureAwait(true);
+            Assert.That(invalidExit, Is.EqualTo(2),
+                $"{invalidOutput}{Environment.NewLine}{invalidError}");
+            Assert.That(invalidError, Is.Empty);
+            using (var document = JsonDocument.Parse(invalidOutput))
+            {
+                Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM2001"));
+            }
+            Assert.That(await File.ReadAllBytesAsync(malformedArtifactPath)
+                .ConfigureAwait(true), Is.EqualTo(retained));
+
+            var missingFniSchema = JsonNode.Parse(
+                CreateNativeCoreManifest(usingModuleIdentity: moduleIdentity,
+                    includeForeignNativeInterface: true))!.AsObject();
+            Assert.That(missingFniSchema.Remove("foreignNativeInterface"),
+                Is.True);
+            await File.WriteAllTextAsync(malformedNativeManifestPath,
+                missingFniSchema.ToJsonString(),
+                new UTF8Encoding(false)).ConfigureAwait(true);
+            var (missingFniExit, missingFniOutput, missingFniError)
+                = await RunAsync([], "compile-trrm", sourcePath,
+                    "--identity", moduleIdentity, "-o", malformedArtifactPath,
+                    "--runtime", "fail-fast", "--trrm-schema", schemaIdentity,
+                    "--native-core-manifest", malformedNativeManifestPath,
+                    "--native-output-core-manifest",
+                    nativeOutputManifestPath,
+                    "--trrm-source-generic-method-exports", exportPath,
+                    "--library", "--json").ConfigureAwait(true);
+            Assert.That(missingFniExit, Is.EqualTo(2),
+                $"{missingFniOutput}{Environment.NewLine}{missingFniError}");
+            Assert.That(missingFniError, Is.Empty);
+            using (var document = JsonDocument.Parse(missingFniOutput))
+            {
+                Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM2001"));
+            }
+            Assert.That(await File.ReadAllBytesAsync(malformedArtifactPath)
+                .ConfigureAwait(true), Is.EqualTo(retained));
+
+            malformedManifest["schema"]
+                = "terrumc.native-core-manifest/1";
+            await File.WriteAllTextAsync(malformedNativeManifestPath,
+                malformedManifest.ToJsonString(),
+                new UTF8Encoding(false)).ConfigureAwait(true);
+            var (v1ExtensionExit, v1ExtensionOutput, v1ExtensionError)
+                = await RunAsync([], "compile-trrm", sourcePath,
+                    "--identity", moduleIdentity, "-o", malformedArtifactPath,
+                    "--runtime", "fail-fast", "--trrm-schema", schemaIdentity,
+                    "--native-core-manifest", malformedNativeManifestPath,
+                    "--native-output-core-manifest",
+                    nativeOutputManifestPath,
+                    "--trrm-source-generic-method-exports", exportPath,
+                    "--library", "--json").ConfigureAwait(true);
+            Assert.That(v1ExtensionExit, Is.EqualTo(2),
+                $"{v1ExtensionOutput}{Environment.NewLine}{v1ExtensionError}");
+            Assert.That(v1ExtensionError, Is.Empty);
+            using (var document = JsonDocument.Parse(v1ExtensionOutput))
+            {
+                Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM2001"));
+            }
+            Assert.That(await File.ReadAllBytesAsync(malformedArtifactPath)
+                .ConfigureAwait(true), Is.EqualTo(retained));
         }
         finally
         {
@@ -1197,7 +1444,8 @@ internal sealed partial class CliTests
         string coreAuthorityIdentity = "test-layout-authority",
         string providerIdentity = "sample.native-core",
         string revisionIdentity = "native-provider-revision-1",
-        string providerSchemaIdentity = "native-registration-schema")
+        string providerSchemaIdentity = "native-registration-schema",
+        bool includeForeignNativeInterface = false)
     {
         object Identity(string exportKey, string kind)
         {
@@ -1326,7 +1574,7 @@ internal sealed partial class CliTests
             };
         }
 
-        return JsonSerializer.Serialize(new {
+        var manifest = new {
             schema = "terrumc.native-core-manifest/1",
             coreAuthorityIdentity,
             usingModuleIdentity,
@@ -1358,7 +1606,25 @@ internal sealed partial class CliTests
                 "Terrum.Interop.NativeCallConv", "native-callconv",
                 "immediate-fnptr-type-use", nativeCallConvArguments,
                 ["fnptr-type-use"]),
-        });
+        };
+        var json = JsonSerializer.Serialize(manifest);
+        if (!includeForeignNativeInterface)
+        {
+            return json;
+        }
+
+        var root = JsonNode.Parse(json)?.AsObject()
+            ?? throw new InvalidOperationException(
+                "The generated NativeCore manifest was not an object.");
+        root["schema"] = "terrumc.native-core-manifest/2";
+        root["foreignNativeInterface"] = JsonSerializer.SerializeToNode(
+            Schema("ForeignNativeInterface",
+                "Terrum.Interop.ForeignNativeInterface",
+                "foreign-native-interface", "primary-declaration", [
+                    Argument("VTableByteOffset", "uint32-constant", null,
+                        true, false, true, ["interface"], null),
+                ], ["interface"]));
+        return root.ToJsonString();
     }
 
     internal static string CreateNativeOutputCoreManifest(
