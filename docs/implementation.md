@@ -1352,13 +1352,17 @@ target, and selected method's output relations. Terminal FNI
 `DoesNotReturn` calls preserve their output contracts and reservations without
 inventing a normal return, publication or cancellation. FNI emission requires the
 NativeOutput cells Feature for selected methods with outputs, retaining its
-PublishedPredicates prerequisite. Local MethodDefs and imported MethodDef
+PublishedPredicates prerequisite. A bounded three-block `NonNegative` result
+branch now reads a scalar output only on the success edge and returns the
+status on the complement edge. Local MethodDefs and imported MethodDef
 Imports are mapped by exact member identity; regressions cover local and
-imported output reservations, provider load/re-emission and malformed
-MethodMap target rejection, but remain unverified under the hold. Reading
-output locals under result-correlated flow, side-effecting argument expressions,
+imported output reservations and conditional reads, provider load/re-emission,
+and malformed MethodMap, success-predicate, branch-target and reservation
+rejection; they remain unverified under the hold.
+Other result selectors/flow shapes, side-effecting argument expressions,
 defaults/constants, multiple calls, other Body control-flow shapes,
-other nonreturning-call shapes and reservation cancellation remain open.
+nonreturning-call shapes beyond the terminal subset and reservation
+cancellation remain open.
 Supervised native
 execution, private persistence, CLI transport and dependent runtime work
 remain open. NativeParameter is not admitted on these methods or anchors, and

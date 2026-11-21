@@ -1304,6 +1304,20 @@ public static partial class TrRmExecutableCompiler
             foreignInterfaceMethodMapTokenForCall,
         TrRmArtifactSchema schema)
     {
+        if (TryGetForeignInterfaceConditionalOutputCall(function, program,
+                out var conditionalCall, out var conditionalOutputVariable,
+                out var conditionalStatusVariable))
+        {
+            return EncodeForeignInterfaceConditionalOutputCallBody(
+                function, program, conditionalCall,
+                conditionalOutputVariable, conditionalStatusVariable,
+                typeSpecRowFor,
+                foreignInterfaceMethodMapTokenForCall
+                    ?? throw Unsupported(
+                        "A Standard F+I caller Body has no InterfaceMethod MethodMap selection."),
+                schema);
+        }
+
         if (TryGetForeignInterfaceDirectReturnCall(function, program,
                 out var foreignInterfaceCall, out var stagedLocals))
         {
@@ -1361,6 +1375,164 @@ public static partial class TrRmExecutableCompiler
 
         throw Unsupported(
             $"Function '{function.Name}' is outside the Standard initialization-reference Body subset.");
+    }
+
+    private static bool TryGetForeignInterfaceConditionalOutputCall(
+        BoundFunction function, BoundProgram program, out BoundCall call,
+        out int outputVariable, out int statusVariable)
+    {
+        call = null!;
+        outputVariable = -1;
+        statusVariable = -1;
+        if (function.IsExternal || function.ParameterCount != 2
+            || function.Variables.Length != 4
+            || function.DoesNotReturn
+            || function.ReturnType != PrimitiveType.Int32
+            || function.Body.RetiredManagedLocals.Length != 0
+            || function.Variables[0].Type != PrimitiveType.NativeRawPointer
+            || function.Variables[0].IsOut || function.Variables[0].IsInit
+            || function.Variables[0].IsImplicitRef
+            || function.Variables[0].IsImplicitReferenceTemporary
+            || function.Variables[1].IsOut || function.Variables[1].IsInit
+            || function.Variables[1].IsImplicitRef
+            || function.Variables[1].IsImplicitReferenceTemporary
+            || function.Variables[2].Type != PrimitiveType.Int32
+            || function.Variables[2].IsOut || function.Variables[2].IsInit
+            || !function.Variables[2].IsInitializationLocal
+            || function.Variables[3].Type != PrimitiveType.Int32
+            || function.Variables[3].IsOut || function.Variables[3].IsInit
+            || function.Variables[3].IsImplicitRef
+            || function.Variables[3].IsImplicitReferenceTemporary
+            || function.Variables[3].IsInitializationLocal)
+        {
+            return false;
+        }
+
+        var statements = function.Body.Statements;
+        if (statements.Length == 1
+            && statements[0] is BoundUnsafe unsafeBlock)
+        {
+            if (unsafeBlock.Body.RetiredManagedLocals.Length != 0)
+            {
+                return false;
+            }
+            statements = unsafeBlock.Body.Statements;
+        }
+        else if (statements.Length != 0
+            && statements[^1] is BoundUnsafe unsafeBody)
+        {
+            if (unsafeBody.Body.RetiredManagedLocals.Length != 0
+                || unsafeBody.Body.Statements.IsEmpty)
+            {
+                return false;
+            }
+
+            var statementBuilder
+                = ImmutableArray.CreateBuilder<BoundStatement>(
+                    statements.Length - 1
+                    + unsafeBody.Body.Statements.Length);
+            for (var index = 0; index < statements.Length - 1; index++)
+            {
+                statementBuilder.Add(statements[index]);
+            }
+            statementBuilder.AddRange(unsafeBody.Body.Statements);
+            statements = statementBuilder.ToImmutable();
+        }
+
+        if (statements.Length != 4
+            || statements[0] is not BoundVacantLocal {
+                Variable: 2,
+            }
+            || statements[1] is not BoundLocal {
+                Variable: 3,
+            } statusLocal
+            || statusLocal.Initializer.Type != PrimitiveType.Int32
+            || statements[2] is not BoundIf {
+                Condition: BoundBinary {
+                    Operator: TokenKind.GreaterEquals,
+                    Type: PrimitiveType.Bool,
+                    Left: BoundRead {
+                        Variable: 3,
+                        Type: PrimitiveType.Int32,
+                    },
+                    Right: BoundConstant {
+                        Type: PrimitiveType.Int32,
+                        Bits.Low: 0,
+                        Bits.High: 0,
+                    },
+                },
+                Then: BoundBlock { Statements.Length: 1 } thenBlock,
+                Else: null,
+            }
+            || thenBlock.Statements[0] is not BoundReturn {
+                Value: BoundRead {
+                    Variable: 2,
+                    Type: PrimitiveType.Int32,
+                },
+            }
+            || statements[3] is not BoundReturn {
+                Value: BoundRead {
+                    Variable: 3,
+                    Type: PrimitiveType.Int32,
+                },
+            })
+        {
+            return false;
+        }
+
+        var callExpression = statusLocal.Initializer;
+        if (callExpression is BoundUnsafeExpression unsafeCall)
+        {
+            callExpression = unsafeCall.Expression;
+        }
+
+        if (callExpression is not BoundCall boundCall
+            || boundCall.Function != BoundCall.ForeignInterfaceFunction
+            || boundCall.ForeignInterfaceCall is not
+                BoundForeignInterfaceCall foreignCall
+            || !boundCall.IsUnsafeAuthorized
+            || foreignCall.DoesNotReturn
+            || boundCall.Type != PrimitiveType.Int32
+            || !ForeignNativeInterfaceContract.TryCreateCallTarget(
+                foreignCall, program, out var target)
+            || target.ReturnType != PrimitiveType.Int32
+            || target.ParameterCount != 2
+            || target.NativeOutputContracts.Length != 1
+            || target.NativeOutputContracts[0].FormalOrdinal != 1
+            || target.NativeOutputContracts[0].PointeeType
+                != PrimitiveType.Int32
+            || target.NativeOutputContracts[0].SuccessSelector
+                != NativeOutputSelector.NonNegative
+            || target.NativeOutputContracts[0].ComplementSelector
+                != NativeOutputSelector.Negative
+            || target.NativeOutputContracts[0].SuccessState
+                != NativeOutputState.Live
+            || target.NativeOutputContracts[0].ComplementState
+                != NativeOutputState.Vacant
+            || boundCall.Arguments.IsDefault
+            || boundCall.Arguments.Length != 2
+            || boundCall.ParameterIndex(0) != 0
+            || boundCall.ParameterIndex(1) != 1
+            || foreignCall.Receiver is not BoundRead {
+                Variable: 0,
+                Type: PrimitiveType.NativeRawPointer,
+            }
+            || boundCall.Arguments[0] is not BoundRead sourceRead
+            || (uint)sourceRead.Variable >= (uint)function.ParameterCount
+            || sourceRead.Variable != 1
+            || sourceRead.Type != target.Variables[0].Type
+            || boundCall.Arguments[1] is not
+                BoundNativeOutputReservation reservation
+            || reservation.Variable != 2
+            || reservation.PointeeType != PrimitiveType.Int32)
+        {
+            return false;
+        }
+
+        call = boundCall;
+        outputVariable = 2;
+        statusVariable = 3;
+        return true;
     }
 
     private static bool TryGetForeignInterfaceDirectReturnCall(
@@ -1783,6 +1955,131 @@ public static partial class TrRmExecutableCompiler
             return new TrRmRegisterBodyCallInput(2, 1,
                 checked((ushort)read.Variable));
         }
+    }
+
+    private static byte[] EncodeForeignInterfaceConditionalOutputCallBody(
+        BoundFunction function, BoundProgram program, BoundCall call,
+        int outputVariable, int statusVariable,
+        Func<PrimitiveType, int> typeSpecRowFor,
+        Func<BoundInterfaceMemberIdentity, uint>
+            methodMapTokenForForeignInterface,
+        TrRmArtifactSchema schema)
+    {
+        var foreignCall = call.ForeignInterfaceCall
+            ?? throw new InvalidOperationException(
+                "The selected call has no foreign-interface identity.");
+        if (!ForeignNativeInterfaceContract.TryCreateCallTarget(
+                foreignCall, program, out var target))
+        {
+            throw Invalid(
+                "A Standard F+I conditional Body has an invalid InterfaceMethod target.");
+        }
+
+        var typeTokens = function.Variables.Select(variable =>
+            GetStandardBodyTypeMapToken(variable.Type, typeSpecRowFor))
+            .ToArray();
+        var methodMapToken
+            = methodMapTokenForForeignInterface(foreignCall.Member);
+        var maps = TrRmRegisterBodyMapBuilder.Create(typeTokens,
+            [methodMapToken]);
+        var homeMap = EncodeStandardInitializationHomeMap(function,
+            typeTokens, maps);
+        var inputs = new TrRmRegisterBodyCallInput[
+            target.ParameterCount + 1];
+        inputs[0] = new TrRmRegisterBodyCallInput(2, 1, 0);
+        var outputContract = target.NativeOutputContracts.Single();
+        for (var sourceArgument = 0;
+            sourceArgument < call.Arguments.Length; sourceArgument++)
+        {
+            var formal = call.ParameterIndex(sourceArgument);
+            if (call.Arguments[sourceArgument]
+                    is BoundNativeOutputReservation reservation)
+            {
+                if (formal != outputContract.FormalOrdinal
+                    || reservation.Variable != outputVariable
+                    || reservation.PointeeType != outputContract.PointeeType)
+                {
+                    throw Invalid(
+                        "A Standard F+I conditional output reservation does not match its selected formal.");
+                }
+
+                inputs[formal + 1] = new TrRmRegisterBodyCallInput(2, 6,
+                    checked((ushort)outputVariable));
+            }
+            else if (call.Arguments[sourceArgument] is BoundRead read
+                && (uint)read.Variable < (uint)function.ParameterCount)
+            {
+                inputs[formal + 1] = new TrRmRegisterBodyCallInput(2, 1,
+                    checked((ushort)read.Variable));
+            }
+            else
+            {
+                throw Unsupported(
+                    $"Function '{function.Name}' has a conditional F+I input outside the direct-parameter Body subset.");
+            }
+        }
+
+        var callSite = TrRmRegisterBodyRecordWriter.EncodeCallSite(1, 1,
+            maps.GetMethodMapIndex(methodMapToken), 0, inputs, [],
+            schema: schema);
+        var records = new List<ReadOnlyMemory<byte>> {
+            new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 },
+            new(callSite),
+        };
+        var outputReservationRecordIndex
+            = checked((ushort)records.Count);
+        records.Add(TrRmRegisterBodyRecordWriter
+            .EncodeNativeOutputReservation(1,
+                checked((ushort)outputVariable),
+                checked((uint)(outputContract.FormalOrdinal + 1))));
+        var edgeRecordIndex = checked((ushort)records.Count);
+        records.Add(TrRmRegisterBodyRecordWriter.EncodeConditionalEdge(1, 2));
+        var entryCode = new List<byte>(26) {
+            0xDF, 0, (byte)outputReservationRecordIndex,
+            (byte)(outputReservationRecordIndex >> 8),
+            0x90, 1,
+            0xD6, 0x10,
+            (byte)statusVariable,
+            (byte)(statusVariable >> 8),
+            0xD5, 0,
+            (byte)statusVariable,
+            (byte)(statusVariable >> 8),
+            0xC2, 0,
+        };
+        var comparisonPayload = (ushort)((15 << 4) | (14 << 12));
+        entryCode.Add((byte)comparisonPayload);
+        entryCode.Add((byte)(comparisonPayload >> 8));
+        entryCode.Add(0xC3);
+        entryCode.Add(6);
+        entryCode.Add(0);
+        entryCode.Add(0xFF);
+        entryCode.Add(0xE4);
+        entryCode.Add(0);
+        entryCode.Add((byte)edgeRecordIndex);
+        entryCode.Add((byte)(edgeRecordIndex >> 8));
+
+        byte[] successCode = [
+            0xD5, 0, checked((byte)outputVariable),
+            checked((byte)(outputVariable >> 8)), 0x17, 0,
+        ];
+        byte[] complementCode = [
+            0xD5, 0, checked((byte)statusVariable),
+            checked((byte)(statusVariable >> 8)), 0x17, 0,
+        ];
+        var blocks = new TrRmRegisterBodyBlock[] {
+            new(0, checked((uint)entryCode.Count), 0),
+            new(checked((uint)entryCode.Count),
+                checked((uint)successCode.Length), 0),
+            new(checked((uint)(entryCode.Count + successCode.Length)),
+                checked((uint)complementCode.Length), 0),
+        };
+        entryCode.AddRange(successCode);
+        entryCode.AddRange(complementCode);
+        return TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
+            maps.MethodMap, default, default, blocks, records,
+            entryCode.ToArray(), schema: schema,
+            generalPredicateGraphsInitializationReferenceBodies
+                : schema.UsesGeneralPredicateGraphs());
     }
 
     private readonly record struct StandardNativePointerLoadBodyDescription(
@@ -4119,6 +4416,15 @@ public static partial class TrRmExecutableCompiler
 
         if (body.BlockCount == 3)
         {
+            if (body.Schema.UsesForeignNativeInterface()
+                && body.GetBlockCode(0)[0] == 0xDF)
+            {
+                return DecodeStandardForeignInterfaceConditionalOutputBody(
+                    body, function, variables, imports,
+                    homeVariables, homeRoles, homeTypes,
+                    foreignInterfaceBodyTargets);
+            }
+
             return body.GetBlockCode(0)[0] switch {
                 0xD5 =>
                     DecodeStandardInitializationReferenceConditionalBody(
@@ -5665,6 +5971,303 @@ public static partial class TrRmExecutableCompiler
         }
 
         return completeStatements.MoveToImmutable();
+    }
+
+    private static ImmutableArray<BoundStatement>
+        DecodeStandardForeignInterfaceConditionalOutputBody(
+            TrRmRegisterBodyReader body, BoundFunction function,
+            ImmutableArray<BoundVariable>.Builder variables,
+            TrRmImportTableReader imports, int[] homeVariables,
+            byte[] homeRoles, PrimitiveType[] homeTypes,
+            IReadOnlyDictionary<int, ForeignNativeInterfaceBodyTarget>?
+                foreignInterfaceBodyTargets)
+    {
+        if (!body.Schema.UsesForeignNativeInterface()
+            || function.IsExternal || function.DoesNotReturn
+            || function.ReturnType != PrimitiveType.Int32
+            || function.ParameterCount != 2 || variables.Count != 4
+            || body.BlockCount != 3 || body.RecordCount != 4
+            || body.MethodCount != 1 || body.HomeCount != 4
+            || !HasEmptyEntryState(body, 0)
+            || !HasEmptyEntryState(body, 1)
+            || !HasEmptyEntryState(body, 2)
+            || homeRoles[0] != 2 || homeRoles[1] != 2
+            || homeRoles[2] != 3 || homeRoles[3] != 3
+            || homeVariables[0] != 0 || homeVariables[1] != 1
+            || homeVariables[2] != 2 || homeVariables[3] != 3
+            || homeTypes[0] != PrimitiveType.NativeRawPointer
+            || homeTypes[2] != PrimitiveType.Int32
+            || homeTypes[3] != PrimitiveType.Int32)
+        {
+            throw Unsupported(
+                "The Standard F+I conditional-output Body requires two scalar formals, one output Home and one status Home.");
+        }
+
+        var entryCode = body.GetBlockCode(0);
+        var successCode = body.GetBlockCode(1);
+        var complementCode = body.GetBlockCode(2);
+        if (entryCode.Length != 26 || entryCode[0] != 0xDF
+            || entryCode[1] != 0 || entryCode[4] != 0x90
+            || entryCode[6] != 0xD6 || entryCode[7] != 0x10
+            || BinaryPrimitives.ReadUInt16LittleEndian(entryCode[8..]) != 3
+            || entryCode[10] != 0xD5 || entryCode[11] != 0
+            || BinaryPrimitives.ReadUInt16LittleEndian(entryCode[12..]) != 3
+            || entryCode[14] != 0xC2 || entryCode[15] != 0
+            || entryCode[18] != 0xC3
+            || entryCode[20] != 0 || entryCode[21] != 0xFF
+            || entryCode[22] != 0xE4 || entryCode[23] != 0
+            || successCode.Length != 6 || successCode[0] != 0xD5
+            || successCode[1] != 0
+            || BinaryPrimitives.ReadUInt16LittleEndian(successCode[2..]) != 2
+            || successCode[4] != 0x17 || successCode[5] != 0
+            || complementCode.Length != 6 || complementCode[0] != 0xD5
+            || complementCode[1] != 0
+            || BinaryPrimitives.ReadUInt16LittleEndian(
+                complementCode[2..]) != 3
+            || complementCode[4] != 0x17 || complementCode[5] != 0)
+        {
+            throw Unsupported(
+                "The Standard F+I conditional-output Body instructions are outside the selected subset.");
+        }
+
+        if (BinaryPrimitives.ReadUInt16LittleEndian(entryCode[16..])
+                != 0xE0F0
+            || entryCode[19] != 6)
+        {
+            throw Invalid(
+                "The Standard F+I output read is not guarded by its NonNegative result predicate.");
+        }
+
+        var callSiteRecordIndex = entryCode[5];
+        var reservationRecordIndex
+            = BinaryPrimitives.ReadUInt16LittleEndian(entryCode[2..]);
+        var edgeRecordIndex
+            = BinaryPrimitives.ReadUInt16LittleEndian(entryCode[24..]);
+        if (callSiteRecordIndex >= body.RecordCount
+            || reservationRecordIndex >= body.RecordCount
+            || edgeRecordIndex >= body.RecordCount)
+        {
+            throw Invalid(
+                "The Standard F+I conditional-output Body references an invalid record.");
+        }
+
+        var callSite = body.GetRecord(callSiteRecordIndex);
+        var callPayload = callSite[4..];
+        var targetMethodMapIndex
+            = BinaryPrimitives.ReadUInt16LittleEndian(callPayload[4..]);
+        if (callSite[0] != 0x02 || callPayload[0] != 1
+            || callPayload[1] != 1
+            || BinaryPrimitives.ReadUInt16LittleEndian(callPayload[6..]) != 0
+            || BinaryPrimitives.ReadUInt32LittleEndian(callPayload[8..]) != 3
+            || BinaryPrimitives.ReadUInt32LittleEndian(callPayload[12..]) != 0
+            || targetMethodMapIndex >= body.MethodCount)
+        {
+            throw Invalid(
+                "The Standard F+I conditional-output Body has an invalid CallSite.");
+        }
+
+        var methodToken = BinaryPrimitives.ReadUInt32LittleEndian(
+            body.MethodMap[(targetMethodMapIndex * sizeof(uint))..]);
+        var tokenKind = checked((byte)(methodToken >> 24));
+        var tokenRow = checked((int)(methodToken & 0x00FF_FFFF));
+        var targetMethodRow = tokenKind switch {
+            0x16 => tokenRow,
+            0x1C when tokenRow > 0 && tokenRow <= imports.Count
+                && (imports.GetExpectedDefinitionForImportRow(tokenRow)
+                    >> 24) == 0x16
+                => checked((int)(imports
+                    .GetExpectedDefinitionForImportRow(tokenRow)
+                    & 0x00FF_FFFF)),
+            _ => 0,
+        };
+        if (targetMethodRow == 0
+            || foreignInterfaceBodyTargets is null
+            || !foreignInterfaceBodyTargets.TryGetValue(targetMethodRow,
+                out var foreignTarget))
+        {
+            throw Invalid(
+                "The Standard F+I conditional-output CallSite has no selected InterfaceMethod target.");
+        }
+
+        var member = foreignTarget.Member;
+        if (member.ResultType is not BoundInterfaceType {
+                Kind: BoundInterfaceTypeKind.Primitive,
+                PrimitiveType: PrimitiveType.Int32,
+            }
+            || member.DoesNotReturn
+            || member.Parameters.Length != 2
+            || member.NativeCallableConvention is not
+                NativeCallingConvention convention
+            || foreignTarget.Definition.ForeignNativeInterface is not
+                BoundForeignNativeInterfaceLayout layout
+            || member.NativeOutputContracts.Length != 1
+            || member.NativeOutputContracts[0].FormalOrdinal != 1
+            || member.NativeOutputContracts[0].PointeeType
+                != PrimitiveType.Int32
+            || member.NativeOutputContracts[0].SuccessSelector
+                != NativeOutputSelector.NonNegative
+            || member.NativeOutputContracts[0].ComplementSelector
+                != NativeOutputSelector.Negative)
+        {
+            throw Invalid(
+                "The Standard F+I conditional-output CallSite does not match its selected output contract.");
+        }
+
+        var reservationRecord = body.GetRecord(reservationRecordIndex);
+        var reservationPayload = reservationRecord[4..];
+        var outputHomeIndex
+            = BinaryPrimitives.ReadUInt16LittleEndian(reservationPayload[2..]);
+        if (reservationRecord[0] != 0x0C
+            || BinaryPrimitives.ReadUInt16LittleEndian(reservationPayload)
+                != callSiteRecordIndex
+            || outputHomeIndex != 2
+            || BinaryPrimitives.ReadUInt32LittleEndian(
+                reservationPayload[4..]) != 2
+            || BinaryPrimitives.ReadUInt16LittleEndian(
+                entryCode[2..]) != reservationRecordIndex)
+        {
+            throw Invalid(
+                "The Standard F+I conditional-output reservation differs from its CallSite input.");
+        }
+
+        var edgeRecord = body.GetRecord(edgeRecordIndex);
+        if (edgeRecord[0] != 0x06
+            || BinaryPrimitives.ReadUInt16LittleEndian(edgeRecord[4..]) != 1
+            || BinaryPrimitives.ReadUInt16LittleEndian(edgeRecord[6..]) != 2)
+        {
+            throw Invalid(
+                "The Standard F+I conditional-output Body has invalid branch targets.");
+        }
+
+        var receiverInput = callPayload[16..];
+        if (receiverInput[0] != 2 || receiverInput[1] != 1
+            || BinaryPrimitives.ReadUInt16LittleEndian(receiverInput[2..])
+                != 0)
+        {
+            throw Invalid(
+                "The Standard F+I conditional-output CallSite has no receiver Home.");
+        }
+
+        var arguments
+            = ImmutableArray.CreateBuilder<BoundExpression>(2);
+        var inputOffset = 20;
+        for (var formal = 0; formal < member.Parameters.Length; formal++)
+        {
+            var input = callPayload.Slice(inputOffset, 4);
+            var selectorKind = input[0];
+            var sourceUse = input[1];
+            var homeIndex = BinaryPrimitives.ReadUInt16LittleEndian(
+                input[2..]);
+            var formalType = member.Parameters[formal].Type.PrimitiveType;
+            if (formal == 1)
+            {
+                if (selectorKind != 2 || sourceUse != 6
+                    || homeIndex != outputHomeIndex
+                    || homeRoles[homeIndex] != 3
+                    || homeTypes[homeIndex] != PrimitiveType.Int32)
+                {
+                    throw Invalid(
+                        "The Standard F+I conditional-output input is not its reserved output Home.");
+                }
+
+                arguments.Add(new BoundNativeOutputReservation(
+                    homeVariables[homeIndex], PrimitiveType.Int32, default));
+            }
+            else
+            {
+                if (selectorKind != 2 || sourceUse != 1
+                    || homeIndex != 1 || homeRoles[homeIndex] != 2
+                    || homeVariables[homeIndex] != 1
+                    || homeTypes[homeIndex] != formalType)
+                {
+                    throw Invalid(
+                        "The Standard F+I conditional-output source input does not match its selected formal.");
+                }
+
+                arguments.Add(new BoundRead(homeVariables[homeIndex],
+                    formalType, default));
+            }
+
+            inputOffset += 4;
+        }
+
+        var outputVariable = homeVariables[outputHomeIndex];
+        var statusVariable = homeVariables[3];
+        if (outputVariable != 2 || statusVariable != 3
+            || variables[outputVariable].IsInitializationLocal
+            || variables[outputVariable].Type != PrimitiveType.Int32
+            || variables[statusVariable].IsInitializationLocal
+            || variables[statusVariable].Type != PrimitiveType.Int32)
+        {
+            throw Invalid(
+                "The Standard F+I conditional-output Homes do not match their source locals.");
+        }
+
+        var declarationKey = member.DeclarationKey;
+        if (tokenKind == 0x1C)
+        {
+            declarationKey = imports.GetBindingForImportRow(tokenRow)
+                .ExportKey;
+            if (!StringComparer.Ordinal.Equals(declarationKey,
+                    member.DeclarationKey)
+                && !member.AdditionalDeclarationKeys.Contains(
+                    declarationKey, StringComparer.Ordinal))
+            {
+                throw Invalid(
+                    "A ForeignNativeInterface CallSite Import does not select one of the exact member ExportKeys.");
+            }
+        }
+
+        var declaringInterface = new BoundInterfaceType(
+            BoundInterfaceTypeKind.Nominal, PrimitiveType.Void,
+            foreignTarget.Definition.QualifiedName, -1, [],
+            false, false, false, false) {
+            ModuleImport = foreignTarget.Definition.ModuleImport,
+        };
+        var memberIdentity = new BoundInterfaceMemberIdentity(
+            declaringInterface, foreignTarget.MemberOrdinal, declarationKey);
+        var call = new BoundCall(BoundCall.ForeignInterfaceFunction,
+            arguments.MoveToImmutable(), PrimitiveType.Int32, default) {
+                IsUnsafeAuthorized = true,
+                ForeignInterfaceCall = new BoundForeignInterfaceCall(
+                    new BoundRead(homeVariables[0],
+                        PrimitiveType.NativeRawPointer, default),
+                    memberIdentity, layout.VTableByteOffset, convention,
+                    member.RequiresMutableReceiver, member.DoesNotReturn,
+                    member.NativeOutputContracts),
+                ArgumentParameterIndices = [0, 1],
+            };
+        variables[outputVariable] = variables[outputVariable] with {
+            IsInitializationLocal = true,
+        };
+        var statusRead = new BoundRead(statusVariable,
+            PrimitiveType.Int32, default);
+        var condition = new BoundBinary(TokenKind.GreaterEquals,
+            statusRead, new BoundConstant(0, PrimitiveType.Int32, default),
+            PrimitiveType.Bool, default);
+        var outputRead = new BoundRead(outputVariable,
+            PrimitiveType.Int32, default);
+        return [
+            new BoundVacantLocal(outputVariable, default),
+            new BoundLocal(statusVariable,
+                new BoundUnsafeExpression(call, default), default),
+            new BoundIf(condition, new BoundBlock([
+                new BoundReturn(outputRead, default),
+            ], default), null, default),
+            new BoundReturn(statusRead, default),
+        ];
+
+        static bool HasEmptyEntryState(TrRmRegisterBodyReader body,
+            int blockIndex)
+        {
+            var stateIndex = BinaryPrimitives.ReadUInt16LittleEndian(
+                body.GetBlock(blockIndex)[8..]);
+            var state = body.GetRecord(stateIndex);
+            return state.Length == 8 && state[0] == 0x01
+                && state[1] == 0
+                && BinaryPrimitives.ReadUInt16LittleEndian(state[2..]) == 0
+                && BinaryPrimitives.ReadUInt32LittleEndian(state[4..]) == 0;
+        }
     }
 
     private static ImmutableArray<BoundStatement>
