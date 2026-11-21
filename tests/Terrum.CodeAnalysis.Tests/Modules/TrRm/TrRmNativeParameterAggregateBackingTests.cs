@@ -2,6 +2,7 @@
 
 using System;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using NUnit.Framework;
@@ -120,5 +121,82 @@ internal sealed class TrRmNativeParameterAggregateBackingTests
             await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
                 .ConfigureAwait(true);
         }
+    }
+
+    [Test]
+    public void StandardNativeOutputReemits16ByteAggregateNativeParameterBacking()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-addresses-1";
+        const string moduleIdentity = "native-output-aggregate-backing-16";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Quad {
+                public int32 First;
+                public int32 Second;
+                public int32 Third;
+                public int32 Fourth;
+            }
+            [param(buffer): DependsOn(nameof(baseAddress))]
+            [Terrum.Interop.NativeImport("kernel32.dll",
+                "ReadProcessMemory")]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(5, Write, NoEscape, 1)]
+            extern unsafe int32 ReadProcessMemory(
+                ptr<void> process, ptr<Quad> baseAddress,
+                [Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                write ptr<Quad> buffer, nuint bytesToRead,
+                write ptr<nuint> bytesRead);
+
+            public unsafe int32 Probe(ptr<void> process, Quad value,
+                nuint bytesToRead, write ptr<nuint> bytesRead) {
+                mut Quad backing = value;
+                init mut Quad buffer;
+                unsafe {
+                    return ReadProcessMemory(process, &backing,
+                        &init buffer, bytesToRead, bytesRead);
+                }
+            }
+            """), NativeOutputCoreRegistrationTests
+                .CreateRegisteredCompilationOptions());
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        Assert.That(program.Structures.Single(
+            static structure => structure.Name == "Quad").Size,
+            Is.EqualTo(16));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            program, moduleIdentity, schemaIdentity,
+            moduleTargetRequirement: 1);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            moduleIdentity, []);
+        var caller = loaded.Functions.Single(static function =>
+            function.Name == "Probe");
+        BoundNativeStorageAddress? aggregateBacking = null;
+        Assert.That(BoundTreeTraversal.VisitExpressions(caller.Body,
+            expression =>
+            {
+                if (expression is BoundNativeStorageAddress address)
+                {
+                    aggregateBacking = address;
+                }
+            }), Is.True);
+        Assert.That(aggregateBacking, Is.Not.Null);
+        Assert.That(aggregateBacking!.ElementCount, Is.EqualTo(1UL));
+        Assert.That(aggregateBacking.ElementStride, Is.EqualTo(16UL));
+        Assert.That(aggregateBacking.ByteExtent, Is.EqualTo(16UL));
+        var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
+            moduleIdentity, schemaIdentity, moduleTargetRequirement: 1);
+        Assert.That(reemitted, Is.EqualTo(artifact));
+        var reemittedInput = new TrRmStandardArtifactInput(schemaIdentity,
+            reemitted);
+        _ = TrRmExecutableCompiler.LoadStandard(reemittedInput,
+            moduleIdentity, []);
+        Assert.That(NativeModuleCompiler.EmitStandardLibrary(
+                reemittedInput, moduleIdentity, [], ["Probe"],
+                NativeRuntimePolicy.FailFast),
+            Is.Not.Empty);
     }
 }
