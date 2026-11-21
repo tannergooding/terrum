@@ -2161,7 +2161,7 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
     [TestCase(2, true)]
     [TestCase(1, false)]
     [TestCase(2, false)]
-    public void L1StorageAddressRejectsInvalidPointerTypeMapEntry(
+    public void L1StorageAddressRejectsMalformedMapAndKinds(
         byte sourceKind, bool outOfRangeTypeMapIndex)
     {
         const string moduleIdentity = "l1p-storage-address-type-map";
@@ -2203,6 +2203,20 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
             TrRmExecutableCompiler.LoadStandard(
                 new TrRmStandardArtifactInput(l1pSchemaIdentity,
                     malformed), moduleIdentity, []));
+        var malformedSourceKind = MutateL1pStorageAddressKind(
+            artifact, l1pSchemaIdentity, "Main", sourceKind,
+            resultKind: false);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(l1pSchemaIdentity,
+                    malformedSourceKind), moduleIdentity, []));
+        var malformedResultKind = MutateL1pStorageAddressKind(
+            artifact, l1pSchemaIdentity, "Main", sourceKind,
+            resultKind: true);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(l1pSchemaIdentity,
+                    malformedResultKind), moduleIdentity, []));
     }
 
     [TestCase(false)]
@@ -3488,6 +3502,15 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
                 BinaryPrimitives.WriteUInt16LittleEndian(
                     bodyBytes.AsSpan(recordStart + 10),
                     invalidTypeMapIndex));
+
+    private static byte[] MutateL1pStorageAddressKind(
+        byte[] artifact, string schemaIdentity, string methodName,
+        byte sourceKind, bool resultKind)
+        => MutateL1pStorageAddressRecord(artifact, schemaIdentity,
+            methodName, sourceKind,
+            (bodyBytes, recordStart) =>
+                bodyBytes[recordStart + (resultKind ? 5 : 4)]
+                    = byte.MaxValue);
 
     private static byte[] MutateL1pStorageAddressSourceRegister(
         byte[] artifact, string schemaIdentity, string methodName,
