@@ -851,7 +851,10 @@ internal sealed class TrRmNativeParameterAggregateBackingTests
     }
 
     [Test]
-    public async Task StandardA2NativeOutputCapturesPostfixArrayIndexAsync()
+    [TestCase("index++", false)]
+    [TestCase("++index", true)]
+    public async Task StandardA2NativeOutputCapturesArrayIndexUpdateAsync(
+        string indexExpression, bool expectedPrefix)
     {
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
@@ -859,7 +862,7 @@ internal sealed class TrRmNativeParameterAggregateBackingTests
         const string schemaIdentity
             = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
         const string moduleIdentity = "a2-native-output-postfix-array-index";
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse($$"""
             [param(buffer): DependsOn(nameof(baseAddress))]
             [Terrum.Interop.NativeImport("kernel32.dll",
                 "ReadProcessMemory")]
@@ -878,8 +881,9 @@ internal sealed class TrRmNativeParameterAggregateBackingTests
                 mut int32 index = initialIndex;
                 init mut int32 buffer;
                 unsafe {
-                    return ReadProcessMemory(process, &source[index++],
-                        &init buffer, bytesToRead, bytesRead);
+                    return ReadProcessMemory(process,
+                        &source[{{indexExpression}}], &init buffer,
+                        bytesToRead, bytesRead);
                 }
             }
             """), NativeOutputCoreRegistrationTests
@@ -906,7 +910,8 @@ internal sealed class TrRmNativeParameterAggregateBackingTests
             }), Is.True);
         Assert.That(arrayBacking, Is.Not.Null);
         Assert.That(arrayBacking!.Index, Is.TypeOf<BoundUpdate>());
-        Assert.That(((BoundUpdate)arrayBacking.Index).IsPrefix, Is.False);
+        Assert.That(((BoundUpdate)arrayBacking.Index).IsPrefix,
+            Is.EqualTo(expectedPrefix));
 
         var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
             moduleIdentity, schemaIdentity, moduleTargetRequirement: 1);
