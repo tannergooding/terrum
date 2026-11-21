@@ -5000,6 +5000,16 @@ public static partial class TrRmExecutableCompiler
 
                 var (methodStart, methodEnd)
                     = tables.Modules.GetMethodDefRange(moduleRow);
+                var hasModuleBody = false;
+                for (var methodRow = methodStart;
+                    methodRow < methodEnd; methodRow++)
+                {
+                    if (tables.Methods.GetBodyRow(methodRow) != 0)
+                    {
+                        hasModuleBody = true;
+                        break;
+                    }
+                }
                 var (typeStart, typeEnd)
                     = tables.Modules.GetTypeDefRange(moduleRow);
                 moduleSelections.Add(new TrRmStandardModuleSelection(index,
@@ -5094,7 +5104,7 @@ public static partial class TrRmExecutableCompiler
                     }
                 }
 
-                if (!isSelectedRoot && methodEnd != methodStart
+                if (!isSelectedRoot && hasModuleBody
                     && !includesFProviderClosure
                     && !includesL1MethodProviderClosure
                     && !includesConstruction2MethodProviderClosure)
