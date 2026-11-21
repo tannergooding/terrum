@@ -198,11 +198,10 @@ internal sealed partial class PeCompiler
         }
         else if (!address.Projections.IsDefaultOrEmpty)
         {
-            if (address.Projections.Length < 2
-                || address.Index != address.Projections[^1].Index)
+            if (address.Index != address.Projections[^1].Index)
             {
                 throw new InvalidOperationException(
-                    "The native storage address has an invalid nested path.");
+                    "The native storage address has an invalid fixed-array path.");
             }
 
             EmitNativeFixedArrayPathAddress(address.Variable,
