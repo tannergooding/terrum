@@ -2767,6 +2767,147 @@ internal sealed partial class CliTests
     }
 
     [Test]
+    public async Task BuildTrRmLibraryBindsAc1BodylessPs1ProviderAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+
+        const string ac1SchemaIdentity
+            = "trrm/1-draft-foreign-native-interface-aggregate-output-consumption-1";
+        const string ps1SchemaIdentity
+            = "trrm/1-draft-foreign-native-interface-parameter-surface-1";
+        const string providerIdentity = "cli-ac1-ps1-provider";
+        const string consumerIdentity = "cli-ac1-consumer";
+        const string providerSource = """
+            using Terrum.Interop;
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Point {
+                public int64 X;
+                public int64 Y;
+            }
+            [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+            [ForeignNativeInterface(VTableByteOffset: uint32(0))]
+            public interface IProbe {
+                [param(value): NativeOutput(
+                    When: NativeOutputCondition.NonZero)]
+                public unsafe int32 TryReadPoint(ptr<int32> source,
+                    [Terrum.CodeAnalysis.DependsOn(this, nameof(source))]
+                    [Terrum.CodeAnalysis.ForwardsBacking(
+                        this, nameof(source))]
+                    write ptr<Point> value);
+            }
+            """;
+        var (native, output)
+            = NativeOutputCoreRegistrationTests
+                .CreateCombinedRegistrations(
+                    includeForeignNativeInterface: true);
+        var options = new CompilationOptions {
+            NativeCoreRegistration = native,
+            LayoutCoreRegistration =
+                NativeCoreRegistrationTests.CreateLayoutRegistration(native),
+            NativeOutputCoreRegistration = output,
+        };
+        var providerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(providerSource), options);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+        var providerProgram = providerCompilation.Program
+            ?? throw new AssertionException("Expected a PS1 provider.");
+        var providerMember
+            = providerProgram.Interfaces.Single().Members.Single();
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerProgram, providerIdentity, ps1SchemaIdentity, 1, [
+                new TrRmSourceTypeExport("", "Point", "provider/Point") {
+                    FieldExports = [
+                        new TrRmSourceFieldExport("X", "provider/Point.X"),
+                        new TrRmSourceFieldExport("Y", "provider/Point.Y"),
+                    ],
+                },
+                new TrRmSourceTypeExport("", "IProbe",
+                    "provider/IProbe") {
+                    GenericArity = 0,
+                    InterfaceMethodExports = [
+                        new TrRmSourceInterfaceMethodExport(
+                            providerMember.SourceInputOrdinal,
+                            providerMember.SourceDeclarationSpan,
+                            "provider/IProbe.TryReadPoint"),
+                    ],
+                },
+            ]);
+        var providerInput = new TrRmStandardArtifactInput(
+            ps1SchemaIdentity, providerArtifact);
+        var providerReference = TrRmExecutableCompiler
+            .CreateStandardReference(providerInput, providerIdentity, []);
+        var consumerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                Point InvokeImportedPoint(ptr<void> receiver,
+                    ptr<int32> source, Point fallback) {
+                    init Point value;
+                    unsafe {
+                        int32 status = IProbe.TryReadPoint(
+                            receiver, source, &init value);
+                        if (status != 0) { return value; }
+                        return fallback;
+                    }
+                }
+                """), providerReference, options);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumerProgram = consumerCompilation.Program
+            ?? throw new AssertionException("Expected an AC1 consumer.");
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            consumerProgram, consumerIdentity, ac1SchemaIdentity, 1, []);
+
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-ac1-ps1-provider-{Guid.NewGuid():N}");
+        var providerPath = prefix + "-provider.trrm";
+        var consumerPath = prefix + "-consumer.trrm";
+        var libraryPath = prefix + ".dll";
+        try
+        {
+            await File.WriteAllBytesAsync(providerPath, providerArtifact)
+                .ConfigureAwait(true);
+            await File.WriteAllBytesAsync(consumerPath, consumerArtifact)
+                .ConfigureAwait(true);
+            var (built, buildOutput, buildError) = await RunAsync([],
+                "build-trrm-library", consumerPath, "--export",
+                "InvokeImportedPoint", "-o", libraryPath, "--runtime",
+                "fail-fast", "--trrm-schema", ac1SchemaIdentity,
+                "--trrm-module", consumerIdentity, "--trrm-provider",
+                ps1SchemaIdentity, providerPath, "--json")
+                .ConfigureAwait(true);
+            Assert.That(built, Is.Zero,
+                $"{buildOutput}{Environment.NewLine}{buildError}");
+            Assert.That(buildError, Is.Empty);
+            using var document = JsonDocument.Parse(buildOutput);
+            Assert.That(document.RootElement.GetProperty("success")
+                .GetBoolean(), Is.True);
+
+            var module = NativeLibrary.Load(libraryPath);
+            try
+            {
+                Assert.That(NativeLibrary.GetExport(module,
+                    "InvokeImportedPoint"), Is.Not.EqualTo(IntPtr.Zero));
+            }
+            finally
+            {
+                NativeLibrary.Free(module);
+            }
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(providerPath)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(consumerPath)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(libraryPath)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
     public async Task SelectedFProfileRunsBuildsAndEmitsLibraryWithDirectNativeImportAsync()
     {
         Assume.That(OperatingSystem.IsWindows()
