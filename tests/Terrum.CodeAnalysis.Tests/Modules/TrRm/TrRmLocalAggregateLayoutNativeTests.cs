@@ -1479,12 +1479,14 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
                     public mut int32 First;
                     public mut int32 Second;
                     public mut int32 Third;
+                    public mut [int32; 3] Values;
                     public Snapshot(uint64 wide, int32 first, int32 second,
                         int32 third) {
                         Value.Wide = wide;
                         First = first;
                         Second = second;
                         Third = third;
+                        Values = [first, second, third];
                     }
                 }
                 public Snapshot CreateSnapshot() {
@@ -1535,9 +1537,13 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
                     mut Snapshot value = CreateSnapshotViaProvider();
                     unsafe {
                         ptr<Snapshot> source = &value;
+                        ptr<int32> element = &value.Values[1];
+                        int32 capturedElement = *element;
                         Snapshot captured = ReadSnapshot(source);
                         value.Value.Wide = 99;
-                        return int32(captured.Value.Wide);
+                        value.Values[1] = 99;
+                        return int32(captured.Value.Wide)
+                            + captured.Values[1] + capturedElement;
                     }
                 }
                 """), methodProviderReference, options);
@@ -1560,7 +1566,7 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
             reemitted);
         Assert.That(NativeModuleCompiler.ExecuteStandard(reemittedInput,
             reemittedIdentity, providers, NativeRuntimePolicy.FailFast),
-            Is.EqualTo(42));
+            Is.EqualTo(46));
         var image = NativeModuleCompiler.EmitStandardExecutable(
             reemittedInput, reemittedIdentity, providers,
             NativeRuntimePolicy.FailFast);
@@ -1570,7 +1576,7 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
         {
             await AssertNativeImageExitCodeAsync(image,
                 Path.Combine(directory, "program.exe"),
-                reemittedIdentity, 42).ConfigureAwait(true);
+                reemittedIdentity, 46).ConfigureAwait(true);
         }
         finally
         {
