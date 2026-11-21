@@ -5969,8 +5969,22 @@ public static partial class SemanticVerifier
                 {
                     throw InvalidEffect(value.Span, "NativePointer");
                 }
-                facts.AddNativePointerProvenance(
-                    target.Identity, valueSources, valueMayBeUnknown);
+                var replacesWholePointer
+                    = targets.Count == 1 && !addressMayBeUnknown
+                        && storage.Projection.Kind
+                            == StorageProjectionKind.WholeObject
+                        && facts.Function.Variables[target.Identity].Type
+                            == value.Type;
+                if (replacesWholePointer)
+                {
+                    facts.SetNativePointerProvenance(target.Identity,
+                        valueSources, valueMayBeUnknown);
+                }
+                else
+                {
+                    facts.AddNativePointerProvenance(
+                        target.Identity, valueSources, valueMayBeUnknown);
+                }
                 if (CarriesNativePointer(value.Type, program))
                 {
                     if (targets.Count == 1 && !addressMayBeUnknown
@@ -6093,6 +6107,75 @@ public static partial class SemanticVerifier
         }
     }
 
+    private static bool CanTrackStraightLineNativePointerFacts(
+        BoundBlock body)
+    {
+        var statements = new List<BoundStatement>();
+        var pending = new Stack<BoundStatement>();
+        pending.Push(body);
+        var remaining = SemanticVerifier.MaximumAnalysisVisits;
+        while (pending.TryPop(out var statement))
+        {
+            if (--remaining < 0)
+            {
+                return false;
+            }
+
+            switch (statement)
+            {
+                case BoundBlock block when !block.Statements.IsDefault:
+                    for (var index = block.Statements.Length - 1;
+                        index >= 0; index--)
+                    {
+                        pending.Push(block.Statements[index]);
+                    }
+                    break;
+                case BoundUnsafe unsafeBlock:
+                    pending.Push(unsafeBlock.Body);
+                    break;
+                case BoundLocal:
+                case BoundAssignment:
+                case BoundExpressionStatement:
+                case BoundReturn:
+                    statements.Add(statement);
+                    break;
+                default:
+                    return false;
+            }
+        }
+
+        var returned = false;
+        foreach (var statement in statements)
+        {
+            if (returned)
+            {
+                return false;
+            }
+
+            if (statement is BoundReturn)
+            {
+                returned = true;
+            }
+        }
+
+        var expressionsAreStraightLine = true;
+        if (!BoundTreeTraversal.VisitExpressions(body, expression =>
+        {
+            if (expression is not (BoundConstant or BoundNull
+                or BoundRead or BoundNativePointerAddress
+                or BoundNativePointerRead or BoundNativePointerWrite
+                or BoundUnsafeExpression))
+            {
+                expressionsAreStraightLine = false;
+            }
+        }))
+        {
+            return false;
+        }
+
+        return expressionsAreStraightLine;
+    }
+
     private static BackingDependencies? CreateBackingDependencies(int functionActivation,
         BoundFunction function,
         BoundProgram program, bool hasSpans,
@@ -6150,6 +6233,8 @@ public static partial class SemanticVerifier
             program.NativeFixedArrayTypes,
             deriveCopyOriginSummaries
                 ? CopyOriginSummaryBuilder.Create(function, program) : null);
+        var trackStraightLineNativePointerFacts
+            = CanTrackStraightLineNativePointerFacts(function.Body);
         var edges = new List<int>?[function.Variables.Length];
         var nativePointerEdges = new List<int>?[function.Variables.Length];
         var resultDependency = ResultDependencyContract(function);
@@ -6160,6 +6245,30 @@ public static partial class SemanticVerifier
         var nativePointerReads = new List<(int Destination, BoundExpression Address)>();
         var nativePointerWrites = new List<(BoundExpression Address, BoundExpression Value)>();
         var remaining = MaximumAnalysisVisits;
+
+        void SetNativePointerSourceFacts(int destination,
+            BoundExpression expression, int depth)
+        {
+            if ((uint)destination >= (uint)function.Variables.Length
+                || !IsNativePointerValue(expression.Type, program)
+                || function.Variables[destination].Type != expression.Type)
+            {
+                throw InvalidEffect(expression.Span, "NativePointer");
+            }
+
+            facts.SetNativePointerProvenance(destination,
+                NativePointerBackingOf(expression, facts, program,
+                    ref remaining, depth + 1),
+                NativePointerMayBeUnknownOf(expression, facts, program,
+                    ref remaining, depth + 1));
+            var extentFact = NativePointerExtentFactsOfExpression(
+                expression, facts, function, program, ref remaining,
+                depth + 1);
+            facts.SetNativePointerExtentProvenance(destination,
+                extentFact.Sources, extentFact.MayBeOpaque,
+                extentFact.IsUnavailable);
+        }
+
         for (var slot = 0; slot < edges.Length; slot++)
         {
             if (TryGetCopyOriginInput(function, program, slot, out var copyOrigin))
@@ -6633,7 +6742,16 @@ public static partial class SemanticVerifier
                     }
                     if (CarriesNativePointer(initializer.Type, program))
                     {
-                        NativePointerSource(local.Variable, initializer, depth + 1);
+                        if (trackStraightLineNativePointerFacts)
+                        {
+                            SetNativePointerSourceFacts(local.Variable,
+                                initializer, depth + 1);
+                        }
+                        else
+                        {
+                            NativePointerSource(local.Variable, initializer,
+                                depth + 1);
+                        }
                     }
                     break;
                 case BoundReturn { Value: BoundExpression result } when result.Type == PrimitiveType.TokenSpan:
@@ -6660,7 +6778,16 @@ public static partial class SemanticVerifier
                     }
                     if (CarriesNativePointer(value.Type, program))
                     {
-                        NativePointerSource(assignment.Variable, value, depth + 1);
+                        if (trackStraightLineNativePointerFacts)
+                        {
+                            SetNativePointerSourceFacts(
+                                assignment.Variable, value, depth + 1);
+                        }
+                        else
+                        {
+                            NativePointerSource(assignment.Variable, value,
+                                depth + 1);
+                        }
                     }
                     break;
                 case BoundOptionalAssignment {
@@ -6699,7 +6826,16 @@ public static partial class SemanticVerifier
                 case BoundExpressionStatement expressionStatement
                     when UnwrapUnsafeExpression(expressionStatement.Expression) is BoundNativePointerWrite write
                         && CarriesNativePointer(write.Value.Type, program):
-                    nativePointerWrites.Add((write.Address, write.Value));
+                    if (trackStraightLineNativePointerFacts)
+                    {
+                        ApplyNativePointerWrite(write.Address, write.Value,
+                            facts, program, ref remaining, depth + 1);
+                    }
+                    else
+                    {
+                        nativePointerWrites.Add((write.Address,
+                            write.Value));
+                    }
                     break;
                 case BoundBlock block:
                     if (block.Statements.IsDefault)
