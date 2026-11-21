@@ -1241,6 +1241,64 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
     }
 
     [Test]
+    public async Task L1PointerLoadSnapshotsFixedArrayElementAddressAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+
+        const string moduleIdentity = "l1p-fixed-array-element-snapshot";
+        const string l1pSchemaIdentity
+            = "trrm/1-draft-local-aggregate-layout-execution-pointer-loads-1";
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            public int32 Main() {
+                mut [int32; 3] values = [4, 5, 6];
+                unsafe {
+                    ptr<int32> source = &values[1];
+                    int32 captured = *source;
+                    values[1] = 99;
+                    return captured;
+                }
+            }
+            """), new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, l1pSchemaIdentity,
+            moduleTargetRequirement: 1);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(l1pSchemaIdentity, artifact),
+            moduleIdentity, []);
+        var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
+            moduleIdentity + "-reemitted", l1pSchemaIdentity,
+            moduleTargetRequirement: 1);
+        var reemittedIdentity = moduleIdentity + "-reemitted";
+        var reemittedInput = new TrRmStandardArtifactInput(
+            l1pSchemaIdentity, reemitted);
+        Assert.That(NativeModuleCompiler.ExecuteStandard(reemittedInput,
+            reemittedIdentity, [], NativeRuntimePolicy.FailFast),
+            Is.EqualTo(5));
+        var image = NativeModuleCompiler.EmitStandardExecutable(
+            reemittedInput, reemittedIdentity, [],
+            NativeRuntimePolicy.FailFast);
+        var directory = TestArtifactPaths.CreateDirectory(
+            "terrum-l1p-fixed-array-element-snapshot-");
+        try
+        {
+            await AssertNativeImageExitCodeAsync(image,
+                Path.Combine(directory, "program.exe"),
+                reemittedIdentity, 5).ConfigureAwait(true);
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
     public async Task L1PointerReadSnapshotsBeforeMutatingLaterCallArgumentAsync()
     {
         Assume.That(OperatingSystem.IsWindows()

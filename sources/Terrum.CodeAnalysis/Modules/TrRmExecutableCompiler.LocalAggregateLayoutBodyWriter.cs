@@ -1442,6 +1442,26 @@ public static partial class TrRmExecutableCompiler
                             }
                         }
                         break;
+                    case BoundNativeFixedArrayPointerAddress arrayAddress:
+                        if (arrayAddress.Projections.IsDefaultOrEmpty)
+                        {
+                            if (arrayAddress.Index is not BoundRead)
+                            {
+                                AddTemporary(arrayAddress.Index);
+                            }
+                        }
+                        else
+                        {
+                            foreach (var projection
+                                in arrayAddress.Projections)
+                            {
+                                if (projection.Index is not BoundRead)
+                                {
+                                    AddTemporary(projection.Index);
+                                }
+                            }
+                        }
+                        break;
                     case BoundNativeFixedArrayInitialization arrayInit:
                         AddTemporary(arrayInit);
                         CollectArrayInitializerTemporaries(arrayInit);
@@ -1511,7 +1531,6 @@ public static partial class TrRmExecutableCompiler
                         break;
                     case BoundIndirectCall:
                     case BoundNativeFunctionAddress:
-                    case BoundNativeFixedArrayPointerAddress:
                     case BoundNativeStorageAddress:
                         throw Unsupported(
                             "L1 executable Bodies do not contain native address or indirect-call operations.");
@@ -3033,6 +3052,139 @@ public static partial class TrRmExecutableCompiler
                     code.Add(unchecked((byte)addressRecordIndex));
                     code.Add((byte)(addressRecordIndex >> 8));
                     return;
+                case BoundNativeFixedArrayPointerAddress arrayAddress:
+                {
+                    if (!arrayAddress.IsUnsafeAuthorized
+                        || destination >= 14
+                        || !NativePointerTypeContract.IsValidType(
+                            arrayAddress.Type, program.NativePointerTypes)
+                        || (uint)arrayAddress.Variable
+                            >= (uint)function.Variables.Length
+                        || arrayAddress.Variable < function.ParameterCount)
+                    {
+                        throw Unsupported(
+                            "L1 fixed-array storage addresses require an authorized local source and a registered typed pointer.");
+                    }
+
+                    var arraySourceVariable
+                        = function.Variables[arrayAddress.Variable];
+                    var rootArrayType = arrayAddress.FieldPlace?.Type
+                        ?? arraySourceVariable.Type;
+                    var projections = arrayAddress.Projections;
+                    if (projections.IsDefaultOrEmpty)
+                    {
+                        projections = [
+                            new BoundNativeFixedArrayProjection(
+                                arrayAddress.Layout, arrayAddress.Index),
+                        ];
+                    }
+                    if (!NativeFixedArrayContract.MatchesPath(
+                            rootArrayType, projections, program,
+                            out _, out var leafLayout)
+                        || leafLayout != arrayAddress.Layout
+                        || arrayAddress.Index != projections[^1].Index
+                        || arrayAddress.Layout.ElementCount == 0
+                        || arrayAddress.Layout.ElementStride == 0
+                        || arrayAddress.Layout.ByteExtent == 0)
+                    {
+                        throw Unsupported(
+                            "L1 fixed-array storage addresses require a complete local array path and positive element extent.");
+                    }
+
+                    var arrayPointerDefinition
+                        = program.NativePointerTypes[
+                            NativePointerTypes.Index(arrayAddress.Type)];
+                    var arraySourceHome = HomeForVariable(
+                        arrayAddress.Variable);
+                    if (arrayPointerDefinition.PointeeType
+                            != arrayAddress.Layout.ElementType
+                        || !NativePointerTypeContract.IsSourcePointee(
+                            arrayAddress.Layout.ElementType,
+                            program.Structures,
+                            program.CheckedReferenceTypes,
+                            program.NativeLoweringAgreement,
+                            program.NativeFixedArrayTypes)
+                        || (arrayPointerDefinition.IsWritable
+                            && ((arrayAddress.FieldPlace is null
+                                    && !arraySourceVariable.IsMutable)
+                                || !NativeFixedArrayContract
+                                    .AllowsMutableLocal(
+                                        arrayAddress.Layout)
+                                || !NativeFixedArrayContract
+                                    .AllowsMutableLocal(
+                                        projections[0].Layout)))
+                        || arraySourceHome < 0
+                        || arraySourceHome >= formalHomeStart
+                        || !currentMustLiveHomes.Contains(arraySourceHome)
+                        || homeMap[arraySourceHome * 8] != 3)
+                    {
+                        throw Unsupported(
+                            "L1 fixed-array storage addresses require a matching pointer and live initialized local array backing.");
+                    }
+
+                    var arrayAccessKind
+                        = arrayPointerDefinition.IsWritable
+                            ? (byte)2 : (byte)1;
+                    var (baseKind, baseIndex) = GetArrayBase(
+                        arrayAddress.Variable, arrayAddress.FieldPlace,
+                        arrayAccessKind, 12);
+                    var selectedArrayType = rootArrayType;
+                    var sourcePlaceRegister = -1;
+                    var finalPlaceRegister = destination == 13
+                        ? (byte)12 : (byte)13;
+                    for (var projectionIndex = 0;
+                        projectionIndex < projections.Length;
+                        projectionIndex++)
+                    {
+                        var projection = projections[projectionIndex];
+                        if (projection.Layout.CarrierType
+                            != selectedArrayType)
+                        {
+                            throw Unsupported(
+                                "L1 fixed-array storage-address projections do not match their source type.");
+                        }
+
+                        var indexHome = CaptureIndexHome(
+                            projection.Index);
+                        var isFinal = projectionIndex
+                            == projections.Length - 1;
+                        var requestedRegister = isFinal
+                            ? finalPlaceRegister
+                            : checked((byte)((projectionIndex % 2) + 1));
+                        var selectionIndex = AddArraySelection(
+                            projection.Layout.CarrierType,
+                            projection.Layout.ElementType, baseKind,
+                            baseIndex, arrayAccessKind, 2,
+                            checked((ushort)indexHome), requestedRegister,
+                            out var placeRegister);
+                        AppendPlaceSelection(selectionIndex, placeRegister);
+                        sourcePlaceRegister = placeRegister;
+                        baseKind = 1;
+                        baseIndex = placeRegister;
+                        selectedArrayType
+                            = projection.Layout.ElementType;
+                    }
+
+                    if (sourcePlaceRegister < 0)
+                    {
+                        throw Unsupported(
+                            "L1 fixed-array storage addresses require a selected element PlaceHandle.");
+                    }
+
+                    var arrayAddressRecordIndex
+                        = checked((ushort)records.Count);
+                    records.Add(
+                        TrRmRegisterBodyRecordWriter.EncodeStorageAddress(
+                            1, 1, checked((ushort)sourcePlaceRegister),
+                            destination,
+                            typeMap.GetIndex(
+                                TypeToken(arrayAddress.Type)), 1));
+                    code.Add(0xEC);
+                    code.Add(0);
+                    code.Add(unchecked((byte)arrayAddressRecordIndex));
+                    code.Add((byte)(arrayAddressRecordIndex >> 8));
+                    return;
+                }
                 case BoundNativePointerRead pointerRead:
                     if (!usesNativePointerLoads
                         || destination >= 14

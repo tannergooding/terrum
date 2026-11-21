@@ -1232,34 +1232,15 @@ public static partial class TrRmExecutableCompiler
                         = BinaryPrimitives.ReadUInt16LittleEndian(
                             instruction[2..]);
                     var storage = body.GetRecord(storageRecordIndex);
+                    var sourceKind = storage[4];
                     if (storage[0] != 0x0E || storage.Length != 20
-                        || storage[4] != 2 || storage[5] is not (1 or 2)
+                        || sourceKind is not (1 or 2)
+                        || storage[5] is not (1 or 2)
                         || BinaryPrimitives.ReadUInt32LittleEndian(
                             storage[12..]) != 1)
                     {
                         throw Invalid(
-                            "An L1 storage address must select one complete local Home.");
-                    }
-
-                    var sourceHome
-                        = BinaryPrimitives.ReadUInt16LittleEndian(
-                            storage[6..]);
-                    if (sourceHome >= state.FormalHomeStart
-                        || (uint)sourceHome
-                            >= (uint)state.HomeVariable.Length
-                        || body.HomeMap[sourceHome * 8] != 3)
-                    {
-                        throw Invalid(
-                            "An L1 storage address source is not local role-3 storage.");
-                    }
-
-                    var sourceVariable = state.HomeVariable[sourceHome];
-                    if (sourceVariable < 0
-                        || (!state.UseFixedPointHomeState
-                            && !state.InitializedHomes.Contains(sourceHome)))
-                    {
-                        throw Invalid(
-                            "An L1 storage address source Home is not initialized.");
+                            "An L1 storage address must select one complete local object.");
                     }
 
                     var pointerTypeMapIndex
@@ -1279,24 +1260,150 @@ public static partial class TrRmExecutableCompiler
                     var pointerDefinition
                         = typeEnvironment.NativePointerTypes[
                             NativePointerTypes.Index(pointerType)];
-                    var sourceValue = state.Variables[sourceVariable];
-                    if (pointerDefinition.PointeeType != sourceValue.Type
-                        || !NativePointerTypeContract.IsSourcePointee(
-                            sourceValue.Type, typeEnvironment.Structures, [],
-                            nativeLoweringAgreement: null,
-                            fixedArrayTypes:
-                                typeEnvironment.FixedArrayTypes)
-                        || (pointerDefinition.IsWritable
-                            && (body.HomeMap[sourceHome * 8 + 1] & 1) == 0))
+                    BoundExpression address;
+                    if (sourceKind == 2)
                     {
-                        throw Invalid(
-                            "An L1 storage address type or access differs from its source Home.");
+                        var sourceHome
+                            = BinaryPrimitives.ReadUInt16LittleEndian(
+                                storage[6..]);
+                        if (sourceHome >= state.FormalHomeStart
+                            || (uint)sourceHome
+                                >= (uint)state.HomeVariable.Length
+                            || body.HomeMap[sourceHome * 8] != 3)
+                        {
+                            throw Invalid(
+                                "An L1 storage address source is not local role-3 storage.");
+                        }
+
+                        var sourceVariable
+                            = state.HomeVariable[sourceHome];
+                        if (sourceVariable < 0
+                            || (!state.UseFixedPointHomeState
+                                && !state.InitializedHomes.Contains(
+                                    sourceHome)))
+                        {
+                            throw Invalid(
+                                "An L1 storage address source Home is not initialized.");
+                        }
+
+                        var sourceValue
+                            = state.Variables[sourceVariable];
+                        if (pointerDefinition.PointeeType
+                                != sourceValue.Type
+                            || !NativePointerTypeContract.IsSourcePointee(
+                                sourceValue.Type,
+                                typeEnvironment.Structures, [],
+                                nativeLoweringAgreement: null,
+                                fixedArrayTypes:
+                                    typeEnvironment.FixedArrayTypes)
+                            || (pointerDefinition.IsWritable
+                                && (body.HomeMap[sourceHome * 8 + 1] & 1)
+                                    == 0))
+                        {
+                            throw Invalid(
+                                "An L1 storage address type or access differs from its source Home.");
+                        }
+
+                        address = new BoundNativePointerAddress(
+                            sourceVariable, pointerType, default) {
+                            IsUnsafeAuthorized = true,
+                        };
+                    }
+                    else
+                    {
+                        var sourceRegister
+                            = BinaryPrimitives.ReadUInt16LittleEndian(
+                                storage[6..]);
+                        if (sourceRegister >= 14
+                            || !state.Selections.TryGetValue(sourceRegister,
+                                out var selection))
+                        {
+                            throw Invalid(
+                                "An L1 array storage address has no selected PlaceHandle source.");
+                        }
+
+                        if (selection.TargetKind != 3
+                            || selection.ArrayPath.IsDefaultOrEmpty)
+                        {
+                            throw Invalid(
+                                "An L1 array storage address requires an array-element PlaceHandle.");
+                        }
+
+                        var arrayLayout = selection.ArrayLayout
+                            ?? throw Invalid(
+                                "An L1 array storage address has no layout.");
+                        var arrayIndex = selection.Index
+                            ?? throw Invalid(
+                                "An L1 array storage address has no captured index.");
+                        if (selection.ArrayPath[^1].Layout != arrayLayout
+                            || selection.ArrayPath[^1].Index != arrayIndex
+                            || arrayLayout.ElementCount == 0
+                            || arrayLayout.ElementStride == 0
+                            || arrayLayout.ByteExtent == 0)
+                        {
+                            throw Invalid(
+                                "An L1 array storage address requires a selected complete element PlaceHandle.");
+                        }
+
+                        if ((uint)selection.RootVariable
+                                >= (uint)state.Variables.Length
+                            || selection.ReferentType
+                                != arrayLayout.ElementType
+                            || pointerDefinition.PointeeType
+                                != selection.ReferentType
+                            || (pointerDefinition.IsWritable
+                                && (selection.AccessKind != 2
+                                    || !NativeFixedArrayContract
+                                        .AllowsMutableLocal(
+                                            selection.ArrayPath[0].Layout)
+                                    || !NativeFixedArrayContract
+                                        .AllowsMutableLocal(arrayLayout)))
+                            || !NativePointerTypeContract.IsSourcePointee(
+                                selection.ReferentType,
+                                typeEnvironment.Structures, [],
+                                nativeLoweringAgreement: null,
+                                fixedArrayTypes:
+                                    typeEnvironment.FixedArrayTypes))
+                        {
+                            throw Invalid(
+                                "An L1 array storage address type or access differs from its selected element.");
+                        }
+
+                        var sourceHome = -1;
+                        for (var homeIndex = 0;
+                            homeIndex < state.FormalHomeStart;
+                            homeIndex++)
+                        {
+                            if (state.HomeVariable[homeIndex]
+                                == selection.RootVariable)
+                            {
+                                sourceHome = homeIndex;
+                                break;
+                            }
+                        }
+                        if (sourceHome < 0
+                            || body.HomeMap[sourceHome * 8] != 3
+                            || (!state.UseFixedPointHomeState
+                                && !state.InitializedHomes.Contains(
+                                    sourceHome))
+                            || (pointerDefinition.IsWritable
+                                && (body.HomeMap[sourceHome * 8 + 1] & 1)
+                                    == 0))
+                        {
+                            throw Invalid(
+                                "An L1 array storage address is not rooted in an initialized local Home with matching access.");
+                        }
+
+                        address = new BoundNativeFixedArrayPointerAddress(
+                            selection.RootVariable, arrayLayout, arrayIndex,
+                            pointerType, default) {
+                            IsUnsafeAuthorized = true,
+                            Projections = selection.ArrayPath.Length > 1
+                                ? selection.ArrayPath : [],
+                            FieldPlace = selection.FieldPlace,
+                        };
                     }
 
-                    var address = new BoundNativePointerAddress(
-                        sourceVariable, pointerType, default) {
-                        IsUnsafeAuthorized = true,
-                    };
                     var resultKind = storage[5];
                     var resultIndex
                         = BinaryPrimitives.ReadUInt16LittleEndian(
