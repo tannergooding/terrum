@@ -1,6 +1,7 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -26,11 +27,13 @@ internal sealed class TrRmNativeParameterAggregateBackingTests
 
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int ProbeDelegate(nint process, NativePair value,
-        nuint bytesToRead, nint bytesRead);
+        nint bytesRead);
 
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
-    private delegate int ArrayProbeDelegate(nint process,
-        nuint bytesToRead, nint bytesRead);
+    private delegate int ArrayProbeDelegate(nint process, nint bytesRead);
+
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int NativeParameterArrayProbeDelegate();
 
     [Test]
     public async Task StandardNativeOutputUsesAggregateNativeParameterBackingAsync()
@@ -60,7 +63,8 @@ internal sealed class TrRmNativeParameterAggregateBackingTests
                 write ptr<nuint> bytesRead);
 
             public unsafe int32 Probe(ptr<void> process, Pair value,
-                nuint bytesToRead, write ptr<nuint> bytesRead) {
+                write ptr<nuint> bytesRead) {
+                nuint bytesToRead = 8;
                 mut Pair backing = value;
                 init mut Pair buffer;
                 unsafe {
@@ -107,7 +111,7 @@ internal sealed class TrRmNativeParameterAggregateBackingTests
                 Assert.That(function(new IntPtr(-1), new NativePair {
                     First = 11,
                     Second = 22,
-                }, (nuint)Marshal.SizeOf<NativePair>(), bytesRead),
+                }, bytesRead),
                     Is.EqualTo(1));
                 Assert.That(Marshal.ReadInt64(bytesRead), Is.EqualTo(8));
             }
@@ -154,7 +158,8 @@ internal sealed class TrRmNativeParameterAggregateBackingTests
                 write ptr<nuint> bytesRead);
 
             public unsafe int32 Probe(ptr<void> process, Quad value,
-                nuint bytesToRead, write ptr<nuint> bytesRead) {
+                write ptr<nuint> bytesRead) {
+                nuint bytesToRead = 16;
                 mut Quad backing = value;
                 init mut Quad buffer;
                 unsafe {
@@ -205,7 +210,13 @@ internal sealed class TrRmNativeParameterAggregateBackingTests
     }
 
     [Test]
-    public async Task StandardNativeOutputUsesMultiElementFixedArrayBackingAsync()
+    [TestCase(3, "mut [int32; 3] source = [11, 22, 33];", "&source[0]", 0, 3UL)]
+    [TestCase(2, "mut [[int32; 2]; 2] source = [[11, 22], [33, 44]];",
+        "&source[1][0]", 2, 2UL)]
+    public async Task StandardNativeOutputUsesMultiElementFixedArrayBackingAsync(
+        int nativeParameterExtent, string sourceInitialization,
+        string sourceAddress, int expectedProjectionCount,
+        ulong expectedElementCount)
     {
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
@@ -213,7 +224,7 @@ internal sealed class TrRmNativeParameterAggregateBackingTests
         const string schemaIdentity
             = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
         const string moduleIdentity = "native-output-array-backing";
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse($$"""
             [Blittable] [Layout(LayoutKind.Sequential)]
             public struct Pair {
                 public int32 First;
@@ -222,7 +233,8 @@ internal sealed class TrRmNativeParameterAggregateBackingTests
             [param(buffer): DependsOn(nameof(baseAddress))]
             [Terrum.Interop.NativeImport("kernel32.dll",
                 "ReadProcessMemory")]
-            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 3)]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape,
+                {{nativeParameterExtent}})]
             [Terrum.Interop.NativeParameter(5, Write, NoEscape, 1)]
             extern unsafe int32 ReadProcessMemory(
                 ptr<void> process, ptr<int32> baseAddress,
@@ -231,12 +243,13 @@ internal sealed class TrRmNativeParameterAggregateBackingTests
                 write ptr<Pair> buffer, nuint bytesToRead,
                 write ptr<nuint> bytesRead);
 
-            public unsafe int32 Probe(ptr<void> process, nuint bytesToRead,
+            public unsafe int32 Probe(ptr<void> process,
                 write ptr<nuint> bytesRead) {
-                mut [int32; 3] source = [11, 22, 33];
+                {{sourceInitialization}}
+                nuint bytesToRead = 8;
                 init mut Pair buffer;
                 unsafe {
-                    return ReadProcessMemory(process, &source[0],
+                    return ReadProcessMemory(process, {{sourceAddress}},
                         &init buffer, bytesToRead, bytesRead);
                 }
             }
@@ -265,10 +278,13 @@ internal sealed class TrRmNativeParameterAggregateBackingTests
         var storageAddress = arrayBacking!;
         Assert.That(NativeFixedArrayTypes.IsType(
             storageAddress.CarrierType), Is.True);
-        Assert.That(storageAddress.Projections.Length, Is.EqualTo(1));
-        Assert.That(storageAddress.ElementCount, Is.EqualTo(3UL));
+        Assert.That(storageAddress.Projections.Length,
+            Is.EqualTo(expectedProjectionCount));
+        Assert.That(storageAddress.ElementCount,
+            Is.EqualTo(expectedElementCount));
         Assert.That(storageAddress.ElementStride, Is.EqualTo(4UL));
-        Assert.That(storageAddress.ByteExtent, Is.EqualTo(12UL));
+        Assert.That(storageAddress.ByteExtent,
+            Is.EqualTo(checked(expectedElementCount * 4UL)));
 
         var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
             moduleIdentity, schemaIdentity, moduleTargetRequirement: 1);
@@ -296,8 +312,7 @@ internal sealed class TrRmNativeParameterAggregateBackingTests
                 var function = Marshal.GetDelegateForFunctionPointer<
                     ArrayProbeDelegate>(NativeLibrary.GetExport(library,
                     "Probe"));
-                Assert.That(function(new IntPtr(-1),
-                    (nuint)Marshal.SizeOf<NativePair>(), bytesRead),
+                Assert.That(function(new IntPtr(-1), bytesRead),
                     Is.EqualTo(1));
                 Assert.That(Marshal.ReadInt64(bytesRead), Is.EqualTo(8));
             }
@@ -307,6 +322,103 @@ internal sealed class TrRmNativeParameterAggregateBackingTests
                 {
                     Marshal.FreeHGlobal(bytesRead);
                 }
+                NativeLibrary.Free(library);
+            }
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
+    public async Task StandardA2NativeParameterLowersSingleProjectionArrayAddressesAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
+        const string moduleIdentity = "a2-nativeparameter-array-address";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("kernel32.dll", "RtlMoveMemory")]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 3)]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 3)]
+            internal extern void RtlMoveMemory(
+                write ptr<int32> destination,
+                ptr<int32> source,
+                uint64 byteCount);
+
+            public unsafe int32 Probe() {
+                mut [int32; 3] source = [11, 22, 33];
+                mut [int32; 3] destination = [0, 0, 0];
+                uint64 byteCount = 12;
+                unsafe {
+                    RtlMoveMemory(&destination[0], &source[0],
+                        byteCount);
+                }
+                return destination[0] + destination[1]
+                    + destination[2];
+            }
+            """), NativeOutputCoreRegistrationTests
+                .CreateRegisteredCompilationOptions());
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity,
+            moduleTargetRequirement: 1);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            moduleIdentity, []);
+        var caller = loaded.Functions.Single(static function =>
+            function.Name == "Probe");
+        var arrayAddresses = new List<BoundNativeStorageAddress>();
+        Assert.That(BoundTreeTraversal.VisitExpressions(caller.Body,
+            expression =>
+            {
+                if (expression is BoundNativeStorageAddress address
+                    && NativeFixedArrayTypes.IsType(address.CarrierType))
+                {
+                    arrayAddresses.Add(address);
+                }
+            }), Is.True);
+        Assert.That(arrayAddresses, Has.Count.EqualTo(2));
+        foreach (var address in arrayAddresses)
+        {
+            Assert.That(address.Projections.Length, Is.EqualTo(1));
+            Assert.That(address.ElementCount, Is.EqualTo(3UL));
+            Assert.That(address.ElementStride, Is.EqualTo(4UL));
+            Assert.That(address.ByteExtent, Is.EqualTo(12UL));
+        }
+
+        var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
+            moduleIdentity, schemaIdentity, moduleTargetRequirement: 1);
+        Assert.That(reemitted, Is.EqualTo(artifact));
+        var reemittedInput = new TrRmStandardArtifactInput(schemaIdentity,
+            reemitted);
+        _ = TrRmExecutableCompiler.LoadStandard(reemittedInput,
+            moduleIdentity, []);
+        var image = NativeModuleCompiler.EmitStandardLibrary(
+            reemittedInput, moduleIdentity, [], ["Probe"],
+            NativeRuntimePolicy.FailFast);
+        var directory = TestArtifactPaths.CreateDirectory(
+            "terrum-a2-nativeparameter-array-address-");
+        try
+        {
+            var imagePath = Path.Combine(directory, "library.dll");
+            await File.WriteAllBytesAsync(imagePath, image)
+                .ConfigureAwait(true);
+            var library = NativeLibrary.Load(imagePath);
+            try
+            {
+                var function = Marshal.GetDelegateForFunctionPointer<
+                    NativeParameterArrayProbeDelegate>(
+                    NativeLibrary.GetExport(library, "Probe"));
+                Assert.That(function(), Is.EqualTo(66));
+            }
+            finally
+            {
                 NativeLibrary.Free(library);
             }
         }

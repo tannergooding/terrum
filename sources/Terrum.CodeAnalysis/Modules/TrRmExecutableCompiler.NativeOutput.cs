@@ -415,7 +415,7 @@ public static partial class TrRmExecutableCompiler
                         }
 
                         var hasArrayPath = isArrayCarrier
-                            && projections.Length == 1
+                            && !projections.IsDefaultOrEmpty
                             && NativeFixedArrayContract.MatchesPath(
                                 address.CarrierType, projections, program,
                                 out _, out var leafLayout)
