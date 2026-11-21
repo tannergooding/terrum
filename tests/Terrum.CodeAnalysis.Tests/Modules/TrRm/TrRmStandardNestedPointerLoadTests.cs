@@ -62,6 +62,18 @@ internal sealed class TrRmStandardNestedPointerLoadTests
         }
     }
 
+    public static IEnumerable<TestCaseData> InvalidScalarPointerLoadCases()
+    {
+        foreach (var schemaIdentity in new[] {
+            PointerLoadsSchemaIdentity,
+            GeneralPredicateGraphsPointerLoadsSchemaIdentity,
+        })
+        {
+            yield return new TestCaseData(schemaIdentity, "bool", 0x02UL);
+            yield return new TestCaseData(schemaIdentity, "rune", 0xD800UL);
+        }
+    }
+
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int ReadNestedPointerFunction(nint pointer);
 
@@ -70,6 +82,12 @@ internal sealed class TrRmStandardNestedPointerLoadTests
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate double ReadFloat64PointerFunction(nint pointer);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate byte ReadBooleanPointerFunction(nint pointer);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int ReadRunePointerFunction(nint pointer);
 
     [TestCase(PointerLoadsSchemaIdentity)]
     [TestCase(GeneralPredicateGraphsPointerLoadsSchemaIdentity)]
@@ -296,6 +314,78 @@ internal sealed class TrRmStandardNestedPointerLoadTests
                     Marshal.GetDelegateForFunctionPointer<
                         ReadFloat64PointerFunction>(readAddress)(backing)));
             Assert.That(actualBits, Is.EqualTo(bits));
+        }
+        finally
+        {
+            if (library != 0)
+            {
+                NativeLibrary.Free(library);
+            }
+            if (backing != 0)
+            {
+                Marshal.FreeHGlobal(backing);
+            }
+            await TestFileCleanup.DeleteWithRetryAsync(libraryPath)
+                .ConfigureAwait(false);
+        }
+    }
+
+    [TestCaseSource(nameof(InvalidScalarPointerLoadCases))]
+    public async Task InvalidBooleanAndRunePointerLoadsPreserveBitsAsync(
+        string schemaIdentity, string typeName, ulong bits)
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string moduleIdentity = "standard-invalid-scalar-pointer-load";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse($"""
+            public unsafe {typeName} Read(ptr<{typeName}> value)
+            {
+                unsafe { return *value; }
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            moduleIdentity, []);
+        var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
+            moduleIdentity + "-reemitted", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, reemitted),
+            moduleIdentity + "-reemitted", []);
+        var image = NativeEmitter.EmitLibrary(loaded, ["Read"],
+            NativeRuntimePolicy.FailFast);
+        var libraryPath = Path.Combine(Path.GetTempPath(),
+            $"terrum-standard-invalid-scalar-pointer-load-{Guid.NewGuid():N}.dll");
+        nint library = 0;
+        nint backing = 0;
+        try
+        {
+            backing = Marshal.AllocHGlobal(sizeof(long));
+            if (typeName == "bool")
+            {
+                Marshal.WriteByte(backing, unchecked((byte)bits));
+            }
+            else
+            {
+                Marshal.WriteInt32(backing, unchecked((int)bits));
+            }
+
+            await File.WriteAllBytesAsync(libraryPath, image)
+                .ConfigureAwait(false);
+            library = NativeLibrary.Load(libraryPath);
+            var readAddress = NativeLibrary.GetExport(library, "Read");
+            var actualBits = typeName == "bool"
+                ? Marshal.GetDelegateForFunctionPointer<
+                    ReadBooleanPointerFunction>(readAddress)(backing)
+                : unchecked((uint)Marshal.GetDelegateForFunctionPointer<
+                    ReadRunePointerFunction>(readAddress)(backing));
+            Assert.That((ulong)actualBits, Is.EqualTo(bits));
         }
         finally
         {
