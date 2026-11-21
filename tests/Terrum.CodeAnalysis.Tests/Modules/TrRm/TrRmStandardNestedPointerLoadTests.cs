@@ -2,6 +2,7 @@
 
 using System;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using NUnit.Framework;
@@ -49,6 +50,7 @@ internal sealed class TrRmStandardNestedPointerLoadTests
         var loaded = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(schemaIdentity, artifact),
             moduleIdentity, []);
+        AssertNestedPointerRead(loaded);
         var reemittedModuleIdentity = moduleIdentity + "-reemitted";
         var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
             reemittedModuleIdentity, schemaIdentity,
@@ -56,6 +58,7 @@ internal sealed class TrRmStandardNestedPointerLoadTests
         loaded = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(schemaIdentity, reemitted),
             reemittedModuleIdentity, []);
+        AssertNestedPointerRead(loaded);
         var image = NativeEmitter.EmitLibrary(loaded, ["ReadNested"],
             NativeRuntimePolicy.FailFast);
         var libraryPath = Path.Combine(Path.GetTempPath(),
@@ -119,5 +122,46 @@ internal sealed class TrRmStandardNestedPointerLoadTests
             await TestFileCleanup.DeleteWithRetryAsync(libraryPath)
                 .ConfigureAwait(false);
         }
+    }
+
+    private static void AssertNestedPointerRead(BoundProgram program)
+    {
+        var function = program.Functions.Single(static candidate =>
+            candidate.Name == "ReadNested");
+        var pendingStatements = new Stack<BoundStatement>();
+        pendingStatements.Push(function.Body);
+        BoundReturn? returnStatement = null;
+        while (pendingStatements.TryPop(out var statement))
+        {
+            switch (statement)
+            {
+                case BoundBlock block:
+                    foreach (var nested in block.Statements)
+                    {
+                        pendingStatements.Push(nested);
+                    }
+                    break;
+                case BoundUnsafe unsafeBlock:
+                    pendingStatements.Push(unsafeBlock.Body);
+                    break;
+                case BoundReturn result:
+                    Assert.That(returnStatement, Is.Null);
+                    returnStatement = result;
+                    break;
+            }
+        }
+
+        Assert.That(returnStatement?.Value, Is.Not.Null);
+        var value = returnStatement!.Value!;
+        for (var depth = 0; depth < 3; depth++)
+        {
+            if (value is BoundUnsafeExpression unsafeExpression)
+            {
+                value = unsafeExpression.Expression;
+            }
+            Assert.That(value, Is.TypeOf<BoundNativePointerRead>());
+            value = ((BoundNativePointerRead)value).Address;
+        }
+        Assert.That(value, Is.TypeOf<BoundRead>());
     }
 }

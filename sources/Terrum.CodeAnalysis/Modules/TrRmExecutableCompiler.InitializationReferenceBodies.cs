@@ -1475,7 +1475,9 @@ public static partial class TrRmExecutableCompiler
             || !CanEncodeStandardNativePointerLoadValue(returnValue,
                 function, program, initializedLocals, pointerReads,
                 ref conversions)
-            || pointerReads.Count != 1 || conversions > 1)
+            || pointerReads.Count == 0
+            || pointerReads.Count > SemanticVerifier.MaximumAnalysisVisits
+            || conversions > 1)
         {
             return false;
         }
@@ -1702,6 +1704,28 @@ public static partial class TrRmExecutableCompiler
         while (pending.TryPop(out var current))
         {
             if (current is BoundCall)
+            {
+                count++;
+            }
+
+            foreach (var nested in current.NestedExpressions)
+            {
+                pending.Push(nested);
+            }
+        }
+
+        return count;
+    }
+
+    private static int CountStandardNativePointerReads(
+        BoundExpression expression)
+    {
+        var pending = new Stack<BoundExpression>();
+        pending.Push(expression);
+        var count = 0;
+        while (pending.TryPop(out var current))
+        {
+            if (current is BoundNativePointerRead)
             {
                 count++;
             }
@@ -3617,7 +3641,6 @@ public static partial class TrRmExecutableCompiler
         var pointerLoads = 0;
         var conversions = 0;
         var returns = 0;
-        BoundNativePointerRead? decodedPointerRead = null;
         var forwardedInitializationReference = false;
         var code = body.GetBlockCode(0);
 
@@ -4317,9 +4340,6 @@ public static partial class TrRmExecutableCompiler
                             pointerType.PointeeType, default) {
                                 IsUnsafeAuthorized = true,
                             };
-                    decodedPointerRead
-                        = (BoundNativePointerRead)valueByRegister[
-                            destinationRegister];
                     pointerLoads++;
                     break;
                 }
@@ -4579,6 +4599,7 @@ public static partial class TrRmExecutableCompiler
             && stores == 0 && calls == 1 && pointerLoads == 0
             && initializedLocals.Count == 1;
         var pointerLoadCallCount = 0;
+        var pointerLoadExpressionCount = 0;
         foreach (var statement in statements)
         {
             pointerLoadCallCount += statement switch {
@@ -4593,11 +4614,23 @@ public static partial class TrRmExecutableCompiler
                     CountStandardNativePointerLoadCalls(returnValue),
                 _ => 0,
             };
+            pointerLoadExpressionCount += statement switch {
+                BoundLocal local =>
+                    CountStandardNativePointerReads(local.Initializer),
+                BoundAssignment assignment =>
+                    CountStandardNativePointerReads(assignment.Value),
+                BoundExpressionStatement expressionStatement =>
+                    CountStandardNativePointerReads(
+                        expressionStatement.Expression),
+                BoundReturn { Value: BoundExpression returnValue } =>
+                    CountStandardNativePointerReads(returnValue),
+                _ => 0,
+            };
         }
         var valuePointerLoad = function.ReturnType != PrimitiveType.Void
-            && stores == 0 && pointerLoads == 1 && conversions <= 1
+            && stores == 0 && pointerLoads > 0 && conversions <= 1
             && initializedLocals.Count == 0 && body.ConstantCount == 0
-            && decodedPointerRead is not null
+            && pointerLoads == pointerLoadExpressionCount
             && calls == pointerLoadCallCount
             && (calls == 0
                 ? body.MethodCount == 0
