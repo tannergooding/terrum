@@ -3105,20 +3105,99 @@ public static partial class TrRmExecutableCompiler
             int resultHome = -1)
         {
             if (destination >= 14
-                || update.Place is not BoundRead read
-                || (uint)read.Variable >= (uint)function.Variables.Length
-                || update.Type != read.Type
                 || !NativeFixedArrayContract.IsIndexType(update.Type)
-                || !function.Variables[read.Variable].IsMutable
                 || update.Operator is not (TokenKind.PlusPlus
                     or TokenKind.MinusMinus))
             {
                 throw Unsupported(
-                    "L1 Body updates require a writable local fixed-array index.");
+                    "L1 Body updates require a supported writable integer place.");
             }
 
-            var sourceHome = HomeForVariable(read.Variable);
-            AppendHomeLoad(code, destination, sourceHome);
+            var sourceHome = -1;
+            List<BoundFieldRead>? fieldPath = null;
+            var fieldRootHome = -1;
+            var fieldRootType = PrimitiveType.Void;
+            if (update.Place is BoundRead read)
+            {
+                if ((uint)read.Variable
+                        >= (uint)function.Variables.Length
+                    || update.Type != read.Type
+                    || !function.Variables[read.Variable].IsMutable)
+                {
+                    throw Unsupported(
+                        "L1 local updates require a mutable local of the exact result type.");
+                }
+
+                sourceHome = HomeForVariable(read.Variable);
+                AppendHomeLoad(code, destination, sourceHome);
+            }
+            else if (update.Place is BoundFieldRead fieldRead)
+            {
+                fieldPath = GetFieldPath(fieldRead, out var root);
+                if (fieldPath.Count == 0
+                    || root is not BoundRead rootRead
+                    || (uint)rootRead.Variable
+                        >= (uint)function.Variables.Length
+                    || rootRead.Type
+                        != function.Variables[rootRead.Variable].Type
+                    || fieldRead.Type != update.Type)
+                {
+                    throw Unsupported(
+                        "L1 field updates require a local Home-rooted field path of the exact result type.");
+                }
+
+                fieldRootHome = HomeForVariable(rootRead.Variable);
+                fieldRootType = rootRead.Type;
+                _ = SelectFieldPath(fieldPath, fieldRootHome, fieldRootType,
+                    1, 1, 0xDA, destination);
+            }
+            else
+            {
+                throw Unsupported(
+                    "L1 Body updates require a local or local field-place target.");
+            }
+
+            void StoreUpdatedValue(byte sourceRegister)
+            {
+                if (fieldPath is null)
+                {
+                    AppendHomeStoreToCurrentBlock(sourceRegister,
+                        sourceHome);
+                    return;
+                }
+
+                var storeSourceRegister = sourceRegister;
+                if (storeSourceRegister is 1 or 2)
+                {
+                    var scratchRegister = storeSourceRegister == 1
+                        ? (byte)3 : (byte)4;
+                    code.Add(0x10);
+                    code.Add((byte)((storeSourceRegister << 4)
+                        | scratchRegister));
+                    storeSourceRegister = scratchRegister;
+                }
+
+                var requestedPlaceRegister = destination == 13
+                    ? (byte)12 : (byte)13;
+                var placeRegister = checked((byte)SelectFieldPath(
+                    fieldPath, fieldRootHome, fieldRootType, 2, 2, 0xD8,
+                    requestedPlaceRegister));
+                var storeIndex = checked((ushort)records.Count);
+                records.Add(
+                    TrRmRegisterBodyRecordWriter.EncodeSemanticStore(
+                        1, 1, 2, 1, placeRegister,
+                        storeSourceRegister,
+                        TrRmArtifactSchema.LocalAggregateLayoutDraft));
+                AppendSemanticStore(storeIndex);
+                if (update.IsPrefix
+                    && storeSourceRegister != sourceRegister)
+                {
+                    code.Add(0x10);
+                    code.Add((byte)((storeSourceRegister << 4)
+                        | destination));
+                }
+            }
+
             var valueRegister = destination;
             if (update.IsPrefix)
             {
@@ -3129,7 +3208,7 @@ public static partial class TrRmExecutableCompiler
                 var operation = GetUpdateOperation(update);
                 AppendC0(operation, valueRegister, valueRegister,
                     oneRegister);
-                AppendHomeStoreToCurrentBlock(valueRegister, sourceHome);
+                StoreUpdatedValue(valueRegister);
                 if (resultHome >= 0)
                 {
                     AppendHomeStoreToCurrentBlock(valueRegister, resultHome);
@@ -3153,7 +3232,7 @@ public static partial class TrRmExecutableCompiler
             var postfixOperation = GetUpdateOperation(update);
             AppendC0(postfixOperation, valueRegister, valueRegister,
                 oneRegisterForPostfix);
-            AppendHomeStoreToCurrentBlock(valueRegister, sourceHome);
+            StoreUpdatedValue(valueRegister);
         }
 
         static byte GetUpdateOperation(BoundUpdate update)

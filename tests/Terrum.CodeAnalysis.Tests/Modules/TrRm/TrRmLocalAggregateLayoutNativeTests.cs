@@ -1241,6 +1241,94 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
     }
 
     [Test]
+    public async Task L1PointerReadSnapshotsBeforeMutatingLaterCallArgumentAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+
+        const string moduleIdentity = "l1p-call-argument-snapshot";
+        const string l1pSchemaIdentity
+            = "trrm/1-draft-local-aggregate-layout-execution-pointer-loads-1";
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Union)]
+            struct RawWord {
+                public mut uint32 Narrow;
+                public mut uint64 Wide;
+            }
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            struct Snapshot {
+                public mut RawWord Value;
+                public mut int32 First;
+                public mut int32 Second;
+                public mut int32 Third;
+                public Snapshot(uint64 wide, int32 first, int32 second,
+                    int32 third) {
+                    Value.Wide = wide;
+                    First = first;
+                    Second = second;
+                    Third = third;
+                }
+            }
+            int32 Echo(int32 value) {
+                return value;
+            }
+            int32 ObserveFirst(Snapshot captured, int32 updated) {
+                return captured.First + updated;
+            }
+            int32 ObserveSecond(Snapshot captured, int32 updated) {
+                return captured.Second + updated;
+            }
+            public int32 Main() {
+                mut Snapshot value = new Snapshot(42, 1, 2, 3);
+                unsafe {
+                    ptr<Snapshot> source = &value;
+                    return ObserveFirst(*source, Echo(++value.First))
+                        + ObserveSecond(*source, Echo(value.Second++));
+                }
+            }
+            """), new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Program!.Structures.Single(
+            static structure => structure.Name == "Snapshot").Size,
+            Is.GreaterThan(16));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, l1pSchemaIdentity,
+            moduleTargetRequirement: 1);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(l1pSchemaIdentity, artifact),
+            moduleIdentity, []);
+        var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
+            moduleIdentity + "-reemitted", l1pSchemaIdentity,
+            moduleTargetRequirement: 1);
+        var reemittedIdentity = moduleIdentity + "-reemitted";
+        var reemittedInput = new TrRmStandardArtifactInput(
+            l1pSchemaIdentity, reemitted);
+        Assert.That(NativeModuleCompiler.ExecuteStandard(reemittedInput,
+            reemittedIdentity, [], NativeRuntimePolicy.FailFast),
+            Is.EqualTo(7));
+        var image = NativeModuleCompiler.EmitStandardExecutable(
+            reemittedInput, reemittedIdentity, [],
+            NativeRuntimePolicy.FailFast);
+        var directory = TestArtifactPaths.CreateDirectory(
+            "terrum-l1p-call-argument-snapshot-");
+        try
+        {
+            await AssertNativeImageExitCodeAsync(image,
+                Path.Combine(directory, "program.exe"),
+                reemittedIdentity, 7).ConfigureAwait(true);
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
     public void L1StorageAddressRejectsInvalidElementCount()
     {
         const string moduleIdentity = "l1p-storage-address-extent";
