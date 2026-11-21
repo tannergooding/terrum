@@ -263,9 +263,10 @@ request. This does **not** widen `--layout-core-manifest`,
 `--native-core-manifest` or `--native-output-core-manifest` command scopes.
 The manifest grants no registered foreign role, output schema or unsafe
 authority. Existing private source commands still lack the native/output
-Core-configuration route for owned annotated foreign declarations; that is an
-independent implementation/contract gate, not permission for this manifest
-to manufacture it.
+Core-configuration route for owned annotated foreign declarations; the
+separate, unapproved [private compilation Core-registration proposal](private-compilation-native-core-registration.md)
+addresses that independent gate. This identity manifest cannot manufacture
+Core authority or replace those selections.
 
 Producer foreign imports must be empty: neither producer CLI has a positional
 private provider. Existing eligible Core enum imports remain as above.

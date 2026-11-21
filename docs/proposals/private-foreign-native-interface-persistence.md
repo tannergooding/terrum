@@ -132,7 +132,10 @@ separate, unapproved
 [foreign-interface identity-input proposal](private-foreign-native-interface-identity-inputs.md)
 recommends complete owner/member assignments in identity-manifest v2 and
 explicitly gates that transport on PF111; it does not change this schema's
-exact selector or grant Core-registration authority.
+exact selector or grant Core-registration authority. Owned annotated source
+also needs the separate, unapproved
+[private compilation Core-registration route](private-compilation-native-core-registration.md);
+neither identity nor schema selection supplies that authority.
 
 **Absent option:** preserve the existing legacy creation/default-selection
 behavior on each route, including supported 104/106 inputs; do not select PF111
