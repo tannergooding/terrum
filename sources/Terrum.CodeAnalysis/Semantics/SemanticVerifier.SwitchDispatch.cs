@@ -304,6 +304,12 @@ public static partial class SemanticVerifier
                     sequence.Join(next, ref remaining, depth + 1);
                 }
                 return sequence;
+            case BoundExpressionStatement {
+                Expression: BoundCall {
+                    ForeignInterfaceCall.DoesNotReturn: true,
+                },
+            }:
+                return new CleanupSwitchFlow(false);
             case BoundExpressionStatement { Expression: BoundCall call }
                 when (uint)call.Function < (uint)program.Functions.Length
                     && program.Functions[call.Function].DoesNotReturn:
@@ -523,13 +529,29 @@ public static partial class SemanticVerifier
                 return CleanupSwitchExpressionIsSafe(assignment.Place, variable, program, ref remaining, depth + 1)
                     && CleanupSwitchExpressionIsSafe(assignment.Right, variable, program, ref remaining, depth + 1, allowRead);
             case BoundCall call:
-                if (program.Functions[call.Function].DoesNotReturn)
+                if (call.Arguments.IsDefault)
                 {
                     return false;
                 }
-                foreach (var argument in call.Arguments)
+                if (call.ForeignInterfaceCall is
+                    BoundForeignInterfaceCall foreignCall)
                 {
-                    if (!CleanupSwitchExpressionIsSafe(argument, variable, program, ref remaining, depth + 1, allowRead))
+                    if (foreignCall.DoesNotReturn
+                        || foreignCall.Receiver is null)
+                    {
+                        return false;
+                    }
+                }
+                else if ((uint)call.Function
+                    >= (uint)program.Functions.Length
+                    || program.Functions[call.Function].DoesNotReturn)
+                {
+                    return false;
+                }
+                foreach (var nested in call.NestedExpressions)
+                {
+                    if (!CleanupSwitchExpressionIsSafe(nested, variable,
+                            program, ref remaining, depth + 1, allowRead))
                     {
                         return false;
                     }

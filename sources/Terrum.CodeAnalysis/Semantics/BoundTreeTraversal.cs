@@ -1386,6 +1386,19 @@ internal static class BoundTreeTraversal
                 rewriteType),
         };
 
+    internal static BoundForeignInterfaceCall RewriteTypes(
+        BoundForeignInterfaceCall call,
+        Func<PrimitiveType, PrimitiveType> rewriteType) =>
+        call with {
+            Member = RewriteTypes(call.Member, rewriteType),
+            NativeOutputContracts =
+                call.NativeOutputContracts.IsDefault ? default : [
+                    .. call.NativeOutputContracts.Select(output =>
+                        output with {
+                            PointeeType = rewriteType(output.PointeeType),
+                        })],
+        };
+
     internal static BoundGenericMethodFormal RewriteTypes(
         BoundGenericMethodFormal formal,
         Func<PrimitiveType, PrimitiveType> rewriteType) =>
@@ -1925,6 +1938,11 @@ internal static class BoundTreeTraversal
                     call.InterfaceCallIdentity is
                         BoundInterfaceCallIdentity interfaceCall
                         ? RewriteTypes(interfaceCall, rewriteType) : null,
+                ForeignInterfaceCall =
+                    call.ForeignInterfaceCall is
+                        BoundForeignInterfaceCall foreignInterfaceCall
+                        ? RewriteTypes(foreignInterfaceCall, rewriteType)
+                        : null,
                 GenericMethodCall = call.GenericMethodCall is
                     BoundGenericMethodInstantiation instantiation
                     ? RewriteTypes(instantiation, rewriteType) : null,

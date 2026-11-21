@@ -77,14 +77,21 @@ public static partial class SemanticVerifier
                         {
                             continue;
                         }
-                        if (dependency.SourceKind != NativeOutputDependencySourceKind.Formal)
+                        if (dependency.SourceKind is not (
+                                NativeOutputDependencySourceKind.Formal
+                                or NativeOutputDependencySourceKind.Receiver))
                         {
                             throw Invalid(call.Span);
                         }
 
+                        var sourceParameterIndex
+                            = dependency.SourceKind
+                                == NativeOutputDependencySourceKind.Receiver
+                                    ? -1 : dependency.SourceOrdinal;
                         var stagedIndex = dependencies.Staged.FindLastIndex(staged =>
                             ReferenceEquals(staged.Call, call)
-                            && staged.ParameterIndex == dependency.SourceOrdinal);
+                            && staged.ParameterIndex
+                                == sourceParameterIndex);
                         if (stagedIndex < 0)
                         {
                             throw InvalidEffect(call.Span, "Ownership");
@@ -181,6 +188,12 @@ public static partial class SemanticVerifier
     private static bool CallMayInvalidateNativeOutputState(
         BoundCall call, BoundFunction target, InitializationState initialized)
     {
+        if (call.ForeignInterfaceCall is not null
+            && initialized.MayHaveNativeOutputState)
+        {
+            return true;
+        }
+
         var program = initialized.Program;
         for (var argumentIndex = 0; argumentIndex < call.Arguments.Length; argumentIndex++)
         {
@@ -250,13 +263,53 @@ public static partial class SemanticVerifier
         var program = initialized.Program;
         if (expression is BoundCall call)
         {
-            var target = (uint)call.Function < (uint)program.Functions.Length
-                ? program.Functions[call.Function] : null;
+            if (call.Arguments.IsDefault
+                || (!call.ArgumentParameterIndices.IsDefault
+                    && call.ArgumentParameterIndices.Length
+                        != call.Arguments.Length))
+            {
+                throw Invalid(call.Span);
+            }
+
+            BoundFunction? target;
+            BoundForeignInterfaceCall? foreignCall
+                = call.ForeignInterfaceCall;
+            if (foreignCall is not null)
+            {
+                if (call.Function != BoundCall.ForeignInterfaceFunction
+                    || foreignCall.Receiver is null
+                    || !ForeignNativeInterfaceContract.TryCreateCallTarget(
+                        foreignCall, program, out var foreignTarget))
+                {
+                    throw Invalid(call.Span);
+                }
+                target = foreignTarget;
+            }
+            else
+            {
+                target = (uint)call.Function < (uint)program.Functions.Length
+                    ? program.Functions[call.Function] : null;
+            }
             var stagedCount = initialized.Dependencies is BackingDependencies
                 stagedDependencies ? stagedDependencies.Staged.Count : 0;
             try
             {
                 var argumentsComplete = true;
+                if (foreignCall is not null)
+                {
+                    ApplyNativeOutputCalls(foreignCall.Receiver,
+                        initialized, callFacts, ref remaining,
+                        depth + 1);
+                    argumentsComplete = CanCompleteNormally(
+                        foreignCall.Receiver, initialized, program,
+                        ref remaining, depth + 1);
+                    if (argumentsComplete && target is not null)
+                    {
+                        StageDependencySource(call, -1,
+                            foreignCall.Receiver, target, initialized,
+                            program, ref remaining, depth + 1);
+                    }
+                }
                 for (var index = 0; index < call.Arguments.Length; index++)
                 {
                     if (!argumentsComplete)
@@ -281,6 +334,15 @@ public static partial class SemanticVerifier
 
                 if (target is not null && argumentsComplete)
                 {
+                    if (foreignCall is not null
+                        && initialized.Dependencies
+                            is BackingDependencies foreignDependencies)
+                    {
+                        foreignDependencies
+                            .MarkAllNativePointerProvenanceUnknown();
+                        foreignDependencies.InvalidateAllCopyOriginValues(
+                            program, ref remaining, depth + 1);
+                    }
                     ApplyNativePointerCaptureEffects(call, target, initialized, ref remaining);
                     InvalidateNativePointerExtentsForCall(
                         call, target, initialized, program);
@@ -418,11 +480,25 @@ public static partial class SemanticVerifier
         }
 
         var program = initialized.Program;
-        var hasEffect = (expression is BoundCall call
-            && (uint)call.Function < (uint)program.Functions.Length
-            && CallMayInvalidateNativeOutputState(
-                call, program.Functions[call.Function], initialized))
-            || (expression is BoundIndirectCall indirectCall
+        var hasEffect = false;
+        if (expression is BoundCall call)
+        {
+            if (call.ForeignInterfaceCall is
+                BoundForeignInterfaceCall foreignCall)
+            {
+                hasEffect = ForeignNativeInterfaceContract
+                        .TryCreateCallTarget(foreignCall, program,
+                            out var target)
+                    && CallMayInvalidateNativeOutputState(
+                        call, target, initialized);
+            }
+            else if ((uint)call.Function < (uint)program.Functions.Length)
+            {
+                hasEffect = CallMayInvalidateNativeOutputState(call,
+                    program.Functions[call.Function], initialized);
+            }
+        }
+        hasEffect |= (expression is BoundIndirectCall indirectCall
                 && indirectCall.Target is not null
                 && NativeFunctionPointerTypes.IsType(indirectCall.Target.Type)
                 && (uint)NativeFunctionPointerTypes.Index(indirectCall.Target.Type)
@@ -468,7 +544,13 @@ public static partial class SemanticVerifier
 
         var program = initialized.Program;
         var hasEffect = false;
-        if (expression is BoundCall call
+        if (expression is BoundCall {
+            ForeignInterfaceCall: not null,
+        })
+        {
+            hasEffect = true;
+        }
+        else if (expression is BoundCall call
             && (uint)call.Function < (uint)program.Functions.Length)
         {
             var target = program.Functions[call.Function];
@@ -793,13 +875,32 @@ public static partial class SemanticVerifier
     private static NativeOutputCallFact? CreateNativeOutputCallFact(
         BoundCall call, InitializationState initialized)
     {
-        if ((uint)call.Function >= (uint)initialized.Program.Functions.Length
-            || call.Type is not (PrimitiveType.Int32 or PrimitiveType.UInt32))
+        if (call.Type is not (PrimitiveType.Int32 or PrimitiveType.UInt32))
         {
             return null;
         }
 
-        var target = initialized.Program.Functions[call.Function];
+        BoundFunction target;
+        if (call.ForeignInterfaceCall is
+            BoundForeignInterfaceCall foreignCall)
+        {
+            if (call.Function != BoundCall.ForeignInterfaceFunction
+                || !ForeignNativeInterfaceContract.TryCreateCallTarget(
+                    foreignCall, initialized.Program, out target))
+            {
+                return null;
+            }
+        }
+        else
+        {
+            if ((uint)call.Function
+                >= (uint)initialized.Program.Functions.Length)
+            {
+                return null;
+            }
+            target = initialized.Program.Functions[call.Function];
+        }
+
         var outputCount = NativeOutputCount(target);
         if (outputCount == 0)
         {

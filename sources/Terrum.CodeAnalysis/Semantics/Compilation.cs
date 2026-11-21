@@ -320,13 +320,15 @@ public sealed class Compilation
                     switch (expression)
                     {
                         case BoundCall call:
-                            if (program.Functions[call.Function].Intrinsic == BoundIntrinsic.BufferClear)
+                            if ((uint)call.Function < (uint)program.Functions.Length
+                                && program.Functions[call.Function].Intrinsic
+                                    == BoundIntrinsic.BufferClear)
                             {
                                 return true;
                             }
-                            foreach (var argument in call.Arguments)
+                            foreach (var nested in call.NestedExpressions)
                             {
-                                expressions.Push(argument);
+                                expressions.Push(nested);
                             }
                             break;
                         case BoundIndirectCall call:

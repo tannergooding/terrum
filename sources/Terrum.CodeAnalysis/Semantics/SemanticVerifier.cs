@@ -1740,11 +1740,20 @@ public static partial class SemanticVerifier
         var hasNativeOutputContracts = program.Functions.Any(static function =>
                 function is not null && NativeOutputCount(function) != 0)
             || program.NativeFunctionPointerSignatures.Any(static signature =>
-                !signature.OutputStates.IsEmpty);
+                !signature.OutputStates.IsEmpty)
+            || program.Interfaces.Any(static definition =>
+                !definition.Members.IsDefault
+                && definition.Members.Any(static member =>
+                    member is not null
+                    && !member.NativeOutputContracts.IsDefaultOrEmpty));
         var hasDoesNotReturnFunctions = program.Functions.Any(
             static function => function.DoesNotReturn)
             || program.NativeFunctionPointerSignatures.Any(
-                static signature => (signature.EffectsMask & 2) != 0);
+                static signature => (signature.EffectsMask & 2) != 0)
+            || program.Interfaces.Any(static definition =>
+                !definition.Members.IsDefault
+                && definition.Members.Any(static member =>
+                    member is not null && member.DoesNotReturn));
         var nativePointerCaptureEffects = CreateNativePointerCaptureEffects(program);
         var nativePointerWriteEffects = CreateNativePointerWriteEffects(
             program, nativePointerCaptureEffects);
@@ -3575,6 +3584,10 @@ public static partial class SemanticVerifier
                     case BoundNativeFunctionAddress address
                         when !item.IsUnsafe || !address.IsUnsafeAuthorized:
                         throw InvalidEffect(address.Span, "NativeFunctionPointer");
+                    case BoundCall {
+                        ForeignInterfaceCall: not null,
+                    } call when !item.IsUnsafe || !call.IsUnsafeAuthorized:
+                        throw InvalidEffect(call.Span, "UnsafeCaller");
                     case BoundCall call when (uint)call.Function < (uint)program.Functions.Length
                         && program.Functions[call.Function] is BoundFunction { RequiresUnsafeCaller: true }
                         && (!item.IsUnsafe || !call.IsUnsafeAuthorized):
@@ -23447,9 +23460,67 @@ public static partial class SemanticVerifier
         FailureEdges? failures, bool statementCompound,
         BoundBinary? cleanupCounterStep,
         bool allowUnmaterializedInterfaceDefaults,
-        bool discardedResult = false)
+        bool discardedResult = false,
+        BoundFunction? targetOverride = null)
     {
-        if (call.Function < 0 || call.Function >= program.Functions.Length || call.Arguments.IsDefault)
+        if (targetOverride is null
+            && call.ForeignInterfaceCall is BoundForeignInterfaceCall
+                foreignCall)
+        {
+            if (!ForeignNativeInterfaceContract.IsValidCall(call, function,
+                    program)
+                || !ForeignNativeInterfaceContract.TryCreateCallTarget(
+                    foreignCall, program, out var foreignTarget))
+            {
+                throw InvalidEffect(call.Span, "ForeignNativeInterface");
+            }
+
+            var stagedDependencyCount
+                = initialized.Dependencies?.Staged.Count ?? 0;
+            try
+            {
+                if (!EvaluateExpression(foreignCall.Receiver, initialized,
+                        fieldMasks, declarations, function, program,
+                        ref remaining, depth + 1, failures))
+                {
+                    foreach (var argument in call.Arguments)
+                    {
+                        ValidateUnreachableExpression(argument, initialized,
+                            fieldMasks, declarations, function, program,
+                            ref remaining, depth + 1);
+                    }
+                    return false;
+                }
+
+                StageDependencySource(call, -1, foreignCall.Receiver,
+                    foreignTarget, initialized, program, ref remaining,
+                    depth + 1, fieldMasks);
+                return VerifyCallExpression(call, initialized, fieldMasks,
+                    declarations, function, program, ref remaining, depth,
+                    failures, statementCompound, cleanupCounterStep,
+                    allowUnmaterializedInterfaceDefaults,
+                    discardedResult, foreignTarget);
+            }
+            finally
+            {
+                if (initialized.Dependencies
+                    is BackingDependencies dependencies)
+                {
+                    dependencies.Staged.RemoveRange(
+                        stagedDependencyCount,
+                        dependencies.Staged.Count
+                            - stagedDependencyCount);
+                }
+            }
+        }
+
+        if (call.Arguments.IsDefault
+            || (targetOverride is null
+                ? call.Function < 0
+                    || call.Function >= program.Functions.Length
+                    || call.ForeignInterfaceCall is not null
+                : call.Function != BoundCall.ForeignInterfaceFunction
+                    || call.ForeignInterfaceCall is null))
         {
             throw Invalid();
         }
@@ -23465,7 +23536,7 @@ public static partial class SemanticVerifier
         {
             throw Limit();
         }
-        var target = program.Functions[call.Function];
+        var target = targetOverride ?? program.Functions[call.Function];
         if (target.PropertyAccessorKind
                 == BoundPropertyAccessorKind.Initializer)
         {
@@ -23552,7 +23623,8 @@ public static partial class SemanticVerifier
             throw InvalidEffect(call.Span, "GenericMethod");
         }
         var copyOriginSummary = initialized.Dependencies is BackingDependencies summaryDependencies
-            ? summaryDependencies.CopyOriginSummaries[call.Function]
+            ? call.Function < 0 ? null
+                : summaryDependencies.CopyOriginSummaries[call.Function]
             : target.CopyOriginSummary;
         if (copyOriginSummary is not null
             && initialized.Dependencies is null)
@@ -23646,6 +23718,23 @@ public static partial class SemanticVerifier
                     state
                         .ClearInitializationPostconditionCallResult(
                             argumentCall);
+                }
+            }
+
+            if (call.ForeignInterfaceCall is
+                BoundForeignInterfaceCall foreignCall)
+            {
+                var receiver = foreignCall.Receiver;
+                state.RepeatResources.ConsumeWork();
+                if (state.Dependencies
+                    is BackingDependencies dependencies)
+                {
+                    dependencies.ClearCallResultCaches(receiver);
+                }
+                if (receiver is BoundCall receiverCall)
+                {
+                    state.ClearInitializationPostconditionCallResult(
+                        receiverCall);
                 }
             }
         }
@@ -24359,6 +24448,14 @@ public static partial class SemanticVerifier
             }
             VerifyStagedNativeParameterExtents(call, target,
                 initialized, program, ref remaining, depth + 1);
+            if (call.ForeignInterfaceCall is not null
+                && initialized.Dependencies
+                    is BackingDependencies foreignCallDependencies)
+            {
+                foreignCallDependencies.MarkAllNativePointerProvenanceUnknown();
+                foreignCallDependencies.InvalidateAllCopyOriginValues(
+                    program, ref remaining, depth + 1);
+            }
             var copyOriginCallResult = CarriesCopyOrigin(call.Type, program)
                 && initialized.Dependencies is BackingDependencies
                 copyOriginResultDependencies
@@ -38561,7 +38658,8 @@ public static partial class SemanticVerifier
         facts = expression switch {
             BoundUnsafeExpression unsafeExpression =>
                 FlowFacts(unsafeExpression.Expression, flowFacts, ref remaining),
-            BoundCall call => FlowFacts(call.Arguments, flowFacts, ref remaining),
+            BoundCall call => FlowFacts(call.NestedExpressions,
+                flowFacts, ref remaining),
             BoundIndirectCall call => FlowFacts([call.Target, .. call.Arguments], flowFacts, ref remaining),
             BoundBinary binary => AddFlowFact(AddFlowFact(0, binary.Left, flowFacts, ref remaining),
                 binary.Right, flowFacts, ref remaining),
@@ -38710,6 +38808,9 @@ public static partial class SemanticVerifier
 
         Count(ref remaining, depth);
         shape = expression switch {
+            BoundCall {
+                ForeignInterfaceCall.DoesNotReturn: true,
+            } => MayNotCompleteNormallyFact,
             BoundCall call when (uint)call.Function < (uint)program.Functions.Length
                 && program.Functions[call.Function].DoesNotReturn
                 => MayNotCompleteNormallyFact,
@@ -38781,6 +38882,27 @@ public static partial class SemanticVerifier
         switch (expression)
         {
             case BoundCall call:
+                if (call.ForeignInterfaceCall is
+                    BoundForeignInterfaceCall foreignCall)
+                {
+                    if (foreignCall.Receiver is null
+                        || call.Arguments.IsDefault
+                        || !CanCompleteNormally(foreignCall.Receiver,
+                            initialized, program, ref remaining,
+                            depth + 1))
+                    {
+                        return false;
+                    }
+                    foreach (var argument in call.Arguments)
+                    {
+                        if (!CanCompleteNormally(argument, initialized,
+                                program, ref remaining, depth + 1))
+                        {
+                            return false;
+                        }
+                    }
+                    return !foreignCall.DoesNotReturn;
+                }
                 if ((uint)call.Function >= (uint)program.Functions.Length || call.Arguments.IsDefault)
                 {
                     return true;

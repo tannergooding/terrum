@@ -6675,6 +6675,27 @@ public static partial class SemanticVerifier
                 case BoundUnsafeExpression unsafeExpression:
                     NativePointerSource(destination, unsafeExpression.Expression, depth + 1);
                     break;
+                case BoundCall call when CarriesNativePointer(
+                    call.Type, program)
+                    && call.ForeignInterfaceCall is
+                        BoundForeignInterfaceCall foreignCall:
+                    facts.NativePointerMayBeUnknown[destination] = true;
+                    if (call.Arguments.IsDefault
+                        || foreignCall.Receiver is null)
+                    {
+                        throw Invalid(call.Span);
+                    }
+                    NativePointerSource(destination, foreignCall.Receiver,
+                        depth + 1);
+                    foreach (var argument in call.Arguments)
+                    {
+                        if (CarriesNativePointer(argument, program))
+                        {
+                            NativePointerSource(destination, argument,
+                                depth + 1);
+                        }
+                    }
+                    break;
                 case BoundCall call when CarriesNativePointer(call.Type, program):
                     facts.NativePointerMayBeUnknown[destination] = true;
                     if (call.Arguments.IsDefault
@@ -12667,6 +12688,37 @@ public static partial class SemanticVerifier
                     ref remaining, depth + 1).Sources;
             case BoundUnsafeExpression unsafeExpression:
                 return NativePointerBackingOf(unsafeExpression.Expression, facts, program, ref remaining, depth + 1);
+            case BoundCall call when CarriesNativePointer(call.Type, program)
+                && call.ForeignInterfaceCall is
+                    BoundForeignInterfaceCall foreignCall:
+                if (facts.TryGetNativePointerCallResult(call,
+                    StorageProjection.WholeObject, out var foreignSources,
+                    out _))
+                {
+                    return foreignSources;
+                }
+                if (call.Arguments.IsDefault
+                    || foreignCall.Receiver is null)
+                {
+                    throw Invalid(call.Span);
+                }
+                var foreignBacking = new HashSet<ProvenanceAnchor>();
+                if (CarriesNativePointer(foreignCall.Receiver, program))
+                {
+                    foreignBacking.UnionWith(NativePointerBackingOf(
+                        foreignCall.Receiver, facts, program, ref remaining,
+                        depth + 1));
+                }
+                foreach (var argument in call.Arguments)
+                {
+                    if (CarriesNativePointer(argument, program))
+                    {
+                        foreignBacking.UnionWith(NativePointerBackingOf(
+                            argument, facts, program, ref remaining,
+                            depth + 1));
+                    }
+                }
+                return foreignBacking;
             case BoundCall call when CarriesNativePointer(call.Type, program):
                 if (facts.TryGetNativePointerCallResult(call,
                     StorageProjection.WholeObject, out var resultSources, out _))
@@ -12973,6 +13025,16 @@ public static partial class SemanticVerifier
                 return new NativePointerExtentFact(whenTrue.Sources,
                     whenTrue.MayBeOpaque || whenFalse.MayBeOpaque,
                     whenTrue.IsUnavailable || whenFalse.IsUnavailable);
+            case BoundCall call when CarriesNativePointer(call.Type, program)
+                && call.ForeignInterfaceCall is not null:
+                if (facts.TryGetNativePointerCallExtentResult(
+                    call, StorageProjection.WholeObject,
+                    out var foreignCallExtent))
+                {
+                    return foreignCallExtent;
+                }
+                return new NativePointerExtentFact([], MayBeOpaque: true,
+                    IsUnavailable: false);
             case BoundCall call when CarriesNativePointer(call.Type, program):
                 if (facts.TryGetNativePointerCallExtentResult(
                     call, StorageProjection.WholeObject, out var callExtent))

@@ -3259,14 +3259,18 @@ internal sealed record BoundPendingInterfaceDefault(
 }
 
 /// <summary>A statically resolved direct call.</summary>
-/// <param name="Function">The callee index.</param>
+/// <param name="Function">The callee index, or the foreign-interface sentinel.</param>
 /// <param name="Arguments">Arguments evaluated once in source order.</param>
 /// <param name="Type">The result type.</param>
 /// <param name="Span">The source range.</param>
 public sealed record BoundCall(int Function, ImmutableArray<BoundExpression> Arguments,
     PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span)
 {
+    internal const int ForeignInterfaceFunction = -1;
+
     internal BoundInterfaceCallIdentity? InterfaceCallIdentity
+        { get; init; }
+    internal BoundForeignInterfaceCall? ForeignInterfaceCall
         { get; init; }
     internal BoundGenericMethodInstantiation? GenericMethodCall { get; init; }
     internal BoundGenericMethodImport? ImportedGenericMethodCall
@@ -3310,12 +3314,25 @@ public sealed record BoundCall(int Function, ImmutableArray<BoundExpression> Arg
     internal bool IsUnsafeAuthorized { get; init; }
 
     internal override bool HasValidNestedExpressions =>
-        !Arguments.IsDefault && Arguments.All(static argument => argument is not null);
+        !Arguments.IsDefault && Arguments.All(static argument => argument is not null)
+        && (ForeignInterfaceCall is null
+            || ForeignInterfaceCall.Receiver is not null);
     internal override ImmutableArray<BoundExpression> NestedExpressions =>
-        Arguments.IsDefault ? [] : Arguments;
+        Arguments.IsDefault ? [] : ForeignInterfaceCall is
+            BoundForeignInterfaceCall foreignCall
+                ? [foreignCall.Receiver, .. Arguments] : Arguments;
     internal override BoundExpression RewriteNestedExpressions(
-        Func<BoundExpression, BoundExpression> rewrite) => Arguments.IsDefault ? this
-        : this with { Arguments = [.. Arguments.Select(rewrite)] };
+        Func<BoundExpression, BoundExpression> rewrite) =>
+        this with {
+            Arguments = Arguments.IsDefault
+                ? default : [.. Arguments.Select(rewrite)],
+            ForeignInterfaceCall = ForeignInterfaceCall is
+                BoundForeignInterfaceCall foreignCall
+                    ? foreignCall with {
+                        Receiver = rewrite(foreignCall.Receiver),
+                    }
+                    : null,
+        };
 }
 
 internal sealed record BoundInterfaceCallIdentity(
@@ -3324,6 +3341,15 @@ internal sealed record BoundInterfaceCallIdentity(
     BoundInterfaceType RequestedInterface,
     BoundInterfaceMemberIdentity Requirement,
     bool IsConstraintCall = false);
+
+internal sealed record BoundForeignInterfaceCall(
+    BoundExpression Receiver,
+    BoundInterfaceMemberIdentity Member,
+    uint VTableByteOffset,
+    NativeCallingConvention CallingConvention,
+    bool RequiresMutableReceiver,
+    bool DoesNotReturn,
+    ImmutableArray<NativeOutputContract> NativeOutputContracts);
 
 /// <summary>A checked call through a concrete native function-pointer signature.</summary>
 public sealed record BoundIndirectCall(BoundExpression Target, ImmutableArray<BoundExpression> Arguments,
