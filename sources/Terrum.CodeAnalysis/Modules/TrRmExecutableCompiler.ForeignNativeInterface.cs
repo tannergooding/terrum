@@ -22,7 +22,6 @@ public static partial class TrRmExecutableCompiler
             || moduleTargetRequirement
                 != TrRmModuleTableReader.WindowsX64NativeTargetRequirement
             || program.EntryPoint >= 0
-            || !program.Functions.IsEmpty
             || !program.Classes.IsEmpty
             || !program.Buffers.IsEmpty
             || !program.NativeFixedArrayTypes.IsEmpty
@@ -45,7 +44,7 @@ public static partial class TrRmExecutableCompiler
             || !ForeignNativeInterfaceContract.IsValidTable(program))
         {
             throw Unsupported(
-                "The F+I source producer requires a declaration-only library with supported native interface and aggregate metadata.");
+                "The F+I source producer requires a library with supported native interface and aggregate metadata.");
         }
 
         var localInterfaces = program.Interfaces.Where(
@@ -163,6 +162,7 @@ public static partial class TrRmExecutableCompiler
                         ? export.Name
                         : string.Concat(export.Namespace, ".",
                             export.Name)]))
+            .Concat(CollectNativeBlittableStructureIndexes(program))
             .Distinct()
             .Order()
             .ToImmutableArray();
@@ -182,90 +182,66 @@ public static partial class TrRmExecutableCompiler
         }
 
         SemanticVerifier.Verify(program);
-        var hasNativeOutputs = foreignNativeInterfaces.Any(
-            static definition => definition.Members.Any(
-                static member =>
-                    !member.NativeOutputContracts.IsDefaultOrEmpty));
-        var hasFunctionPointerPredicates
-            = GetForeignNativeFunctionPointerSignatureIndexes(
-                foreignNativeInterfaces, program).Any(index =>
-                !program.NativeFunctionPointerSignatures[index]
-                    .Selectors.IsEmpty);
-        var hasScalarDefaults = schema
-            .UsesForeignNativeInterfaceParameterSurface()
-            && foreignNativeInterfaces.Any(static definition =>
-                definition.Members.Any(static member =>
-                    member.Parameters.Any(static parameter =>
-                        parameter.DefaultValue is not null)));
-        var featureRows = new List<TrRmFeatureRow> {
-            TrRmFeatureRow.NativeBoundaryContracts,
-            TrRmFeatureRow.RootlessNativeValues,
-            TrRmFeatureRow.NativeInterfaceCalls,
-        };
-        if (hasNativeOutputs)
+        if (!program.SourceTypePublications.IsDefault)
         {
-            featureRows.Add(TrRmFeatureRow.NativeOutputCellsCandidate);
-            featureRows.Add(TrRmFeatureRow.PublishedPredicates);
-        }
-        else if (hasFunctionPointerPredicates)
-        {
-            featureRows.Add(TrRmFeatureRow.PublishedPredicates);
-        }
-        if (hasScalarDefaults)
-        {
-            featureRows.Add(TrRmFeatureRow.TypedFrozenValues);
-        }
-        if (!structureIndexes.IsEmpty)
-        {
-            featureRows.Add(TrRmFeatureRow.LayoutQueries);
-        }
-        if (schema.UsesForeignNativeInterfaceParameterSurface())
-        {
-            featureRows.Add(TrRmFeatureRow.MethodParameterLabelsCandidate);
+            throw Unsupported(
+                "F+I source emission cannot replace a retained source publication map.");
         }
 
-        var moduleNameRows = TrRmStringTableWriter.EncodeTextRows([
-            (moduleIdentity, 0),
-        ]);
-        var strings = new TrRmStringTableReader(moduleNameRows, 1);
-        var featureBytes = TrRmFeatureTableWriter.Encode(featureRows, schema);
-        var moduleBytes = TrRmModuleTableWriter.Encode([
-            new TrRmModuleRow(1,
-                moduleTargetRequirement, 0, 0, 1, 1, 1, 1, 1,
-                featureRows.Count),
-        ], strings, 0, 0, 0, 0, featureRows.Count);
-        var targetProfileBytes = TrRmTargetProfileTableWriter.Encode([
-            new TrRmTargetProfileRow(
-                TrRmTargetProfileTableReader.WindowsX64NativeProfileId,
-                TrRmTargetProfileTableReader
-                    .WindowsX64NativeProfileRuleRevision),
-        ]);
-        var sections = new List<TrRmSection> {
-            new(0x0001, 0, 1, moduleBytes),
-            new(0x0002, 0, 1, moduleNameRows),
-            new(0x0004, 0, checked((uint)featureRows.Count), featureBytes),
-            new(0x0048, 0, 1, targetProfileBytes),
+        // Expected aggregate Imports are rebuilt after the caller tables are emitted.
+        var callerStructures = program.Structures.Select(static structure =>
+            structure with {
+                Fields = structure.Fields.Select(static field => field with {
+                    StandardFieldOrigin = null,
+                }).ToImmutableArray(),
+                StandardTypeOrigin = null,
+                StandardLayoutOnly = false,
+            }).ToImmutableArray();
+        var callerProgram = program with {
+            Structures = callerStructures,
+            StandardQuerySourceAssociation = null,
         };
-        sections.Sort(static (left, right) =>
-            left.Kind.CompareTo(right.Kind));
-        var shell = TrRmArtifactWriter.Encode(sections, schema);
-        if (!structureIndexes.IsEmpty)
+        var methodMapPlaceholders
+            = new Dictionary<BoundInterfaceMemberIdentity, uint>();
+        uint GetMethodMapPlaceholder(BoundInterfaceMemberIdentity member)
         {
-            var structureArtifact
-                = EmitForeignNativeInterfaceStructureArtifact(program,
-                    moduleIdentity, moduleTargetRequirement,
-                    structureTypeExports, structureIndexes);
-            shell = MergeForeignNativeInterfaceStructureArtifact(shell,
-                structureArtifact, schema);
+            if (methodMapPlaceholders.TryGetValue(member,
+                    out var existing))
+            {
+                return existing;
+            }
+
+            if (methodMapPlaceholders.Count >= 0x00FF_FFFF)
+            {
+                throw Unsupported(
+                    "The F+I caller Body has too many distinct InterfaceMethod targets.");
+            }
+
+            // Interface MethodDefs are appended after caller Bodies.
+            var placeholder = 0xFE00_0000u
+                | checked((uint)methodMapPlaceholders.Count + 1);
+            methodMapPlaceholders.Add(member, placeholder);
+            return placeholder;
         }
+
+        var callerArtifact = EmitDevelopment(callerProgram, moduleIdentity,
+            schema, moduleTargetRequirement, structureTypeExports,
+            standardInitializationReferenceBodies: true,
+            standardSchemaIdentity: schemaIdentity,
+            foreignInterfaceMethodMapTokenForCall:
+                GetMethodMapPlaceholder,
+            semanticVerificationProgram: program);
         var sourceMethodExports = SourceGenericMethodExports.Capture(
             program, moduleIdentity, []);
         var artifact = EmitGenericMethodCallsDraftSource(program,
             moduleIdentity, moduleTargetRequirement, sourceMethodExports,
             interfaceTypeExports, schema, baseSchema: schema,
-            baseArtifact: shell,
+            standardInitializationReferenceBodies: true,
+            baseArtifact: callerArtifact,
             foreignNativeInterfaceStructureIndexes: structureIndexes,
             standardSchemaIdentity: schemaIdentity,
+            foreignInterfaceMethodMapTokenPlaceholders:
+                methodMapPlaceholders,
             frozenScalarValueBuilder: schema
                 .UsesForeignNativeInterfaceParameterSurface()
                     ? new TrRmFrozenScalarValueBuilder() : null);
@@ -455,147 +431,26 @@ public static partial class TrRmExecutableCompiler
         }
     }
 
-    private static byte[] EmitForeignNativeInterfaceStructureArtifact(
-        BoundProgram program, string moduleIdentity,
-        uint moduleTargetRequirement,
-        IReadOnlyList<TrRmSourceTypeExport> structureTypeExports,
-        ImmutableArray<int> structureIndexes)
+    private static bool HasForeignNativeInterfaceCall(
+        BoundFunction function)
     {
-        var structureIndexMap = new int[program.Structures.Length];
-        Array.Fill(structureIndexMap, -1);
-        for (var index = 0; index < structureIndexes.Length; index++)
-        {
-            structureIndexMap[structureIndexes[index]] = index;
-        }
-
-        PrimitiveType RemapStructureFieldType(PrimitiveType type)
-        {
-            if (NativePointerTypes.IsType(type)
-                || NativeFunctionPointerTypes.IsType(type)
-                || NativeFixedArrayTypes.IsType(type)
-                || BoundEnumTypes.IsType(type))
-            {
-                throw Unsupported(
-                    "The current F+I aggregate layout slice admits scalar, raw-pointer and inline-struct fields only.");
-            }
-
-            if ((int)type is >= 100 and < BoundEnumTypes.First)
-            {
-                var structureIndex = (int)type - 100;
-                if ((uint)structureIndex >= (uint)structureIndexMap.Length
-                    || structureIndexMap[structureIndex] < 0)
+        var containsCall = false;
+        if (!BoundTreeTraversal.VisitExpressions(function.Body,
+                expression =>
                 {
-                    throw Unsupported(
-                        "A ForeignNativeInterface aggregate field has no selected TypeDef closure.");
-                }
-
-                return (PrimitiveType)(100
-                    + structureIndexMap[structureIndex]);
-            }
-
-            return type;
-        }
-
-        var structures = ImmutableArray.CreateBuilder<BoundStruct>(
-            structureIndexes.Length);
-        foreach (var structureIndex in structureIndexes)
-        {
-            var structure = program.Structures[structureIndex];
-            var fields = structure.Fields.Select(field => field with {
-                Type = RemapStructureFieldType(field.Type),
-                StandardFieldOrigin = null,
-            }).ToImmutableArray();
-            structures.Add(structure with {
-                Fields = fields,
-                StandardTypeOrigin = null,
-                StandardLayoutOnly = false,
-            });
-        }
-        var selectedStructures = structures.MoveToImmutable();
-        var sourceTypeDeclarations = program.SourceTypeDeclarations.IsDefault
-            ? ImmutableArray<BoundSourceTypeDeclaration>.Empty
-            : program.SourceTypeDeclarations
-                .Where(declaration =>
-                    (uint)declaration.StructureIndex
-                        < (uint)structureIndexMap.Length
-                    && structureIndexMap[declaration.StructureIndex] >= 0)
-                .Select(declaration => declaration with {
-                    StructureIndex = structureIndexMap[
-                        declaration.StructureIndex],
-                    DeclarationSnapshot = selectedStructures[
-                        structureIndexMap[declaration.StructureIndex]],
-                }).ToImmutableArray();
-        var typePointers
-            = ImmutableArray.CreateBuilder<NativePointerTypeDefinition>(
-                selectedStructures.Length);
-        for (var structureIndex = 0;
-            structureIndex < selectedStructures.Length; structureIndex++)
-        {
-            typePointers.Add(new NativePointerTypeDefinition(
-                (PrimitiveType)(100 + structureIndex), false));
-        }
-
-        if (!program.SourceTypePublications.IsDefault)
+                    if (expression is BoundCall {
+                            ForeignInterfaceCall: not null,
+                        })
+                    {
+                        containsCall = true;
+                    }
+                }))
         {
             throw Unsupported(
-                "F+I structure emission cannot replace a retained source publication map.");
+                $"Function '{function.Name}' cannot be traversed for F+I calls.");
         }
 
-        var structureProgram = program with {
-            Functions = [],
-            EntryPoint = -1,
-            Interfaces = [],
-            Structures = selectedStructures,
-            NativeFunctionPointerSignatures = [],
-            NativePointerTypes = typePointers.MoveToImmutable(),
-            NativeFixedArrayTypes = [],
-            EnumDefinitions = [],
-            SourceTypeDeclarations = sourceTypeDeclarations,
-            StandardQuerySourceAssociation = null,
-        };
-        return EmitDevelopment(structureProgram, moduleIdentity,
-            TrRmArtifactSchema.Standard, moduleTargetRequirement,
-            structureTypeExports);
-    }
-
-    private static byte[] MergeForeignNativeInterfaceStructureArtifact(
-        byte[] shell, byte[] structureArtifact,
-        TrRmArtifactSchema schema)
-    {
-        var shellIndex = new TrRmArtifactIndex(shell, schema);
-        var structuresIndex = new TrRmArtifactIndex(structureArtifact,
-            TrRmArtifactSchema.Standard);
-        var sections = new List<TrRmSection>(
-            shellIndex.SectionCount + structuresIndex.SectionCount);
-        for (var sectionIndex = 0;
-            sectionIndex < structuresIndex.SectionCount; sectionIndex++)
-        {
-            structuresIndex.GetSection(sectionIndex, out var kind, out var flags,
-                out var bytes, out var count);
-            if (kind is 0x0001 or 0x0004)
-            {
-                continue;
-            }
-
-            sections.Add(new TrRmSection(kind, flags,
-                checked((uint)count), bytes.ToArray()));
-        }
-
-        for (var sectionIndex = 0; sectionIndex < shellIndex.SectionCount;
-            sectionIndex++)
-        {
-            shellIndex.GetSection(sectionIndex, out var kind, out var flags,
-                out var bytes, out var count);
-            if (kind is not (0x0002 or 0x0048))
-            {
-                sections.Add(new TrRmSection(kind, flags,
-                    checked((uint)count), bytes.ToArray()));
-            }
-        }
-
-        sections.Sort(static (left, right) =>
-            left.Kind.CompareTo(right.Kind));
-        return TrRmArtifactWriter.Encode(sections, schema);
+        return containsCall;
     }
 
     private static byte[] AddForeignNativeInterfaceRows(byte[] artifact,

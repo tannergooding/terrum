@@ -1300,8 +1300,21 @@ public static partial class TrRmExecutableCompiler
         Func<int, uint> methodMapTokenForFunction,
         Func<BoundFieldRead, uint> fieldDefRowFor,
         Func<BoundFieldRead, uint> fieldPathRowFor,
+        Func<BoundInterfaceMemberIdentity, uint>?
+            foreignInterfaceMethodMapTokenForCall,
         TrRmArtifactSchema schema)
     {
+        if (TryGetForeignInterfaceDirectReturnCall(function, program,
+                out var foreignInterfaceCall))
+        {
+            return EncodeForeignInterfaceDirectReturnCallBody(function,
+                program, foreignInterfaceCall, typeSpecRowFor,
+                foreignInterfaceMethodMapTokenForCall
+                    ?? throw Unsupported(
+                        "A Standard F+I caller Body has no InterfaceMethod MethodMap selection."),
+                schema);
+        }
+
         if (TryGetStandardInitializationReferenceConditionalStore(
                 function, program, out var condition,
                 out var conditionalStores))
@@ -1348,6 +1361,166 @@ public static partial class TrRmExecutableCompiler
 
         throw Unsupported(
             $"Function '{function.Name}' is outside the Standard initialization-reference Body subset.");
+    }
+
+    private static bool TryGetForeignInterfaceDirectReturnCall(
+        BoundFunction function, BoundProgram program, out BoundCall call)
+    {
+        call = null!;
+        if (function.IsExternal
+            || function.Variables.Length != function.ParameterCount
+            || function.Body.RetiredManagedLocals.Length != 0
+            || function.Variables.Any(static variable =>
+                variable.IsOut || variable.IsInit
+                || variable.IsInitializationLocal
+                || variable.IsImplicitRef
+                || variable.IsImplicitReferenceTemporary)
+            || function.ReturnType == PrimitiveType.Void)
+        {
+            return false;
+        }
+
+        var statements = function.Body.Statements;
+        if (statements.Length == 1
+            && statements[0] is BoundUnsafe unsafeBlock)
+        {
+            if (unsafeBlock.Body.RetiredManagedLocals.Length != 0)
+            {
+                return false;
+            }
+            statements = unsafeBlock.Body.Statements;
+        }
+
+        if (statements.Length != 1
+            || statements[0] is not BoundReturn returned)
+        {
+            return false;
+        }
+
+        var returnExpression = returned.Value;
+        if (returnExpression is BoundUnsafeExpression unsafeExpression)
+        {
+            returnExpression = unsafeExpression.Expression;
+        }
+
+        if (returnExpression is not BoundCall boundCall
+            || boundCall.Function != BoundCall.ForeignInterfaceFunction
+            || boundCall.ForeignInterfaceCall is not
+                BoundForeignInterfaceCall foreignCall
+            || !boundCall.IsUnsafeAuthorized
+            || foreignCall.DoesNotReturn
+            || !foreignCall.NativeOutputContracts.IsEmpty
+            || boundCall.Type != function.ReturnType
+            || !ForeignNativeInterfaceContract.TryCreateCallTarget(
+                foreignCall, program, out var target)
+            || target.ReturnType != function.ReturnType
+            || target.ParameterCount != boundCall.Arguments.Length
+            || boundCall.Arguments.IsDefault
+            || boundCall.Arguments.Any(static argument =>
+                argument is not BoundRead)
+            || foreignCall.Receiver is not BoundRead receiver
+            || (uint)receiver.Variable >= (uint)function.ParameterCount
+            || function.Variables[receiver.Variable].Type
+                != receiver.Type
+            || function.Variables[receiver.Variable].IsOut
+            || function.Variables[receiver.Variable].IsInit)
+        {
+            return false;
+        }
+
+        var seenParameters = new bool[target.ParameterCount];
+        for (var sourceArgument = 0;
+            sourceArgument < boundCall.Arguments.Length;
+            sourceArgument++)
+        {
+            var formal = boundCall.ParameterIndex(sourceArgument);
+            if ((uint)formal >= (uint)target.ParameterCount
+                || seenParameters[formal]
+                || boundCall.Arguments[sourceArgument] is not BoundRead read
+                || (uint)read.Variable >= (uint)function.ParameterCount
+                || function.Variables[read.Variable].Type
+                    != target.Variables[formal].Type
+                || function.Variables[read.Variable].IsOut
+                || function.Variables[read.Variable].IsInit)
+            {
+                return false;
+            }
+
+            seenParameters[formal] = true;
+        }
+
+        if (seenParameters.Any(static seen => !seen))
+        {
+            return false;
+        }
+
+        call = boundCall;
+        return true;
+    }
+
+    private static byte[] EncodeForeignInterfaceDirectReturnCallBody(
+        BoundFunction function, BoundProgram program, BoundCall call,
+        Func<PrimitiveType, int> typeSpecRowFor,
+        Func<BoundInterfaceMemberIdentity, uint>
+            methodMapTokenForForeignInterface,
+        TrRmArtifactSchema schema)
+    {
+        var foreignCall = call.ForeignInterfaceCall
+            ?? throw new InvalidOperationException(
+                "The selected call has no foreign-interface identity.");
+        if (!ForeignNativeInterfaceContract.TryCreateCallTarget(
+                foreignCall, program, out var target))
+        {
+            throw Invalid(
+                "A Standard F+I caller Body has an invalid InterfaceMethod target.");
+        }
+
+        var typeTokens = function.Variables.Select(variable =>
+            GetStandardBodyTypeMapToken(variable.Type, typeSpecRowFor))
+            .ToArray();
+        var methodMapToken
+            = methodMapTokenForForeignInterface(foreignCall.Member);
+        var maps = TrRmRegisterBodyMapBuilder.Create(typeTokens,
+            [methodMapToken]);
+        var homeMap = EncodeStandardInitializationHomeMap(function,
+            typeTokens, maps);
+        var inputs = new TrRmRegisterBodyCallInput[
+            target.ParameterCount + 1];
+        inputs[0] = CreateInput(foreignCall.Receiver);
+        for (var sourceArgument = 0;
+            sourceArgument < call.Arguments.Length; sourceArgument++)
+        {
+            var formal = call.ParameterIndex(sourceArgument);
+            inputs[formal + 1] = CreateInput(call.Arguments[sourceArgument]);
+        }
+
+        var callSite = TrRmRegisterBodyRecordWriter.EncodeCallSite(1, 1,
+            maps.GetMethodMapIndex(methodMapToken), 0, inputs, [],
+            schema: schema);
+        ReadOnlyMemory<byte>[] records = [
+            new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 },
+            new(callSite),
+        ];
+        byte[] code = [0x90, 1, 0x17, 0];
+        return TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
+            maps.MethodMap, default, default,
+            [new TrRmRegisterBodyBlock(0, (uint)code.Length, 0)],
+            records, code, schema: schema,
+            generalPredicateGraphsInitializationReferenceBodies
+                : schema.UsesGeneralPredicateGraphs());
+
+        TrRmRegisterBodyCallInput CreateInput(BoundExpression expression)
+        {
+            if (expression is not BoundRead read
+                || (uint)read.Variable >= (uint)function.ParameterCount)
+            {
+                throw Unsupported(
+                    $"Function '{function.Name}' has an F+I call input outside the direct-parameter Body subset.");
+            }
+
+            return new TrRmRegisterBodyCallInput(2, 1,
+                checked((ushort)read.Variable));
+        }
     }
 
     private readonly record struct StandardNativePointerLoadBodyDescription(
@@ -3601,7 +3774,9 @@ public static partial class TrRmExecutableCompiler
             bool construction2MethodLinking = false,
             ImmutableArray<BoundConstant> scalarConstants = default,
             IReadOnlyDictionary<uint, PrimitiveType>?
-                nominalClassTypesByTypeSpecReference = null)
+                nominalClassTypesByTypeSpecReference = null,
+            IReadOnlyDictionary<int, ForeignNativeInterfaceBodyTarget>?
+                foreignInterfaceBodyTargets = null)
     {
         if (body.BlockCount is not (1 or 3) || body.HasExceptionDirectory
             || body.FieldCount != 0
@@ -4033,6 +4208,224 @@ public static partial class TrRmExecutableCompiler
                     var preparationCount
                         = BinaryPrimitives.ReadUInt32LittleEndian(
                             record[16..]);
+                    if (body.Schema.UsesForeignNativeInterface()
+                        && record[4] == 1
+                        && targetMethodMapIndex < body.MethodCount)
+                    {
+                        var methodToken
+                            = BinaryPrimitives.ReadUInt32LittleEndian(
+                                body.MethodMap[(targetMethodMapIndex
+                                    * sizeof(uint))..]);
+                        var tokenKind
+                            = checked((byte)(methodToken >> 24));
+                        var tokenRow = checked((int)(methodToken
+                            & 0x00FF_FFFF));
+                        var targetMethodRow = tokenKind switch
+                        {
+                            0x16 => tokenRow,
+                            0x1C when tokenRow > 0
+                                && tokenRow <= imports.Count
+                                && (imports
+                                    .GetExpectedDefinitionForImportRow(
+                                        tokenRow) >> 24) == 0x16
+                                => checked((int)(imports
+                                    .GetExpectedDefinitionForImportRow(
+                                        tokenRow) & 0x00FF_FFFF)),
+                            _ => 0,
+                        };
+                        if (targetMethodRow != 0
+                            && foreignInterfaceBodyTargets is not null
+                            && foreignInterfaceBodyTargets.TryGetValue(
+                                targetMethodRow, out var foreignTarget))
+                        {
+                            var member = foreignTarget.Member;
+                            if (resultKind != 1
+                                || resultIndex >= 14
+                                || preparationCount != 0
+                                || member.ResultType is not
+                                    BoundInterfaceType resultBoundType
+                                || resultBoundType.Kind
+                                    != BoundInterfaceTypeKind.Primitive
+                                || resultBoundType.PrimitiveType
+                                    == PrimitiveType.Void
+                                || function.ReturnType
+                                    != resultBoundType.PrimitiveType
+                                || foreignTarget.Definition
+                                    .ForeignNativeInterface is not
+                                    BoundForeignNativeInterfaceLayout layout
+                                || member.NativeCallableConvention is not
+                                    NativeCallingConvention convention
+                                || member.DoesNotReturn
+                                || !member.NativeOutputContracts.IsEmpty
+                                || inputCount
+                                    != (uint)(member.Parameters.Length + 1))
+                            {
+                                throw Unsupported(
+                                    "The Standard F+I Body subset requires a normal-returning, no-output direct InterfaceMethod CallSite.");
+                            }
+
+                            var resultType = resultBoundType.PrimitiveType;
+                            var declarationKey = member.DeclarationKey;
+                            if (tokenKind == 0x1C)
+                            {
+                                declarationKey = imports
+                                    .GetBindingForImportRow(tokenRow)
+                                    .ExportKey;
+                                if (!StringComparer.Ordinal.Equals(
+                                        declarationKey,
+                                        member.DeclarationKey)
+                                    && !member.AdditionalDeclarationKeys
+                                        .Contains(declarationKey,
+                                            StringComparer.Ordinal))
+                                {
+                                    throw Invalid(
+                                        "A ForeignNativeInterface CallSite Import does not select one of the exact member ExportKeys.");
+                                }
+                            }
+
+                            var declaringInterface
+                                = new BoundInterfaceType(
+                                    BoundInterfaceTypeKind.Nominal,
+                                    PrimitiveType.Void,
+                                    foreignTarget.Definition.QualifiedName,
+                                    -1, [], false, false, false, false) {
+                                    ModuleImport =
+                                        foreignTarget.Definition.ModuleImport,
+                                };
+                            var memberIdentity
+                                = new BoundInterfaceMemberIdentity(
+                                    declaringInterface,
+                                    foreignTarget.MemberOrdinal,
+                                    declarationKey);
+                            var receiverKind = record[20];
+                            var receiverUse = record[21];
+                            var receiverIndex
+                                = BinaryPrimitives.ReadUInt16LittleEndian(
+                                    record[22..]);
+                            BoundExpression? receiver = null;
+                            if (receiverUse == 1 && receiverKind == 1
+                                && receiverIndex < 14
+                                && valueByRegister.TryGetValue(
+                                    receiverIndex, out var registerReceiver)
+                                && registerReceiver.Type
+                                    == PrimitiveType.NativeRawPointer)
+                            {
+                                receiver = registerReceiver;
+                            }
+                            else if (receiverUse == 1
+                                && receiverKind == 2
+                                && receiverIndex < homeVariables.Length
+                                && (homeRoles[receiverIndex] is 2 or 3)
+                                && homeVariables[receiverIndex] >= 0
+                                && !variables[homeVariables[
+                                    receiverIndex]].IsOut
+                                && !variables[homeVariables[
+                                    receiverIndex]].IsInit
+                                && variables[homeVariables[
+                                    receiverIndex]].Type
+                                    == PrimitiveType.NativeRawPointer)
+                            {
+                                var receiverVariable
+                                    = homeVariables[receiverIndex];
+                                receiver = new BoundRead(
+                                    receiverVariable,
+                                    variables[receiverVariable].Type,
+                                    default);
+                            }
+
+                            if (receiver is null)
+                            {
+                                throw Invalid(
+                                    "A ForeignNativeInterface CallSite has no completed raw-pointer receiver input.");
+                            }
+
+                            var arguments
+                                = ImmutableArray.CreateBuilder<
+                                    BoundExpression>(
+                                    member.Parameters.Length);
+                            var inputOffset = 24;
+                            for (var formal = 0;
+                                formal < member.Parameters.Length; formal++)
+                            {
+                                var selectorKind = record[inputOffset];
+                                var sourceUse = record[inputOffset + 1];
+                                var selectorIndex
+                                    = BinaryPrimitives
+                                        .ReadUInt16LittleEndian(
+                                            record[(inputOffset + 2)..]);
+                                var formalType
+                                    = member.Parameters[formal].Type
+                                        .PrimitiveType;
+                                if (selectorKind == 1 && sourceUse == 1
+                                    && selectorIndex < 14
+                                    && valueByRegister.TryGetValue(
+                                        selectorIndex,
+                                        out var registerArgument)
+                                    && registerArgument.Type == formalType)
+                                {
+                                    arguments.Add(registerArgument);
+                                }
+                                else if (selectorKind == 2
+                                    && sourceUse == 1
+                                    && selectorIndex < homeVariables.Length
+                                    && (homeRoles[selectorIndex] is 2 or 3)
+                                    && homeVariables[selectorIndex] >= 0
+                                    && !variables[homeVariables[
+                                        selectorIndex]].IsOut
+                                    && !variables[homeVariables[
+                                        selectorIndex]].IsInit
+                                    && variables[homeVariables[
+                                        selectorIndex]].Type == formalType)
+                                {
+                                    var argumentVariable
+                                        = homeVariables[selectorIndex];
+                                    arguments.Add(new BoundRead(
+                                        argumentVariable,
+                                        variables[argumentVariable].Type,
+                                        default));
+                                }
+                                else
+                                {
+                                    throw Unsupported(
+                                        "The Standard F+I Body subset requires completed register or Home inputs in formal order.");
+                                }
+
+                                inputOffset += 4;
+                            }
+
+                            var call = new BoundCall(
+                                BoundCall.ForeignInterfaceFunction,
+                                arguments.MoveToImmutable(), resultType,
+                                default) {
+                                IsUnsafeAuthorized = true,
+                                ForeignInterfaceCall =
+                                    new BoundForeignInterfaceCall(
+                                        receiver, memberIdentity,
+                                        layout.VTableByteOffset,
+                                        convention,
+                                        member.RequiresMutableReceiver,
+                                        member.DoesNotReturn,
+                                        member.NativeOutputContracts),
+                                ArgumentParameterIndices = [
+                                    .. Enumerable.Range(0,
+                                        member.Parameters.Length),
+                                ],
+                            };
+                            // The caller-unsafe FNI target makes this CallSite the authored unsafe assertion.
+                            var authorizedCall
+                                = new BoundUnsafeExpression(call, default);
+                            if (!valueByRegister.TryAdd(resultIndex,
+                                    authorizedCall))
+                            {
+                                throw Invalid(
+                                    "A ForeignNativeInterface CallSite overwrites an existing value register.");
+                            }
+
+                            calls++;
+                            break;
+                        }
+                    }
+
                     if (body.UsesNativePointerLoads
                         && body.Schema.UsesNativeParameterContracts()
                         && resultKind == 0)

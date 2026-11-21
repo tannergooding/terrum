@@ -1339,11 +1339,19 @@ selected member ordinal and full-width vtable offset. NativeOutput reservations
 remain direct cells and the method result remains available for the verifier's
 correlated publication rules. PE-emission regressions cover reordered formals,
 slot 1, the high offset path and an imported aggregate view; they remain
-unverified under the active hold. Standard FNI Body/CallSite persistence,
-supervised native execution, private persistence and CLI transport remain
-open. NativeParameter is not admitted on these methods or anchors, and neither
-FNI proposal is approved. General aggregate output Bodies and native-interface
-execution remain incomplete.
+unverified under the active hold. Standard FNI Bodies now emit and source-free
+decode a bounded receiver-first MethodMap CallSite for a direct non-void
+return with no NativeOutput and receiver/formal inputs read from caller
+parameters. Local MethodDefs and imported MethodDef Imports are mapped by
+exact member identity; regressions cover a local provider Body, an imported
+consumer Body, imported-provider load/re-emission and malformed MethodMap
+target rejection, but remain unverified under the hold. Output reservations,
+staged or side-effecting arguments, other Body control-flow shapes, and
+void/unit results remain open. Supervised native
+execution, private persistence, CLI transport and dependent runtime work
+remain open. NativeParameter is not admitted on these methods or anchors, and
+neither FNI proposal is approved. General aggregate output Bodies and
+native-interface execution remain incomplete.
 [CG-004](implementation/conformance-gaps.md#cg-004) owns
 the detailed composition and qualification gates. Earlier TRRM NativeOutput
 clauses and ScalarInitOutput encoding are prototype artifacts, not a fallback

@@ -339,6 +339,7 @@ internal static class TrRmRegisterBodyMapValidator
         TrRmFieldDefTableReader fields, TrRmFieldPathTableReader fieldPaths,
         TrRmInterfaceDefTableReader interfaces,
         TrRmInterfaceMethodTableReader interfaceMethods,
+        TrRmForeignNativeInterfaceTableReader foreignNativeInterfaces,
         TrRmInterfaceWitnessTableReader interfaceWitnesses,
         TrRmConstantSourceTableReader constantSources,
         TrRmFrozenValueNodeTableReader frozenValueNodes,
@@ -457,6 +458,7 @@ internal static class TrRmRegisterBodyMapValidator
             types, fields, ref typeSpecs, methods, signatures,
             parameters, genericParams, constraints, contracts, imports,
             nativeFunctionPointerAnchors,
+            interfaces, interfaceMethods, foreignNativeInterfaces,
             constantValues, initializationReferenceTypes);
         ConsumeWork(body);
         ValidateCallSiteHomeTypes(body, methodDefRow, ownerModule, types, typeSpecs,
@@ -465,6 +467,7 @@ internal static class TrRmRegisterBodyMapValidator
             parameters, imports,
             constantValues, contracts, features, modules, standardNativeImports,
             nativeFunctionPointerAnchors,
+            interfaces, interfaceMethods, foreignNativeInterfaces,
             registerTypeEntries, initializationReferenceTypes);
         ConsumeWork(body);
         ValidateObjectConstructionLifecycle(body, methodDefRow, ownerModule,
@@ -3116,6 +3119,9 @@ internal static class TrRmRegisterBodyMapValidator
         TrRmConstraintTableReader constraints,
         TrRmContractTableReader contracts, TrRmImportTableReader imports,
         TrRmNativeFunctionPointerAnchorTableReader nativeFunctionPointerAnchors,
+        TrRmInterfaceDefTableReader interfaces,
+        TrRmInterfaceMethodTableReader interfaceMethods,
+        TrRmForeignNativeInterfaceTableReader foreignNativeInterfaces,
         ConstantSourceValueContext constantValues,
         InitializationReferenceTypeMap initializationReferenceTypes)
     {
@@ -3163,7 +3169,8 @@ internal static class TrRmRegisterBodyMapValidator
                             registerTypes,
                             ref typeSpecs, methods, signatures, parameters,
                             genericParams, constraints, contracts, imports,
-                            nativeFunctionPointerAnchors);
+                            nativeFunctionPointerAnchors, types, interfaces,
+                            interfaceMethods, foreignNativeInterfaces);
                         UpdateCallSiteRegisterTypes(body, callSiteRecordIndex,
                             registerTypes, ref typeSpecs, methods,
                             signatures, genericParams, constraints, imports,
@@ -3176,7 +3183,8 @@ internal static class TrRmRegisterBodyMapValidator
                             blockIndex, registerTypes,
                             ref typeSpecs, methods, signatures,
                             parameters, genericParams, constraints, contracts, imports,
-                            nativeFunctionPointerAnchors);
+                            nativeFunctionPointerAnchors, types, interfaces,
+                            interfaceMethods, foreignNativeInterfaces);
                         UpdateCallSiteRegisterTypes(body,
                             ReadUInt16(body, instruction, 2), registerTypes,
                             ref typeSpecs, methods, signatures,
@@ -3333,7 +3341,11 @@ internal static class TrRmRegisterBodyMapValidator
         TrRmConstraintTableReader constraints,
         TrRmContractTableReader contracts,
         TrRmImportTableReader imports,
-        TrRmNativeFunctionPointerAnchorTableReader nativeFunctionPointerAnchors)
+        TrRmNativeFunctionPointerAnchorTableReader nativeFunctionPointerAnchors,
+        TrRmTypeDefTableReader types,
+        TrRmInterfaceDefTableReader interfaces,
+        TrRmInterfaceMethodTableReader interfaceMethods,
+        TrRmForeignNativeInterfaceTableReader foreignNativeInterfaces)
     {
         var payload = GetRecordPayload(body, recordIndex);
         var targetMethod = GetCallSiteTargetMethod(body, payload,
@@ -3343,6 +3355,12 @@ internal static class TrRmRegisterBodyMapValidator
         var (firstParameter, parameterCount) = signatures.GetParamRange(signature);
         var inputCount = ReadUInt32(body, payload, 8);
         var receiverTypeSpec = signatures.GetReceiverTypeSpec(signature);
+        var foreignNativeInterfaceCall
+            = ReadByte(body, payload, 0) == 1
+                && body.Schema.UsesForeignNativeInterface()
+                && IsForeignNativeInterfaceMethodTarget(targetMethod,
+                    methods, types, interfaces, interfaceMethods,
+                    foreignNativeInterfaces);
         var isGenericInterfaceRequirement
             = ReadByte(body, payload, 0) == 4
                 && ReadByte(body, GetRecordPayload(body,
@@ -3355,7 +3373,8 @@ internal static class TrRmRegisterBodyMapValidator
                 || (body.Schema.UsesConstructionContracts()
                     && targetConstructionRole == 1)
                 || body.Schema.UsesMethodReceiverAccess()
-                || isGenericInterfaceRequirement);
+                || isGenericInterfaceRequirement
+                || foreignNativeInterfaceCall);
         if (inputCount != (uint)(parameterCount
                 + (hasReceiver ? 1 : 0)))
         {
@@ -3668,6 +3687,100 @@ internal static class TrRmRegisterBodyMapValidator
             || (expectedWritable && !actualWritable)
             || (requiresDeclaredClassMutability
                 && actualWritable && !ownerIsMutable))
+        {
+            throw InvalidMap();
+        }
+    }
+
+    private static bool IsForeignNativeInterfaceMethodTarget(
+        int targetMethod, TrRmMethodDefTableReader methods,
+        TrRmTypeDefTableReader types,
+        TrRmInterfaceDefTableReader interfaces,
+        TrRmInterfaceMethodTableReader interfaceMethods,
+        TrRmForeignNativeInterfaceTableReader foreignNativeInterfaces)
+    {
+        var ownerTypeDef = methods.GetOwnerType(targetMethod);
+        if (ownerTypeDef == 0 || types.GetKind(ownerTypeDef) != 3)
+        {
+            return false;
+        }
+
+        var interfaceDef
+            = interfaces.GetInterfaceDefForTypeDef(ownerTypeDef);
+        if (interfaceDef == 0
+            || interfaceMethods.GetOwnerInterfaceDefForMethod(targetMethod)
+                != interfaceDef)
+        {
+            return false;
+        }
+
+        for (var row = 1; row <= foreignNativeInterfaces.Count; row++)
+        {
+            if (foreignNativeInterfaces.GetOwnerInterfaceDef(row)
+                == (uint)interfaceDef)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static void ValidateForeignNativeInterfaceReceiverInput(
+        TrRmRegisterBodyReader body, int targetMethod,
+        ReadOnlySpan<byte> callSitePayload, int inputOffset,
+        uint receiverTypeSpec, RegisterTypeState[] registerTypes,
+        int ownerModule, TrRmTypeDefTableReader types,
+        TrRmTypeSpecTableReader typeSpecs,
+        TrRmMethodDefTableReader methods,
+        TrRmInterfaceDefTableReader interfaces,
+        TrRmInterfaceMethodTableReader interfaceMethods,
+        TrRmForeignNativeInterfaceTableReader foreignNativeInterfaces)
+    {
+        if (!IsForeignNativeInterfaceMethodTarget(targetMethod, methods,
+                types, interfaces, interfaceMethods,
+                foreignNativeInterfaces)
+            || methods.GetOwnerModule(targetMethod) != ownerModule
+            || receiverTypeSpec == 0
+            || ReadByte(body, callSitePayload, inputOffset + 1) != 1)
+        {
+            throw InvalidMap();
+        }
+
+        var selectorKind = ReadByte(body, callSitePayload, inputOffset);
+        var selectorIndex = ReadUInt16(body, callSitePayload,
+            inputOffset + 2);
+        uint actualTypeSpecRef;
+        if (selectorKind == 1)
+        {
+            var actual = GetRegisterTypeState(body, registerTypes,
+                selectorIndex);
+            if (actual.IsPlaceHandle)
+            {
+                throw InvalidMap();
+            }
+
+            actualTypeSpecRef = GetRegisterTypeSpecRef(body, actual);
+        }
+        else if (selectorKind == 2)
+        {
+            var home = GetHomeMapEntry(body, selectorIndex);
+            var homeRole = ReadByte(body, home, 0);
+            if (homeRole is not (1 or 2 or 3))
+            {
+                throw InvalidMap();
+            }
+
+            actualTypeSpecRef = GetTypeMapTypeSpecRef(body,
+                ReadUInt16(body, home, 2));
+        }
+        else
+        {
+            throw InvalidMap();
+        }
+
+        if (!typeSpecs.AreEquivalentTypeSpecRefs(actualTypeSpecRef,
+                receiverTypeSpec))
         {
             throw InvalidMap();
         }
@@ -8523,6 +8636,9 @@ internal static class TrRmRegisterBodyMapValidator
         TrRmFeatureTableReader features, TrRmModuleTableReader modules,
         TrRmNativeImportTableReader standardNativeImports,
         TrRmNativeFunctionPointerAnchorTableReader nativeFunctionPointerAnchors,
+        TrRmInterfaceDefTableReader interfaces,
+        TrRmInterfaceMethodTableReader interfaceMethods,
+        TrRmForeignNativeInterfaceTableReader foreignNativeInterfaces,
         RegisterTypeState[][] registerTypeEntries,
         InitializationReferenceTypeMap initializationReferenceTypes)
     {
@@ -8582,6 +8698,13 @@ internal static class TrRmRegisterBodyMapValidator
                         var nativeParameters = contracts.GetNativeParameters(targetMethod);
                         var receiverTypeSpec
                             = signatures.GetReceiverTypeSpec(signature);
+                        var foreignNativeInterfaceCall
+                            = ReadByte(body, payload, 0) == 1
+                                && body.Schema.UsesForeignNativeInterface()
+                                && IsForeignNativeInterfaceMethodTarget(
+                                    targetMethod, methods, types, interfaces,
+                                    interfaceMethods,
+                                    foreignNativeInterfaces);
                         var isGenericInterfaceRequirement
                             = ReadByte(body, payload, 0) == 4
                                 && ReadByte(body, GetRecordPayload(body,
@@ -8601,7 +8724,8 @@ internal static class TrRmRegisterBodyMapValidator
                                 || (body.Schema.UsesConstructionContracts()
                                     && targetConstructionRole == 1)
                                 || body.Schema.UsesMethodReceiverAccess()
-                                || isGenericInterfaceRequirement);
+                                || isGenericInterfaceRequirement
+                                || foreignNativeInterfaceCall);
                         if (ReadUInt32(body, payload, 8)
                             != (uint)(parameterCount
                                 + (hasReceiver ? 1 : 0)))
@@ -8638,6 +8762,15 @@ internal static class TrRmRegisterBodyMapValidator
                             else if (targetConstructionRole == 2)
                             {
                                 throw InvalidMap();
+                            }
+                            else if (foreignNativeInterfaceCall)
+                            {
+                                ValidateForeignNativeInterfaceReceiverInput(
+                                    body, payload, inputOffset,
+                                    receiverTypeSpec, registerTypes,
+                                    ownerModule, types, typeSpecs, methods,
+                                    interfaces, interfaceMethods,
+                                    foreignNativeInterfaces);
                             }
                             else
                             {

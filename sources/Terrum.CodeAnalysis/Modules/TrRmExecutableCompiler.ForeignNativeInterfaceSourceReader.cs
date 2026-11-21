@@ -10,6 +10,121 @@ namespace Terrum.CodeAnalysis.Modules;
 
 public static partial class TrRmExecutableCompiler
 {
+    private readonly record struct ForeignNativeInterfaceBodyTarget(
+        BoundInterfaceDefinition Definition,
+        BoundInterfaceMemberDefinition Member, int MemberOrdinal);
+
+    private static Dictionary<int, ForeignNativeInterfaceBodyTarget>
+        CreateForeignNativeInterfaceBodyTargets(
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+        int selectedModuleRow,
+        ImmutableArray<BoundInterfaceDefinition> definitions)
+    {
+        var result = new Dictionary<int, ForeignNativeInterfaceBodyTarget>();
+        for (var foreignInterfaceRow = 1;
+            foreignInterfaceRow <= tables.ForeignNativeInterfaces.Count;
+            foreignInterfaceRow++)
+        {
+            var interfaceDef = checked((int)
+                tables.ForeignNativeInterfaces.GetOwnerInterfaceDef(
+                    foreignInterfaceRow));
+            var typeDef = tables.Interfaces.GetOwnerTypeDef(interfaceDef);
+            if (tables.TypeDefs.GetOwnerModule(typeDef)
+                != selectedModuleRow)
+            {
+                continue;
+            }
+
+            var typeDefId = 0x1300_0000u | checked((uint)typeDef);
+            BoundModuleImport ownerImport;
+            var typeImportRows = Enumerable.Range(1, tables.Imports.Count)
+                .Where(importRow =>
+                    tables.Imports.GetExpectedDefinitionForImportRow(
+                        importRow) == typeDefId
+                    && tables.ModuleRefs.GetOwnerModule(
+                        tables.Imports.GetModuleRefForImportRow(importRow))
+                        == selectedModuleRow)
+                .ToArray();
+            if (typeImportRows.Length == 1)
+            {
+                var binding = tables.Imports.GetBindingForImportRow(
+                    typeImportRows[0]);
+                ownerImport = new BoundModuleImport(
+                    binding.ProducerIdentity, binding.ExportKey,
+                    binding.TargetRequirement, binding.RuntimePolicy);
+            }
+            else if (typeImportRows.Length == 0)
+            {
+                var typeExports = tables.Exports.GetExportsForModule(
+                        selectedModuleRow)
+                    .Where(export => export.Definition == typeDefId)
+                    .ToArray();
+                if (typeExports.Length != 1)
+                {
+                    throw Invalid(
+                        "A ForeignNativeInterface Body target has no unique TypeDef ExportKey or Import.");
+                }
+
+                var (targetRequirement, runtimePolicy)
+                    = tables.Modules.GetRequirements(selectedModuleRow);
+                ownerImport = new BoundModuleImport(
+                    tables.Modules.GetIdentity(selectedModuleRow),
+                    typeExports[0].ExportKey, targetRequirement,
+                    runtimePolicy);
+            }
+            else
+            {
+                throw Invalid(
+                    "A ForeignNativeInterface Body target has multiple TypeDef Imports.");
+            }
+
+            var typeName = tables.TypeDefs.GetName(typeDef);
+            var typeNamespace = tables.TypeDefs.GetNamespace(typeDef);
+            var qualifiedName = typeNamespace.Length == 0
+                ? typeName : string.Concat(typeNamespace, ".", typeName);
+            var owners = definitions.Where(definition =>
+                    StringComparer.Ordinal.Equals(
+                        definition.QualifiedName, qualifiedName)
+                    && definition.ModuleImport == ownerImport
+                    && definition.ForeignNativeInterface is not null)
+                .ToArray();
+            if (owners is not [{ } owner])
+            {
+                throw Invalid(
+                    "A ForeignNativeInterface Body target has no exact bound owner.");
+            }
+
+            var (firstMethod, methodCount)
+                = tables.Interfaces.GetMethodRange(interfaceDef);
+            if (owner.Members.Length != methodCount)
+            {
+                throw Invalid(
+                    "A ForeignNativeInterface Body target has an incomplete member view.");
+            }
+
+            for (var ordinal = 0; ordinal < methodCount; ordinal++)
+            {
+                var interfaceMethod = firstMethod + ordinal;
+                var methodRow = tables.InterfaceMethods.GetMethodDefRow(
+                    interfaceMethod);
+                var member = owner.Members[ordinal];
+                if (tables.InterfaceMethods.GetOwnerInterfaceDef(
+                        interfaceMethod) != interfaceDef
+                    || tables.InterfaceMethods.GetOrdinal(interfaceMethod)
+                        != (uint)ordinal
+                    || !result.TryAdd(methodRow,
+                        new ForeignNativeInterfaceBodyTarget(owner,
+                            member, ordinal)))
+                {
+                    throw Invalid(
+                        "A ForeignNativeInterface MethodDef has an ambiguous Body target identity.");
+                }
+            }
+        }
+
+        return result;
+    }
+
     private static ImmutableArray<BoundInterfaceDefinition>
         CreateForeignNativeInterfaceDefinitions(
         TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,

@@ -349,6 +349,10 @@ public static partial class TrRmExecutableCompiler
         string schemaIdentity)
         => StringComparer.Ordinal.Equals(schemaIdentity,
                 StandardInitReferenceBodiesSchemaIdentity)
+            || StringComparer.Ordinal.Equals(schemaIdentity,
+                StandardForeignNativeInterfaceSchemaIdentity)
+            || StringComparer.Ordinal.Equals(schemaIdentity,
+                StandardForeignNativeInterfaceParameterSurfaceSchemaIdentity)
             || IsSelectedInitializationReferenceLocalFieldLayoutSchemaIdentity(
                 schemaIdentity)
             || StringComparer.Ordinal.Equals(schemaIdentity,
@@ -356,6 +360,13 @@ public static partial class TrRmExecutableCompiler
             || StringComparer.Ordinal.Equals(schemaIdentity,
                 StandardInitReferenceBodiesPointerLoadsNativeParameterSchemaIdentity)
             || IsSelectedGeneralPredicateGraphsSchemaIdentity(schemaIdentity);
+
+    private static bool IsSelectedForeignNativeInterfaceSchemaIdentity(
+        string? schemaIdentity)
+        => StringComparer.Ordinal.Equals(schemaIdentity,
+                StandardForeignNativeInterfaceSchemaIdentity)
+            || StringComparer.Ordinal.Equals(schemaIdentity,
+                StandardForeignNativeInterfaceParameterSurfaceSchemaIdentity);
 
     private static bool
         IsSelectedInitializationReferenceLocalFieldLayoutSchemaIdentity(
@@ -1999,7 +2010,10 @@ public static partial class TrRmExecutableCompiler
         bool standardNativePointerLoads = false,
         bool allowGenericMethodNominalTypeTables = false,
         string? standardSchemaIdentity = null,
-        bool hasCoreContractFailureIdentityTransport = false)
+        bool hasCoreContractFailureIdentityTransport = false,
+        Func<BoundInterfaceMemberIdentity, uint>?
+            foreignInterfaceMethodMapTokenForCall = null,
+        BoundProgram? semanticVerificationProgram = null)
     {
         ArgumentNullException.ThrowIfNull(program);
         if (BoundEnumTypes.HasStandardDeclarations(
@@ -2039,7 +2053,9 @@ public static partial class TrRmExecutableCompiler
                 or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft
                 or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft
                 or TrRmArtifactSchema.InitializationReferencePointerLoadNativeParameterDraft
-                or TrRmArtifactSchema.InitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft))
+                or TrRmArtifactSchema.InitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft
+                or TrRmArtifactSchema.ForeignNativeInterfaceDraft
+                or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft))
         {
             throw new ArgumentException(
                 "Initialization-reference Bodies require a selected Standard or GeneralPredicateGraphsDraft profile.",
@@ -2105,7 +2121,9 @@ public static partial class TrRmExecutableCompiler
         if (sourceTypeExports is not null
             && schema is not (TrRmArtifactSchema.Standard
                 or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
-                or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft))
+                or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft
+                or TrRmArtifactSchema.ForeignNativeInterfaceDraft
+                or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft))
         {
             throw Unsupported(
                 "Explicit source type exports require an exact Standard schema.");
@@ -2198,17 +2216,27 @@ public static partial class TrRmExecutableCompiler
             throw new ArgumentException("A module identity is required.", nameof(moduleIdentity));
         }
 
-        if (program.EntryPoint == -1)
+        var programToVerify = semanticVerificationProgram ?? program;
+        if (programToVerify.EntryPoint != program.EntryPoint
+            || !programToVerify.Functions.Equals(program.Functions))
         {
-            SemanticVerifier.VerifyLibraryReferences(program);
+            throw new ArgumentException(
+                "The emitted program and semantic verification program have different function identities.",
+                nameof(semanticVerificationProgram));
         }
-        else if (program.Functions.Any(static function => function.IsExternal))
+
+        if (programToVerify.EntryPoint == -1)
         {
-            SemanticVerifier.VerifyReferences(program);
+            SemanticVerifier.VerifyLibraryReferences(programToVerify);
+        }
+        else if (programToVerify.Functions.Any(
+                     static function => function.IsExternal))
+        {
+            SemanticVerifier.VerifyReferences(programToVerify);
         }
         else
         {
-            SemanticVerifier.Verify(program);
+            SemanticVerifier.Verify(programToVerify);
         }
 
         if (BoundEnumTypes.UsesAny(program))
@@ -2318,8 +2346,12 @@ public static partial class TrRmExecutableCompiler
             = (schema is TrRmArtifactSchema.Standard
                 or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
                 or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft
-                or TrRmArtifactSchema.RegisterExceptionRegionsDraft)
+                or TrRmArtifactSchema.RegisterExceptionRegionsDraft
+                or TrRmArtifactSchema.ForeignNativeInterfaceDraft
+                or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft)
             && (hasRegisteredQueryOperations || hasSourceTypeExports
+                || (schema.UsesForeignNativeInterface()
+                    && !blittableStructureIndexes.IsEmpty)
                 || (schema.UsesInitializationReferenceLocalFieldLayout()
                     && program.Structures.Any(static structure =>
                         structure.StandardLayoutOnly
@@ -2554,6 +2586,18 @@ public static partial class TrRmExecutableCompiler
         var functionFeatures = new (bool HasFloatingTypes, bool HasIndexedFlow,
             bool HasNonScalarStorage)[program.Functions.Length];
         var outputFeatures = new bool[program.Functions.Length];
+        var foreignInterfaceCallFeatures
+            = new bool[program.Functions.Length];
+        if (standardInitializationReferenceBodies
+            && schema.UsesForeignNativeInterface())
+        {
+            for (var index = 0; index < program.Functions.Length; index++)
+            {
+                foreignInterfaceCallFeatures[index]
+                    = HasForeignNativeInterfaceCall(
+                        program.Functions[index]);
+            }
+        }
         var hasFloatingTypes = false;
         var parameterCount = 0;
         var effectCount = 0;
@@ -2608,7 +2652,8 @@ public static partial class TrRmExecutableCompiler
             {
                 throw Unsupported($"Function '{function.Name}' has an invalid native vtable contract.");
             }
-            var features = function.IsExternal || hasNativeVTable ? default
+            var features = function.IsExternal || hasNativeVTable
+                || foreignInterfaceCallFeatures[index] ? default
                 : AnalyzeFunction(function, program,
                     generalPredicateGraphsInitializationReferenceBodies,
                     emitsConstruction2DeclarationPredicateGraphs);
@@ -6145,6 +6190,18 @@ public static partial class TrRmExecutableCompiler
                         structureFieldFirst, fieldPathRows,
                         standardFieldImportRows));
                 }
+                else if (standardInitializationReferenceBodies
+                    && foreignInterfaceCallFeatures[index])
+                {
+                    bodies.Add(EncodeStandardInitializationReferenceBody(
+                        function, program, TypeSpecRowFor,
+                        MethodMapTokenForFunction, FieldDefRowFor,
+                        FieldPathRowFor,
+                        foreignInterfaceMethodMapTokenForCall
+                            ?? throw Unsupported(
+                                "The F+I Body writer requires exact InterfaceMethod MethodMap selection."),
+                        schema));
+                }
                 else if (outputFeatures[index])
                 {
                     bodies.Add(standardInitializationReferenceBodies
@@ -6152,6 +6209,7 @@ public static partial class TrRmExecutableCompiler
                             function, program, TypeSpecRowFor,
                             MethodMapTokenForFunction, FieldDefRowFor,
                             FieldPathRowFor,
+                            foreignInterfaceMethodMapTokenForCall,
                             schema)
                         : EncodeOutputBody(function, program, typeRowsList,
                             nativeParameterTypeRows, nativeOutputTypeRows,
@@ -6421,6 +6479,7 @@ public static partial class TrRmExecutableCompiler
                 && ((schema is TrRmArtifactSchema.Standard
                         or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
                         or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft)
+                    || schema.UsesForeignNativeInterface()
                     || schema.UsesGeneralPredicateGraphs()
                     || schema
                         == TrRmArtifactSchema.InitializationReferencePointerLoadNativeParameterDraft);
@@ -6549,7 +6608,9 @@ public static partial class TrRmExecutableCompiler
         }
         else if ((schema is TrRmArtifactSchema.Standard
                 or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
-                or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft)
+                or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft
+                or TrRmArtifactSchema.ForeignNativeInterfaceDraft
+                or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft)
             && (registeredQueryBodyCount != 0
                 || fieldPathRows.Count != 0
                 || standardSourceImportMappings.Any(
@@ -6699,7 +6760,9 @@ public static partial class TrRmExecutableCompiler
         var standardFeatureTable
             = ((schema is TrRmArtifactSchema.Standard
                     or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
-                    or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft)
+                    or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft
+                    or TrRmArtifactSchema.ForeignNativeInterfaceDraft
+                    or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft)
                 || schema.UsesGeneralPredicateGraphs()
                 || standardNativeParameterProfile)
                 && featureCount != 0
@@ -6860,10 +6923,11 @@ public static partial class TrRmExecutableCompiler
                 }
             }
         }
-        var targetProfileBytes = layoutRows.Count == 0 ? []
+        var targetProfileBytes = layoutRows.Count == 0
+                && !schema.UsesForeignNativeInterface() ? []
             : TrRmTargetProfileTableWriter.Encode([new TrRmTargetProfileRow(1, 1)]);
         var targetProfiles = new TrRmTargetProfileTableReader(targetProfileBytes,
-            layoutRows.Count == 0 ? 0 : 1);
+            targetProfileBytes.Length == 0 ? 0 : 1);
         var layoutBytes = layoutRows.Count == 0 ? []
             : TrRmLayoutTableWriter.Encode(layoutRows, typeDefs,
                 targetProfiles, layoutFieldRows.Count);
@@ -7427,7 +7491,8 @@ public static partial class TrRmExecutableCompiler
                         : TrRmArtifactIndex
                             .ForGeneralPredicateGraphsDraft(artifact));
         }
-        else
+        // The FNI composer appends interface metadata and resolves its temporary Body targets.
+        else if (!schema.UsesForeignNativeInterface())
         {
             _ = Load(artifact);
         }
@@ -7621,6 +7686,8 @@ public static partial class TrRmExecutableCompiler
                 : schema is TrRmArtifactSchema.Standard
                     or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
                     or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft
+                    or TrRmArtifactSchema.ForeignNativeInterfaceDraft
+                    or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft
                     ? TrRmStructuralMetadataValidator
                         .ValidateAndGetExecutionTables(index)
                 : TrRmStructuralMetadataValidator
@@ -7646,6 +7713,47 @@ public static partial class TrRmExecutableCompiler
         var nativeFunctionPointerSignatureTable = validatedTables.NativeFunctionPointerSignatures;
         var nativeVTables = validatedTables.NativeVTables;
         var imports = validatedTables.Imports;
+        var foreignInterfaceMethodRows = new HashSet<int>();
+        if (schema.UsesForeignNativeInterface())
+        {
+            for (var foreignInterfaceRow = 1;
+                foreignInterfaceRow
+                    <= validatedTables.ForeignNativeInterfaces.Count;
+                foreignInterfaceRow++)
+            {
+                var interfaceDef = checked((int)
+                    validatedTables.ForeignNativeInterfaces
+                        .GetOwnerInterfaceDef(foreignInterfaceRow));
+                var ownerTypeDef
+                    = validatedTables.Interfaces
+                        .GetOwnerTypeDef(interfaceDef);
+                if (typeDefs.GetOwnerModule(ownerTypeDef)
+                    != selectedModuleRow)
+                {
+                    continue;
+                }
+
+                var (firstMethod, methodCount)
+                    = validatedTables.Interfaces.GetMethodRange(
+                        interfaceDef);
+                for (var ordinal = 0; ordinal < methodCount; ordinal++)
+                {
+                    _ = foreignInterfaceMethodRows.Add(
+                        validatedTables.InterfaceMethods
+                            .GetMethodDefRow(firstMethod + ordinal));
+                }
+            }
+        }
+        var foreignInterfaceBodyTargets
+            = schema.UsesForeignNativeInterface()
+                ? standardClassQueryProgram is null
+                    ? new Dictionary<int,
+                        ForeignNativeInterfaceBodyTarget>()
+                    : CreateForeignNativeInterfaceBodyTargets(
+                        validatedTables, selectedModuleRow,
+                        standardClassQueryProgram.Interfaces)
+                : new Dictionary<int,
+                    ForeignNativeInterfaceBodyTarget>();
         var typeCount = types.Count;
         for (var section = 0; section < index.SectionCount; section++)
         {
@@ -7661,12 +7769,17 @@ public static partial class TrRmExecutableCompiler
                     && kind == 0x3D;
             var isSelectedStandardNativeImportSection
                 = standardNativePointerLoads && kind == 0x0021;
+            var isForeignNativeInterfaceSection
+                = schema.UsesForeignNativeInterface()
+                    && (kind is 0x0024 or 0x0025 or 0x004C or 0x0052
+                        or 0x0066);
             if (kind is not (1 or 2 or 4 or 0x10 or 0x11 or 0x13 or 0x14 or 0x15
                 or 0x16 or 0x17 or 0x18
                 or 0x1B or 0x1C or 0x1D or 0x20
                 or 0x23 or 0x30 or 0x31 or 0x32 or 0x33 or 0x48 or 0x4B)
                 && !isPublishedPredicateSection
                 && !isGeneralPredicateGraphSection
+                && !isForeignNativeInterfaceSection
                 && !isSelectedStandardNativeImportSection)
             {
                 throw Invalid($"Section 0x{kind:X4} is not executable.");
@@ -7762,7 +7875,9 @@ public static partial class TrRmExecutableCompiler
         uint rootlessNativeValuesRuleRevision = 0;
         if ((schema is TrRmArtifactSchema.Standard
                 or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
-                or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft)
+                or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft
+                or TrRmArtifactSchema.ForeignNativeInterfaceDraft
+                or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft)
             || schema.UsesGeneralPredicateGraphs()
             || schema.UsesNativeParameterContracts())
         {
@@ -7807,6 +7922,21 @@ public static partial class TrRmExecutableCompiler
             throw Invalid("Native function-pointer signatures require the RootlessNativeValues feature.");
         }
 
+        if (schema.UsesForeignNativeInterface())
+        {
+            for (var methodRow = methodStart;
+                methodRow < methodEnd; methodRow++)
+            {
+                var bodyRow = defs.GetBodyRow(methodRow);
+                if (bodyRow != 0
+                    && bodies.GetRow(bodyRow)[0] == 0x01)
+                {
+                    validatedTables.ValidateRegisterBodyMapsForMethod(
+                        methodRow);
+                }
+            }
+        }
+
         var optionalStructures = hasOptionalScalarTypes ? TrRmOptionalScalar.Structures : [];
         var nativePointerTypeDefinitions = new List<NativePointerTypeDefinition>();
         var checkedReferenceTypeDefinitions
@@ -7831,10 +7961,18 @@ public static partial class TrRmExecutableCompiler
             var name = BinaryPrimitives.ReadUInt32LittleEndian(exportBytes.Slice((row * 8) + 4));
             var method = id & 0xFF_FFFF;
             var definitionKind = id >> 24;
-            if ((schema is TrRmArtifactSchema.Standard
+            if (((schema is TrRmArtifactSchema.Standard
                     or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
                     or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft)
+                    || schema.UsesForeignNativeInterface())
                 && (definitionKind is 0x13 or 0x14))
+            {
+                continue;
+            }
+
+            if (schema.UsesForeignNativeInterface()
+                && definitionKind == 0x16
+                && foreignInterfaceMethodRows.Contains(checked((int)method)))
             {
                 continue;
             }
@@ -7942,6 +8080,7 @@ public static partial class TrRmExecutableCompiler
         var importedNativeVTableCount = 0;
         var importedNativeParameterMethodCount = 0;
         var importedInitializationReferenceMethodCount = 0;
+        var foreignNativeInterfaceImportCount = 0;
         for (var signatureRow = 1;
             signatureRow <= nativeFunctionPointerSignatureTable.Count; signatureRow++)
         {
@@ -7961,6 +8100,24 @@ public static partial class TrRmExecutableCompiler
         {
             if (nativeFunctionPointerSignatureTable.HasSignatureForMethod(row))
             {
+                continue;
+            }
+
+            if (foreignInterfaceMethodRows.Contains(row))
+            {
+                if (defs.GetBodyRow(row) != 0)
+                {
+                    throw Invalid(
+                        "A ForeignNativeInterface MethodDef cannot carry a Body.");
+                }
+
+                var foreignSignature = defs.GetSignature(row);
+                if (!usedSignatures[foreignSignature])
+                {
+                    usedSignatures[foreignSignature] = true;
+                    usedSignatureCount++;
+                }
+
                 continue;
             }
 
@@ -8372,6 +8529,26 @@ public static partial class TrRmExecutableCompiler
                 "The Standard initialization-reference profile has an unbound or unsupported Import.");
         }
 
+        if (schema.UsesForeignNativeInterface())
+        {
+            foreach (var importRow in selectedImportRows)
+            {
+                var definition
+                    = imports.GetExpectedDefinitionForImportRow(importRow);
+                var definitionKind = definition >> 24;
+                var expectedRow = checked((int)(definition
+                    & 0x00FF_FFFF));
+                if ((definitionKind is 0x13 or 0x14)
+                    || definitionKind == 0x16
+                        && (foreignInterfaceMethodRows.Contains(expectedRow)
+                            || nativeFunctionPointerSignatureTable
+                                .HasSignatureForMethod(expectedRow)))
+                {
+                    foreignNativeInterfaceImportCount++;
+                }
+            }
+        }
+
         var selectedConstruction2MethodImportCount = 0;
         var selectedConstruction2ClassTypeImportCount = 0;
         var selectedConstruction2FieldImportCount = 0;
@@ -8415,7 +8592,9 @@ public static partial class TrRmExecutableCompiler
                 + selectedConstruction2ClassTypeImportCount
                 + selectedConstruction2FieldImportCount
                 + initializationReferenceTypeImportCount
-                + layoutQueryImportCount != selectedImportRows.Count)
+                + layoutQueryImportCount
+                + foreignNativeInterfaceImportCount
+                    != selectedImportRows.Count)
         {
             throw Invalid(
                 "Executable TRRM supports native callable/vtable imports and validated Standard LayoutQueries type/field imports.");
@@ -8436,6 +8615,10 @@ public static partial class TrRmExecutableCompiler
         for (var row = methodStart; row < methodEnd; row++)
         {
             var functionIndex = functionIndexByMethodRow[row];
+            if (foreignInterfaceMethodRows.Contains(row))
+            {
+                continue;
+            }
             if (standardConstruction2MethodLinkingProfile
                 && functionIndex < 0 && defs.GetOwnerType(row) != 0)
             {
@@ -8606,7 +8789,9 @@ public static partial class TrRmExecutableCompiler
                                     standardConstruction2MethodLinkingProfile,
                                 scalarConstants: scalarConstants,
                                 nominalClassTypesByTypeSpecReference:
-                                    nominalClassTypesByTypeSpecReference);
+                                    nominalClassTypesByTypeSpecReference,
+                                foreignInterfaceBodyTargets:
+                                    foreignInterfaceBodyTargets);
                     }
 
                     registeredQueryBody = true;

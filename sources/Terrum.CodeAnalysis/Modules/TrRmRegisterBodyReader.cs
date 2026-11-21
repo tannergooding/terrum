@@ -15,6 +15,7 @@ internal readonly ref struct TrRmRegisterBodyReader
     private readonly ReadOnlySpan<byte> _homeMap;
     private readonly ReadOnlySpan<byte> _typeMap;
     private readonly ReadOnlySpan<byte> _methodMap;
+    private readonly int _methodMapOffset;
     private readonly ReadOnlySpan<byte> _fieldMap;
     private readonly ReadOnlySpan<byte> _constantMap;
     private readonly ReadOnlySpan<byte> _blocks;
@@ -160,6 +161,7 @@ internal readonly ref struct TrRmRegisterBodyReader
         var nextMap = mapStart + (homeCount * 8);
         _typeMap = body.Slice(nextMap, typeCount * 4);
         nextMap += typeCount * 4;
+        _methodMapOffset = nextMap;
         _methodMap = body.Slice(nextMap, methodCount * 4);
         nextMap += methodCount * 4;
         _fieldMap = body.Slice(nextMap, fieldCount * 4);
@@ -395,6 +397,7 @@ internal readonly ref struct TrRmRegisterBodyReader
     internal ReadOnlySpan<byte> HomeMap => _homeMap;
     internal ReadOnlySpan<byte> TypeMap => _typeMap;
     internal ReadOnlySpan<byte> MethodMap => _methodMap;
+    internal int MethodMapOffset => _methodMapOffset;
     internal ReadOnlySpan<byte> FieldMap => _fieldMap;
     internal ReadOnlySpan<byte> ConstantMap => _constantMap;
     internal ReadOnlySpan<byte> Code => _code;

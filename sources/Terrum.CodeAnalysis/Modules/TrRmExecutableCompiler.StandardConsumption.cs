@@ -919,9 +919,10 @@ public static partial class TrRmExecutableCompiler
         if (includesInitializationReferenceBodies
             && tables.Imports.Count == 0 && tables.ModuleRefs.Count == 0)
         {
-            var classQueryProgram = CreateEN1ClassQueryReferenceProgram(
-                artifacts, schemaIdentities, moduleIdentity, rootModuleRow,
-                tables);
+            var classQueryProgram
+                = CreateStandardInitializationReferenceBodyProgram(
+                    artifacts, schemaIdentities, moduleIdentity,
+                    0, rootModuleRow, tables);
             return LoadDevelopment(artifacts[0],
                 GetForeignInvocationSchema(schemaIdentities[0]),
                 standardSchemaIdentity: schemaIdentities[0],
@@ -975,6 +976,42 @@ public static partial class TrRmExecutableCompiler
         var methodImportRows = new List<int>();
         var importedMethodRows = new HashSet<int>();
         var moduleRefsUsed = new bool[tables.ModuleRefs.Count + 1];
+        bool IsForeignNativeInterfaceMethod(int methodRow)
+        {
+            if (!schemaIdentities.Any(IsSelectedForeignNativeInterfaceSchemaIdentity))
+            {
+                return false;
+            }
+
+            var ownerTypeDef = tables.Methods.GetOwnerType(methodRow);
+            if (ownerTypeDef == 0
+                || tables.TypeDefs.GetKind(ownerTypeDef) != 3)
+            {
+                return false;
+            }
+
+            var interfaceDef
+                = tables.Interfaces.GetInterfaceDefForTypeDef(ownerTypeDef);
+            if (interfaceDef == 0)
+            {
+                return false;
+            }
+
+            for (var foreignInterfaceRow = 1;
+                foreignInterfaceRow <= tables.ForeignNativeInterfaces.Count;
+                foreignInterfaceRow++)
+            {
+                if (tables.ForeignNativeInterfaces
+                        .GetOwnerInterfaceDef(foreignInterfaceRow)
+                    == (uint)interfaceDef)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         for (var importRow = 1; importRow <= tables.Imports.Count;
             importRow++)
         {
@@ -999,10 +1036,32 @@ public static partial class TrRmExecutableCompiler
                 continue;
             }
 
+            if (schemaIdentities.Any(
+                    IsSelectedForeignNativeInterfaceSchemaIdentity)
+                && (definitionKind is 0x13 or 0x14))
+            {
+                var importModuleRefRow = tables.Imports
+                    .GetModuleRefForImportRow(importRow);
+                moduleRefsUsed[importModuleRefRow] = true;
+                continue;
+            }
+
             if (definitionKind == 0x16)
             {
                 var targetMethodRow = checked((int)
                     (importedDefinition & 0x00FF_FFFF));
+                if (IsForeignNativeInterfaceMethod(targetMethodRow)
+                    || IsSelectedForeignNativeInterfaceSchemaIdentity(
+                        schemaIdentities[0])
+                    && tables.NativeFunctionPointerSignatures
+                        .HasSignatureForMethod(targetMethodRow))
+                {
+                    var importModuleRefRow = tables.Imports
+                        .GetModuleRefForImportRow(importRow);
+                    moduleRefsUsed[importModuleRefRow] = true;
+                    continue;
+                }
+
                 if (IsSelectedLocalAggregateLayoutSchemaIdentity(
                         schemaIdentities[0]))
                 {
@@ -1168,9 +1227,10 @@ public static partial class TrRmExecutableCompiler
                 }
             }
 
-            var classQueryProgram = CreateEN1ClassQueryReferenceProgram(
-                artifacts, schemaIdentities, moduleIdentity, rootModuleRow,
-                tables);
+            var classQueryProgram
+                = CreateStandardInitializationReferenceBodyProgram(
+                    artifacts, schemaIdentities, moduleIdentity,
+                    0, rootModuleRow, tables);
             return LoadDevelopment(artifacts[0],
                 GetForeignInvocationSchema(schemaIdentities[0]),
                 standardSchemaIdentity: schemaIdentities[0],
@@ -1316,6 +1376,58 @@ public static partial class TrRmExecutableCompiler
         return RetainStandardFieldProviderClosure(program,
             standardFieldProviderValidation, artifacts, schemaIdentities,
             moduleValidation.Modules, rootModuleRow, moduleIdentity);
+    }
+
+    private static BoundProgram? CreateStandardInitializationReferenceBodyProgram(
+        byte[][] artifacts, string[] schemaIdentities,
+        string moduleIdentity, int artifactIndex, int rootModuleRow,
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables tables)
+    {
+        if (schemaIdentities.Length != 0
+            && IsSelectedForeignNativeInterfaceSchemaIdentity(
+                schemaIdentities[artifactIndex]))
+        {
+            var providers = new List<TrRmStandardArtifactInput>(
+                artifacts.Length - 1);
+            for (var index = 0; index < artifacts.Length; index++)
+            {
+                if (index != artifactIndex)
+                {
+                    providers.Add(new TrRmStandardArtifactInput(
+                        schemaIdentities[index], artifacts[index]));
+                }
+            }
+
+            var reference = CreateGenericMethodCallsDraftReference(
+                new TrRmStandardArtifactInput(
+                    schemaIdentities[artifactIndex],
+                    artifacts[artifactIndex]),
+                moduleIdentity, providers, exportKey: null);
+            return new BoundProgram([], -1) {
+                RuntimePolicy = reference.RuntimePolicy,
+                Structures = reference.Structures,
+                NativeFunctionPointerSignatures
+                    = reference.NativeFunctionPointerSignatures,
+                NativePointerTypes = reference.NativePointerTypes,
+                CheckedReferenceTypes = reference.CheckedReferenceTypes,
+                Interfaces = reference.Interfaces,
+                EnumDefinitions = reference.EnumDefinitions,
+                NativeFixedArrayTypes = reference.NativeFixedArrayTypes,
+                SpanTypes = reference.SpanTypes,
+                GenericNominalTypeDefinitions
+                    = reference.GenericNominalTypeDefinitions,
+                GenericNominalTypeInstances
+                    = reference.GenericNominalTypeInstances,
+            };
+        }
+
+        if (artifactIndex != 0)
+        {
+            return null;
+        }
+
+        return CreateEN1ClassQueryReferenceProgram(artifacts,
+            schemaIdentities, moduleIdentity, rootModuleRow, tables);
     }
 
     private static BoundProgram? CreateEN1ClassQueryReferenceProgram(
@@ -4753,12 +4865,19 @@ public static partial class TrRmExecutableCompiler
                     or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationSchemaIdentity
                     or StandardLocalAggregateLayoutSchemaIdentity
                     or StandardLocalAggregatePointerLoadsSchemaIdentity;
+                var supportsForeignNativeInterface
+                    = IsSelectedForeignNativeInterfaceSchemaIdentity(
+                        schemaIdentities[index]);
+                var supportsForeignNativeInterfaceParameterSurface
+                    = StringComparer.Ordinal.Equals(schemaIdentities[index],
+                        StandardForeignNativeInterfaceParameterSurfaceSchemaIdentity);
                 var supportsNativeOutputCells
                     = StringComparer.Ordinal.Equals(schemaIdentities[index],
                         StandardForeignInvocationSchemaIdentity)
                     || StringComparer.Ordinal.Equals(schemaIdentities[index],
                         StandardForeignInvocationStorageAddressSchemaIdentity)
                     || supportsA2Features
+                    || supportsForeignNativeInterface
                     || StringComparer.Ordinal.Equals(schemaIdentities[index],
                         StandardForeignInvocationStorageGenericFixedArraySchemaIdentity);
                 var supportsScalarFrozenValues
@@ -4772,6 +4891,7 @@ public static partial class TrRmExecutableCompiler
                         StandardLocalAggregatePointerLoadsSchemaIdentity)
                     || StringComparer.Ordinal.Equals(schemaIdentities[index],
                         StandardLocalAggregateLayoutSchemaIdentity)
+                    || supportsForeignNativeInterfaceParameterSurface
                     || IsSelectedGeneralPredicateGraphsSchemaIdentity(
                         schemaIdentities[index]);
                 var supportsCopyOriginAndUnionCoverage
@@ -4789,6 +4909,7 @@ public static partial class TrRmExecutableCompiler
                 var supportsLayoutQueries
                     = StringComparer.Ordinal.Equals(schemaIdentities[index],
                         StandardLayoutQueriesSchemaIdentity)
+                    || supportsForeignNativeInterface
                     || IsSelectedGeneralPredicateGraphsSchemaIdentity(
                         schemaIdentities[index]);
                 var supportsInitializationReferenceBodies
@@ -4814,6 +4935,9 @@ public static partial class TrRmExecutableCompiler
                         && !(supportsNativePointerLoads
                             && feature.FeatureId
                                 == TrRmFeatureTableReader.DirectNativeCallsFeatureId)
+                        && !(supportsForeignNativeInterface
+                            && feature.FeatureId
+                                == TrRmFeatureTableReader.NativeInterfaceCallsFeatureId)
                         && !(supportsNativeOutputCells
                             && feature.FeatureId
                                 == TrRmFeatureTableReader.NativeBoundaryContractsFeatureId)
@@ -4833,6 +4957,9 @@ public static partial class TrRmExecutableCompiler
                         && !(supportsLayoutQueries
                             && feature.FeatureId
                                 == TrRmFeatureTableReader.LayoutQueriesFeatureId)
+                        && !(supportsForeignNativeInterfaceParameterSurface
+                            && feature.FeatureId
+                                == TrRmFeatureTableReader.MethodParameterLabelsFeatureId)
                         && !(supportsInitializationReferenceBodies
                             && feature.FeatureId
                                 == TrRmFeatureTableReader.NativeBoundaryContractsFeatureId)
@@ -4901,7 +5028,8 @@ public static partial class TrRmExecutableCompiler
                     && !includesL1MethodProviderClosure
                     && !includesConstruction2MethodProviderClosure
                     && !includesInitializationReferenceLocalFieldLayout
-                    && !includesLayoutQueryProviderClosure)
+                    && !includesLayoutQueryProviderClosure
+                    && !includesInitializationReferenceBodyClosure)
                 {
                     throw Unsupported(
                         "Provider Imports require a supported exact provider closure or an A2 type-only Module.");
@@ -4957,12 +5085,18 @@ public static partial class TrRmExecutableCompiler
                 {
                     if (includesInitializationReferenceBodyClosure)
                     {
+                        var standardBodyReferenceProgram
+                            = CreateStandardInitializationReferenceBodyProgram(
+                                artifacts, schemaIdentities, identity,
+                                index, moduleRow, tables);
                         _ = LoadDevelopment(artifacts[index],
                             GetForeignInvocationSchema(schemaIdentities[index]),
                             standardSchemaIdentity: schemaIdentities[index],
                             coreContractFailureIdentitySelections:
                                 coreContractFailureIdentitySelections,
-                            selectedModuleRow: moduleRow);
+                            selectedModuleRow: moduleRow,
+                            standardClassQueryProgram:
+                                standardBodyReferenceProgram);
                     }
                     else if (includesLayoutQueryProviderClosure)
                     {

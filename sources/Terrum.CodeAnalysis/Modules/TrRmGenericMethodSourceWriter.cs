@@ -69,7 +69,9 @@ public static partial class TrRmExecutableCompiler
             sourceClassMethodGenericFormalPlans = null,
         string? standardSchemaIdentity = null,
         ImmutableArray<int> foreignNativeInterfaceStructureIndexes =
-            default)
+            default,
+        IReadOnlyDictionary<BoundInterfaceMemberIdentity, uint>?
+            foreignInterfaceMethodMapTokenPlaceholders = null)
     {
         if (program.GenericMethodDefinitions.IsDefault)
         {
@@ -375,6 +377,19 @@ public static partial class TrRmExecutableCompiler
 
             artifact = ReplaceFrozenScalarValueSections(artifact, schema,
                 methodParameterSurfaceValues, standardSchemaIdentity);
+        }
+
+        if (schema.UsesForeignNativeInterface()
+            && foreignInterfaceMethodMapTokenPlaceholders is
+                { Count: > 0 })
+        {
+            var importedInterfaceMethodImportRows
+                = ReadImportedInterfaceMethodImportRows(artifact, schema,
+                    standardSchemaIdentity);
+            artifact = RemapForeignNativeInterfaceCallMethodMapTokens(
+                artifact, schema, exportedInterfaceMethodDefRows,
+                importedInterfaceMethodImportRows,
+                foreignInterfaceMethodMapTokenPlaceholders);
         }
 
         var index = new TrRmArtifactIndex(artifact, schema,
@@ -9470,6 +9485,170 @@ public static partial class TrRmExecutableCompiler
         }
 
         return result;
+    }
+
+    private static Dictionary<GenericImportedInterfaceMethodKey, uint>
+        ReadImportedInterfaceMethodImportRows(byte[] artifact,
+            TrRmArtifactSchema schema, string? standardSchemaIdentity)
+    {
+        var index = new TrRmArtifactIndex(artifact, schema,
+            standardSchemaIdentity: standardSchemaIdentity);
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var sectionIndex = 0;
+            sectionIndex < index.SectionCount;
+            sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var bytes, out var count);
+            sections.Add(new TrRmSection(kind, flags,
+                checked((uint)count), bytes.ToArray()));
+        }
+
+        var stringSection = GetSection(sections, 0x0002);
+        var strings = new TrRmStringTableReader(stringSection.Bytes.Span,
+            checked((int)stringSection.RecordCount));
+        return ReadImportedInterfaceMethodImportRows(sections, strings);
+    }
+
+    private static byte[] RemapForeignNativeInterfaceCallMethodMapTokens(
+        byte[] artifact, TrRmArtifactSchema schema,
+        IReadOnlyDictionary<(
+            string QualifiedName, int Arity, int MemberOrdinal,
+            string DeclarationKey), uint> localMethodDefRows,
+        IReadOnlyDictionary<GenericImportedInterfaceMethodKey, uint>
+            importedMethodImportRows,
+        IReadOnlyDictionary<BoundInterfaceMemberIdentity, uint>
+            placeholders)
+    {
+        var targetTokens = new Dictionary<uint, uint>(placeholders.Count);
+        foreach (var (member, placeholder) in placeholders)
+        {
+            if ((placeholder >> 24) != 0xFE
+                || (placeholder & 0x00FF_FFFF) == 0
+                || member.DeclaringInterface.NominalName is not
+                    string qualifiedName)
+            {
+                throw Invalid(
+                    "A Standard F+I caller Body has an invalid InterfaceMethod placeholder.");
+            }
+
+            var arity = member.DeclaringInterface.TypeArguments.Length;
+            uint targetToken;
+            if (member.DeclaringInterface.ModuleImport
+                is BoundModuleImport importedInterface)
+            {
+                var key = new GenericImportedInterfaceMethodKey(
+                    importedInterface.ProducerIdentity,
+                    importedInterface.ExportKey, qualifiedName, arity,
+                    member.MemberOrdinal, member.DeclarationKey,
+                    importedInterface.TargetRequirement,
+                    importedInterface.RuntimePolicy);
+                if (!importedMethodImportRows.TryGetValue(key,
+                        out var importRow))
+                {
+                    throw Unsupported(
+                        "A Standard F+I caller Body has no exact imported InterfaceMethod Import.");
+                }
+
+                targetToken = 0x1C00_0000u | importRow;
+            }
+            else
+            {
+                var key = (qualifiedName, arity, member.MemberOrdinal,
+                    member.DeclarationKey);
+                if (!localMethodDefRows.TryGetValue(key,
+                        out var methodRow))
+                {
+                    throw Unsupported(
+                        "A Standard F+I caller Body has no exact local InterfaceMethod MethodDef.");
+                }
+
+                targetToken = 0x1600_0000u | methodRow;
+            }
+
+            if (!targetTokens.TryAdd(placeholder, targetToken))
+            {
+                throw Invalid(
+                    "A Standard F+I caller Body reuses an InterfaceMethod placeholder.");
+            }
+        }
+
+        var index = new TrRmArtifactIndex(artifact, schema);
+        if (!index.TryGetSection(0x0020, out var bodyBytes,
+                out var bodyCount)
+            || bodyCount == 0)
+        {
+            throw Invalid(
+                "A Standard F+I caller Body placeholder has no Body table.");
+        }
+
+        var bodySection = bodyBytes.ToArray();
+        var bodyTable = new TrRmBodyTableReader(bodySection, bodyCount,
+            schema);
+        _ = index.TryGetSection(0x001B, out _, out var contractCount);
+        var bodyDataOffset = checked((bodyCount + 1) * sizeof(uint));
+        var replaced = new HashSet<uint>();
+        for (var bodyRow = 1; bodyRow <= bodyCount; bodyRow++)
+        {
+            var body = bodyTable.GetRow(bodyRow);
+            if (body[0] != 0x01 || body[1] != 0x01)
+            {
+                continue;
+            }
+
+            var registerBody = bodyTable.GetRegisterBody(bodyRow,
+                contractCount);
+            var methodMap = registerBody.MethodMap;
+            var previousOffset
+                = BinaryPrimitives.ReadUInt32LittleEndian(
+                    bodySection.AsSpan((bodyRow - 1) * sizeof(uint), 4));
+            var rowStart = checked(bodyDataOffset
+                + (int)previousOffset);
+            for (var methodMapIndex = 0;
+                methodMapIndex < registerBody.MethodCount;
+                methodMapIndex++)
+            {
+                var mapOffset = methodMapIndex * sizeof(uint);
+                var token = BinaryPrimitives.ReadUInt32LittleEndian(
+                    methodMap[mapOffset..]);
+                if ((token >> 24) != 0xFE)
+                {
+                    continue;
+                }
+                if (!targetTokens.TryGetValue(token,
+                        out var targetToken))
+                {
+                    throw Invalid(
+                        "A Standard F+I caller Body has an unknown InterfaceMethod placeholder.");
+                }
+
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    bodySection.AsSpan(checked(rowStart
+                        + registerBody.MethodMapOffset + mapOffset), 4),
+                    targetToken);
+                _ = replaced.Add(token);
+            }
+        }
+
+        if (replaced.Count != targetTokens.Count)
+        {
+            throw Invalid(
+                "A Standard F+I InterfaceMethod placeholder has no Body MethodMap entry.");
+        }
+
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var sectionIndex = 0;
+            sectionIndex < index.SectionCount;
+            sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var bytes, out var count);
+            sections.Add(new TrRmSection(kind, flags,
+                checked((uint)count),
+                kind == 0x0020 ? bodySection : bytes.ToArray()));
+        }
+
+        return TrRmArtifactWriter.Encode(sections, schema);
     }
 
     private static Dictionary<GenericImportedInterfaceMethodKey, uint>

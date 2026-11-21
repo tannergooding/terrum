@@ -360,6 +360,7 @@ public static class TrRmStructuralMetadataValidator
                 Modules, TypeDefs, EnumDefs, TypeSpecs, GenericParams,
                 Constraints, Methods, Signatures, Parameters, Fields,
                 FieldPaths, Interfaces, InterfaceMethods,
+                ForeignNativeInterfaces,
                 InterfaceWitnesses, ConstantSources,
                 FrozenValueNodes,
                 Blobs, Contracts, Imports, NativeFunctionPointerAnchors,
