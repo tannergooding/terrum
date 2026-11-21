@@ -2876,10 +2876,10 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
                 var function = Marshal.GetDelegateForFunctionPointer<
                     GetPointerValueDelegate>(NativeLibrary.GetExport(library,
                     "Main"));
-                var source = Marshal.AllocHGlobal(32);
+                var source = Marshal.AllocHGlobal(40);
                 try
                 {
-                    for (var index = 0; index < 32; index++)
+                    for (var index = 0; index < 40; index++)
                     {
                         Marshal.WriteByte(source, index, 0);
                     }
@@ -2934,6 +2934,15 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
                 methodProviderInput,
                 new TrRmStandardArtifactInput(l1pSchemaIdentity,
                     incompatibleArrayArtifact),
+            ]));
+        var incompatiblePointerArtifact = CreateL1pTypeProviderArtifact(
+            typeProviderIdentity, l1pSchemaIdentity, relocate: true,
+            incompatiblePointer: true);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(rootInput, rootIdentity, [
+                methodProviderInput,
+                new TrRmStandardArtifactInput(l1pSchemaIdentity,
+                    incompatiblePointerArtifact),
             ]));
     }
 
@@ -3158,7 +3167,8 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
     private static byte[] CreateL1pTypeProviderArtifact(
         string moduleIdentity, string schemaIdentity,
         bool relocate = false, bool incompatible = false,
-        bool incompatibleRawUnion = false, bool incompatibleArray = false)
+        bool incompatibleRawUnion = false, bool incompatibleArray = false,
+        bool incompatiblePointer = false)
     {
         var prefix = relocate ? """
             [Blittable] [Layout(LayoutKind.Sequential)]
@@ -3170,6 +3180,7 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
         var firstFieldType = incompatible ? "uint32" : "int32";
         var wideFieldType = incompatibleRawUnion ? "uint32" : "uint64";
         var arrayElementType = incompatibleArray ? "uint32" : "int32";
+        var pointerElementType = incompatiblePointer ? "uint64" : "int32";
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse($$"""
             {{prefix}}
             [Blittable] [Layout(LayoutKind.Union)]
@@ -3188,6 +3199,7 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
                 public mut int32 Second;
                 public mut int32 Third;
                 public mut [{{arrayElementType}}; 3] Values;
+                public mut ptr<{{pointerElementType}}> Pointer;
             }
             """), new CompilationOptions {
             RuntimePolicy = BoundRuntimePolicy.FailFast,
