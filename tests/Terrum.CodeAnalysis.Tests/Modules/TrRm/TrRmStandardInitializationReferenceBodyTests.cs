@@ -4699,6 +4699,155 @@ internal sealed class TrRmStandardInitializationReferenceBodyTests
         Assert.That(capturedType.TypeCode, Is.EqualTo((byte)0x08));
     }
 
+    [Test]
+    public void Construction2EmitsPhase2ScalarConstantPatternGraph()
+    {
+        const string moduleIdentity = "phase-constant-pattern-producer";
+        const string source = """
+            void Check(int32 value)
+                ensure value is 5
+            {
+            }
+            """;
+        var failureSelection = new CoreContractFailureIdentitySelection(
+            moduleIdentity,
+            new CoreContractFailureDeclarationIdentity(
+                "core.contracts", "requirement-exception"),
+            new CoreContractFailureDeclarationIdentity(
+                "core.contracts", "postcondition-exception"),
+            new CoreContractFailureDeclarationIdentity(
+                "core.contracts", "require-exception-schema"));
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+            new CompilationOptions {
+                CoreContractFailureIdentitySelection = failureSelection,
+            });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = (BoundProgram)compilation.Program!;
+        var function = program.Functions.Single(
+            static candidate => candidate.Name == "Check");
+        var boundPattern = (BoundBinary)
+            function.DeclarationContractClauses.Single().Predicate;
+        Assert.That(boundPattern.IsConstantPatternTest, Is.True);
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            moduleIdentity, C1M1Construction2SchemaIdentity, 1,
+            out var emittedFailureSelections);
+        Assert.That(emittedFailureSelections, Is.EqualTo([failureSelection]));
+
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex.ForC1M1Construction2Draft(artifact));
+        var predicate = tables.Contracts.GetPredicateGraphContracts(1)
+            .Single();
+        Assert.That((predicate.PhaseTag, predicate.PhaseLocalOrdinal),
+            Is.EqualTo(((byte)2, 0u)));
+        Assert.That(tables.Contracts.GetOutputStateContracts(1), Is.Empty);
+
+        var graphRow = predicate.PredicateGraphRow;
+        var footprint = tables.PredicateGraphs.GetReadFootprintRow(graphRow);
+        Assert.That(tables.PredicateReadFootprints.GetRootRowCount(footprint),
+            Is.EqualTo(1));
+        var rootRow = checked((int)tables.PredicateReadFootprints
+            .GetRootFirstRow(footprint));
+        Assert.That((tables.PredicateReadRoots.GetRootKind(rootRow),
+                tables.PredicateReadRoots.GetRootIdentity(rootRow)),
+            Is.EqualTo(((byte)2, 0u)));
+
+        var matchNode = tables.PredicateGraphs.GetRootNodeRow(graphRow);
+        Assert.That(tables.PredicateNodes.GetNodeKind(matchNode),
+            Is.EqualTo(0x34u));
+        var subjectNode = tables.PredicateChildEdges
+            .GetChildNodeRowByOrdinal(matchNode, 0);
+        Assert.That(tables.PredicateNodes.GetNodeKind(subjectNode),
+            Is.EqualTo(0x11u));
+        var subjectTypeSpecRef = tables.PredicateNodes
+            .GetResultTypeSpecRef(subjectNode);
+        Assert.That(tables.TypeSpecs.GetTypeSpecRef(subjectTypeSpecRef)
+            .TypeCode, Is.EqualTo((byte)0x08));
+
+        var constantPatternNode = tables.PredicateChildEdges
+            .GetChildNodeRowByOrdinal(matchNode, 1);
+        Assert.That(tables.PredicateNodes.GetNodeKind(constantPatternNode),
+            Is.EqualTo(0x43u));
+        var literalOperand = checked((int)tables.PredicateNodes
+            .GetOperandFirstRow(constantPatternNode));
+        Assert.That(tables.PredicateNodeOperands.GetOperandKind(
+            literalOperand), Is.EqualTo((byte)2));
+        var frozenValueNode = checked((int)tables.PredicateNodeOperands
+            .GetOperandRef(literalOperand));
+        Assert.That(tables.TypeSpecs.AreEquivalentTypeSpecRefs(
+                subjectTypeSpecRef,
+                tables.FrozenValueNodes.GetTypeSpecRef(frozenValueNode)),
+            Is.True);
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(
+                tables.FrozenValueNodes.GetScalarPayload(frozenValueNode,
+                    tables.Blobs)),
+            Is.EqualTo(5));
+
+        var featureIds = Enumerable.Range(1, tables.Features.Count)
+            .Select(row => tables.Features.GetFeature(row).FeatureId)
+            .ToArray();
+        Assert.That(featureIds, Does.Contain(10u));
+        Assert.That(featureIds, Does.Contain(11u));
+        Assert.That(featureIds, Does.Contain(17u));
+    }
+
+    [Test]
+    public void Construction2RejectsScalarConstantPatternWithMismatchedLiteralType()
+    {
+        const string moduleIdentity = "phase-constant-pattern-rejection";
+        const string source = """
+            void Check(int32 value)
+                ensure value is 5
+            {
+            }
+            """;
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+            new CompilationOptions {
+                CoreContractFailureIdentitySelection
+                    = new CoreContractFailureIdentitySelection(
+                        moduleIdentity,
+                        new CoreContractFailureDeclarationIdentity(
+                            "core.contracts", "requirement-exception"),
+                        new CoreContractFailureDeclarationIdentity(
+                            "core.contracts", "postcondition-exception"),
+                        new CoreContractFailureDeclarationIdentity(
+                            "core.contracts", "require-exception-schema")),
+            });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = (BoundProgram)compilation.Program!;
+        var function = program.Functions.Single(
+            static candidate => candidate.Name == "Check");
+        var clause = function.DeclarationContractClauses.Single();
+        var pattern = (BoundBinary)clause.Predicate;
+        var literal = (BoundConstant)pattern.Right;
+        var malformedFunction = function with {
+            DeclarationContractClauses = [
+                clause with {
+                    Predicate = pattern with {
+                        Right = literal with {
+                            Type = PrimitiveType.UInt32,
+                        },
+                    },
+                },
+            ],
+        };
+        var malformedProgram = program with {
+            Functions = program.Functions.Select(candidate =>
+                candidate.Name == function.Name
+                    ? malformedFunction : candidate).ToImmutableArray(),
+        };
+
+        Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.EmitStandard(malformedProgram,
+                moduleIdentity, C1M1Construction2SchemaIdentity, 1,
+                out ImmutableArray<CoreContractFailureIdentitySelection> _));
+    }
+
     [TestCase("(enabled && ready) == (*destination is init)",
         "if (enabled && ready) { *destination = 42; }",
         "1:0001|0:1110")]

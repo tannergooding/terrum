@@ -3155,6 +3155,8 @@ public sealed record BoundBinary(TokenKind Operator, BoundExpression Left, Bound
     PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span)
 {
     internal BoundIntegerOverflowBehavior OverflowBehavior { get; init; }
+    // Keep source constant-pattern tests distinct from ordinary equality.
+    internal bool IsConstantPatternTest { get; init; }
 
     internal override ImmutableArray<BoundExpression> NestedExpressions => [Left, Right];
     internal override BoundExpression RewriteNestedExpressions(

@@ -3170,7 +3170,8 @@ public static partial class TrRmExecutableCompiler
                 or BoundIsNull
                 or BoundContractReturnValue
                 or BoundReferenceInitializationTest or BoundIsSome
-                or BoundIsVariablePattern)
+                or BoundIsVariablePattern
+                or BoundBinary { IsConstantPatternTest: true })
             {
                 return [];
             }
@@ -3335,6 +3336,50 @@ public static partial class TrRmExecutableCompiler
                 matchNodeRow, 1, checked((int)nullPatternNodeRow)));
         }
 
+        void AddConstantPatternMatchGraph(int parentNodeRow,
+            uint childOrdinal, PrimitiveType subjectType,
+            uint inputRootRow, BoundConstant constant,
+            ref int rootNodeRow)
+        {
+            var literal
+                = predicateFrozenScalarValues.AddFrozenValueNode(constant);
+            var matchNodeRow = checked(predicateNodes.Count + 1);
+            predicateNodes.Add(new TrRmPredicateNodeRow(0x34,
+                checked((uint)TypeSpecRowFor(PrimitiveType.Bool)), 0, 0));
+            if (parentNodeRow == 0)
+            {
+                rootNodeRow = matchNodeRow;
+            }
+            else
+            {
+                predicateChildEdges.Add(new TrRmPredicateChildEdgeRow(
+                    parentNodeRow, childOrdinal, matchNodeRow));
+            }
+
+            var subjectNodeRow = checked((uint)predicateNodes.Count + 1);
+            var subjectOperandFirstRow = checked(
+                (uint)predicateNodeOperands.Count + 1);
+            predicateNodeOperands.Add(
+                new TrRmPredicateNodeOperandRow(1, inputRootRow));
+            predicateNodes.Add(new TrRmPredicateNodeRow(0x11,
+                checked((uint)TypeSpecRowFor(subjectType)),
+                subjectOperandFirstRow, 1));
+
+            var constantPatternNodeRow
+                = checked((uint)predicateNodes.Count + 1);
+            var patternOperandFirstRow = checked(
+                (uint)predicateNodeOperands.Count + 1);
+            predicateNodeOperands.Add(new TrRmPredicateNodeOperandRow(2,
+                literal.FrozenValueNodeRow));
+            predicateNodes.Add(new TrRmPredicateNodeRow(0x43,
+                checked((uint)TypeSpecRowFor(PrimitiveType.Bool)),
+                patternOperandFirstRow, 1));
+            predicateChildEdges.Add(new TrRmPredicateChildEdgeRow(
+                matchNodeRow, 0, checked((int)subjectNodeRow)));
+            predicateChildEdges.Add(new TrRmPredicateChildEdgeRow(
+                matchNodeRow, 1, checked((int)constantPatternNodeRow)));
+        }
+
         void AddCapturedValueLoadGraph(
             int parentNodeRow, uint childOrdinal,
             PrimitiveType capturedType, uint captureRow,
@@ -3392,6 +3437,49 @@ public static partial class TrRmExecutableCompiler
                                 frame.Expression.Type)),
                             frame.OperandFirstRow,
                             frame.OperandCount);
+                    continue;
+                }
+
+                if (frame.Expression is BoundBinary {
+                        IsConstantPatternTest: true,
+                    } constantPatternTest)
+                {
+                    if (declarationPhase
+                            is not (BoundDeclarationContractPhase.Precondition
+                                or BoundDeclarationContractPhase
+                                    .NormalPostcondition)
+                        || constantPatternTest.Operator
+                            != TokenKind.EqualsEquals
+                        || constantPatternTest.Type != PrimitiveType.Bool
+                        || constantPatternTest.Left
+                            is not BoundRead subjectRead
+                        || constantPatternTest.Right
+                            is not BoundConstant constant
+                        || subjectRead.Variable < 0
+                        || subjectRead.Variable >= function.ParameterCount
+                        || function.Variables[subjectRead.Variable].IsOut
+                        || function.Variables[subjectRead.Variable].IsInit
+                        || function.Variables[subjectRead.Variable].IsMutable
+                        || function.Variables[subjectRead.Variable].Type
+                            != subjectRead.Type
+                        || !PrimitiveTypeFacts.IsBuiltInScalar(
+                            subjectRead.Type)
+                        || constant.Type != subjectRead.Type
+                        || constant.RepresentationType
+                            != subjectRead.Type
+                        || !constant.Bits.IsCanonicalFor(constant.Type)
+                        || !rootRowsByIdentity.TryGetValue(
+                            (2, subjectRead.Variable),
+                            out var constantSubjectRootRow))
+                    {
+                        throw Unsupported(
+                            "A scalar constant-pattern graph requires an exact typed input formal and canonical literal.");
+                    }
+
+                    AddConstantPatternMatchGraph(frame.ParentNodeRow,
+                        frame.ChildOrdinal, subjectRead.Type,
+                        constantSubjectRootRow, constant,
+                        ref rootNodeRow);
                     continue;
                 }
 
@@ -3926,7 +4014,44 @@ public static partial class TrRmExecutableCompiler
                 {
                     var expression = pendingExpressions.Pop();
                     var children = GetGeneralPredicateChildren(expression);
-                    if (expression is BoundIsNull nullTest)
+                    if (expression is BoundBinary {
+                            IsConstantPatternTest: true,
+                        } constantPatternTest)
+                    {
+                        if (clause.Phase is not (
+                                BoundDeclarationContractPhase.Precondition
+                                or BoundDeclarationContractPhase
+                                    .NormalPostcondition)
+                            || constantPatternTest.Operator
+                                != TokenKind.EqualsEquals
+                            || constantPatternTest.Type
+                                != PrimitiveType.Bool
+                            || constantPatternTest.Left
+                                is not BoundRead subjectRead
+                            || constantPatternTest.Right
+                                is not BoundConstant constant
+                            || subjectRead.Variable < 0
+                            || subjectRead.Variable
+                                >= function.ParameterCount
+                            || function.Variables[subjectRead.Variable].IsOut
+                            || function.Variables[subjectRead.Variable].IsInit
+                            || function.Variables[subjectRead.Variable]
+                                .IsMutable
+                            || function.Variables[subjectRead.Variable].Type
+                                != subjectRead.Type
+                            || !PrimitiveTypeFacts.IsBuiltInScalar(
+                                subjectRead.Type)
+                            || constant.Type != subjectRead.Type
+                            || constant.RepresentationType != subjectRead.Type
+                            || !constant.Bits.IsCanonicalFor(constant.Type))
+                        {
+                            throw Unsupported(
+                                "A scalar constant-pattern graph requires an exact typed input formal and canonical literal.");
+                        }
+
+                        _ = readRoots.Add((2, subjectRead.Variable));
+                    }
+                    else if (expression is BoundIsNull nullTest)
                     {
                         if (clause.Phase
                                 != BoundDeclarationContractPhase

@@ -18599,6 +18599,48 @@ internal sealed partial class Binder
                 break;
 
             case SyntaxKind.IsPatternExpression:
+                var constantPattern = node.Children
+                    .OfType<SyntaxNode>()
+                    .LastOrDefault();
+                if (constantPattern?.Kind
+                    == SyntaxKind.SwitchConstantPattern)
+                {
+                    var patternExpression = constantPattern.Children
+                        .OfType<SyntaxNode>()
+                        .FirstOrDefault();
+                    if (patternExpression is null)
+                    {
+                        Report("TRM3001",
+                            "A constant pattern requires an expression.",
+                            constantPattern.Span);
+                        expression = ErrorExpression(node.Span);
+                        break;
+                    }
+
+                    var subject = BindExpression(
+                        (SyntaxNode)node.Children[0], null);
+                    var patternValue = BindExpression(patternExpression,
+                        subject.Type);
+                    if (!PrimitiveTypeFacts.IsBuiltInScalar(subject.Type)
+                        || FoldSwitchConstantLocals(patternValue)
+                            is not BoundConstant constant
+                        || constant.Type != subject.Type
+                        || constant.RepresentationType != subject.Type)
+                    {
+                        Report("TRM3007",
+                            "A constant pattern requires a fixed scalar constant of the subject type.",
+                            constantPattern.Span);
+                        expression = ErrorExpression(node.Span);
+                        break;
+                    }
+
+                    expression = new BoundBinary(TokenKind.EqualsEquals,
+                        subject, constant, PrimitiveType.Bool, node.Span) {
+                            IsConstantPatternTest = true,
+                        };
+                    break;
+                }
+
                 if (!TryGetGenericUniqueProperty(node,
                     out var uniqueFormalOrdinal, out var uniqueFormalType))
                 {
