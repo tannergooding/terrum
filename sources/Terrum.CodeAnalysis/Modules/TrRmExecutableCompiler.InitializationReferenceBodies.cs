@@ -4274,6 +4274,7 @@ public static partial class TrRmExecutableCompiler
                             || variables[variable].IsOut
                             || variables[variable].IsInit
                             || variables[variable].IsInitializationLocal
+                            || initializedLocals.Contains(variable)
                             || !DirectNativeImportContract.IsScalar(
                                 homeTypes[homeIndex])
                             || !valueByRegister.TryGetValue(sourceRegister,
@@ -4539,6 +4540,7 @@ public static partial class TrRmExecutableCompiler
                     var variable = homeVariables[reservation.HomeIndex];
                     if (variable < function.ParameterCount
                         || variable >= variables.Count
+                        || initializedValueLocals.Contains(variable)
                         || !initializedLocals.Add(variable)
                         || variables[variable].IsInitializationLocal)
                     {
