@@ -840,12 +840,18 @@ across clauses.
 The Standard producer and source-free re-emitter preserve rootless scalar
 predicates with an empty read footprint for either OutputState value. Loading
 checks the graph and relation shape without re-proving the producer's body.
-Nontrivial source declaration-clause emission remains gated until the separate
-phase-2 clause path is implemented; the current graph-codec tests isolate
-phase-3 metadata from that clause payload.
+Under the distinct no-label Construction-2 failure profile, the phase-1/2
+source producer emits bounded scalar clauses, phase-2 initialization tests,
+optional and captured-value patterns, scalar Constant pattern `0x43`, and
+scalar TypeTest pattern `0x44` with exact `PredicateTypeUse` `0x004F` for an
+optional scalar subject. Native lowering includes the same bounded TypeTest
+predicate; producer and emission regressions remain unverified under the
+active hold. The phase-1/2 consumer, failure maps, provider binding,
+source-free remapping/re-emission and graph execution remain open.
 This composition does not select the LayoutQueries source/provider/query-Body
-profile. Phase-2 ensure persistence, checked conversions, bit reinterpretation,
-calls, captures, places, broader cross-clause value coverage, complete
+profile. Other phase-2 forms including checked conversions, bit
+reinterpretation, typed/reference/tuple/union/property patterns, places,
+broader cross-clause value coverage, complete
 dependency/provider replacement remapping and graph execution remain open.
 Native JIT and PE execution also cover
 imported default-Boolean OutputState calls after same-profile
@@ -859,7 +865,8 @@ direction: Feature 10/1 has no unconditional Feature 11/9 prerequisite, and
 the separate
 [checked-output selector proposal](proposals/checked-output-outcome-selectors.md)
 limits general phase-3 selectors to that exact candidate profile. Standard
-phase-1/2 declaration-predicate persistence and execution remain unsupported.
+source-free loading and execution of phase-1/2 declaration-predicate graphs
+remain unsupported.
 The normative registry still records the pending `10 -> 11 -> 9` chain; this
 divergence is not a conformance claim or a compatibility mapping.
 The separate, unapproved `trrm/1-draft-init-reference-bodies-1` profile

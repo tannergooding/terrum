@@ -3292,6 +3292,8 @@ internal sealed partial class PeCompiler
                 return ExpressionSpills(projection.Value, ref maximumArguments);
             case BoundIsNull test:
                 return ExpressionSpills(test.Value, ref maximumArguments);
+            case BoundTypeTestPattern test:
+                return ExpressionSpills(test.Value, ref maximumArguments);
             case BoundIsSome pattern:
                 return ExpressionSpills(pattern.Value, ref maximumArguments);
             case BoundIsVariablePattern pattern:
@@ -3645,6 +3647,9 @@ internal sealed partial class PeCompiler
                     VisitExpression(projection.Value);
                     break;
                 case BoundIsNull test:
+                    VisitExpression(test.Value);
+                    break;
+                case BoundTypeTestPattern test:
                     VisitExpression(test.Value);
                     break;
                 case BoundIsSome pattern:
@@ -10113,6 +10118,41 @@ internal sealed partial class PeCompiler
                     _code.Bytes(0x48, 0x8B, 0x00);
                 }
                 _code.Bytes(0x48, 0x85, 0xC0, 0x0F, 0x94, 0xC0, 0x0F, 0xB6, 0xC0);
+                break;
+            case BoundTypeTestPattern test:
+                var optionalType = IsOptionalValueType(test.Value.Type);
+                var typeMatches = optionalType
+                    ? GetOptionalValueLayout(test.Value.Type).PayloadType
+                        == test.TestedType
+                    : test.Value.Type == test.TestedType;
+                Expression(test.Value, spill);
+                if (!optionalType)
+                {
+                    _code.Byte(0xB8);
+                    _code.Int32(typeMatches ? 1 : 0);
+                    break;
+                }
+
+                if (IsTaggedOptionalValueType(test.Value.Type))
+                {
+                    TestTaggedOptionalPresence(test.Value.Type);
+                }
+                else
+                {
+                    if (IsNormalBackingOptionalReference(test.Value.Type))
+                    {
+                        _code.Bytes(0x48, 0x8B, 0x00);
+                    }
+                    _code.Bytes(0x48, 0x85, 0xC0);
+                }
+                if (typeMatches)
+                {
+                    _code.Bytes(0x0F, 0x95, 0xC0, 0x0F, 0xB6, 0xC0);
+                }
+                else
+                {
+                    _code.Bytes(0x31, 0xC0);
+                }
                 break;
             case BoundIsSome pattern when IsTaggedOptionalValueType(
                 pattern.Value.Type):

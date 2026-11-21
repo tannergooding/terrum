@@ -249,6 +249,9 @@ internal static class TokenSpanContract
                 case BoundIsNull test:
                     pending.Push(test.Value);
                     break;
+                case BoundTypeTestPattern test:
+                    pending.Push(test.Value);
+                    break;
                 case BoundIsSome test:
                     pending.Push(test.Value);
                     break;

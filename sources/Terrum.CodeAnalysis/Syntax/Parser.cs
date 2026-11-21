@@ -2352,7 +2352,10 @@ internal sealed class Parser
         var afterType = Peek(typeCoreOffset + 1).Kind;
         if (typeStart && (mutable || Peek(typeOffset).Kind == TokenKind.WriteKeyword
             || afterType is TokenKind.Identifier or TokenKind.Question
-                or TokenKind.QuestionQuestion or TokenKind.Less))
+                or TokenKind.QuestionQuestion or TokenKind.Less
+            || (Peek(typeOffset).Kind == TokenKind.Identifier
+                && IsBuiltInScalarPatternTypeName(
+                    Peek(typeOffset).Text))))
         {
             var children = new List<SyntaxElement>();
             if (mutable)
@@ -2388,6 +2391,14 @@ internal sealed class Parser
 
         return Node(SyntaxKind.SwitchConstantPattern, [ParseExpression()]);
     }
+
+    private static bool IsBuiltInScalarPatternTypeName(string name) =>
+        name is "bool" or "char8" or "char16" or "char32" or "rune"
+            or "int8" or "int16" or "int32" or "int64"
+            or "uint8" or "uint16" or "uint32" or "uint64"
+            or "nint" or "nuint" or "int128" or "uint128"
+            or "float16" or "bfloat16" or "float32" or "float64"
+            or "float128" or "decimal32" or "decimal64" or "decimal128";
 
     private SyntaxNode ParseSwitchQualifiedPattern(SyntaxNode type, bool includeCaseName)
     {

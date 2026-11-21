@@ -1897,6 +1897,9 @@ internal static class BoundTreeTraversal
                 propertyTest with {
                     FormalType = rewriteType(propertyTest.FormalType),
                 },
+            BoundTypeTestPattern typeTest => typeTest with {
+                TestedType = rewriteType(typeTest.TestedType),
+            },
             BoundCall call => call with {
                 Type = type,
                 InterfaceCallIdentity =

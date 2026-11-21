@@ -4848,6 +4848,177 @@ internal sealed class TrRmStandardInitializationReferenceBodyTests
                 out ImmutableArray<CoreContractFailureIdentitySelection> _));
     }
 
+    [TestCase("int32", PrimitiveType.Int32, (byte)0x08)]
+    [TestCase("int64", PrimitiveType.Int64, (byte)0x09)]
+    public void Construction2EmitsPhase2ScalarTypeTestPatternGraph(
+        string testedTypeName, PrimitiveType testedType, byte typeCode)
+    {
+        const string moduleIdentity = "phase-type-test-pattern-producer";
+        var source = $$"""
+            void Check(int32? value)
+                ensure value is {{testedTypeName}}
+            {
+            }
+            """;
+        var failureSelection = new CoreContractFailureIdentitySelection(
+            moduleIdentity,
+            new CoreContractFailureDeclarationIdentity(
+                "core.contracts", "requirement-exception"),
+            new CoreContractFailureDeclarationIdentity(
+                "core.contracts", "postcondition-exception"),
+            new CoreContractFailureDeclarationIdentity(
+                "core.contracts", "require-exception-schema"));
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+            new CompilationOptions {
+                CoreContractFailureIdentitySelection = failureSelection,
+            });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = (BoundProgram)compilation.Program!;
+        var function = program.Functions.Single(
+            static candidate => candidate.Name == "Check");
+        var clause = function.DeclarationContractClauses.Single();
+        Assert.That((clause.Phase, clause.PhaseLocalOrdinal),
+            Is.EqualTo((BoundDeclarationContractPhase.NormalPostcondition,
+                0u)));
+        Assert.That(clause.Predicate, Is.TypeOf<BoundTypeTestPattern>());
+        var boundTypeTest = (BoundTypeTestPattern)clause.Predicate;
+        Assert.That(boundTypeTest.TestedType, Is.EqualTo(testedType));
+        Assert.That(function.CheckedOutputStatePredicates.IsDefaultOrEmpty,
+            Is.True);
+        Assert.That(NativeEmitter.EmitLibrary(program, ["Check"],
+            NativeRuntimePolicy.FailFast), Is.Not.Empty);
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            moduleIdentity, C1M1Construction2SchemaIdentity, 1,
+            out var emittedFailureSelections);
+        Assert.That(emittedFailureSelections, Is.EqualTo([failureSelection]));
+
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex.ForC1M1Construction2Draft(artifact));
+        var predicate = tables.Contracts.GetPredicateGraphContracts(1)
+            .Single();
+        Assert.That((predicate.PhaseTag, predicate.PhaseLocalOrdinal),
+            Is.EqualTo(((byte)2, 0u)));
+        Assert.That(tables.Contracts.GetOutputStateContracts(1), Is.Empty);
+        Assert.That(tables.PredicateTypeUses.Count, Is.EqualTo(1));
+        Assert.That(tables.PredicateCaptures.Count, Is.Zero);
+
+        var footprint = tables.PredicateGraphs.GetReadFootprintRow(
+            predicate.PredicateGraphRow);
+        Assert.That(tables.PredicateReadFootprints.GetRootRowCount(footprint),
+            Is.EqualTo(1));
+        var rootRow = checked((int)tables.PredicateReadFootprints
+            .GetRootFirstRow(footprint));
+        Assert.That((tables.PredicateReadRoots.GetRootKind(rootRow),
+                tables.PredicateReadRoots.GetRootIdentity(rootRow)),
+            Is.EqualTo(((byte)2, 0u)));
+
+        var matchNode = tables.PredicateGraphs.GetRootNodeRow(
+            predicate.PredicateGraphRow);
+        Assert.That(tables.PredicateNodes.GetNodeKind(matchNode),
+            Is.EqualTo(0x34u));
+        var subjectNode = tables.PredicateChildEdges
+            .GetChildNodeRowByOrdinal(matchNode, 0);
+        Assert.That(tables.PredicateNodes.GetNodeKind(subjectNode),
+            Is.EqualTo(0x11u));
+        var optionalSubjectType = tables.TypeSpecs.GetTypeSpecRef(
+            tables.PredicateNodes.GetResultTypeSpecRef(subjectNode));
+        Assert.That(optionalSubjectType.Form,
+            Is.EqualTo((byte)0x06));
+        var optionalSubjectTypeBytes = tables.TypeSpecs.GetTypeSpecBytes(
+            optionalSubjectType.Value);
+        var optionalPayloadTypeRef = BinaryPrimitives
+            .ReadUInt32LittleEndian(optionalSubjectTypeBytes.Slice(2, 4));
+        var optionalPayloadType = tables.TypeSpecs.GetTypeSpecRef(
+            optionalPayloadTypeRef);
+        Assert.That((optionalPayloadType.Form,
+                optionalPayloadType.TypeCode),
+            Is.EqualTo(((byte)0x01, (byte)0x08)));
+
+        var typeTestNode = tables.PredicateChildEdges
+            .GetChildNodeRowByOrdinal(matchNode, 1);
+        Assert.That(tables.PredicateNodes.GetNodeKind(typeTestNode),
+            Is.EqualTo(0x44u));
+        var typeOperand = checked((int)tables.PredicateNodes
+            .GetOperandFirstRow(typeTestNode));
+        Assert.That(tables.PredicateNodeOperands.GetOperandKind(typeOperand),
+            Is.EqualTo((byte)6));
+        var typeUseRow = checked((int)tables.PredicateNodeOperands
+            .GetOperandRef(typeOperand));
+        var targetTypeSpecRef
+            = tables.PredicateTypeUses.GetTypeSpecRef(typeUseRow);
+        var targetType = tables.TypeSpecs.GetTypeSpecRef(
+            targetTypeSpecRef);
+        Assert.That(targetType.Form, Is.EqualTo((byte)0x01));
+        Assert.That(targetType.TypeCode, Is.EqualTo(typeCode));
+
+        var featureIds = Enumerable.Range(1, tables.Features.Count)
+            .Select(row => tables.Features.GetFeature(row).FeatureId)
+            .ToArray();
+        Assert.That(featureIds, Does.Contain(17u));
+
+        if (testedType == PrimitiveType.Int32)
+        {
+            Assert.Throws<NotSupportedException>(() =>
+                TrRmExecutableCompiler.EmitStandard(program, moduleIdentity,
+                    GeneralPredicateGraphsSchemaIdentity, 1));
+        }
+    }
+
+    [Test]
+    public void Construction2RejectsUnsupportedTypeTestTypeUse()
+    {
+        const string moduleIdentity = "phase-type-test-pattern-rejection";
+        const string source = """
+            void Check(int32? value)
+                ensure value is int32
+            {
+            }
+            """;
+        var failureSelection = new CoreContractFailureIdentitySelection(
+            moduleIdentity,
+            new CoreContractFailureDeclarationIdentity(
+                "core.contracts", "requirement-exception"),
+            new CoreContractFailureDeclarationIdentity(
+                "core.contracts", "postcondition-exception"),
+            new CoreContractFailureDeclarationIdentity(
+                "core.contracts", "require-exception-schema"));
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+            new CompilationOptions {
+                CoreContractFailureIdentitySelection = failureSelection,
+            });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = (BoundProgram)compilation.Program!;
+        var function = program.Functions.Single(
+            static candidate => candidate.Name == "Check");
+        var clause = function.DeclarationContractClauses.Single();
+        var typeTest = (BoundTypeTestPattern)clause.Predicate;
+        var malformedFunction = function with {
+            DeclarationContractClauses = [
+                clause with {
+                    Predicate = typeTest with {
+                        TestedType = PrimitiveType.OwnedInt32Buffer,
+                    },
+                },
+            ],
+        };
+        var malformedProgram = program with {
+            Functions = program.Functions.Select(candidate =>
+                candidate.Name == function.Name
+                    ? malformedFunction : candidate).ToImmutableArray(),
+        };
+
+        Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.EmitStandard(malformedProgram,
+                moduleIdentity, C1M1Construction2SchemaIdentity, 1,
+                out ImmutableArray<CoreContractFailureIdentitySelection> _));
+    }
+
     [TestCase("(enabled && ready) == (*destination is init)",
         "if (enabled && ready) { *destination = 42; }",
         "1:0001|0:1110")]

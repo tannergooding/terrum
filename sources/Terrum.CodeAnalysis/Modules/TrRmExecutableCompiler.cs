@@ -2842,6 +2842,9 @@ public static partial class TrRmExecutableCompiler
             + (2 * program.NativeFunctionPointerSignatures.Length));
         var predicateGraphs = new List<TrRmPredicateGraphRow>();
         var predicateCaptures = new List<TrRmPredicateCaptureRow>();
+        var predicateTypeUses = new List<TrRmPredicateTypeUseRow>();
+        var predicateTypeUseRowsByTypeSpecRef
+            = new Dictionary<uint, uint>();
         var predicateReadFootprints
             = new List<TrRmPredicateReadFootprintRow>();
         var predicateReadRoots = new List<TrRmPredicateReadRootRow>();
@@ -2971,6 +2974,22 @@ public static partial class TrRmExecutableCompiler
                 nativeFunctionPointerTypeRows, typeRowsList,
                 nativePointerTypeRows, program.NativePointerTypes,
                 structureTypeDefRows, typeDefTypeSpecRows, TypeSpecRowFor);
+        }
+
+        uint PredicateTypeUseRowFor(PrimitiveType type)
+        {
+            var typeSpecRef = checked((uint)TypeSpecRowFor(type));
+            if (predicateTypeUseRowsByTypeSpecRef.TryGetValue(typeSpecRef,
+                    out var existingRow))
+            {
+                return existingRow;
+            }
+
+            var row = checked((uint)predicateTypeUses.Count + 1);
+            predicateTypeUses.Add(
+                new TrRmPredicateTypeUseRow(typeSpecRef));
+            predicateTypeUseRowsByTypeSpecRef.Add(typeSpecRef, row);
+            return row;
         }
 
         uint FieldDefRowFor(BoundFieldRead field)
@@ -3168,6 +3187,7 @@ public static partial class TrRmExecutableCompiler
             if (expression is BoundRead or BoundConstant
                 or BoundIsInitialized
                 or BoundIsNull
+                or BoundTypeTestPattern
                 or BoundContractReturnValue
                 or BoundReferenceInitializationTest or BoundIsSome
                 or BoundIsVariablePattern
@@ -3336,6 +3356,48 @@ public static partial class TrRmExecutableCompiler
                 matchNodeRow, 1, checked((int)nullPatternNodeRow)));
         }
 
+        void AddTypeTestMatchGraph(int parentNodeRow,
+            uint childOrdinal, PrimitiveType optionalType,
+            uint inputRootRow, uint typeUseRow,
+            ref int rootNodeRow)
+        {
+            var matchNodeRow = checked(predicateNodes.Count + 1);
+            predicateNodes.Add(new TrRmPredicateNodeRow(0x34,
+                checked((uint)TypeSpecRowFor(PrimitiveType.Bool)), 0, 0));
+            if (parentNodeRow == 0)
+            {
+                rootNodeRow = matchNodeRow;
+            }
+            else
+            {
+                predicateChildEdges.Add(new TrRmPredicateChildEdgeRow(
+                    parentNodeRow, childOrdinal, matchNodeRow));
+            }
+
+            var subjectNodeRow = checked((uint)predicateNodes.Count + 1);
+            var subjectOperandFirstRow = checked(
+                (uint)predicateNodeOperands.Count + 1);
+            predicateNodeOperands.Add(
+                new TrRmPredicateNodeOperandRow(1, inputRootRow));
+            predicateNodes.Add(new TrRmPredicateNodeRow(0x11,
+                checked((uint)TypeSpecRowFor(optionalType)),
+                subjectOperandFirstRow, 1));
+
+            var typeTestPatternNodeRow
+                = checked((uint)predicateNodes.Count + 1);
+            var patternOperandFirstRow = checked(
+                (uint)predicateNodeOperands.Count + 1);
+            predicateNodeOperands.Add(
+                new TrRmPredicateNodeOperandRow(6, typeUseRow));
+            predicateNodes.Add(new TrRmPredicateNodeRow(0x44,
+                checked((uint)TypeSpecRowFor(PrimitiveType.Bool)),
+                patternOperandFirstRow, 1));
+            predicateChildEdges.Add(new TrRmPredicateChildEdgeRow(
+                matchNodeRow, 0, checked((int)subjectNodeRow)));
+            predicateChildEdges.Add(new TrRmPredicateChildEdgeRow(
+                matchNodeRow, 1, checked((int)typeTestPatternNodeRow)));
+        }
+
         void AddConstantPatternMatchGraph(int parentNodeRow,
             uint childOrdinal, PrimitiveType subjectType,
             uint inputRootRow, BoundConstant constant,
@@ -3500,6 +3562,42 @@ public static partial class TrRmExecutableCompiler
                     AddNullMatchGraph(frame.ParentNodeRow,
                         frame.ChildOrdinal, optionalRead.Type,
                         nullInputRootRow, ref rootNodeRow);
+                    continue;
+                }
+
+                if (frame.Expression
+                    is BoundTypeTestPattern typeTest)
+                {
+                    if (declarationPhase
+                            != BoundDeclarationContractPhase
+                                .NormalPostcondition
+                        || typeTest.Value is not BoundRead optionalRead
+                        || optionalRead.Variable < 0
+                        || optionalRead.Variable >= function.ParameterCount
+                        || function.Variables[optionalRead.Variable].Type
+                            != optionalRead.Type
+                        || function.Variables[optionalRead.Variable].IsOut
+                        || function.Variables[optionalRead.Variable].IsInit
+                        || function.Variables[optionalRead.Variable]
+                            .IsMutable
+                        || !TryGetOptionalBuiltInScalarType(
+                            optionalRead.Type, program.CheckedReferenceTypes,
+                            out _)
+                        || !generalPredicateScalarTypeRows.ContainsKey(
+                            typeTest.TestedType)
+                        || !rootRowsByIdentity.TryGetValue(
+                            (2, optionalRead.Variable),
+                            out var typeTestInputRootRow))
+                    {
+                        throw Unsupported(
+                            "A TypeTest graph requires its phase-2 optional input and a supported scalar TypeUse.");
+                    }
+
+                    AddTypeTestMatchGraph(frame.ParentNodeRow,
+                        frame.ChildOrdinal, optionalRead.Type,
+                        typeTestInputRootRow,
+                        PredicateTypeUseRowFor(typeTest.TestedType),
+                        ref rootNodeRow);
                     continue;
                 }
 
@@ -4072,6 +4170,34 @@ public static partial class TrRmExecutableCompiler
                         {
                             throw Unsupported(
                                 "A Null pattern graph requires a scalar optional input formal.");
+                        }
+
+                        _ = readRoots.Add((2, optionalRead.Variable));
+                    }
+                    else if (expression
+                        is BoundTypeTestPattern typeTest)
+                    {
+                        if (clause.Phase
+                                != BoundDeclarationContractPhase
+                                    .NormalPostcondition
+                            || typeTest.Value is not BoundRead optionalRead
+                            || optionalRead.Variable < 0
+                            || optionalRead.Variable
+                                >= function.ParameterCount
+                            || function.Variables[optionalRead.Variable].Type
+                                != optionalRead.Type
+                            || function.Variables[optionalRead.Variable].IsOut
+                            || function.Variables[optionalRead.Variable].IsInit
+                            || function.Variables[optionalRead.Variable]
+                                .IsMutable
+                            || !TryGetOptionalBuiltInScalarType(
+                                optionalRead.Type,
+                                program.CheckedReferenceTypes, out _)
+                            || !generalPredicateScalarTypeRows.ContainsKey(
+                                typeTest.TestedType))
+                        {
+                            throw Unsupported(
+                                "A TypeTest graph requires a scalar optional input and a supported scalar TypeUse in a phase-2 clause.");
                         }
 
                         _ = readRoots.Add((2, optionalRead.Variable));
@@ -6087,6 +6213,9 @@ public static partial class TrRmExecutableCompiler
         var predicateCaptureBytes = predicateCaptures.Count == 0 ? []
             : TrRmPredicateCaptureTableWriter.Encode(predicateCaptures,
                 predicateGraphs.Count, types);
+        var predicateTypeUseBytes = predicateTypeUses.Count == 0 ? []
+            : TrRmPredicateTypeUseTableWriter.Encode(predicateTypeUses,
+                types, schema);
         var predicateFrozenScalarTables
             = predicateFrozenScalarValues.FrozenValueNodeCount == 0
                 ? new TrRmFrozenScalarValueTables([], 0, [], 0, [], 0)
@@ -6096,7 +6225,7 @@ public static partial class TrRmExecutableCompiler
             predicateFrozenScalarTables.FrozenValueNodeCount,
             predicateCaptures.Count,
             predicateOperations.Count,
-            0, 0, 0, 0, 0, 0, 0);
+            0, predicateTypeUses.Count, 0, 0, 0, 0, 0);
         var predicateNodeOperandBytes = predicateNodeOperands.Count == 0 ? []
             : TrRmPredicateNodeOperandTableWriter.Encode(
                 predicateNodeOperands, predicateOperandCounts, schema);
@@ -6136,6 +6265,7 @@ public static partial class TrRmExecutableCompiler
         sectionCount += predicateGraphs.Count == 0 ? 0 : 5;
         sectionCount += predicateChildEdges.Count == 0 ? 0 : 1;
         sectionCount += predicateCaptures.Count == 0 ? 0 : 1;
+        sectionCount += predicateTypeUses.Count == 0 ? 0 : 1;
         sectionCount += predicateOperations.Count == 0 ? 0 : 1;
         sectionCount += methodParameterSurfaceRows.Count == 0 ? 0 : 1;
         sectionCount += typeDefBindingEqualityRows.Count == 0 ? 0 : 1;
@@ -6268,6 +6398,12 @@ public static partial class TrRmExecutableCompiler
                 sections.Add(new(0x004D, 0,
                     (uint)predicateOperations.Count,
                     predicateOperationBytes));
+            }
+            if (predicateTypeUses.Count != 0)
+            {
+                sections.Add(new(0x004F, 0,
+                    (uint)predicateTypeUses.Count,
+                    predicateTypeUseBytes));
             }
         }
         if (predicateFrozenScalarTables.FrozenValueNodeCount != 0)

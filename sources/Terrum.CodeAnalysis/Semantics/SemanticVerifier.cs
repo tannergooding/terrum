@@ -2166,6 +2166,9 @@ public static partial class SemanticVerifier
                 case BoundIsNull test:
                     Expression(test.Value, scope, depth + 1);
                     break;
+                case BoundTypeTestPattern test:
+                    Expression(test.Value, scope, depth + 1);
+                    break;
                 case BoundNativeFixedArrayInitialization fixedArray:
                     if (fixedArray.Elements.IsDefault)
                     {
@@ -2978,6 +2981,9 @@ public static partial class SemanticVerifier
                     Expression(projection.Value, depth + 1, acquiringRoot);
                     break;
                 case BoundIsNull test:
+                    Expression(test.Value, depth + 1, acquiringRoot);
+                    break;
+                case BoundTypeTestPattern test:
                     Expression(test.Value, depth + 1, acquiringRoot);
                     break;
                 case BoundNativeFixedArrayElement fixedArrayElement:
@@ -7715,6 +7721,9 @@ public static partial class SemanticVerifier
                         conditional.WhenFalse, function, program, ref remaining, depth + 1),
             BoundIsNull test => CleanupExpressionCanBeProvenNonThrowing(
                 test.Value, function, program, ref remaining, depth + 1),
+            BoundTypeTestPattern test =>
+                CleanupExpressionCanBeProvenNonThrowing(
+                    test.Value, function, program, ref remaining, depth + 1),
             _ => false,
         };
     }
@@ -19397,6 +19406,34 @@ public static partial class SemanticVerifier
                 Expression(test.Value, initialized, fieldMasks, declarations, function, program,
                     ref remaining, depth + 1, failures);
                 break;
+            case BoundTypeTestPattern typeTest:
+                if (typeTest.Value is not BoundRead testRead
+                    || testRead.Variable < 0
+                    || testRead.Variable >= function.ParameterCount
+                    || function.Variables[testRead.Variable].Type
+                        != testRead.Type
+                    || function.Variables[testRead.Variable].IsOut
+                    || function.Variables[testRead.Variable].IsInit
+                    || !ValidType(typeTest.TestedType,
+                        allowVoid: false, program))
+                {
+                    throw Invalid(typeTest.Span);
+                }
+
+                var testValueType = typeTest.Value.Type;
+                var testPayloadType = testValueType;
+                if (!PrimitiveTypeFacts.IsBuiltInScalar(testValueType)
+                    && (!TryGetOptionalPayloadType(testValueType, program,
+                            out testPayloadType)
+                        || !PrimitiveTypeFacts.IsBuiltInScalar(
+                            testPayloadType)))
+                {
+                    throw Invalid(typeTest.Span);
+                }
+                Expression(typeTest.Value, initialized, fieldMasks,
+                    declarations, function, program, ref remaining,
+                    depth + 1, failures);
+                break;
             case BoundIsInitialized initializationTest:
                 if (initializationTest.Type != PrimitiveType.Bool
                     || initializationTest.Variable < 0 || initializationTest.Variable >= initialized.Length
@@ -22579,7 +22616,8 @@ public static partial class SemanticVerifier
         }
         if (expression is BoundCall or BoundIndirectCall
             or BoundNominalUpdate or BoundCoalesce
-            or BoundIsNull or BoundIsSome or BoundIsVariablePattern)
+            or BoundIsNull or BoundTypeTestPattern or BoundIsSome
+            or BoundIsVariablePattern)
         {
             return false;
         }
@@ -22597,6 +22635,7 @@ public static partial class SemanticVerifier
             if (expression is BoundUnary { Operator: TokenKind.Bang }
                 or BoundConditional or BoundCall or BoundIndirectCall
                 or BoundNominalUpdate or BoundCoalesce or BoundIsNull
+                or BoundTypeTestPattern
                 or BoundIsSome or BoundIsVariablePattern
                 or BoundIsInitialized
                 or BoundReferenceInitializationTest
@@ -35066,6 +35105,8 @@ public static partial class SemanticVerifier
             BoundOptionalLift lift => InvalidatesReservedOwner(lift.Value, variable, ref remaining, depth + 1),
             BoundReadonlyProjection projection => InvalidatesReservedOwner(projection.Value, variable, ref remaining, depth + 1),
             BoundIsNull test => InvalidatesReservedOwner(test.Value, variable, ref remaining, depth + 1),
+            BoundTypeTestPattern test => InvalidatesReservedOwner(
+                test.Value, variable, ref remaining, depth + 1),
             BoundCoalesce coalesce => InvalidatesReservedOwner(coalesce.Optional, variable, ref remaining, depth + 1)
                 || InvalidatesReservedOwner(coalesce.Fallback, variable, ref remaining, depth + 1),
             BoundIsSome pattern => InvalidatesReservedOwner(pattern.Value, variable, ref remaining, depth + 1),
@@ -37866,6 +37907,9 @@ public static partial class SemanticVerifier
             case BoundIsNull test:
                 VacateNestedOutputs(test.Value, state, ref remaining);
                 break;
+            case BoundTypeTestPattern test:
+                VacateNestedOutputs(test.Value, state, ref remaining);
+                break;
             case BoundNativeFixedArrayInitialization fixedArray:
                 foreach (var element in fixedArray.Elements)
                 {
@@ -38087,6 +38131,8 @@ public static partial class SemanticVerifier
             BoundOptionalLift lift => FlowFacts(lift.Value, flowFacts, ref remaining),
             BoundReadonlyProjection projection => FlowFacts(projection.Value, flowFacts, ref remaining),
             BoundIsNull test => FlowFacts(test.Value, flowFacts, ref remaining),
+            BoundTypeTestPattern test =>
+                FlowFacts(test.Value, flowFacts, ref remaining),
             BoundNativeFixedArrayInitialization fixedArray =>
                 FlowFacts(fixedArray.Elements, flowFacts, ref remaining),
             BoundNativeFixedArrayRepeatInitialization repeat =>

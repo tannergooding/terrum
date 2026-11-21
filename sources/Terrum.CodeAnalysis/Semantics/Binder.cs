@@ -17565,6 +17565,8 @@ internal sealed partial class Binder
         BoundOptionalLift lift => ContainsAuthorizedExpressionScopeCall(lift.Value),
         BoundReadonlyProjection projection => ContainsAuthorizedExpressionScopeCall(projection.Value),
         BoundIsNull test => ContainsAuthorizedExpressionScopeCall(test.Value),
+        BoundTypeTestPattern test =>
+            ContainsAuthorizedExpressionScopeCall(test.Value),
         BoundIsSome pattern => ContainsAuthorizedExpressionScopeCall(pattern.Value),
         BoundIsVariablePattern pattern => ContainsAuthorizedExpressionScopeCall(pattern.Value),
         _ => false,
@@ -18599,20 +18601,68 @@ internal sealed partial class Binder
                 break;
 
             case SyntaxKind.IsPatternExpression:
-                var constantPattern = node.Children
+                var patternSyntax = node.Children
                     .OfType<SyntaxNode>()
                     .LastOrDefault();
-                if (constantPattern?.Kind
+                if (_bindingContractPhase is not null
+                    && patternSyntax?.Kind
+                        == SyntaxKind.SwitchTypedBindingPattern
+                    && patternSyntax.Children.Length == 1
+                    && patternSyntax.Children[0] is SyntaxNode {
+                        Kind: SyntaxKind.TypeName,
+                    } typeTestSyntax)
+                {
+                    var diagnosticsBeforeType = DiagnosticCount;
+                    var testedType = BindType(typeTestSyntax,
+                        allowVoid: false);
+                    if (DiagnosticCount != diagnosticsBeforeType
+                        || !PrimitiveTypeFacts.IsBuiltInScalar(
+                            testedType))
+                    {
+                        if (DiagnosticCount == diagnosticsBeforeType)
+                        {
+                            Report("TRM3007",
+                                "A declaration TypeTest requires a fixed scalar type.",
+                                patternSyntax.Span);
+                        }
+                        expression = ErrorExpression(node.Span);
+                        break;
+                    }
+
+                    var subject = BindExpression(
+                        (SyntaxNode)node.Children[0], null);
+                    if (subject is not BoundRead subjectRead
+                        || (!PrimitiveTypeFacts.IsBuiltInScalar(
+                                subjectRead.Type)
+                            && (!TryGetRequiredOptionalType(
+                                    subjectRead.Type,
+                                    out var subjectValueType)
+                                || !PrimitiveTypeFacts.IsBuiltInScalar(
+                                    subjectValueType))))
+                    {
+                        Report("TRM3007",
+                            "A declaration TypeTest requires a named scalar or optional scalar input value.",
+                            node.Span);
+                        expression = ErrorExpression(node.Span);
+                        break;
+                    }
+
+                    expression = new BoundTypeTestPattern(subject,
+                        testedType, node.Span);
+                    break;
+                }
+
+                if (patternSyntax?.Kind
                     == SyntaxKind.SwitchConstantPattern)
                 {
-                    var patternExpression = constantPattern.Children
+                    var patternExpression = patternSyntax.Children
                         .OfType<SyntaxNode>()
                         .FirstOrDefault();
                     if (patternExpression is null)
                     {
                         Report("TRM3001",
                             "A constant pattern requires an expression.",
-                            constantPattern.Span);
+                            patternSyntax.Span);
                         expression = ErrorExpression(node.Span);
                         break;
                     }
@@ -18629,7 +18679,7 @@ internal sealed partial class Binder
                     {
                         Report("TRM3007",
                             "A constant pattern requires a fixed scalar constant of the subject type.",
-                            constantPattern.Span);
+                            patternSyntax.Span);
                         expression = ErrorExpression(node.Span);
                         break;
                     }
