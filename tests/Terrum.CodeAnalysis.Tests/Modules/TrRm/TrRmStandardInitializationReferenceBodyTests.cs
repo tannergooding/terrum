@@ -5529,16 +5529,25 @@ internal sealed class TrRmStandardInitializationReferenceBodyTests
             Is.EqualTo(((byte)0x01, referentTypeCode)));
     }
 
-    [TestCase("write ref<int32>", "mut ref<int32>", (byte)9,
+    [TestCase("ensure", (byte)2, "write ref<int32>", "mut ref<int32>", (byte)9,
         (byte)0x08, (byte)1, (byte)1, (byte)0)]
-    [TestCase("write ref<int32>", "mut write ref<int32>", (byte)10,
+    [TestCase("ensure", (byte)2, "write ref<int32>",
+        "mut write ref<int32>", (byte)10,
         (byte)0x08, (byte)1, (byte)1, (byte)1)]
-    [TestCase("ref<int32>", "mut write ref<int32>", (byte)10,
+    [TestCase("ensure", (byte)2, "ref<int32>",
+        "mut write ref<int32>", (byte)10,
         (byte)0x08, (byte)0, (byte)1, (byte)1)]
-    [TestCase("ref<int32>", "mut ref<int64>", (byte)9,
+    [TestCase("ensure", (byte)2, "ref<int32>", "mut ref<int64>", (byte)9,
         (byte)0x09, (byte)0, (byte)1, (byte)0)]
+    [TestCase("require", (byte)1, "write ref<int32>",
+        "mut ref<int32>", (byte)9,
+        (byte)0x08, (byte)1, (byte)1, (byte)0)]
+    [TestCase("require", (byte)1, "ref<int32>",
+        "mut write ref<int32>", (byte)10,
+        (byte)0x08, (byte)0, (byte)1, (byte)1)]
     public void Construction2EmitsRoleTwoReferencePatternCaptureGraph(
-        string subjectTypeName, string patternTypeName,
+        string clauseKind, byte expectedPhase, string subjectTypeName,
+        string patternTypeName,
         byte referencePatternKind, byte referentTypeCode,
         byte subjectQualifiers, byte captureFlags,
         byte capturedQualifiers)
@@ -5546,7 +5555,7 @@ internal sealed class TrRmStandardInitializationReferenceBodyTests
         const string moduleIdentity = "reference-pattern-capture-producer";
         var source = $$"""
             void Check({{subjectTypeName}} value)
-                ensure value is {{patternTypeName}} captured
+                {{clauseKind}} value is {{patternTypeName}} captured
             {
             }
             """;
@@ -5592,6 +5601,7 @@ internal sealed class TrRmStandardInitializationReferenceBodyTests
                 TrRmArtifactIndex.ForC1M1Construction2Draft(artifact));
         var predicate = tables.Contracts.GetPredicateGraphContracts(1)
             .Single();
+        Assert.That(predicate.PhaseTag, Is.EqualTo(expectedPhase));
         Assert.That(tables.PredicateCaptures.Count, Is.EqualTo(1));
         const int captureRow = 1;
         Assert.That(tables.PredicateCaptures.GetGraphRow(captureRow),
@@ -5767,6 +5777,37 @@ internal sealed class TrRmStandardInitializationReferenceBodyTests
         const string source = """
             void Check(ref<int32> value)
                 ensure value is ref<int32> _
+            {
+            }
+            public int32 Run() { return 0; }
+            """;
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+            new CompilationOptions {
+                CoreContractFailureIdentitySelection
+                    = new CoreContractFailureIdentitySelection(
+                        moduleIdentity,
+                        new CoreContractFailureDeclarationIdentity(
+                            "core.contracts", "requirement-exception"),
+                        new CoreContractFailureDeclarationIdentity(
+                            "core.contracts", "postcondition-exception"),
+                        new CoreContractFailureDeclarationIdentity(
+                            "core.contracts", "require-exception-schema")),
+            });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = (BoundProgram)compilation.Program!;
+        Assert.That(NativeEmitter.EmitLibrary(program, ["Run"],
+            NativeRuntimePolicy.FailFast), Is.Not.Empty);
+    }
+
+    [Test]
+    public void NativeEmitterEmitsReferencePatternCaptureContracts()
+    {
+        const string moduleIdentity = "reference-pattern-capture-emission";
+        const string source = """
+            void Check(write ref<int32> value)
+                ensure value is mut ref<int32> captured
             {
             }
             public int32 Run() { return 0; }
