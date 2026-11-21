@@ -358,6 +358,21 @@ public static partial class TrRmExecutableCompiler
             = new Dictionary<(int CallIndex, int Formal),
                 BoundNativeStorageAddress>(
                 checked(import.Parameters.Length * outputCalls.Count));
+
+        List<BoundFieldRead> GetFieldPlacePath(
+            BoundExpression? fieldPlace)
+        {
+            var path = new List<BoundFieldRead>();
+            while (fieldPlace is BoundFieldRead fieldRead)
+            {
+                path.Add(fieldRead);
+                fieldPlace = fieldRead.Receiver;
+            }
+
+            path.Reverse();
+            return path;
+        }
+
         for (var callIndex = 0; callIndex < outputCalls.Count; callIndex++)
         {
             var selectedCall = outputCalls[callIndex];
@@ -449,6 +464,8 @@ public static partial class TrRmExecutableCompiler
                                 ? !hasArrayPath
                                 : address.CarrierType != address.ElementType
                                     || address.ElementCount != 1)
+                            || (!isArrayCarrier
+                                && address.FieldPlace is not null)
                             || requiredElementCount == 0
                             || requiredElementCount > address.ElementCount
                             || nativeParameter.Extent
@@ -456,8 +473,22 @@ public static partial class TrRmExecutableCompiler
                             || address.ElementStride == 0
                             || (!isArrayCarrier
                                 && address.ElementStride != address.ByteExtent)
-                            || caller.Variables[address.Variable].Type
-                                != address.CarrierType
+                            || (!isArrayCarrier
+                                && caller.Variables[address.Variable].Type
+                                    != address.CarrierType)
+                            || (isArrayCarrier
+                                && (address.FieldPlace is null
+                                    ? caller.Variables[address.Variable].Type
+                                        != address.CarrierType
+                                    : !DirectNativeImportContract
+                                        .MatchesNativeFixedArrayFieldPlace(
+                                            address.Variable,
+                                            address.FieldPlace,
+                                            address.CarrierType, caller,
+                                            program,
+                                            requireWritable:
+                                                nativeParameter.Access
+                                                != NativeParameterAccess.Read)))
                             || (!isArrayCarrier
                                 && (address.Index is not BoundConstant index
                                     || index.Type != PrimitiveType.Int32
@@ -507,8 +538,9 @@ public static partial class TrRmExecutableCompiler
         var placeSelectionCount = nativeParameterAddressByCallFormal.Values
             .Where(static address => NativeFixedArrayTypes.IsType(
                 address.CarrierType))
-            .Sum(static address => address.Projections.IsDefaultOrEmpty
-                ? 1 : address.Projections.Length);
+            .Sum(address => (address.Projections.IsDefaultOrEmpty
+                    ? 1 : address.Projections.Length)
+                + GetFieldPlacePath(address.FieldPlace).Count);
         var arrayInitializationRecordCount = backingLocals.Sum(local =>
             local.Initializer
                 is BoundNativeFixedArrayInitialization initialization
@@ -732,6 +764,7 @@ public static partial class TrRmExecutableCompiler
 
         var typeDefRows = new List<TrRmTypeDefRow>(program.Structures.Length);
         var fieldRows = new List<TrRmFieldDefRow>();
+        var fieldFirstByStructure = new int[program.Structures.Length];
         var layoutRows = new List<TrRmLayoutRow>(
             checked(program.Structures.Length * 2));
         var layoutFieldRows = new List<TrRmLayoutFieldRow>();
@@ -753,6 +786,7 @@ public static partial class TrRmExecutableCompiler
 
             var firstField = structure.Fields.IsEmpty
                 ? 0 : fieldRows.Count + 1;
+            fieldFirstByStructure[structureIndex] = firstField;
             foreach (var field in structure.Fields)
             {
                 var fieldTypeSpecRef = GetTypeSpecRef(field.Type);
@@ -1155,11 +1189,18 @@ public static partial class TrRmExecutableCompiler
                     address.CarrierType))
                 .Select(address => CreateStandardBodyTypeMapToken(
                     GetTypeSpecRef(address.ElementType)));
+        var nativeArrayFieldTypeMapTokens
+            = nativeParameterAddressByCallFormal.Values
+                .SelectMany(address => GetFieldPlacePath(
+                    address.FieldPlace))
+                .Select(field => CreateStandardBodyTypeMapToken(
+                    GetTypeSpecRef(field.Type)));
         var bodyTypeMapTokens = outputTypeMapTokens
             .Concat(callerParameterTypeMapTokens)
             .Concat(backingLocalTypeMapTokens)
             .Concat(nativeParameterTypeMapTokens)
-            .Concat(nativeArrayElementTypeMapTokens);
+            .Concat(nativeArrayElementTypeMapTokens)
+            .Concat(nativeArrayFieldTypeMapTokens);
         var maps = TrRmRegisterBodyMapBuilder.Create(
             bodyTypeMapTokens,
             [0x1600_0000u | checked((uint)targetMethodRow)]);
@@ -1323,11 +1364,87 @@ public static partial class TrRmExecutableCompiler
                             ];
                         }
 
+                        var fieldPath = GetFieldPlacePath(address.FieldPlace);
                         var selections
                             = ImmutableArray.CreateBuilder<
                                 (ushort RecordIndex,
                                     byte DestinationRegister)>(
-                                        projections.Length);
+                                        fieldPath.Count + projections.Length);
+                        var accessKind = address.IsReadonly
+                            ? (byte)1 : (byte)2;
+                        var selectedArrayBaseKind = (byte)2;
+                        var selectedArrayBaseIndex = sourceIndex;
+                        if (fieldPath.Count > 0)
+                        {
+                            var previousFieldRegister = -1;
+                            for (var fieldOrdinal = 0;
+                                fieldOrdinal < fieldPath.Count;
+                                fieldOrdinal++)
+                            {
+                                var fieldRead = fieldPath[fieldOrdinal];
+                                var ownerIndex = (int)fieldRead.Receiver.Type
+                                    - 100;
+                                if ((uint)ownerIndex
+                                        >= (uint)program.Structures.Length
+                                    || fieldFirstByStructure[ownerIndex] <= 0
+                                    || (uint)fieldRead.Field
+                                        >= (uint)program.Structures[ownerIndex]
+                                            .Fields.Length)
+                                {
+                                    throw Unsupported(
+                                        "An A2 NativeParameter field path has no exact FieldDef.");
+                                }
+
+                                var fieldDefRow = checked(
+                                    fieldFirstByStructure[ownerIndex]
+                                    + fieldRead.Field);
+                                var destinationRegister = checked(
+                                    (byte)(fieldOrdinal % 2));
+                                var baseKind = fieldOrdinal == 0
+                                    ? (byte)2 : (byte)1;
+                                var baseIndex = fieldOrdinal == 0
+                                    ? sourceIndex : previousFieldRegister;
+                                if (fieldDefRow is <= 0 or > 0xFF_FFFF
+                                    || baseIndex < 0
+                                    || (uint)baseIndex > ushort.MaxValue)
+                                {
+                                    throw Unsupported(
+                                        "An A2 NativeParameter field path exceeds a PlaceSelection index domain.");
+                                }
+
+                                var selectionRecordIndex
+                                    = checked((ushort)records.Count);
+                                records.Add(
+                                    TrRmRegisterBodyRecordWriter
+                                        .EncodePlaceSelection(
+                                            targetKind: 2,
+                                            accessKind: accessKind,
+                                            destinationKind: 1,
+                                            baseKind: baseKind,
+                                            destinationIndex:
+                                                destinationRegister,
+                                            baseIndex: checked((ushort)baseIndex),
+                                            indexKind: 0,
+                                            targetRefKind: 1,
+                                            indexIndex: 0,
+                                            targetRef: checked(
+                                                (uint)fieldDefRow),
+                                            referentTypeMapIndex:
+                                                maps.GetTypeMapIndex(
+                                                    CreateStandardBodyTypeMapToken(
+                                                        GetTypeSpecRef(
+                                                            fieldRead.Type))),
+                                            schema));
+                                selections.Add((selectionRecordIndex,
+                                    destinationRegister));
+                                previousFieldRegister = destinationRegister;
+                            }
+
+                            selectedArrayBaseKind = 1;
+                            selectedArrayBaseIndex = previousFieldRegister;
+                        }
+
+                        var previousArrayRegister = -1;
                         for (var projectionIndex = 0;
                             projectionIndex < projections.Length;
                             projectionIndex++)
@@ -1348,11 +1465,10 @@ public static partial class TrRmExecutableCompiler
                             var destinationRegister
                                 = checked((byte)(projectionIndex % 2));
                             var baseKind = projectionIndex == 0
-                                ? (byte)2 : (byte)1;
+                                ? selectedArrayBaseKind : (byte)1;
                             var baseIndex = projectionIndex == 0
-                                ? sourceIndex
-                                : selections[projectionIndex - 1]
-                                    .DestinationRegister;
+                                ? selectedArrayBaseIndex
+                                : previousArrayRegister;
                             var selectionRecordIndex
                                 = checked((ushort)records.Count);
                             records.Add(
@@ -1374,13 +1490,13 @@ public static partial class TrRmExecutableCompiler
                                         schema));
                             selections.Add((selectionRecordIndex,
                                 destinationRegister));
+                            previousArrayRegister = destinationRegister;
                         }
 
                         placeSelectionRecordsByCallFormal.Add(
                             (callIndex, formal), selections.ToImmutable());
                         sourceKind = 1;
-                        sourceIndex = selections[selections.Count - 1]
-                            .DestinationRegister;
+                        sourceIndex = previousArrayRegister;
                     }
 
                     var requiredElementCount = checked((uint)(
