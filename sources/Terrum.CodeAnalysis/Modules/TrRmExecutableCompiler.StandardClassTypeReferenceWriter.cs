@@ -11047,6 +11047,10 @@ public static partial class TrRmExecutableCompiler
                         && StringComparer.Ordinal.Equals(
                             root.Origin.ProviderIdentity,
                             methodExpectation.Provider.ModuleIdentity)
+                        && root.Origin.OwnerModule is
+                            BoundSourceTypeProviderSnapshot ownerModule
+                        && SameA2SourceTypeProviderSnapshot(ownerModule,
+                            methodExpectation.Provider)
                         && StringComparer.Ordinal.Equals(root.Origin.ExportKey,
                             methodExpectation.ExportKey)
                         && root.Origin.ClassOwner

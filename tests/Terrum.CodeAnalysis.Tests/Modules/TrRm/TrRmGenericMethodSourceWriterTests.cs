@@ -5693,6 +5693,25 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = (BoundProgram)compilation.Program!;
+        var providerModuleRow = Enumerable.Range(1,
+                providerTables.Modules.Count)
+            .Single(row => providerTables.Modules.GetIdentity(row)
+                == providerIdentity);
+        var retainedClassMethodImports = program.RetainedGenericMethodRoots
+            .Where(root => root.Origin.ClassOwner is not null
+                && (root.Origin.ExportKey == firstMethodExportKey
+                    || root.Origin.ExportKey == secondMethodExportKey))
+            .ToArray();
+        Assert.That(retainedClassMethodImports, Has.Length.EqualTo(2));
+        Assert.That(retainedClassMethodImports.All(root =>
+                root.Origin.OwnerModule is
+                    BoundSourceTypeProviderSnapshot ownerModule
+                && ownerModule.SchemaIdentity == schemaIdentity
+                && ownerModule.ModuleRow == providerModuleRow
+                && ownerModule.ModuleIdentity == providerIdentity
+                && ownerModule.ArtifactSnapshot.AsSpan()
+                    .SequenceEqual(providerArtifact)),
+            Is.True);
         var containerDeclaration = tree.Root.Children
             .OfType<SyntaxNode>().Single(static node =>
                 node.Kind == SyntaxKind.ClassDeclaration);
