@@ -781,6 +781,22 @@ internal sealed class NativeCoreRegistrationTests
                     [Terrum.CodeAnalysis.ForwardsBacking(
                         this, nameof(source))]
                     write ptr<float32> value);
+
+                [param(value): Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonNegative)]
+                public unsafe int32 TryReadRune(ptr<int32> source,
+                    [Terrum.CodeAnalysis.DependsOn(this, nameof(source))]
+                    [Terrum.CodeAnalysis.ForwardsBacking(
+                        this, nameof(source))]
+                    write ptr<rune> value);
+
+                [param(value): Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonNegative)]
+                public unsafe int32 TryReadNuint(ptr<int32> source,
+                    [Terrum.CodeAnalysis.DependsOn(this, nameof(source))]
+                    [Terrum.CodeAnalysis.ForwardsBacking(
+                        this, nameof(source))]
+                    write ptr<nuint> value);
             }
 
             int32 Invoke(ptr<void> receiver, ptr<int32> source) {
@@ -924,6 +940,28 @@ internal sealed class NativeCoreRegistrationTests
                 init float32 value;
                 unsafe {
                     int32 status = IProbe.TryReadFloat32(
+                        receiver, source, &init value);
+                    if (status >= 0) { return value; }
+                    return fallback;
+                }
+            }
+
+            rune InvokeRune(ptr<void> receiver, ptr<int32> source,
+                rune fallback) {
+                init rune value;
+                unsafe {
+                    int32 status = IProbe.TryReadRune(
+                        receiver, source, &init value);
+                    if (status >= 0) { return value; }
+                    return fallback;
+                }
+            }
+
+            nuint InvokeNuint(ptr<void> receiver, ptr<int32> source,
+                nuint fallback) {
+                init nuint value;
+                unsafe {
+                    int32 status = IProbe.TryReadNuint(
                         receiver, source, &init value);
                     if (status >= 0) { return value; }
                     return fallback;
@@ -1077,6 +1115,28 @@ internal sealed class NativeCoreRegistrationTests
                     return fallback;
                 }
             }
+
+            rune InvokeRune(ptr<void> receiver, ptr<int32> source,
+                rune fallback) {
+                init rune value;
+                unsafe {
+                    int32 status = IProbe.TryReadRune(
+                        receiver, source, &init value);
+                    if (status >= 0) { return value; }
+                    return fallback;
+                }
+            }
+
+            nuint InvokeNuint(ptr<void> receiver, ptr<int32> source,
+                nuint fallback) {
+                init nuint value;
+                unsafe {
+                    int32 status = IProbe.TryReadNuint(
+                        receiver, source, &init value);
+                    if (status >= 0) { return value; }
+                    return fallback;
+                }
+            }
             """;
         var providerCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse(providerSource), options);
@@ -1224,6 +1284,20 @@ internal sealed class NativeCoreRegistrationTests
             providerTables.Methods.GetBodyRow(providerFloat32Row),
             providerTables.Contracts.Count);
         AssertCorrelatedOutputBody(providerFloat32Body, 6, 3, 4, 2);
+        var providerRuneRow
+            = Enumerable.Range(1, providerTables.Methods.Count).Single(row =>
+                providerTables.Methods.GetName(row) == "InvokeRune");
+        var providerRuneBody = providerTables.Bodies.GetRegisterBody(
+            providerTables.Methods.GetBodyRow(providerRuneRow),
+            providerTables.Contracts.Count);
+        AssertCorrelatedOutputBody(providerRuneBody, 6, 3, 4, 2);
+        var providerNuintRow
+            = Enumerable.Range(1, providerTables.Methods.Count).Single(row =>
+                providerTables.Methods.GetName(row) == "InvokeNuint");
+        var providerNuintBody = providerTables.Bodies.GetRegisterBody(
+            providerTables.Methods.GetBodyRow(providerNuintRow),
+            providerTables.Contracts.Count);
+        AssertCorrelatedOutputBody(providerNuintBody, 6, 3, 4, 2);
 
         var loadedProvider = TrRmExecutableCompiler.LoadStandard(
             providerInput, "provider.module", []);
@@ -1265,6 +1339,12 @@ internal sealed class NativeCoreRegistrationTests
             PrimitiveType.Int32);
         AssertCorrelatedOutputCall(loadedProvider, null,
             "InvokeFloat32", TokenKind.GreaterEquals, PrimitiveType.Float32,
+            PrimitiveType.Int32);
+        AssertCorrelatedOutputCall(loadedProvider, null,
+            "InvokeRune", TokenKind.GreaterEquals, PrimitiveType.Rune,
+            PrimitiveType.Int32);
+        AssertCorrelatedOutputCall(loadedProvider, null,
+            "InvokeNuint", TokenKind.GreaterEquals, PrimitiveType.NativeUInt,
             PrimitiveType.Int32);
         var reference = TrRmExecutableCompiler.CreateStandardReference(
             providerInput, "provider.module", []);
@@ -1401,6 +1481,20 @@ internal sealed class NativeCoreRegistrationTests
             consumerTables.Methods.GetBodyRow(consumerFloat32Row),
             consumerTables.Contracts.Count);
         AssertCorrelatedOutputBody(consumerFloat32Body, 6, 3, 4, 2);
+        var consumerRuneRow
+            = Enumerable.Range(1, consumerTables.Methods.Count).Single(row =>
+                consumerTables.Methods.GetName(row) == "InvokeRune");
+        var consumerRuneBody = consumerTables.Bodies.GetRegisterBody(
+            consumerTables.Methods.GetBodyRow(consumerRuneRow),
+            consumerTables.Contracts.Count);
+        AssertCorrelatedOutputBody(consumerRuneBody, 6, 3, 4, 2);
+        var consumerNuintRow
+            = Enumerable.Range(1, consumerTables.Methods.Count).Single(row =>
+                consumerTables.Methods.GetName(row) == "InvokeNuint");
+        var consumerNuintBody = consumerTables.Bodies.GetRegisterBody(
+            consumerTables.Methods.GetBodyRow(consumerNuintRow),
+            consumerTables.Contracts.Count);
+        AssertCorrelatedOutputBody(consumerNuintBody, 6, 3, 4, 2);
 
         var providers = new[] { providerInput };
         var malformedIndex = new TrRmArtifactIndex(consumerArtifact,
@@ -1460,6 +1554,12 @@ internal sealed class NativeCoreRegistrationTests
         AssertCorrelatedOutputCall(loadedConsumer, "provider.module",
             "InvokeFloat32", TokenKind.GreaterEquals, PrimitiveType.Float32,
             PrimitiveType.Int32);
+        AssertCorrelatedOutputCall(loadedConsumer, "provider.module",
+            "InvokeRune", TokenKind.GreaterEquals, PrimitiveType.Rune,
+            PrimitiveType.Int32);
+        AssertCorrelatedOutputCall(loadedConsumer, "provider.module",
+            "InvokeNuint", TokenKind.GreaterEquals, PrimitiveType.NativeUInt,
+            PrimitiveType.Int32);
         var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(
             loadedConsumer, "consumer.module", schemaIdentity, 1, []);
         var reloadedConsumer = TrRmExecutableCompiler.LoadStandard(
@@ -1503,6 +1603,12 @@ internal sealed class NativeCoreRegistrationTests
             PrimitiveType.Int32);
         AssertCorrelatedOutputCall(reloadedConsumer, "provider.module",
             "InvokeFloat32", TokenKind.GreaterEquals, PrimitiveType.Float32,
+            PrimitiveType.Int32);
+        AssertCorrelatedOutputCall(reloadedConsumer, "provider.module",
+            "InvokeRune", TokenKind.GreaterEquals, PrimitiveType.Rune,
+            PrimitiveType.Int32);
+        AssertCorrelatedOutputCall(reloadedConsumer, "provider.module",
+            "InvokeNuint", TokenKind.GreaterEquals, PrimitiveType.NativeUInt,
             PrimitiveType.Int32);
 
         static void AssertCorrelatedOutputBody(
