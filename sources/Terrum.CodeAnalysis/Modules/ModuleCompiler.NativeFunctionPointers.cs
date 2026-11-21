@@ -106,8 +106,7 @@ public static partial class ModuleCompiler
             return new NativeFunctionPointerSignatureReadResult([], []);
         }
 
-        var isRevision105 = moduleReader.FormatVersion
-            == CheckedReferenceVersion;
+        var isRevision105 = UsesCheckedReferenceBaseline(moduleReader.FormatVersion);
         var signatureCount = Count(reader, MaximumNodes);
         if (signatureCount == 0
             && moduleReader.FormatVersion == NativeFunctionPointerVersion)

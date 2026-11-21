@@ -1572,7 +1572,7 @@ public static partial class ModuleCompiler
     private static void ValidatePrivateNominalTypeOrigins(Module module,
         bool reading, bool requireCompleteClosure)
     {
-        if (reading && module.FormatVersion != CheckedReferenceVersion
+        if (reading && !UsesCheckedReferenceBaseline(module.FormatVersion)
             && module.NominalTypeOrigins.IsEmpty)
         {
             return;
@@ -2081,7 +2081,7 @@ public static partial class ModuleCompiler
         BinaryWriter writer, Module module)
     {
         if (writer is not ModuleWriter {
-                FormatVersion: CheckedReferenceVersion,
+                FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
             })
         {
             if (!module.EnumDefinitions.IsDefaultOrEmpty)
@@ -2159,7 +2159,7 @@ public static partial class ModuleCompiler
         Module module)
     {
         if (writer is not ModuleWriter {
-                FormatVersion: CheckedReferenceVersion,
+                FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
             })
         {
             if (!module.NominalTypeOrigins.IsDefaultOrEmpty)
@@ -2194,7 +2194,7 @@ public static partial class ModuleCompiler
         ReadPrivateNominalTypeOrigins(BinaryReader reader)
     {
         if (reader is not ModuleReader {
-                FormatVersion: CheckedReferenceVersion,
+                FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
             })
         {
             return [];

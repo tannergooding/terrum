@@ -41,7 +41,7 @@ public static partial class ModuleCompiler
     {
         var argument = call.Arguments[argumentIndex];
         if (writer is not ModuleWriter {
-                FormatVersion: CheckedReferenceVersion,
+                FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
             } moduleWriter)
         {
             PutExpression(writer, argument, names, ref remaining, depth,
@@ -412,8 +412,7 @@ public static partial class ModuleCompiler
                             moduleWriter.NativeFixedArrayTypes,
                             moduleWriter.NativePointerTypes,
                             moduleWriter.NativeFunctionPointerSignatures)
-                        && !(moduleWriter.FormatVersion
-                                == CheckedReferenceVersion
+                        && !(UsesCheckedReferenceBaseline(moduleWriter.FormatVersion)
                             && moduleWriter.SourceProgram
                                 is BoundProgram private106Program
                             && IsPrivate106NestedArrayValueLocal(
@@ -842,7 +841,7 @@ public static partial class ModuleCompiler
             }
 
             var hasInheritedNestedFieldWriteBacking
-                = writer.FormatVersion == CheckedReferenceVersion
+                = UsesCheckedReferenceBaseline(writer.FormatVersion)
                     && pathWrite.FieldPlace is null
                     && !pathWrite.LeafFields.IsDefaultOrEmpty
                     && IsPrivateFixedArrayRootLocal(writer,
@@ -1202,7 +1201,7 @@ public static partial class ModuleCompiler
         usedNestedFieldWriteBacking = false;
         Step(ref remaining, depth);
         if (reader is not ModuleReader moduleReader
-            || moduleReader.FormatVersion != CheckedReferenceVersion)
+            || !UsesCheckedReferenceBaseline(moduleReader.FormatVersion))
         {
             throw new ModuleFormatException(
                 "Private places require exact revision 106.");
@@ -1300,7 +1299,7 @@ public static partial class ModuleCompiler
                             moduleReader.NativePointerTypes,
                             moduleReader.NativeFunctionPointerSignatures);
                 var isAggregateArrayValue
-                    = moduleReader.FormatVersion == CheckedReferenceVersion
+                    = UsesCheckedReferenceBaseline(moduleReader.FormatVersion)
                         && IsPrivate106NestedArrayValueLocal(arrayType,
                                 moduleReader.CurrentReturnType,
                                 moduleReader.CurrentVariables,
@@ -1497,8 +1496,7 @@ public static partial class ModuleCompiler
                         reader.NativePointerTypes,
                         reader.NativeFunctionPointerSignatures,
                         reader.EnumDefinitions)
-                    && !(reader.FormatVersion
-                            == CheckedReferenceVersion
+                    && !(UsesCheckedReferenceBaseline(reader.FormatVersion)
                         && IsPrivate106NestedArrayValueLocal(
                             projection.Layout.CarrierType,
                             reader.CurrentReturnType,

@@ -123,6 +123,68 @@ internal sealed class PrivateRevision106BodyTests
     }
 
     [Test]
+    public void PF111SelectionIsExactAndPreservesOrdinaryModuleBaseline()
+    {
+        const string schemaIdentity
+            = "terrum/private-semantic-111-foreign-native-interfaces-1";
+        const string providerSource = """
+            public struct Cell {
+                public int32 Value;
+            }
+
+            public int32 Read(Cell value) { return value.Value; }
+            """;
+        var providerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(providerSource));
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+        var providerProgram = providerCompilation.Program
+            ?? throw new AssertionException("Expected a bound provider.");
+        var defaultProducer = ModuleCompiler.CreateProducer(providerProgram,
+            ["Read"]);
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(
+                defaultProducer.AsSpan(sizeof(int), sizeof(int))),
+            Is.AnyOf(104, 106));
+
+        var producer = ModuleCompiler.CreateProducerWithSchema(
+            providerProgram, ["Read"], schemaIdentity);
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(
+                producer.AsSpan(sizeof(int), sizeof(int))),
+            Is.EqualTo(111));
+        var reference = ModuleCompiler.CreateReference(producer);
+        var sourceCell = providerProgram.Structures.Single(
+            static structure => structure.Name == "Cell");
+        var referenceCell = reference.Structures.Single(
+            static structure => structure.Name == "Cell");
+        Assert.That(referenceCell.DeclaredCopyEvidence,
+            Is.EqualTo(sourceCell.DeclaredCopyEvidence == true));
+
+        var consumerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                public int32 Use(Cell value) { return Read(value); }
+                """), reference);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumerProgram = consumerCompilation.Program
+            ?? throw new AssertionException("Expected a bound consumer.");
+        _ = Assert.Throws<ModuleContractException>(() =>
+            ModuleCompiler.CreateConsumer(consumerProgram, producer));
+        var consumer = ModuleCompiler.CreateConsumerWithSchema(
+            consumerProgram, producer, schemaIdentity);
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(
+                consumer.AsSpan(sizeof(int), sizeof(int))),
+            Is.EqualTo(111));
+        _ = Assert.Throws<ModuleContractException>(() =>
+            ModuleCompiler.CreateConsumerWithSchema(consumerProgram,
+                defaultProducer, schemaIdentity));
+        _ = Assert.Throws<ModuleContractException>(() =>
+            ModuleCompiler.CreateProducerWithSchema(providerProgram,
+                ["Read"], "terrum/private-semantic-111-foreign-native-interfaces"));
+    }
+
+    [Test]
     public void GeneralDependencyRowsRoundTripAndConstrainProviderReplacement()
     {
         static byte[] CreateProvider(string dependencyAttribute)

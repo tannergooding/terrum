@@ -35,12 +35,32 @@ public static partial class ModuleCompiler
     private const int NativeFixedArrayVersion = 103;
     private const int WideFixedLayoutVersion = 104;
     private const int CheckedReferenceVersion = 106;
+    private const int ForeignInterfacePrivateVersion = 111;
+    internal const string ForeignInterfacePrivateSchemaIdentity
+        = "terrum/private-semantic-111-foreign-native-interfaces-1";
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
     private const int MaximumNodes = 100_000;
     private const int MaximumDepth = 128;
     private const int MaximumStringBytes = 1024;
+
+    internal static int GetPrivateSchemaFormatVersion(string schemaIdentity)
+    {
+        ArgumentNullException.ThrowIfNull(schemaIdentity);
+        if (!StringComparer.Ordinal.Equals(schemaIdentity,
+                ForeignInterfacePrivateSchemaIdentity))
+        {
+            throw new ModuleContractException(
+                "The selected private schema identity is unsupported.");
+        }
+
+        return ForeignInterfacePrivateVersion;
+    }
+
+    internal static bool UsesCheckedReferenceBaseline(int formatVersion)
+        => formatVersion is CheckedReferenceVersion
+            or ForeignInterfacePrivateVersion;
 
     internal sealed class ConsumerContractSnapshot(Module module, string profile)
     {
@@ -272,7 +292,7 @@ public static partial class ModuleCompiler
         foreach (var function in functions)
         {
             var private106RawUnionArrayConstructorReceiver
-                = formatVersion == CheckedReferenceVersion
+                = UsesCheckedReferenceBaseline(formatVersion)
                     && function.IsConstructor
                     && function.Variables.Length != 0
                     && function.Variables[0].Type == function.ReturnType
@@ -283,7 +303,7 @@ public static partial class ModuleCompiler
             if ((!IsRevision100RuntimeType(function.ReturnType, structures,
                     fixedArrayTypes, nativePointerTypes,
                     functionPointerSignatures)
-                    && !(formatVersion == CheckedReferenceVersion
+                    && !(UsesCheckedReferenceBaseline(formatVersion)
                         && IsPrivate106RawUnionArrayAggregate(
                             function.ReturnType, structures,
                             fixedArrayTypes, nativePointerTypes,
@@ -1678,7 +1698,7 @@ public static partial class ModuleCompiler
     /// <summary>Creates an independently stored producer from named functions in a verified compilation.</summary>
     /// <remarks>Tagged Host.Source profiles are test-only prototypes; compilation-local spans are never persisted.</remarks>
     public static byte[] CreateProducer(BoundProgram program, IEnumerable<string> exports)
-        => CreateProducerCore(program, exports, null);
+        => CreateProducerCore(program, exports, null, null);
 
     /// <summary>Creates a producer with explicit nominal declaration identities.</summary>
     /// <param name="program">The verified program snapshot.</param>
@@ -1689,11 +1709,27 @@ public static partial class ModuleCompiler
         IEnumerable<string> exports, PrivateModuleIdentityInputs inputs)
     {
         ArgumentNullException.ThrowIfNull(inputs);
-        return CreateProducerCore(program, exports, inputs);
+        return CreateProducerCore(program, exports, inputs, null);
+    }
+
+    /// <summary>Creates a producer under one exact selected private schema.</summary>
+    /// <param name="program">The verified program snapshot.</param>
+    /// <param name="exports">The exported function names.</param>
+    /// <param name="schemaIdentity">The exact private schema identity.</param>
+    /// <param name="identityInputs">Optional nominal identities captured for <paramref name="program"/>.</param>
+    /// <returns>The independently stored producer artifact.</returns>
+    public static byte[] CreateProducerWithSchema(BoundProgram program,
+        IEnumerable<string> exports, string schemaIdentity,
+        PrivateModuleIdentityInputs? identityInputs = null)
+    {
+        var formatVersion = GetPrivateSchemaFormatVersion(schemaIdentity);
+        return CreateProducerCore(program, exports, identityInputs,
+            formatVersion);
     }
 
     private static byte[] CreateProducerCore(BoundProgram program,
-        IEnumerable<string> exports, PrivateModuleIdentityInputs? identityInputs)
+        IEnumerable<string> exports, PrivateModuleIdentityInputs? identityInputs,
+        int? selectedFormatVersion)
     {
         ArgumentNullException.ThrowIfNull(exports);
         ArgumentNullException.ThrowIfNull(program);
@@ -2015,7 +2051,7 @@ public static partial class ModuleCompiler
                 sourceProgram, module, identityInputs),
         };
         module = ProjectPrivateEnumDefinitions(module, identityInputs);
-        return Write(module, program);
+        return Write(module, program, selectedFormatVersion);
 
         int FindStructureIndex(string name)
         {
@@ -2033,7 +2069,7 @@ public static partial class ModuleCompiler
 
     /// <summary>Stores consumer bound bodies and imported declaration contracts, but never producer bodies.</summary>
     public static byte[] CreateConsumer(BoundProgram program, byte[] referenceProducer)
-        => CreateConsumerCore(program, referenceProducer, null);
+        => CreateConsumerCore(program, referenceProducer, null, null);
 
     /// <summary>Creates a consumer with explicit nominal declaration identities.</summary>
     /// <param name="program">The verified consumer program snapshot.</param>
@@ -2044,12 +2080,28 @@ public static partial class ModuleCompiler
         byte[] referenceProducer, PrivateModuleIdentityInputs inputs)
     {
         ArgumentNullException.ThrowIfNull(inputs);
-        return CreateConsumerCore(program, referenceProducer, inputs);
+        return CreateConsumerCore(program, referenceProducer, inputs, null);
+    }
+
+    /// <summary>Creates a consumer under the exact private schema selected by its provider.</summary>
+    /// <param name="program">The verified consumer program snapshot.</param>
+    /// <param name="referenceProducer">The selected producer artifact.</param>
+    /// <param name="schemaIdentity">The exact private schema identity.</param>
+    /// <param name="identityInputs">Optional nominal identities captured for <paramref name="program"/>.</param>
+    /// <returns>The consumer artifact containing bodies and imported contracts.</returns>
+    public static byte[] CreateConsumerWithSchema(BoundProgram program,
+        byte[] referenceProducer, string schemaIdentity,
+        PrivateModuleIdentityInputs? identityInputs = null)
+    {
+        var formatVersion = GetPrivateSchemaFormatVersion(schemaIdentity);
+        return CreateConsumerCore(program, referenceProducer, identityInputs,
+            formatVersion);
     }
 
     private static byte[] CreateConsumerCore(BoundProgram program,
         byte[] referenceProducer,
-        PrivateModuleIdentityInputs? identityInputs)
+        PrivateModuleIdentityInputs? identityInputs,
+        int? selectedFormatVersion)
     {
         ArgumentNullException.ThrowIfNull(program);
         RejectDeclarationContractClauses(program);
@@ -2123,6 +2175,19 @@ public static partial class ModuleCompiler
         }
         var producer = Read(referenceProducer, expectedConsumer: false);
         ValidateProducer(producer);
+        if (selectedFormatVersion is int selectedVersion)
+        {
+            if (producer.FormatVersion != selectedVersion)
+            {
+                throw new ModuleContractException(
+                    "The explicitly selected private schema does not match the producer revision.");
+            }
+        }
+        else if (producer.FormatVersion == ForeignInterfacePrivateVersion)
+        {
+            throw new ModuleContractException(
+                "PF111 consumers require an explicit private schema selection.");
+        }
         var producerReference = CreateReference(producer,
             out var producerCheckedReferenceMapping);
         var producerCheckedReferenceMappingArray
@@ -2239,10 +2304,10 @@ public static partial class ModuleCompiler
                 }
                 var contract = Contract(function, program.Structures, program.NativeFunctionPointerSignatures,
                     program.NativePointerTypes, program.NativeFixedArrayTypes,
-                    private105: producer.FormatVersion
-                        == CheckedReferenceVersion);
-                var producerContract = producer.FormatVersion
-                        == CheckedReferenceVersion
+                    private105: UsesCheckedReferenceBaseline(
+                        producer.FormatVersion));
+                var producerContract = UsesCheckedReferenceBaseline(
+                        producer.FormatVersion)
                         ? RemapPrivateCheckedReferenceContract(
                         RemapPrivate105FunctionPointerReferences(
                             imported.Contract, producerFunctionPointerMapping),
@@ -2498,7 +2563,7 @@ public static partial class ModuleCompiler
         module = ProjectPrivateEnumDefinitions(module, identityInputs);
         ValidateSelectedPrivateNominalImports(module, producer,
             identityInputs);
-        return Write(module, program);
+        return Write(module, program, selectedFormatVersion);
     }
 
     /// <summary>Resolves symbolic calls against a separately supplied producer, checks contracts and verifies the complete linked IR.</summary>
@@ -2697,11 +2762,12 @@ public static partial class ModuleCompiler
                     || actualContract.Contains("fnptr#",
                         StringComparison.Ordinal))
                 {
-                    if (consumer.FormatVersion != CheckedReferenceVersion
-                        || producer.FormatVersion != CheckedReferenceVersion)
+                    if (consumer.FormatVersion != producer.FormatVersion
+                        || !UsesCheckedReferenceBaseline(
+                            consumer.FormatVersion))
                     {
                         throw new ModuleContractException(
-                            "Private function-pointer references require exact revision-106 consumers and providers.");
+                            "Private function-pointer references require consumers and providers selected under the same checked-reference schema.");
                     }
 
                     expectedContract
@@ -2716,11 +2782,12 @@ public static partial class ModuleCompiler
                     || actualContract.Contains("ctype#",
                         StringComparison.Ordinal))
                 {
-                    if (consumer.FormatVersion != CheckedReferenceVersion
-                        || producer.FormatVersion != CheckedReferenceVersion)
+                    if (consumer.FormatVersion != producer.FormatVersion
+                        || !UsesCheckedReferenceBaseline(
+                            consumer.FormatVersion))
                     {
                         throw new ModuleContractException(
-                            "Private checked-reference types require exact revision-106 consumers and providers.");
+                            "Private checked-reference types require consumers and providers selected under the same checked-reference schema.");
                     }
 
                     expectedContract
@@ -8251,7 +8318,8 @@ public static partial class ModuleCompiler
         }
     }
 
-    private static byte[] Write(Module module, BoundProgram program)
+    private static byte[] Write(Module module, BoundProgram program,
+        int? selectedFormatVersion = null)
     {
         RejectDeclarationContractClauses(program);
         RejectStaticInitializationFacts(program);
@@ -8534,7 +8602,7 @@ public static partial class ModuleCompiler
                 FormatVersion = CheckedReferenceVersion,
             };
         }
-        if (module.FormatVersion == CheckedReferenceVersion)
+        if (UsesCheckedReferenceBaseline(module.FormatVersion))
         {
             var functions = ImmutableArray.CreateBuilder<ModuleFunction>(
                 module.Functions.Length);
@@ -8594,7 +8662,7 @@ public static partial class ModuleCompiler
                 Functions = functions.MoveToImmutable(),
             };
         }
-        if (module.FormatVersion == CheckedReferenceVersion)
+        if (UsesCheckedReferenceBaseline(module.FormatVersion))
         {
             ValidatePrivateReferenceTypeUses(
                 module.CheckedReferenceTypes, module.InvocationBuffers,
@@ -8640,6 +8708,18 @@ public static partial class ModuleCompiler
         {
             RejectManagedNodes(program);
         }
+        if (selectedFormatVersion is int requestedFormatVersion)
+        {
+            if (requestedFormatVersion
+                != ForeignInterfacePrivateVersion)
+            {
+                throw new ModuleContractException(
+                    "The explicitly selected private schema version is unsupported.");
+            }
+            module = module with {
+                FormatVersion = requestedFormatVersion,
+            };
+        }
         using var stream = new MemoryStream();
         using var writer = new ModuleWriter(stream) {
             FormatVersion = module.FormatVersion,
@@ -8681,7 +8761,8 @@ public static partial class ModuleCompiler
                 or NativeVTableContractVersion or NativeVTableOutputVersion or NativeCallableEntryVersion
                 or ArithmeticOperationVersion or NativeOutputContractVersion
                 or NativeStorageAddressExtentVersion or NativeFixedArrayVersion
-                or WideFixedLayoutVersion or CheckedReferenceVersion)
+                or WideFixedLayoutVersion or CheckedReferenceVersion
+                or ForeignInterfacePrivateVersion)
             {
                 writer.Write((byte)structure.TokenSpanRole);
             }
@@ -8689,6 +8770,17 @@ public static partial class ModuleCompiler
             writer.Write(structure.IsPrivate);
             writer.Write(structure.IsInternal);
             writer.Write(structure.IsUnique);
+            if (module.FormatVersion == ForeignInterfacePrivateVersion)
+            {
+                if (structure.DeclaredCopyEvidence == true
+                    && (structure.IsUnique
+                        || structure.CleanupMethod is not null))
+                {
+                    throw new ModuleContractException(
+                        "A PF111 Copy-positive structure cannot be unique or declare Cleanup.");
+                }
+                writer.Write(structure.DeclaredCopyEvidence == true);
+            }
             writer.Write(structure.IsTransparent);
             if (module.FormatVersion >= FixedLayoutVersion)
             {
@@ -8758,7 +8850,7 @@ public static partial class ModuleCompiler
             writer.Write(module.NativeFunctionPointerSignatures.Length);
             foreach (var signature in module.NativeFunctionPointerSignatures)
             {
-                if (module.FormatVersion == CheckedReferenceVersion)
+                if (UsesCheckedReferenceBaseline(module.FormatVersion))
                 {
                     WritePrivateRevision105NativeFunctionPointerSignature(
                         writer, signature);
@@ -8805,7 +8897,7 @@ public static partial class ModuleCompiler
                 writer.Write(fixedArray.RequiredAlignment);
             }
         }
-        if (module.FormatVersion == CheckedReferenceVersion)
+        if (UsesCheckedReferenceBaseline(module.FormatVersion))
         {
             WritePrivateCheckedReferenceTypes(writer,
                 module.CheckedReferenceTypes, module.Structures,
@@ -8872,11 +8964,12 @@ public static partial class ModuleCompiler
                     module.NativeFunctionPointerSignatures,
                     module.NativePointerTypes,
                     private105: module.FormatVersion
-                        == CheckedReferenceVersion,
+                        is CheckedReferenceVersion
+                            or ForeignInterfacePrivateVersion,
                     enumDefinitions: module.EnumDefinitions);
                 PutNativeOutputContracts(writer, outputRole, outputContracts);
             }
-            if (module.FormatVersion == CheckedReferenceVersion)
+            if (UsesCheckedReferenceBaseline(module.FormatVersion))
             {
                 WritePrivateRevision106FunctionMetadata(writer, item);
             }
@@ -8987,10 +9080,11 @@ public static partial class ModuleCompiler
                 moduleReader.NominalTypeOrigins = nominalTypeOrigins;
                 moduleReader.EnumDefinitions = enumDefinitions;
                 moduleReader.HasReadEnumDefinitions
-                    = moduleReader.FormatVersion
-                        == CheckedReferenceVersion;
+                    = UsesCheckedReferenceBaseline(
+                        moduleReader.FormatVersion);
                 moduleReader.HasReadCheckedReferenceTypes
-                    = moduleReader.FormatVersion == CheckedReferenceVersion;
+                    = UsesCheckedReferenceBaseline(
+                        moduleReader.FormatVersion);
                 moduleReader.InvocationBuffers = invocationBuffers;
             }
             var count = Count(reader, MaximumFunctions);
@@ -9056,7 +9150,8 @@ public static partial class ModuleCompiler
                     or NativeVTableContractVersion or NativeVTableOutputVersion or NativeCallableEntryVersion
                     or ArithmeticOperationVersion or NativeOutputContractVersion
                     or NativeStorageAddressExtentVersion or NativeFixedArrayVersion
-                    or WideFixedLayoutVersion or CheckedReferenceVersion))
+                    or WideFixedLayoutVersion or CheckedReferenceVersion
+                    or ForeignInterfacePrivateVersion))
             {
                 ValidateProducer(module);
             }
@@ -9078,7 +9173,8 @@ public static partial class ModuleCompiler
             throw new ModuleFormatException("Unknown module format or version.");
         }
         var version = reader.ReadInt32();
-        if (version is not (WideFixedLayoutVersion or CheckedReferenceVersion)
+        if (version is not (WideFixedLayoutVersion or CheckedReferenceVersion
+            or ForeignInterfacePrivateVersion)
             || reader is not ModuleReader moduleReader)
         {
             throw new ModuleFormatException("Unknown module format or version.");
@@ -9099,7 +9195,8 @@ public static partial class ModuleCompiler
                 or NativeVTableContractVersion or NativeVTableOutputVersion or NativeCallableEntryVersion
             or ArithmeticOperationVersion or NativeOutputContractVersion
                 or NativeStorageAddressExtentVersion or NativeFixedArrayVersion
-            or WideFixedLayoutVersion or CheckedReferenceVersion
+                or WideFixedLayoutVersion or CheckedReferenceVersion
+                or ForeignInterfacePrivateVersion
                 ? 12 : 10);
         if ((invocationProfileId is not null
                 && (!requiresSourceGrant
@@ -9111,7 +9208,8 @@ public static partial class ModuleCompiler
                                 or NativeVTableOutputVersion or NativeCallableEntryVersion
                                 or ArithmeticOperationVersion or NativeOutputContractVersion
                                 or NativeStorageAddressExtentVersion or NativeFixedArrayVersion
-                                or WideFixedLayoutVersion or CheckedReferenceVersion)
+                                or WideFixedLayoutVersion or CheckedReferenceVersion
+                                or ForeignInterfacePrivateVersion)
                             || !ScalarFrontendHost.IsInvocationProfileIdentity(invocationProfileId)))))
             || (invocationProfileId is null && bufferCount != 0))
         {
@@ -9164,6 +9262,7 @@ public static partial class ModuleCompiler
     {
         if (reader is not ModuleReader {
             FormatVersion: WideFixedLayoutVersion or CheckedReferenceVersion
+                or ForeignInterfacePrivateVersion
         })
         {
             return [];
@@ -9194,7 +9293,8 @@ public static partial class ModuleCompiler
         BinaryReader reader, PrimitiveType arrayType)
     {
         if (reader is not ModuleReader {
-            FormatVersion: WideFixedLayoutVersion or CheckedReferenceVersion,
+            FormatVersion: WideFixedLayoutVersion or CheckedReferenceVersion
+                or ForeignInterfacePrivateVersion,
         } moduleReader
             || !NativeFixedArrayTypes.IsType(arrayType))
         {
@@ -9389,7 +9489,8 @@ public static partial class ModuleCompiler
                         or NativeVTableContractVersion or NativeVTableOutputVersion or NativeCallableEntryVersion
                         or ArithmeticOperationVersion or NativeOutputContractVersion
                         or NativeStorageAddressExtentVersion or NativeFixedArrayVersion
-                        or WideFixedLayoutVersion or CheckedReferenceVersion,
+                        or WideFixedLayoutVersion or CheckedReferenceVersion
+                        or ForeignInterfacePrivateVersion,
             }
                 ? (TokenSpanTypeRole)reader.ReadByte() : TokenSpanTypeRole.None;
             if (role is < TokenSpanTypeRole.None or > TokenSpanTypeRole.Snapshot)
@@ -9400,6 +9501,10 @@ public static partial class ModuleCompiler
             var isPrivate = GetBool(reader);
             var isInternal = GetBool(reader);
             var isUnique = GetBool(reader);
+            bool? declaredCopyEvidence
+                = reader is ModuleReader {
+                    FormatVersion: ForeignInterfacePrivateVersion,
+                } ? GetBool(reader) : null;
             var isTransparent = GetBool(reader);
             var fixedLayout = reader is ModuleReader { FormatVersion: >= FixedLayoutVersion };
             var blittableTargetRequirement = fixedLayout ? reader.ReadInt32() : 0;
@@ -9414,6 +9519,12 @@ public static partial class ModuleCompiler
             var requiredAlignment = layoutControls
                 ? reader.ReadInt32() : 1;
             var cleanup = GetBool(reader) ? GetString(reader) : null;
+            if (declaredCopyEvidence == true
+                && (isUnique || cleanup is not null))
+            {
+                throw new ModuleFormatException(
+                    "A PF111 Copy-positive structure cannot be unique or declare Cleanup.");
+            }
             var fieldCount = Count(reader, MaximumSlots);
             var fields = ImmutableArray.CreateBuilder<BoundStructField>(fieldCount);
             for (var field = 0; field < fieldCount; field++)
@@ -9437,6 +9548,7 @@ public static partial class ModuleCompiler
                 IsPrivate = isPrivate,
                 IsInternal = isInternal,
                 IsUnique = isUnique,
+                DeclaredCopyEvidence = declaredCopyEvidence,
                 IsTransparent = isTransparent,
                 BlittableTargetRequirement = blittableTargetRequirement,
                 IsSequential = isSequential,
@@ -9608,7 +9720,7 @@ public static partial class ModuleCompiler
         ValidateNativeOutputContracts(role, result, contract, structures,
             functionPointerSignatures, nativePointerTypes,
             private105: reader is ModuleReader {
-                FormatVersion: CheckedReferenceVersion,
+                FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
             }, enumDefinitions: enumDefinitions);
         return (role, result);
     }
@@ -9916,7 +10028,7 @@ public static partial class ModuleCompiler
             }
             if (function is BoundFunction checkedOutputFunction
                 && reader is ModuleReader {
-                    FormatVersion: CheckedReferenceVersion,
+                    FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
                 } outputReader)
             {
                 var outputFormals = GetPrivateCheckedOutputFormals(
@@ -9956,7 +10068,7 @@ public static partial class ModuleCompiler
                 = ImmutableArray<byte>.Empty;
             var hasDeclaredRawUnionReturnCoverage = false;
             if (reader is ModuleReader {
-                    FormatVersion: CheckedReferenceVersion,
+                    FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
                 } moduleReader)
             {
                 var rawUnionCoverage
@@ -10026,7 +10138,7 @@ public static partial class ModuleCompiler
             {
                 function = RestoreDirectNativeImportSettings(function,
                     contract, private105: reader is ModuleReader {
-                        FormatVersion: CheckedReferenceVersion,
+                        FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
                     });
             }
             if (function is BoundFunction copyOriginFunction
@@ -10050,7 +10162,7 @@ public static partial class ModuleCompiler
                         expectedDirectNativeImport, contract);
             }
             if (reader is ModuleReader {
-                    FormatVersion: CheckedReferenceVersion,
+                    FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
                 } && function is BoundFunction nativeFunction)
             {
                 function = RestorePrivate105NativeCallableConvention(
@@ -10069,7 +10181,7 @@ public static partial class ModuleCompiler
                 }
             }
             else if (reader is ModuleReader {
-                    FormatVersion: CheckedReferenceVersion,
+                    FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
                 } && function is null)
             {
                 ValidatePrivate105BodylessFunctionContract(contract,
@@ -10082,7 +10194,7 @@ public static partial class ModuleCompiler
                     importedNativeVTableMethod);
             }
             if (reader is ModuleReader {
-                    FormatVersion: CheckedReferenceVersion,
+                    FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
                 } && function is BoundFunction storedFunction)
             {
                 ValidatePrivateImplicitReferenceContract(contract,
@@ -10122,7 +10234,7 @@ public static partial class ModuleCompiler
                     nativeFunctionPointerSignatures, nativePointerTypes,
                     nativeFixedArrayTypes,
                     private105: reader is ModuleReader {
-                        FormatVersion: CheckedReferenceVersion,
+                        FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
                     });
             if (actualContract is not null && actualContract != contract)
             {
@@ -10178,7 +10290,7 @@ public static partial class ModuleCompiler
                         ? [] : private106Metadata.CheckedOutputStates,
                 HasPrivateCheckedOutputStateMetadata =
                     reader is ModuleReader {
-                        FormatVersion: CheckedReferenceVersion,
+                        FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
                     },
                 ExpectedDirectNativeImport = expectedDirectNativeImport,
                 HasDeclaredRawUnionReturnCoverage
@@ -10311,14 +10423,14 @@ public static partial class ModuleCompiler
             = addressOnlyNestedBackingVariables;
         moduleWriter.CurrentNestedBackingVariable = -1;
         var private106RawUnionArrayResult
-            = moduleWriter.FormatVersion == CheckedReferenceVersion
+            = UsesCheckedReferenceBaseline(moduleWriter.FormatVersion)
                 && IsPrivate106RawUnionArrayAggregate(
                     function.ReturnType, moduleWriter.Structures,
                     moduleWriter.NativeFixedArrayTypes,
                     moduleWriter.NativePointerTypes,
                     moduleWriter.NativeFunctionPointerSignatures, program);
         var private106ArrayValueContext
-            = moduleWriter.FormatVersion == CheckedReferenceVersion
+            = UsesCheckedReferenceBaseline(moduleWriter.FormatVersion)
                 && IsPrivate106ArrayAggregateValueContext(sourceFunction,
                     program);
         if ((!IsRevision100RuntimeType(function.ReturnType,
@@ -10426,7 +10538,7 @@ public static partial class ModuleCompiler
                          moduleWriter.NativeFixedArrayTypes,
                          moduleWriter.NativePointerTypes,
                          moduleWriter.NativeFunctionPointerSignatures)
-                && !(moduleWriter.FormatVersion == CheckedReferenceVersion
+                && !(UsesCheckedReferenceBaseline(moduleWriter.FormatVersion)
                     && IsPrivate106RawUnionArrayAggregate(
                         variable.Type, moduleWriter.Structures,
                         moduleWriter.NativeFixedArrayTypes,
@@ -10573,7 +10685,7 @@ public static partial class ModuleCompiler
             writer.Write(variable.IsMutable);
             writer.Write(variable.IsOut);
             writer.Write(variable.IsInit);
-            if (moduleWriter.FormatVersion == CheckedReferenceVersion)
+            if (UsesCheckedReferenceBaseline(moduleWriter.FormatVersion))
             {
                 var firstLocal = function.ParameterCount
                     + (function.IsConstructor ? 1 : 0);
@@ -10627,7 +10739,7 @@ public static partial class ModuleCompiler
         }
         var coverageProgram = CreatePrivate106CoverageProgram(typeReader);
         var private106RawUnionArrayResult
-            = typeReader.FormatVersion == CheckedReferenceVersion
+            = UsesCheckedReferenceBaseline(typeReader.FormatVersion)
                 && IsPrivate106RawUnionArrayAggregate(type,
                 typeReader.Structures,
                 typeReader.NativeFixedArrayTypes,
@@ -10775,7 +10887,7 @@ public static partial class ModuleCompiler
             var isOut = GetBool(reader);
             var isInit = GetBool(reader);
             var declarationFlags = reader is ModuleReader {
-                FormatVersion: CheckedReferenceVersion,
+                FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
             } ? reader.ReadByte() : (byte)0;
             var firstLocal = parameters + (constructor ? 1 : 0);
             var isParameter = i >= (constructor ? 1 : 0)
@@ -10833,7 +10945,7 @@ public static partial class ModuleCompiler
                 IsImplicitReferenceTemporary = (declarationFlags & 4) != 0,
             };
             var private106ArrayAggregateValue
-                = typeReader.FormatVersion == CheckedReferenceVersion
+                = UsesCheckedReferenceBaseline(typeReader.FormatVersion)
                     && (i >= firstLocal
                         || (constructor && i == 0
                             && variableType == type))
@@ -10856,7 +10968,7 @@ public static partial class ModuleCompiler
             if (NativeFixedArrayTypes.IsType(variableType))
             {
                 var private106NestedArrayValue
-                    = typeReader.FormatVersion == CheckedReferenceVersion
+                    = UsesCheckedReferenceBaseline(typeReader.FormatVersion)
                         && IsPrivate106NestedArrayValueLocal(
                             variableType, type, variables.ToImmutable()
                                 .Add(variable), coverageProgram);
@@ -10909,7 +11021,7 @@ public static partial class ModuleCompiler
                     "Module vacancy declaration names an invalid local.");
             }
             if (reader is ModuleReader {
-                    FormatVersion: CheckedReferenceVersion,
+                    FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
                 } && !variables[vacant.Variable].IsInitializationLocal)
             {
                 throw new ModuleFormatException(
@@ -11370,8 +11482,7 @@ public static partial class ModuleCompiler
                     privateFixedArrayWriter.NativeFixedArrayTypes,
                     privateFixedArrayWriter.NativePointerTypes,
                     privateFixedArrayWriter.NativeFunctionPointerSignatures)
-                && !(privateFixedArrayWriter.FormatVersion
-                        == CheckedReferenceVersion
+                && !(UsesCheckedReferenceBaseline(privateFixedArrayWriter.FormatVersion)
                     && privateFixedArrayWriter.SourceProgram
                         is BoundProgram private106ExpressionProgram
                     && IsPrivate106RawUnionArrayAggregate(expression.Type,
@@ -11415,7 +11526,7 @@ public static partial class ModuleCompiler
             BoundIsSome => (byte)18,
             BoundIsVariablePattern => (byte)27,
             BoundIsInitialized when writer is ModuleWriter {
-                FormatVersion: CheckedReferenceVersion,
+                FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
             } => (byte)51,
             BoundIsInitialized => (byte)28,
             BoundBufferLength => (byte)29,
@@ -11433,57 +11544,57 @@ public static partial class ModuleCompiler
             BoundFieldMove => (byte)42,
             BoundNativeFixedArrayInitialization => (byte)43,
             BoundNativeFixedArrayElement element when writer is ModuleWriter {
-                FormatVersion: CheckedReferenceVersion,
+                FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
             } && element.FieldPlace is not null => (byte)50,
             BoundNativeFixedArrayElement => (byte)44,
             BoundNativeFixedArrayPointerAddress => (byte)45,
             BoundNativeFixedArrayWrite write when writer is ModuleWriter {
-                FormatVersion: CheckedReferenceVersion,
+                FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
             } && write.FieldPlace is not null => (byte)53,
             BoundNativeFixedArrayWrite => (byte)46,
             BoundNativeFixedArrayPathElement when writer is ModuleWriter {
-                FormatVersion: CheckedReferenceVersion,
+                FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
             } => (byte)50,
             BoundNativeFixedArrayRepeatInitialization => (byte)47,
             BoundNativeFixedArrayPathWrite when writer is ModuleWriter {
-                FormatVersion: CheckedReferenceVersion,
+                FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
             } => (byte)53,
             BoundNativeFixedArrayPathWrite => (byte)48,
             BoundReferenceFormation when writer is ModuleWriter {
-                FormatVersion: CheckedReferenceVersion,
+                FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
             } => (byte)49,
             BoundReferenceReborrow when writer is ModuleWriter {
-                FormatVersion: CheckedReferenceVersion,
+                FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
             } => (byte)49,
             BoundReferenceRead when writer is ModuleWriter {
-                FormatVersion: CheckedReferenceVersion,
+                FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
             } => (byte)50,
             BoundReferenceInitializationTest when writer is ModuleWriter {
-                FormatVersion: CheckedReferenceVersion,
+                FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
             } => (byte)51,
             BoundReferenceWrite when writer is ModuleWriter {
-                FormatVersion: CheckedReferenceVersion,
+                FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
             } => (byte)53,
             BoundPrivatePlaceRead { UseKind: 3 } when !allowBorrowDescriptor =>
                 throw new ModuleContractException(
                     "BorrowDescriptor can only be emitted as a referent operand."),
             BoundPrivateReferenceForm when writer is ModuleWriter {
-                FormatVersion: CheckedReferenceVersion,
+                FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
             } => (byte)49,
             BoundPrivatePlaceRead when writer is ModuleWriter {
-                FormatVersion: CheckedReferenceVersion,
+                FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
             } => (byte)50,
             BoundPrivatePlaceIsInitialized when writer is ModuleWriter {
-                FormatVersion: CheckedReferenceVersion,
+                FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
             } => (byte)51,
             BoundInitializationAttenuation when writer is ModuleWriter {
-                FormatVersion: CheckedReferenceVersion,
+                FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
             } => (byte)52,
             BoundPrivateCheckedStore when writer is ModuleWriter {
-                FormatVersion: CheckedReferenceVersion,
+                FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
             } => (byte)53,
             BoundImplicitReferenceMaterialize when writer is ModuleWriter {
-                FormatVersion: CheckedReferenceVersion,
+                FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
             } => (byte)54,
             BoundNativeFixedArrayPathElement =>
                 throw new ModuleContractException(
@@ -11624,8 +11735,7 @@ public static partial class ModuleCompiler
                                 moduleWriter.NativeFixedArrayTypes,
                                 enumDefinitions:
                                     moduleWriter.EnumDefinitions))
-                        && !(moduleWriter.FormatVersion
-                                == CheckedReferenceVersion
+                        && !(UsesCheckedReferenceBaseline(moduleWriter.FormatVersion)
                             && moduleWriter.SourceProgram
                                 is BoundProgram private106Program
                             && IsPrivate106NestedArrayValueLocal(
@@ -11653,7 +11763,7 @@ public static partial class ModuleCompiler
                 break;
             case BoundNativeFixedArrayElement element when writer
                 is ModuleWriter {
-                    FormatVersion: CheckedReferenceVersion,
+                    FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
                 } privateArrayElementWriter && element.FieldPlace is not null:
                 var privateArrayElementPlace = CreatePrivateBoundPlace(
                     privateArrayElementWriter,
@@ -11686,7 +11796,7 @@ public static partial class ModuleCompiler
                 break;
             case BoundNativeFixedArrayPathElement pathElement when writer
                 is ModuleWriter {
-                    FormatVersion: CheckedReferenceVersion,
+                    FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
                 } pathElementWriter:
                 var pathElementPlace = CreatePrivateBoundPlace(
                     pathElementWriter, pathElement, pathElement.Type);
@@ -11724,7 +11834,7 @@ public static partial class ModuleCompiler
                     depth + 1, inUnsafe);
                 break;
             case BoundNativeFixedArrayWrite write when writer is ModuleWriter {
-                FormatVersion: CheckedReferenceVersion,
+                FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
             } privateArrayWriteWriter && write.FieldPlace is not null:
                 if (write.Type != PrimitiveType.Void
                     || write.Value.Type != write.Layout.ElementType)
@@ -11790,8 +11900,7 @@ public static partial class ModuleCompiler
                             || repeat.Layout.ElementCount == 0
                             || repeat.Layout.ElementStride == 0
                             || repeat.Layout.ByteExtent == 0)
-                        && !(repeatWriter.FormatVersion
-                                == CheckedReferenceVersion
+                        && !(UsesCheckedReferenceBaseline(repeatWriter.FormatVersion)
                             && repeatWriter.SourceProgram
                                     is BoundProgram private106RepeatProgram
                             && IsPrivate106NestedArrayValueLocal(
@@ -11808,8 +11917,7 @@ public static partial class ModuleCompiler
                 break;
             case BoundNativeFixedArrayPathWrite pathWrite:
                 if (writer is ModuleWriter checkedPathWriter
-                    && checkedPathWriter.FormatVersion
-                        == CheckedReferenceVersion)
+                    && UsesCheckedReferenceBaseline(checkedPathWriter.FormatVersion))
                 {
                     var destination = CreatePrivateFixedArrayPathWritePlace(
                         checkedPathWriter, pathWrite);
@@ -11947,7 +12055,7 @@ public static partial class ModuleCompiler
                 var formationKind = (byte)(formation.Place is BoundViewRead
                     ? 2 : 1);
                 if (writer is ModuleWriter {
-                        FormatVersion: CheckedReferenceVersion,
+                        FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
                     } checkedReferenceWriter)
                 {
                     var privatePlace = CreatePrivateBoundPlace(
@@ -11999,7 +12107,7 @@ public static partial class ModuleCompiler
             case BoundReferenceWrite referenceWrite:
                 var checkedReferenceTransition = (byte)2;
                 if (writer is ModuleWriter {
-                        FormatVersion: CheckedReferenceVersion,
+                        FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
                     } privateStoreWriter)
                 {
                     if (!CheckedReferenceTypeContract.IsValidType(
@@ -12073,8 +12181,7 @@ public static partial class ModuleCompiler
                 var allowNestedFieldWriteBacking
                     = store.Transition == 2
                         && writer is ModuleWriter placeWriter
-                        && placeWriter.FormatVersion
-                            == CheckedReferenceVersion
+                        && UsesCheckedReferenceBaseline(placeWriter.FormatVersion)
                         && IsPrivateNestedArrayFieldWritePlace(
                             store.Destination, placeWriter);
                 PutPrivateBoundPlace(writer, store.Destination, names,
@@ -12113,7 +12220,7 @@ public static partial class ModuleCompiler
                 break;
             case BoundIsInitialized initializationTest:
                 if (writer is ModuleWriter {
-                        FormatVersion: CheckedReferenceVersion,
+                        FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
                     })
                 {
                     PutPrivateLocalPlace(writer, initializationTest.Variable,
@@ -12315,7 +12422,7 @@ public static partial class ModuleCompiler
                     typeReader.NativeFixedArrayTypes,
                     typeReader.NativePointerTypes,
                     typeReader.NativeFunctionPointerSignatures)
-                && !(typeReader.FormatVersion == CheckedReferenceVersion
+                && !(UsesCheckedReferenceBaseline(typeReader.FormatVersion)
                     && IsPrivate106RawUnionArrayAggregate(type,
                         typeReader.Structures,
                         typeReader.NativeFixedArrayTypes,
@@ -12443,8 +12550,7 @@ public static partial class ModuleCompiler
                             initializationReader.NativeFixedArrayTypes,
                             enumDefinitions:
                                 initializationReader.EnumDefinitions))
-                    && !(initializationReader.FormatVersion
-                            == CheckedReferenceVersion
+                    && !(UsesCheckedReferenceBaseline(initializationReader.FormatVersion)
                         && IsPrivate106NestedArrayValueLocal(type,
                             initializationReader.CurrentReturnType,
                             initializationReader.CurrentVariables,
@@ -12619,8 +12725,7 @@ public static partial class ModuleCompiler
                                 repeatReader.NativeFixedArrayTypes,
                                 repeatReader.CheckedReferenceTypes,
                                 repeatReader.EnumDefinitions))
-                        && !(repeatReader.FormatVersion
-                                == CheckedReferenceVersion
+                        && !(UsesCheckedReferenceBaseline(repeatReader.FormatVersion)
                             && IsPrivate106NestedArrayValueLocal(type,
                                 repeatReader.CurrentReturnType,
                                 repeatReader.CurrentVariables,
@@ -12767,32 +12872,32 @@ public static partial class ModuleCompiler
                     LeafFields = leafFields,
                 };
             case 49 when reader is ModuleReader {
-                    FormatVersion: CheckedReferenceVersion,
+                    FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
                 }:
                 return GetPrivateReferenceForm(reader, type, span,
                     ref remaining, depth, allowBorrowDescriptor);
             case 50 when reader is ModuleReader {
-                    FormatVersion: CheckedReferenceVersion,
+                    FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
                 }:
                 return GetPrivatePlaceRead(reader, type, span,
                     ref remaining, depth, allowBorrowDescriptor);
             case 51 when reader is ModuleReader {
-                    FormatVersion: CheckedReferenceVersion,
+                    FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
                 } && type == PrimitiveType.Bool:
                 return GetPrivatePlaceInitializationTest(reader, span,
                     ref remaining, depth, allowBorrowDescriptor);
             case 53 when reader is ModuleReader {
-                    FormatVersion: CheckedReferenceVersion,
+                    FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
                 } && type == PrimitiveType.Void:
                 return GetPrivateCheckedStore(reader, span,
                     ref remaining, depth, allowBorrowDescriptor);
             case 52 when reader is ModuleReader {
-                    FormatVersion: CheckedReferenceVersion,
+                    FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
                 }:
                 return GetPrivateInitializationAttenuation(reader, type,
                     span, ref remaining, depth);
             case 54 when reader is ModuleReader {
-                    FormatVersion: CheckedReferenceVersion,
+                    FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
                 }:
                 return GetPrivateReferenceMaterialization(reader, type,
                     span, ref remaining, depth);
@@ -12856,7 +12961,8 @@ public static partial class ModuleCompiler
                 return new BoundSpanRead(spanView, GetExpression(reader, ref remaining, depth + 1), type, span);
             case 35:
                 if (reader is not ModuleReader {
-                    FormatVersion: WideFixedLayoutVersion or CheckedReferenceVersion,
+                    FormatVersion: WideFixedLayoutVersion or CheckedReferenceVersion
+                        or ForeignInterfacePrivateVersion,
                 } storageAddressReader)
                 {
                     throw new ModuleFormatException(
@@ -13467,7 +13573,7 @@ public static partial class ModuleCompiler
         if (CheckedReferenceTypes.IsType(type))
         {
             if (reader is not ModuleReader {
-                    FormatVersion: CheckedReferenceVersion,
+                    FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
                 } moduleReader
                 || (moduleReader.HasReadCheckedReferenceTypes
                     && (uint)CheckedReferenceTypes.Index(type)
@@ -13480,7 +13586,7 @@ public static partial class ModuleCompiler
         else if (BoundEnumTypes.IsType(type))
         {
             if (reader is not ModuleReader {
-                    FormatVersion: CheckedReferenceVersion,
+                    FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
                 } moduleReader
                 || (moduleReader.HasReadEnumDefinitions
                     && (uint)BoundEnumTypes.Index(type)
@@ -13508,7 +13614,7 @@ public static partial class ModuleCompiler
         if (CheckedReferenceTypes.IsType(type))
         {
             if (writer is not ModuleWriter {
-                    FormatVersion: CheckedReferenceVersion,
+                    FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
                 } moduleWriter
                 || (uint)CheckedReferenceTypes.Index(type)
                     >= (uint)moduleWriter.CheckedReferenceTypes.Length)
@@ -13520,7 +13626,7 @@ public static partial class ModuleCompiler
         else if (BoundEnumTypes.IsType(type))
         {
             if (writer is not ModuleWriter {
-                    FormatVersion: CheckedReferenceVersion,
+                    FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
                 } moduleWriter
                 || (uint)BoundEnumTypes.Index(type)
                     >= (uint)moduleWriter.EnumDefinitions.Length)
@@ -13546,7 +13652,7 @@ public static partial class ModuleCompiler
         BoundConstant constant)
     {
         if (writer is not ModuleWriter {
-                FormatVersion: CheckedReferenceVersion,
+                FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
             })
         {
             writer.Write(constant.Value);
@@ -13582,7 +13688,7 @@ public static partial class ModuleCompiler
         BinaryReader reader, PrimitiveType type, TextSpan span)
     {
         if (reader is not ModuleReader {
-                FormatVersion: CheckedReferenceVersion,
+                FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
             })
         {
             return new BoundConstant(reader.ReadInt64(), type, span);

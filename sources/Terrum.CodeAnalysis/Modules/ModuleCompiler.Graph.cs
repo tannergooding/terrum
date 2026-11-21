@@ -1309,7 +1309,7 @@ public static partial class ModuleCompiler
             throw new ModuleContractException("Graph library and dependency runtime policies differ.");
         }
         var dependencyCheckedReferenceMapping
-            = module.FormatVersion == CheckedReferenceVersion
+            = UsesCheckedReferenceBaseline(module.FormatVersion)
                 ? MapCheckedReferenceTypeRows(module, dependencies)
                     .ToArray()
                 : [];
@@ -1341,9 +1341,8 @@ public static partial class ModuleCompiler
                 dependencies.NativeFunctionPointerSignatures,
                 dependencies.NativePointerTypes,
                 dependencies.NativeFixedArrayTypes,
-                private105: module.FormatVersion
-                    == CheckedReferenceVersion);
-            if (module.FormatVersion == CheckedReferenceVersion)
+                private105: UsesCheckedReferenceBaseline(module.FormatVersion));
+            if (UsesCheckedReferenceBaseline(module.FormatVersion))
             {
                 actualContract = RemapPrivate105FunctionPointerReferences(
                     actualContract, dependencyFunctionPointerMapping);
@@ -1368,7 +1367,7 @@ public static partial class ModuleCompiler
                     item.GeneralDependencyContracts,
                     GetPrivateGeneralDependencyContracts(actual),
                     item.Contract)
-                || (module.FormatVersion == CheckedReferenceVersion
+                || (UsesCheckedReferenceBaseline(module.FormatVersion)
                     && !SameDirectNativeImportDescriptor(
                         item.ExpectedDirectNativeImport, module.Structures,
                         module.NativeFunctionPointerSignatures,
@@ -1376,13 +1375,13 @@ public static partial class ModuleCompiler
                         dependencies.Structures,
                         dependencies.NativeFunctionPointerSignatures,
                         dependencies.NativePointerTypes))
-                || (module.FormatVersion == CheckedReferenceVersion
+                || (UsesCheckedReferenceBaseline(module.FormatVersion)
                     && !Private105CopyOriginSummarySatisfies(
                         item.ExpectedCopyOriginSummaryData,
                         GetPrivate105CopyOriginSummaryData(actual,
                             dependencies.Structures,
                             dependencies.CheckedReferenceTypes)))
-                || (module.FormatVersion == CheckedReferenceVersion
+                || (UsesCheckedReferenceBaseline(module.FormatVersion)
                     && (!item.HasDeclaredRawUnionReturnCoverage
                         || !Private106RawUnionReturnCoverageSatisfies(
                         item.DeclaredRawUnionReturnCoverage,
@@ -1504,10 +1503,9 @@ public static partial class ModuleCompiler
                 moduleReader.NominalTypeOrigins = nominalTypeOrigins;
                 moduleReader.EnumDefinitions = enumDefinitions;
                 moduleReader.HasReadEnumDefinitions
-                    = moduleReader.FormatVersion
-                        == CheckedReferenceVersion;
+                    = UsesCheckedReferenceBaseline(moduleReader.FormatVersion);
                 moduleReader.HasReadCheckedReferenceTypes
-                    = moduleReader.FormatVersion == CheckedReferenceVersion;
+                    = UsesCheckedReferenceBaseline(moduleReader.FormatVersion);
                 moduleReader.InvocationBuffers = invocationBuffers;
             }
             var count = Count(reader, MaximumFunctions);

@@ -1400,7 +1400,7 @@ public static partial class ModuleCompiler
             consumer.EnumDefinitions,
             reference.EnumDefinitions);
         var providerCheckedReferenceMapping
-            = consumer.FormatVersion == CheckedReferenceVersion
+            = UsesCheckedReferenceBaseline(consumer.FormatVersion)
                 ? MapCheckedReferenceTypeRows(consumer, reference).ToArray()
                 : [];
         if (consumer.RuntimePolicy != reference.RuntimePolicy)
@@ -1439,9 +1439,8 @@ public static partial class ModuleCompiler
                 reference.NativeFunctionPointerSignatures,
                 reference.NativePointerTypes,
                 reference.NativeFixedArrayTypes,
-                private105: consumer.FormatVersion
-                    == CheckedReferenceVersion);
-            if (consumer.FormatVersion == CheckedReferenceVersion)
+                private105: UsesCheckedReferenceBaseline(consumer.FormatVersion));
+            if (UsesCheckedReferenceBaseline(consumer.FormatVersion))
             {
                 actualContract = RemapPrivate105FunctionPointerReferences(
                     actualContract, providerFunctionPointerMapping);
@@ -1461,7 +1460,7 @@ public static partial class ModuleCompiler
                 throw new ModuleContractException(
                     $"Private function contract mismatch for '{imported.Name}'.");
             }
-            if ((consumer.FormatVersion == CheckedReferenceVersion
+            if ((UsesCheckedReferenceBaseline(consumer.FormatVersion)
                     ? !SameDirectNativeImportDescriptor(
                         imported.ExpectedDirectNativeImport,
                         consumer.Structures,
@@ -1475,13 +1474,13 @@ public static partial class ModuleCompiler
                         && !imported.Contract.Contains(
                             "|DirectNativeImport:",
                             StringComparison.Ordinal))
-                || (consumer.FormatVersion == CheckedReferenceVersion
+                || (UsesCheckedReferenceBaseline(consumer.FormatVersion)
                     && !Private105CopyOriginSummarySatisfies(
                         imported.ExpectedCopyOriginSummaryData,
                         GetPrivate105CopyOriginSummaryData(actual,
                             reference.Structures,
                             reference.CheckedReferenceTypes)))
-                || (consumer.FormatVersion == CheckedReferenceVersion
+                || (UsesCheckedReferenceBaseline(consumer.FormatVersion)
                     && (!imported.HasDeclaredRawUnionReturnCoverage
                         || !Private106RawUnionReturnCoverageSatisfies(
                         imported.DeclaredRawUnionReturnCoverage,
@@ -1590,7 +1589,7 @@ public static partial class ModuleCompiler
                         consumer.Structures),
                     providerFunctionPointerMapping),
                 providerNativePointerMapping);
-            if (consumer.FormatVersion == CheckedReferenceVersion)
+            if (UsesCheckedReferenceBaseline(consumer.FormatVersion))
             {
                 importedFunction = BoundTreeTraversal.RewriteTypes(
                     importedFunction, type => RemapCheckedReferenceType(

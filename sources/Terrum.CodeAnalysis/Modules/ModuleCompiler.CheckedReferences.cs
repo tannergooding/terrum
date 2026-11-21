@@ -51,7 +51,7 @@ public static partial class ModuleCompiler
         bool allowUnresolvedEnums = false)
     {
         if (writer is not ModuleWriter {
-                FormatVersion: CheckedReferenceVersion,
+                FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
             } moduleWriter
             || referenceTypes.IsDefault
             || !referenceTypes.SequenceEqual(
@@ -163,7 +163,7 @@ public static partial class ModuleCompiler
             ImmutableArray<BoundNativeFixedArrayType> fixedArrayTypes)
     {
         if (reader is not ModuleReader {
-                FormatVersion: CheckedReferenceVersion,
+                FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
             } moduleReader)
         {
             return [];
@@ -914,7 +914,7 @@ public static partial class ModuleCompiler
             ImmutableArray<BoundStruct> structures)
     {
         if (reader is not ModuleReader {
-                FormatVersion: CheckedReferenceVersion,
+                FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
             })
         {
             return [];
@@ -3245,7 +3245,7 @@ public static partial class ModuleCompiler
         ImmutableArray<NativeOutputContract> nativeOutputContracts)
     {
         if (reader is not ModuleReader {
-                FormatVersion: CheckedReferenceVersion,
+                FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
             })
         {
             return default;
