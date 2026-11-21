@@ -34,6 +34,9 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int GetPointerValueDelegate(nint source);
 
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate double GetDoublePointerValueDelegate(nint source);
+
     [TestCase(false)]
     [TestCase(true)]
     public async Task StandardL1MethodProvidersUseImportedNominalArrayFieldsAsync(
@@ -1050,6 +1053,96 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
     }
 
     [Test]
+    public async Task L1PointerLoadPreservesAggregateFloatingBitsAcrossStandardRoundTripAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+
+        const string moduleIdentity = "l1p-aggregate-floating-bits";
+        const string l1pSchemaIdentity
+            = "trrm/1-draft-local-aggregate-layout-execution-pointer-loads-1";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            struct Snapshot {
+                public mut float64 First;
+                public mut int64 Second;
+                public mut int64 Third;
+            }
+            public float64 Main(ptr<Snapshot> source) {
+                unsafe {
+                    Snapshot captured = *source;
+                    return captured.First;
+                }
+            }
+            """), new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, l1pSchemaIdentity,
+            moduleTargetRequirement: 1);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(l1pSchemaIdentity, artifact),
+            moduleIdentity, []);
+        var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
+            moduleIdentity + "-reemitted", l1pSchemaIdentity,
+            moduleTargetRequirement: 1);
+        var reemittedIdentity = moduleIdentity + "-reemitted";
+        var image = NativeModuleCompiler.EmitStandardLibrary(
+            new TrRmStandardArtifactInput(l1pSchemaIdentity, reemitted),
+            reemittedIdentity, [], ["Main"],
+            NativeRuntimePolicy.FailFast);
+
+        var directory = TestArtifactPaths.CreateDirectory(
+            "terrum-l1p-aggregate-floating-bits-");
+        try
+        {
+            var imagePath = Path.Combine(directory, "library.dll");
+            await File.WriteAllBytesAsync(imagePath, image)
+                .ConfigureAwait(true);
+            var library = NativeLibrary.Load(imagePath);
+            try
+            {
+                var function = Marshal.GetDelegateForFunctionPointer<
+                    GetDoublePointerValueDelegate>(NativeLibrary.GetExport(
+                    library, "Main"));
+                var source = Marshal.AllocHGlobal(3 * sizeof(long));
+                try
+                {
+                    Marshal.WriteInt64(source, sizeof(long), 1);
+                    Marshal.WriteInt64(source, 2 * sizeof(long), 2);
+                    var values = new[] {
+                        long.MinValue,
+                        unchecked((long)0x7FF8_0000_0000_0042UL),
+                    };
+                    foreach (var expectedBits in values)
+                    {
+                        Marshal.WriteInt64(source, expectedBits);
+                        var result = function(source);
+                        Assert.That(BitConverter.DoubleToInt64Bits(result),
+                            Is.EqualTo(expectedBits));
+                    }
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(source);
+                }
+            }
+            finally
+            {
+                NativeLibrary.Free(library);
+            }
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
     public void NativePointerReadSnapshotsIndirectAggregateBeforeMutation()
     {
         Assume.That(OperatingSystem.IsWindows()
@@ -1086,6 +1179,45 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
             string.Join(Environment.NewLine, compilation.Diagnostics));
         Assert.That(NativeJit.Execute(compilation.Program!,
             NativeRuntimePolicy.FailFast), Is.EqualTo(42));
+    }
+
+    [Test]
+    public void NativePointerReadPreservesLocalRawUnionCoverage()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Union)]
+            struct RawWord {
+                public mut uint32 Narrow;
+                public mut uint64 Wide;
+            }
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            struct Snapshot {
+                public mut RawWord Value;
+                public Snapshot(uint64 value) {
+                    Value.Wide = value;
+                }
+            }
+            Snapshot MakeSnapshot() {
+                return new Snapshot(uint64(7));
+            }
+            public int32 Main() {
+                mut Snapshot value = MakeSnapshot();
+                unsafe {
+                    Snapshot captured = *(&value);
+                    return int32(captured.Value.Wide);
+                }
+            }
+            """), new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(compilation.Program!,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(7));
     }
 
     [Test]
@@ -1285,7 +1417,7 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
             [Blittable] [Layout(LayoutKind.Sequential)]
-            unique struct UniqueSnapshot {
+            public unique struct UniqueSnapshot {
                     public mut int32 First;
             }
             public int32 Read(ptr<UniqueSnapshot> source) {

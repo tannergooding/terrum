@@ -4425,6 +4425,14 @@ public static partial class SemanticVerifier
                     _ = initialized.CopyRawUnionArrayFacts(local.Variable,
                         localAggregateRead.Variable);
                 }
+                else if (TryGetNativePointerReadLocalStorage(
+                        local.Initializer, local.Initializer.Type,
+                        function, program, out var localPointerSourceVariable)
+                    && IsInlineStructStorage(local.Initializer.Type, program))
+                {
+                    _ = initialized.CopyRawUnionArrayFacts(local.Variable,
+                        localPointerSourceVariable);
+                }
                 if (local.Initializer is BoundCall localCall
                     && initialized.Dependencies is BackingDependencies
                         localCallDependencies
@@ -4870,6 +4878,15 @@ public static partial class SemanticVerifier
                     _ = initialized.CopyRawUnionArrayFacts(
                         assignment.Variable,
                         assignmentAggregateRead.Variable);
+                }
+                else if (TryGetNativePointerReadLocalStorage(
+                        assignment.Value, assignment.Value.Type,
+                        function, program,
+                        out var assignmentPointerSourceVariable)
+                    && IsInlineStructStorage(assignment.Value.Type, program))
+                {
+                    _ = initialized.CopyRawUnionArrayFacts(
+                        assignment.Variable, assignmentPointerSourceVariable);
                 }
                 if (assignment.Value is BoundCall assignmentCall
                     && initialized.Dependencies is BackingDependencies
@@ -35825,6 +35842,44 @@ public static partial class SemanticVerifier
                 out byteOffset);
     }
 
+    private static bool TryGetNativePointerReadLocalStorage(
+        BoundExpression expression, PrimitiveType type,
+        BoundFunction function, BoundProgram program,
+        out int sourceVariable)
+    {
+        while (expression is BoundUnsafeExpression unsafeExpression)
+        {
+            expression = unsafeExpression.Expression;
+        }
+
+        if (expression is BoundNativePointerRead pointerRead
+            && pointerRead.Type == type)
+        {
+            var address = pointerRead.Address;
+            while (address is BoundUnsafeExpression unsafeAddress)
+            {
+                address = unsafeAddress.Expression;
+            }
+
+            if (address is BoundNativePointerAddress pointerAddress
+                && NativePointerTypeContract.IsValidType(
+                    pointerAddress.Type, program.NativePointerTypes)
+                && (uint)pointerAddress.Variable
+                    < (uint)function.Variables.Length
+                && function.Variables[pointerAddress.Variable].Type == type
+                && program.NativePointerTypes[
+                    NativePointerTypes.Index(pointerAddress.Type)]
+                    .PointeeType == type)
+            {
+                sourceVariable = pointerAddress.Variable;
+                return true;
+            }
+        }
+
+        sourceVariable = -1;
+        return false;
+    }
+
     private static byte[] InitializedPayloadBytesOfExpression(
         BoundExpression expression, PrimitiveType type,
         InitializationState initialized, BoundFunction function,
@@ -35854,6 +35909,18 @@ public static partial class SemanticVerifier
                 return [.. initialized.RawUnionReturnCoverageSummaries[
                     call.Function]];
             }
+        }
+
+        if (TryGetNativePointerReadLocalStorage(expression, type,
+                function, program, out var pointerSourceVariable)
+            && initialized.TryGetRawUnionInitializedBytes(
+                pointerSourceVariable, out var pointerSourceBytes)
+            && pointerSourceBytes.Length
+                == MaterializedPayloadSize(type, program))
+        {
+            return InitializedRawUnionArrayPayloadBytesOfValue(
+                pointerSourceVariable, type, pointerSourceBytes,
+                initialized, program, ref remaining, depth + 1);
         }
 
         if (expression is BoundReferenceRead referenceRead
