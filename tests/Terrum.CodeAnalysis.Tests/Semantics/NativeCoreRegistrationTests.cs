@@ -348,6 +348,8 @@ internal sealed class NativeCoreRegistrationTests
     [Test]
     public void StandardForeignNativeInterfaceProducerEmitsOutputContracts()
     {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-native-interface-parameter-surface-1";
         var (native, output) = NativeOutputCoreRegistrationTests
             .CreateCombinedRegistrations(includeForeignNativeInterface: true);
         var options = new CompilationOptions {
@@ -589,6 +591,42 @@ internal sealed class NativeCoreRegistrationTests
             Is.EqualTo("limit"));
         Assert.That(countMember.Parameters.Single().DefaultValue,
             Is.Not.Null);
+        var sourceFreeCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(""), reboundReference);
+        Assert.That(sourceFreeCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                sourceFreeCompilation.Diagnostics));
+        var forwardedArtifact = TrRmExecutableCompiler.EmitStandard(
+            sourceFreeCompilation.Program
+                ?? throw new AssertionException(
+                    "Expected a source-free FNI forwarder."),
+            "forwarder.module", schemaIdentity, 1, []);
+        var forwardedReference = TrRmExecutableCompiler
+            .CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    forwardedArtifact), "forwarder.module", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        changedProviderArtifact),
+                ]);
+        var forwardedInterface = forwardedReference.Interfaces.Single();
+        Assert.That(forwardedInterface.ModuleImport?.ProducerIdentity,
+            Is.EqualTo("provider.module"));
+        Assert.That(forwardedInterface.Members[0].NativeOutputContracts
+            .Single().FormalOrdinal, Is.EqualTo(1));
+        Assert.That(forwardedInterface.Members[1].Dependencies.Select(
+                static dependency => dependency.Relation),
+            Is.EquivalentTo([
+                BoundDependencyRelation.DependsOn,
+                BoundDependencyRelation.ForwardsBacking,
+            ]));
+        var forwardedCountMember = forwardedInterface.Members.Single(
+            static member => member.Name == "Count");
+        Assert.That(forwardedCountMember.Parameters.Single().Name,
+            Is.EqualTo("limit"));
+        Assert.That(forwardedCountMember.Parameters.Single().DefaultValue,
+            Is.Not.Null);
+        Assert.That(forwardedCountMember.Parameters.Single().DefaultValue
+            ?.Value, Is.EqualTo(2L));
         _ = Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.CreateStandardReference(
                 new TrRmStandardArtifactInput(
