@@ -4494,6 +4494,7 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             namespace Example {
                 public interface ISource<T> { type Item = T; }
                 public class Box {
+                    public Box() { }
                     public static int32 Constrained<T, U>()
                         where T : ISource<T>
                         where T.via<ISource<T>>.Item is U {
@@ -4519,6 +4520,10 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             .OfType<SyntaxNode>()
             .Single(static node =>
                 node.Kind == SyntaxKind.ClassDeclaration);
+        var constructorDeclaration = classDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ConstructorDeclaration);
         var boxClassIndex = Enumerable.Range(0,
                 providerProgram.Classes.Length)
             .Single(index => providerProgram.Classes[index].Name == "Box");
@@ -4537,7 +4542,10 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         };
         var classExport = new TrRmSourceClassExport(providerProgram,
             boxClassIndex, classDeclaration.Span,
-            "example.class/Box", []);
+            "example.class/Box", [
+                new TrRmSourceClassMemberExport(boxClassIndex,
+                    constructorDeclaration.Span, "constructor.box"),
+            ]);
         var methodExport = new TrRmSourceGenericMethodExport(
             providerProgram, constrained.SourceInputOrdinal,
             constrained.Span, "Box.Constrained");
@@ -4615,6 +4623,7 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         var consumerTree = SyntaxTree.Parse("""
                 namespace Example {
                     public class Forwarder {
+                        public Forwarder() { }
                         public static int32 Forward<T, U>(T value)
                             where T : ISource<T>
                             where T.via<ISource<T>>.Item is U {
@@ -4685,6 +4694,10 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             .OfType<SyntaxNode>()
             .Single(static node =>
                 node.Kind == SyntaxKind.ClassDeclaration);
+        var forwarderConstructor = forwarderDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ConstructorDeclaration);
         var forwarderClassIndex = Enumerable.Range(0,
                 consumerProgram.Classes.Length)
             .Single(index =>
@@ -4699,7 +4712,12 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             ], [
                 new TrRmSourceClassExport(consumerProgram,
                     forwarderClassIndex, forwarderDeclaration.Span,
-                    "example.class/Forwarder", []),
+                    "example.class/Forwarder", [
+                        new TrRmSourceClassMemberExport(
+                            forwarderClassIndex,
+                            forwarderConstructor.Span,
+                            "constructor.forwarder"),
+                    ]),
             ]);
         var consumerReference = TrRmExecutableCompiler.CreateStandardReference(
             new TrRmStandardArtifactInput(CM1AR1SchemaIdentity,
@@ -4773,7 +4791,7 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         var tree = SyntaxTree.Parse("""
             namespace Example {
                 public interface ISource<T> { type Item = T; }
-                public class Box { }
+                public class Box { public Box() { } }
                 public int32 Constrained<T, U>()
                     where T : ISource<T>
                     where T.via<ISource<T>>.Item is U {
@@ -4795,6 +4813,10 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             .Children.OfType<SyntaxNode>()
             .Single(static node =>
                 node.Kind == SyntaxKind.ClassDeclaration);
+        var constructorDeclaration = classDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ConstructorDeclaration);
         var classIndex = Enumerable.Range(0, program.Classes.Length)
             .Single(index => program.Classes[index].Name == "Box");
         var method = program.GenericMethodDefinitions.Single();
@@ -4810,7 +4832,10 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             ],
         };
         var classExport = new TrRmSourceClassExport(program, classIndex,
-            classDeclaration.Span, "example.class/Box", []);
+            classDeclaration.Span, "example.class/Box", [
+                new TrRmSourceClassMemberExport(classIndex,
+                    constructorDeclaration.Span, "constructor.box"),
+            ]);
         var methodExport = new TrRmSourceGenericMethodExport(program,
             method.SourceInputOrdinal, method.Span,
             "example.method/Constrained");
@@ -4828,9 +4853,10 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             namespace Example {
                 public interface ISource<T> { type Item = T; }
                 public class Box {
+                    public Box() { }
                     public static int32 Constrained() { return 7; }
                 }
-                public class Marker { }
+                public class Marker { public Marker() { } }
             }
             """);
         var compilation = Compilation.CreateLibrary(tree);
@@ -4858,6 +4884,14 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             .OfType<SyntaxNode>()
             .Single(static node =>
                 node.Kind == SyntaxKind.FunctionDeclaration);
+        var boxConstructor = boxDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ConstructorDeclaration);
+        var markerConstructor = markerDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ConstructorDeclaration);
         var boxClassIndex = Enumerable.Range(0, program.Classes.Length)
             .Single(index => program.Classes[index].Name == "Box");
         var markerClassIndex = Enumerable.Range(0, program.Classes.Length)
@@ -4878,9 +4912,14 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                 boxDeclaration.Span, "example.class/Box", [
                     new TrRmSourceClassMemberExport(boxClassIndex,
                         methodDeclaration.Span, "Box.Constrained"),
+                    new TrRmSourceClassMemberExport(boxClassIndex,
+                        boxConstructor.Span, "constructor.box"),
                 ]),
             new TrRmSourceClassExport(program, markerClassIndex,
-                markerDeclaration.Span, "example.class/Marker", []),
+                markerDeclaration.Span, "example.class/Marker", [
+                    new TrRmSourceClassMemberExport(markerClassIndex,
+                        markerConstructor.Span, "constructor.marker"),
+                ]),
         };
         var providerArtifact = TrRmExecutableCompiler.EmitStandard(program,
             "cm1ar1.required.provider", CM1AR1SchemaIdentity, 0,
@@ -4934,7 +4973,7 @@ internal sealed class TrRmGenericMethodSourceWriterTests
     {
         var markerTree = SyntaxTree.Parse("""
             namespace Example {
-                public class Marker { }
+                public class Marker { public Marker() { } }
             }
             """);
         var markerCompilation = Compilation.CreateLibrary(markerTree);
@@ -4949,6 +4988,10 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             .Children.OfType<SyntaxNode>()
             .Single(static node =>
                 node.Kind == SyntaxKind.ClassDeclaration);
+        var markerConstructor = markerDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ConstructorDeclaration);
         var markerClassIndex = Enumerable.Range(0,
                 markerProgram.Classes.Length)
             .Single(index => markerProgram.Classes[index].Name == "Marker");
@@ -4958,7 +5001,11 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             [], [], [
                 new TrRmSourceClassExport(markerProgram,
                     markerClassIndex, markerDeclaration.Span,
-                    "example.class/Marker", []),
+                    "example.class/Marker", [
+                        new TrRmSourceClassMemberExport(markerClassIndex,
+                            markerConstructor.Span,
+                            "constructor.marker"),
+                    ]),
             ]);
         var markerReference = TrRmExecutableCompiler.CreateStandardReference(
             new TrRmStandardArtifactInput(CM1AR1SchemaIdentity,
@@ -4972,6 +5019,7 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                 public interface ISource<T> { type Item = T; }
                 public class Box {
                     public Marker Value;
+                    public Box(Marker value) { Value = value; }
                     public static int32 Constrained() { return 7; }
                 }
             }
@@ -4999,6 +5047,10 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             .OfType<SyntaxNode>()
             .Single(static node =>
                 node.Kind == SyntaxKind.FunctionDeclaration);
+        var boxConstructor = boxDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ConstructorDeclaration);
         var boxClassIndex = Enumerable.Range(0, program.Classes.Length)
             .Single(index => program.Classes[index].Name == "Box");
         var typeExport = new TrRmSourceTypeExport("Example", "ISource",
@@ -5018,6 +5070,8 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                     fieldDeclaration.Span, "Box.Value"),
                 new TrRmSourceClassMemberExport(boxClassIndex,
                     methodDeclaration.Span, "Box.Constrained"),
+                new TrRmSourceClassMemberExport(boxClassIndex,
+                    boxConstructor.Span, "constructor.box"),
             ]);
         var providerArtifact = TrRmExecutableCompiler.EmitStandard(program,
             "cm1ar1.class.provider", CM1AR1SchemaIdentity, 0,
@@ -5114,6 +5168,7 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             namespace Example {
                 public class Container {
                     public Box Value;
+                    public Container(Box value) { Value = value; }
                 }
             }
             """);
@@ -5132,6 +5187,9 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         var valueDeclaration = containerDeclaration.Children
             .OfType<SyntaxNode>().Single(static node =>
                 node.Kind == SyntaxKind.FieldDeclaration);
+        var constructorDeclaration = containerDeclaration.Children
+            .OfType<SyntaxNode>().Single(static node =>
+                node.Kind == SyntaxKind.ConstructorDeclaration);
         var containerClassIndex = Enumerable.Range(0,
                 program.Classes.Length)
             .Single(index => program.Classes[index].Name == "Container");
@@ -5143,6 +5201,9 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                     containerDeclaration.Span, "example.class/Container", [
                         new TrRmSourceClassMemberExport(containerClassIndex,
                             valueDeclaration.Span, "Container.Value"),
+                        new TrRmSourceClassMemberExport(containerClassIndex,
+                            constructorDeclaration.Span,
+                            "constructor.container"),
                     ]),
             ]);
         var publishedTables
@@ -5335,10 +5396,10 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         const string methodExportKey = "Box.Constrained";
         const string interfaceExportKey = "example.interface/IMarker";
         var providerArtifact
-            = CreateC1M1InterfaceConstraintClassMethodProvider(
+            = CreateC1M1ClassMethodInterfaceConstraintProvider(
                 providerIdentity, schemaIdentity, includePrefix: false);
         var replacementArtifact
-            = CreateC1M1InterfaceConstraintClassMethodProvider(
+            = CreateC1M1ClassMethodInterfaceConstraintProvider(
                 providerIdentity, schemaIdentity, includePrefix: true);
         var schema = TrRmExecutableCompiler.GetForeignInvocationSchema(
             schemaIdentity);
@@ -5372,6 +5433,7 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             namespace Example {
                 public class Container {
                     public Box Value;
+                    public Container(Box value) { Value = value; }
                 }
             }
             """);
@@ -5390,6 +5452,9 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         var valueDeclaration = containerDeclaration.Children
             .OfType<SyntaxNode>().Single(static node =>
                 node.Kind == SyntaxKind.FieldDeclaration);
+        var constructorDeclaration = containerDeclaration.Children
+            .OfType<SyntaxNode>().Single(static node =>
+                node.Kind == SyntaxKind.ConstructorDeclaration);
         var containerClassIndex = Enumerable.Range(0,
                 program.Classes.Length)
             .Single(index => program.Classes[index].Name == "Container");
@@ -5401,6 +5466,9 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                     containerDeclaration.Span, "example.class/Container", [
                         new TrRmSourceClassMemberExport(containerClassIndex,
                             valueDeclaration.Span, "Container.Value"),
+                        new TrRmSourceClassMemberExport(containerClassIndex,
+                            constructorDeclaration.Span,
+                            "constructor.container"),
                     ]),
             ]);
         var publishedTables
@@ -5618,6 +5686,7 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         var tree = SyntaxTree.Parse("""
             public class Container {
                 public Box Value;
+                public Container(Box value) { Value = value; }
             }
             """);
         var compilation = Compilation.CreateLibrary(tree, reference);
@@ -5630,6 +5699,9 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         var valueDeclaration = containerDeclaration.Children
             .OfType<SyntaxNode>().Single(static node =>
                 node.Kind == SyntaxKind.FieldDeclaration);
+        var constructorDeclaration = containerDeclaration.Children
+            .OfType<SyntaxNode>().Single(static node =>
+                node.Kind == SyntaxKind.ConstructorDeclaration);
         var containerClassIndex = Enumerable.Range(0,
                 program.Classes.Length)
             .Single(index => program.Classes[index].Name == "Container");
@@ -5641,6 +5713,9 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                     containerDeclaration.Span, "ContainerKey", [
                         new TrRmSourceClassMemberExport(containerClassIndex,
                             valueDeclaration.Span, "Container.Value"),
+                        new TrRmSourceClassMemberExport(containerClassIndex,
+                            constructorDeclaration.Span,
+                            "constructor.container"),
                     ]),
             ]);
         var publishedTables
@@ -5849,6 +5924,7 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             namespace Example {
                 public interface ISource<T> { type Item = T; }
                 public class Container {
+                    public Container() { }
                     public static int32 Constrained<T>()
                         where T : ISource<T>
                         where T.via<ISource<T>>.Item is Box<Box<int32>> {
@@ -5877,6 +5953,10 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             .OfType<SyntaxNode>()
             .Single(static node =>
                 node.Kind == SyntaxKind.FunctionDeclaration);
+        var classConstructor = classDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ConstructorDeclaration);
         var classIndex = Enumerable.Range(0, classProgram.Classes.Length)
             .Single(index => classProgram.Classes[index].Name == "Container");
         var classArtifact = TrRmExecutableCompiler.EmitStandard(
@@ -5898,6 +5978,9 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                     classDeclaration.Span, "example.class/Container", [
                         new TrRmSourceClassMemberExport(classIndex,
                             methodDeclaration.Span, "Container.Constrained"),
+                        new TrRmSourceClassMemberExport(classIndex,
+                            classConstructor.Span,
+                            "constructor.container"),
                     ]),
             ]);
         var classInput = new TrRmStandardArtifactInput(CM1AR1SchemaIdentity,
@@ -6021,6 +6104,7 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         var classTree = SyntaxTree.Parse("""
             namespace Example {
                 public class Container {
+                    public Container() { }
                     public static Box<T> Accept<T>(Box<T> value) {
                         return move value;
                     }
@@ -6055,6 +6139,10 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             .Children.OfType<SyntaxNode>()
             .Single(static node =>
                 node.Kind == SyntaxKind.ClassDeclaration);
+        var classConstructor = classDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ConstructorDeclaration);
         var acceptDeclaration = classDeclaration.Children
             .OfType<SyntaxNode>()
             .Single(static node =>
@@ -6122,7 +6210,11 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                     withDefaultMethod.Span, "Container.WithDefault"),
             ], [
                 new TrRmSourceClassExport(classProgram, classIndex,
-                    classDeclaration.Span, "container-key", []),
+                    classDeclaration.Span, "container-key", [
+                        new TrRmSourceClassMemberExport(classIndex,
+                            classConstructor.Span,
+                            "constructor.container"),
+                    ]),
             ]);
         var classTables = TrRmStructuralMetadataValidator
             .ValidateC1AndGetExecutionTables(
@@ -6616,6 +6708,7 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             namespace Example {
                 public interface ISource<T> { type Item = T; }
                 public class Box {
+                    public Box() { }
                     public int32 Constrained<T, U>()
                         where T : ISource<T>
                         where T.via<ISource<T>>.Item is U {
@@ -6639,6 +6732,10 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             .OfType<SyntaxNode>()
             .Single(static node =>
                 node.Kind == SyntaxKind.ClassDeclaration);
+        var boxConstructor = classDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ConstructorDeclaration);
         var classIndex = Enumerable.Range(0, program.Classes.Length)
             .Single(index => program.Classes[index].Name == "Box");
         var method = program.GenericMethodDefinitions.Single();
@@ -6654,7 +6751,10 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             ],
         };
         var classExport = new TrRmSourceClassExport(program, classIndex,
-            classDeclaration.Span, "example.class/Box", []);
+            classDeclaration.Span, "example.class/Box", [
+                new TrRmSourceClassMemberExport(classIndex,
+                    boxConstructor.Span, "constructor.box"),
+            ]);
         var methodExport = new TrRmSourceGenericMethodExport(program,
             method.SourceInputOrdinal, method.Span,
             "Box.Constrained");
@@ -6695,6 +6795,7 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                 public interface ISource<T> { type Item = T; }
                 public interface IOther<T> { type Item = T; }
                 public class Box {
+                    public Box() { }
                     public static int32 Constrained() { return 7; }
                 }
             }
@@ -6734,12 +6835,18 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             .OfType<SyntaxNode>()
             .Single(static node =>
                 node.Kind == SyntaxKind.FunctionDeclaration);
+        var boxConstructor = classDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ConstructorDeclaration);
         var boxClassIndex = Enumerable.Range(0, program.Classes.Length)
             .Single(index => program.Classes[index].Name == "Box");
         var classExport = new TrRmSourceClassExport(program, boxClassIndex,
             classDeclaration.Span, "example.class/Box", [
                 new TrRmSourceClassMemberExport(boxClassIndex,
                     methodDeclaration.Span, "Box.Constrained"),
+                new TrRmSourceClassMemberExport(boxClassIndex,
+                    boxConstructor.Span, "constructor.box"),
             ]);
         var providerArtifact = TrRmExecutableCompiler.EmitStandard(program,
             "cm1ar1.owner.provider", CM1AR1SchemaIdentity, 0,
@@ -6780,14 +6887,14 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             string associatedDefault)
         {
             var prefixDeclaration = includePrefixTypeDef
-                ? "public class Prefix { }" : string.Empty;
+                ? "public class Prefix { public Prefix() { } }" : string.Empty;
             var tree = SyntaxTree.Parse($$"""
                 namespace Example {
                     {{prefixDeclaration}}
                     public interface ISource<T> {
                         type Item = {{associatedDefault}};
                     }
-                    public class LibraryRoot { }
+                    public class LibraryRoot { public LibraryRoot() { } }
                 }
                 """);
             var compilation = Compilation.CreateLibrary(tree);
@@ -6818,9 +6925,16 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                 var classIndex = Enumerable.Range(0, program.Classes.Length)
                     .Single(index =>
                         program.Classes[index].Name == className);
+                var constructor = classDeclaration.Children
+                    .OfType<SyntaxNode>().Single(static node =>
+                        node.Kind == SyntaxKind.ConstructorDeclaration);
                 classExports.Add(new TrRmSourceClassExport(program,
                     classIndex, classDeclaration.Span,
-                    $"example.class/{className}", []));
+                    $"example.class/{className}", [
+                        new TrRmSourceClassMemberExport(classIndex,
+                            constructor.Span,
+                            $"constructor.{className}"),
+                    ]));
             }
 
             var typeExport = new TrRmSourceTypeExport("Example",
@@ -6850,6 +6964,7 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         var classTree = SyntaxTree.Parse("""
             namespace Example {
                 public class Box {
+                    public Box() { }
                     public static int32 Constrained<T, U>()
                         where T : ISource<T>
                         where T.via<ISource<T>>.Item is U {
@@ -6872,6 +6987,10 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             .OfType<SyntaxNode>()
             .Single(static node =>
                 node.Kind == SyntaxKind.ClassDeclaration);
+        var boxConstructor = boxDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ConstructorDeclaration);
         var boxClassIndex = Enumerable.Range(0,
                 classProgram.Classes.Length)
             .Single(index => classProgram.Classes[index].Name == "Box");
@@ -6884,7 +7003,10 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                     "Box.Constrained"),
             ], [
                 new TrRmSourceClassExport(classProgram, boxClassIndex,
-                    boxDeclaration.Span, "example.class/Box", []),
+                    boxDeclaration.Span, "example.class/Box", [
+                        new TrRmSourceClassMemberExport(boxClassIndex,
+                            boxConstructor.Span, "constructor.box"),
+                    ]),
             ]);
         var classInput = new TrRmStandardArtifactInput(
             CM1AR1SchemaIdentity, classArtifact);
@@ -6924,12 +7046,13 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             bool includePrefixMethod)
         {
             var prefixDeclaration = includePrefixMethod
-                ? "public class Prefix { public static int32 Ping() { return 1; } }"
+                ? "public class Prefix { public Prefix() { } public static int32 Ping() { return 1; } }"
                 : string.Empty;
             var tree = SyntaxTree.Parse($$"""
                 namespace Example {
                     {{prefixDeclaration}}
                     public class Box {
+                        public Box() { }
                         public static int32 Constrained<T, U>()
                             where T : ISource<T>
                             where T.via<ISource<T>>.Item is {{requiredType}} {
@@ -6965,6 +7088,9 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                 var classIndex = Enumerable.Range(0,
                         program.Classes.Length)
                     .Single(index => program.Classes[index].Name == name);
+                var constructor = classNode.Children
+                    .OfType<SyntaxNode>().Single(static member =>
+                        member.Kind == SyntaxKind.ConstructorDeclaration);
                 var members = name == "Prefix"
                     ? classNode.Children.OfType<SyntaxNode>()
                         .Where(static member =>
@@ -6974,6 +7100,9 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                                 methodNode.Span, "Prefix.Ping"))
                         .ToImmutableArray()
                     : ImmutableArray<TrRmSourceClassMemberExport>.Empty;
+                members = members.Add(new TrRmSourceClassMemberExport(
+                    classIndex, constructor.Span,
+                    $"constructor.{name}"));
                 classExports.Add(new TrRmSourceClassExport(program,
                     classIndex, classNode.Span,
                     $"example.class/{name}", members));
@@ -6991,6 +7120,7 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         var callerTree = SyntaxTree.Parse("""
             namespace Example {
                 public class Forwarder {
+                    public Forwarder() { }
                     public static int32 Forward<T, U>(T value)
                         where T : ISource<T>
                         where T.via<ISource<T>>.Item is U {
@@ -7014,6 +7144,10 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             .OfType<SyntaxNode>()
             .Single(static node =>
                 node.Kind == SyntaxKind.ClassDeclaration);
+        var forwarderConstructor = forwarderDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ConstructorDeclaration);
         var forwarderClassIndex = Enumerable.Range(0,
                 callerProgram.Classes.Length)
             .Single(index =>
@@ -7027,7 +7161,12 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             ], [
                 new TrRmSourceClassExport(callerProgram,
                     forwarderClassIndex, forwarderDeclaration.Span,
-                    "example.class/Forwarder", []),
+                    "example.class/Forwarder", [
+                        new TrRmSourceClassMemberExport(
+                            forwarderClassIndex,
+                            forwarderConstructor.Span,
+                            "constructor.forwarder"),
+                    ]),
             ]);
         var callerInput = new TrRmStandardArtifactInput(
             CM1AR1SchemaIdentity, callerArtifact);
@@ -11716,12 +11855,13 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                     .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsClassTypeBindingViews
                 : schemaIdentity;
         var prefixText = includePrefix
-            ? "public class Prefix {}" : string.Empty;
+            ? "public class Prefix { public Prefix() { } }" : string.Empty;
         var tree = SyntaxTree.Parse($$"""
             namespace Example {
                 public interface IMarker<T> { }
                 {{prefixText}}
                 public class Box {
+                    public Box() { }
                     public static int32 Constrained() { return 7; }
                 }
             }
@@ -11744,6 +11884,9 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         var methodDeclaration = boxDeclaration.Children
             .OfType<SyntaxNode>().Single(static node =>
                 node.Kind == SyntaxKind.FunctionDeclaration);
+        var boxConstructor = boxDeclaration.Children
+            .OfType<SyntaxNode>().Single(static node =>
+                node.Kind == SyntaxKind.ConstructorDeclaration);
         var boxIndex = Enumerable.Range(0, program.Classes.Length)
             .Single(index => program.Classes[index].Name == "Box");
         var classExports = new List<TrRmSourceClassExport>();
@@ -11755,14 +11898,22 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                         static token => token.Token.Name == "Prefix"));
             var prefixIndex = Enumerable.Range(0, program.Classes.Length)
                 .Single(index => program.Classes[index].Name == "Prefix");
+            var prefixConstructor = prefixDeclaration.Children
+                .OfType<SyntaxNode>().Single(static node =>
+                    node.Kind == SyntaxKind.ConstructorDeclaration);
             classExports.Add(new TrRmSourceClassExport(program, prefixIndex,
-                prefixDeclaration.Span, "example.class/Prefix"));
+                prefixDeclaration.Span, "example.class/Prefix", [
+                    new TrRmSourceClassMemberExport(prefixIndex,
+                        prefixConstructor.Span, "constructor.prefix"),
+                ]));
         }
 
         classExports.Add(new TrRmSourceClassExport(program, boxIndex,
             boxDeclaration.Span, "example.class/Box", [
                 new TrRmSourceClassMemberExport(boxIndex,
                     methodDeclaration.Span, "Box.Constrained"),
+                new TrRmSourceClassMemberExport(boxIndex,
+                    boxConstructor.Span, "constructor.box"),
             ]));
         var typeExport = new TrRmSourceTypeExport("Example", "IMarker",
             "example.interface/IMarker") {
@@ -12687,12 +12838,13 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         string moduleIdentity, string schemaIdentity, bool includePrefix)
     {
         var prefixText = includePrefix
-            ? "public class Prefix {}" : string.Empty;
+            ? "public class Prefix { public Prefix() { } }" : string.Empty;
         var tree = SyntaxTree.Parse($$"""
             public interface ISource<T> { type Item = T; }
             {{prefixText}}
             public class Leaf {
                 public int32 Value;
+                public Leaf(int32 value) { Value = value; }
                 public void Read(int32 value) { }
             }
             """);
@@ -12714,6 +12866,9 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         var readDeclaration = leafDeclaration.Children
             .OfType<SyntaxNode>().Single(static node =>
                 node.Kind == SyntaxKind.FunctionDeclaration);
+        var leafConstructor = leafDeclaration.Children
+            .OfType<SyntaxNode>().Single(static node =>
+                node.Kind == SyntaxKind.ConstructorDeclaration);
         var leafIndex = Enumerable.Range(0, program.Classes.Length)
             .Single(index => program.Classes[index].Name == "Leaf");
         var classExports
@@ -12725,8 +12880,14 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                     static token => token.Token.Name == "Prefix"));
             var prefixIndex = Enumerable.Range(0, program.Classes.Length)
                 .Single(index => program.Classes[index].Name == "Prefix");
+            var prefixConstructor = prefixDeclaration.Children
+                .OfType<SyntaxNode>().Single(static node =>
+                    node.Kind == SyntaxKind.ConstructorDeclaration);
             classExports.Add(new TrRmSourceClassExport(program, prefixIndex,
-                prefixDeclaration.Span, "PrefixKey"));
+                prefixDeclaration.Span, "PrefixKey", [
+                    new TrRmSourceClassMemberExport(prefixIndex,
+                        prefixConstructor.Span, "Prefix.ctor"),
+                ]));
         }
 
         classExports.Add(new TrRmSourceClassExport(program, leafIndex,
@@ -12737,9 +12898,11 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                     readDeclaration.Span, "Leaf.Read"),
                 new TrRmSourceClassMemberExport(leafIndex,
                     readDeclaration.Span, "Leaf.ReadAlias"),
+                new TrRmSourceClassMemberExport(leafIndex,
+                    leafConstructor.Span, "Leaf.ctor"),
             ]));
         classExports.Add(new TrRmSourceClassExport(program, leafIndex,
-            leafDeclaration.Span, "LeafAliasKey"));
+            leafDeclaration.Span, "LeafAliasKey", []));
         var typeExport = new TrRmSourceTypeExport("",
             "ISource", "ISource") {
             GenericArity = sourceInterface.Formals.Length,
@@ -12764,12 +12927,13 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         string schemaIdentity = CM1AR1SchemaIdentity)
     {
         var prefixText = includePrefix
-            ? "public class Prefix {}" : string.Empty;
+            ? "public class Prefix { public Prefix() { } }" : string.Empty;
         var tree = SyntaxTree.Parse($$"""
             namespace Example {
                 public interface ISource<T> { type Item = T; }
                 {{prefixText}}
                 public class Box {
+                    public Box() { }
                     public static int32 Constrained<T, U>()
                         where T : ISource<T>
                         where T.via<ISource<T>>.Item is U {
@@ -12798,6 +12962,9 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         var methodDeclaration = boxDeclaration.Children
             .OfType<SyntaxNode>().Single(static node =>
                 node.Kind == SyntaxKind.FunctionDeclaration);
+        var boxConstructor = boxDeclaration.Children
+            .OfType<SyntaxNode>().Single(static node =>
+                node.Kind == SyntaxKind.ConstructorDeclaration);
         var boxIndex = Enumerable.Range(0, program.Classes.Length)
             .Single(index => program.Classes[index].Name == "Box");
         var classExports
@@ -12809,14 +12976,22 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                     static token => token.Token.Name == "Prefix"));
             var prefixIndex = Enumerable.Range(0, program.Classes.Length)
                 .Single(index => program.Classes[index].Name == "Prefix");
+            var prefixConstructor = prefixDeclaration.Children
+                .OfType<SyntaxNode>().Single(static node =>
+                    node.Kind == SyntaxKind.ConstructorDeclaration);
             classExports.Add(new TrRmSourceClassExport(program, prefixIndex,
-                prefixDeclaration.Span, "example.class/Prefix"));
+                prefixDeclaration.Span, "example.class/Prefix", [
+                    new TrRmSourceClassMemberExport(prefixIndex,
+                        prefixConstructor.Span, "constructor.prefix"),
+                ]));
         }
 
         classExports.Add(new TrRmSourceClassExport(program, boxIndex,
             boxDeclaration.Span, "example.class/Box", [
                 new TrRmSourceClassMemberExport(boxIndex,
                     methodDeclaration.Span, "Box.Constrained"),
+                new TrRmSourceClassMemberExport(boxIndex,
+                    boxConstructor.Span, "constructor.box"),
             ]));
         var typeExport = new TrRmSourceTypeExport("Example", "ISource",
             "example.interface/ISource") {
