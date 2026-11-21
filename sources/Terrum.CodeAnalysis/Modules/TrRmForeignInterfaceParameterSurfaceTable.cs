@@ -1,7 +1,6 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
-using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
 
@@ -59,26 +58,36 @@ internal static class TrRmForeignInterfaceParameterSurfaceTableWriter
                 : left.Ordinal.CompareTo(right.Ordinal);
         });
 
-        var result = new byte[checked(orderedRows.Length * RowSize)];
+        var result = new List<byte>(checked(orderedRows.Length * RowSize));
         for (var index = 0; index < orderedRows.Length; index++)
         {
             resourceLedger?.ConsumeWork();
-            var row = orderedRows[index];
-            var offset = index * RowSize;
-            Write(result, offset, row.OwnerMethodDefRow);
-            Write(result, offset + sizeof(uint), row.Ordinal);
-            Write(result, offset + (2 * sizeof(uint)), row.NameStringRow);
-            Write(result, offset + (3 * sizeof(uint)),
-                row.DefaultConstantSourceRow);
+            AppendRow(result, orderedRows[index]);
         }
 
-        _ = new TrRmMethodParameterLabelTableReader(result,
+        var encoded = result.ToArray();
+        _ = new TrRmMethodParameterLabelTableReader(encoded,
             orderedRows.Length, strings, methods, signatures, parameters,
             typeSpecs, constantSources, frozenValueNodes, blobs, features,
             modules, schema, resourceLedger);
-        return result;
+        return encoded;
     }
 
-    private static void Write(byte[] bytes, int offset, uint value)
-        => BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(offset), value);
+    internal static void AppendRow(List<byte> bytes,
+        TrRmForeignInterfaceParameterSurfaceRow row)
+    {
+        ArgumentNullException.ThrowIfNull(bytes);
+        AppendUInt32(bytes, row.OwnerMethodDefRow);
+        AppendUInt32(bytes, row.Ordinal);
+        AppendUInt32(bytes, row.NameStringRow);
+        AppendUInt32(bytes, row.DefaultConstantSourceRow);
+    }
+
+    private static void AppendUInt32(List<byte> bytes, uint value)
+    {
+        bytes.Add((byte)value);
+        bytes.Add((byte)(value >> 8));
+        bytes.Add((byte)(value >> 16));
+        bytes.Add((byte)(value >> 24));
+    }
 }

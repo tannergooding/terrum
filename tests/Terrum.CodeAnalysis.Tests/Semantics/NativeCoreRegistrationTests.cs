@@ -102,6 +102,7 @@ internal sealed class NativeCoreRegistrationTests
             [Terrum.Interop.ForeignNativeInterface(VTableByteOffset: uint32(16))]
             public interface IProbe {
                 public unsafe int32 Read();
+                public mut unsafe int32 Update();
             }
             """;
         var registration = CreateRegistration(
@@ -275,6 +276,153 @@ internal sealed class NativeCoreRegistrationTests
             });
         Assert.That(wrongTarget.HasErrors, Is.True,
             string.Join(Environment.NewLine, wrongTarget.Diagnostics));
+    }
+
+    [Test]
+    public void StandardForeignNativeInterfaceProducerEmitsBaseMethodIdentity()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeCallable]
+            [Terrum.Interop.ForeignNativeInterface(VTableByteOffset: uint32(16))]
+            public interface IProbe {
+                public unsafe int32 Read();
+            }
+            """), new CompilationOptions {
+                NativeCoreRegistration = CreateRegistration(
+                    includeForeignNativeInterface: true),
+            });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program
+            ?? throw new AssertionException("Expected a bound program.");
+        var definition = program.Interfaces.Single();
+        var typeExport = new TrRmSourceTypeExport("", "IProbe",
+            "provider/IProbe") {
+            GenericArity = 0,
+            InterfaceMethodExports = [.. definition.Members.Select(member =>
+                new TrRmSourceInterfaceMethodExport(
+                    member.SourceInputOrdinal, member.SourceDeclarationSpan,
+                    $"provider/IProbe.{member.Name}"))],
+        };
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "provider.module",
+            "trrm/1-draft-foreign-native-interface-contracts-1", 1,
+            [typeExport]);
+        var schema = TrRmArtifactSchema.ForeignNativeInterfaceDraft;
+        var index = TrRmArtifactIndex.ForForeignNativeInterfaceDraft(artifact);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(index);
+
+        Assert.That(tables.Interfaces.Count, Is.EqualTo(1));
+        Assert.That(tables.InterfaceMethods.Count, Is.EqualTo(2));
+        Assert.That(tables.ForeignNativeInterfaces.Count, Is.EqualTo(1));
+        Assert.That(tables.ForeignNativeInterfaces.GetOwnerInterfaceDef(1),
+            Is.EqualTo(1u));
+        Assert.That(tables.ForeignNativeInterfaces.GetVTableByteOffset(1),
+            Is.EqualTo(16u));
+        Assert.That(tables.Methods.GetBodyRow(1), Is.Zero);
+        Assert.That(tables.Methods.GetBodyRow(2), Is.Zero);
+        Assert.That(tables.Methods.GetFlags(1) & 3, Is.EqualTo(2u));
+        Assert.That(tables.Methods.GetFlags(2) & 3, Is.EqualTo(2u));
+        Assert.That(tables.Contracts.GetEffectsMask(1), Is.EqualTo(4u));
+        Assert.That(tables.Contracts.GetNativeCallableConvention(1),
+            Is.EqualTo((byte)1));
+        var readReceiver = tables.Signatures.GetReceiverTypeSpec(
+            tables.Methods.GetSignature(1));
+        var updateReceiver = tables.Signatures.GetReceiverTypeSpec(
+            tables.Methods.GetSignature(2));
+        Assert.That(tables.TypeSpecs.GetTypeSpecBytes(readReceiver)[1],
+            Is.Zero);
+        Assert.That(tables.TypeSpecs.GetTypeSpecBytes(updateReceiver)[1],
+            Is.EqualTo((byte)1));
+        Assert.That(tables.Modules.GetRequirements(1).TargetRequirement,
+            Is.EqualTo(TrRmModuleTableReader
+                .WindowsX64NativeTargetRequirement));
+        Assert.That(TrRmFeatureManifestValidator.Requires(tables.Features,
+            tables.Modules, 1,
+            TrRmFeatureTableReader.NativeInterfaceCallsFeatureId, schema),
+            Is.True);
+    }
+
+    [Test]
+    public void StandardForeignNativeInterfaceParameterProducerRetainsDefaultSurface()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeCallable]
+            [Terrum.Interop.ForeignNativeInterface(VTableByteOffset: uint32(0))]
+            public interface IProbe {
+                public unsafe int32 Read(int32 value, int32 extra = 1);
+            }
+            """), new CompilationOptions {
+                NativeCoreRegistration = CreateRegistration(
+                    includeForeignNativeInterface: true),
+            });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program
+            ?? throw new AssertionException("Expected a bound program.");
+        var definition = program.Interfaces.Single();
+        var member = definition.Members.Single();
+        var typeExport = new TrRmSourceTypeExport("", "IProbe",
+            "provider/IProbe") {
+            GenericArity = 0,
+            InterfaceMethodExports = [
+                new TrRmSourceInterfaceMethodExport(
+                    member.SourceInputOrdinal, member.SourceDeclarationSpan,
+                    "provider/IProbe.Read"),
+            ],
+        };
+        _ = Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.EmitStandard(program, "provider.module",
+                "trrm/1-draft-foreign-native-interface-contracts-1", 1,
+                [typeExport]));
+
+        var schemaIdentity
+            = "trrm/1-draft-foreign-native-interface-parameter-surface-1";
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "provider.module", schemaIdentity, 1, [typeExport]);
+        var schema
+            = TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft;
+        var index = TrRmArtifactIndex
+            .ForForeignNativeInterfaceParameterSurfaceDraft(artifact);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(index);
+
+        Assert.That(index.TryGetSection(0x0066, out var surfaceBytes,
+            out var surfaceCount), Is.True);
+        Assert.That(surfaceCount, Is.EqualTo(2));
+        Assert.That(surfaceBytes.Length, Is.EqualTo(32));
+        Assert.That(tables.MethodParameterLabels.TryGetNameStringRow(1, 0,
+            out var valueNameRow), Is.True);
+        Assert.That(tables.Strings.DecodeName(valueNameRow),
+            Is.EqualTo("value"));
+        Assert.That(tables.MethodParameterLabels.TryGetNameStringRow(1, 1,
+            out var extraNameRow), Is.True);
+        Assert.That(tables.Strings.DecodeName(extraNameRow),
+            Is.EqualTo("extra"));
+        Assert.That(tables.MethodParameterLabels
+            .TryGetDefaultConstantSourceRow(1, 0, out var requiredDefault),
+            Is.True);
+        Assert.That(requiredDefault, Is.Zero);
+        Assert.That(tables.MethodParameterLabels
+            .TryGetDefaultConstantSourceRow(1, 1, out var optionalDefault),
+            Is.True);
+        Assert.That(optionalDefault, Is.EqualTo(1u));
+        var frozenValueNode = checked((int)tables.ConstantSources
+            .GetPayloadReference(checked((int)optionalDefault)));
+        Assert.That(tables.FrozenValueNodes.GetScalarPayload(frozenValueNode,
+            tables.Blobs).ToArray(), Is.EqualTo(new byte[] { 1, 0, 0, 0 }));
+        foreach (var feature in new uint[] { 1, 2, 5, 11, 26 })
+        {
+            Assert.That(TrRmFeatureManifestValidator.Requires(
+                tables.Features, tables.Modules, 1, feature, schema), Is.True,
+                $"Feature {feature}");
+        }
+        Assert.That(TrRmFeatureManifestValidator.Requires(tables.Features,
+            tables.Modules, 1,
+            TrRmFeatureTableReader.NominalUnionMetadataFeatureId, schema),
+            Is.False);
     }
 
     [Test]

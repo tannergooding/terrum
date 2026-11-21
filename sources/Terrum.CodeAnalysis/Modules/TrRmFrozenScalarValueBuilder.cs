@@ -63,6 +63,23 @@ internal sealed class TrRmFrozenScalarValueBuilder
         return Add(constant, 0xF200_0000u | typeCode, constant.Type);
     }
 
+    internal TrRmFrozenScalarValueReference AddScalarParameterDefault(
+        BoundConstant constant, uint typeSpecRef, PrimitiveType parameterType)
+    {
+        if (typeSpecRef == 0
+            || constant.Type != parameterType
+            || constant.RepresentationType != parameterType
+            || !TryGetTypeCode(parameterType, out var typeCode)
+            || typeCode is 0x10 or 0x11
+            || !constant.Bits.IsCanonicalFor(parameterType))
+        {
+            throw new NotSupportedException(
+                "Scalar parameter defaults require an exact SF1 type and value.");
+        }
+
+        return Add(constant, typeSpecRef, parameterType);
+    }
+
     internal TrRmFrozenScalarValueReference AddNominalEnum(
         BoundConstant constant, uint typeSpecRef)
     {
@@ -303,6 +320,11 @@ internal sealed class TrRmFrozenScalarValueBuilder
     {
         for (var candidate = 0; candidate <= 0x19; candidate++)
         {
+            if (candidate is 0x10 or 0x11)
+            {
+                continue;
+            }
+
             if (TrRmConstantSourceValueValidator.TryGetBoundScalarType(
                 (byte)candidate, out var candidateType)
                 && candidateType == type)

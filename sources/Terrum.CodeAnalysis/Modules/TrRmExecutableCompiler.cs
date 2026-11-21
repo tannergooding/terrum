@@ -515,6 +515,15 @@ public static partial class TrRmExecutableCompiler
             };
         }
 
+        if (StringComparer.Ordinal.Equals(schemaIdentity,
+                StandardForeignNativeInterfaceSchemaIdentity)
+            || StringComparer.Ordinal.Equals(schemaIdentity,
+                StandardForeignNativeInterfaceParameterSurfaceSchemaIdentity))
+        {
+            return EmitStandardCore(program, moduleIdentity, schemaIdentity,
+                moduleTargetRequirement, typeExportSnapshot);
+        }
+
         if (typeExportSnapshot.Length == 0)
         {
             return EmitStandard(program, moduleIdentity, schemaIdentity,
@@ -1168,6 +1177,8 @@ public static partial class TrRmExecutableCompiler
                 "The Standard initialization-reference Body profile requires the Windows x64 target.");
         }
         if ((schemaIdentity is StandardForeignInvocationSchemaIdentity
+                or StandardForeignNativeInterfaceSchemaIdentity
+                or StandardForeignNativeInterfaceParameterSurfaceSchemaIdentity
                 or StandardForeignInvocationStorageAddressSchemaIdentity
                 or StandardForeignInvocationStorageFixedArraySchemaIdentity
                 or StandardForeignInvocationStorageFixedArrayEmptyInitializationSchemaIdentity
@@ -1453,6 +1464,11 @@ public static partial class TrRmExecutableCompiler
             StandardForeignInvocationSchemaIdentity
                 => EmitForeignInvocationDraftNativeAddressLibrary(
                     program, moduleIdentity),
+            StandardForeignNativeInterfaceSchemaIdentity
+                or StandardForeignNativeInterfaceParameterSurfaceSchemaIdentity
+                => EmitForeignNativeInterfaceDeclarations(program,
+                    moduleIdentity, schemaIdentity, moduleTargetRequirement,
+                    sourceTypeExports),
             StandardForeignInvocationStorageAddressSchemaIdentity
                 => EmitForeignInvocationDraftNativeAddressLibrary(program,
                     moduleIdentity,

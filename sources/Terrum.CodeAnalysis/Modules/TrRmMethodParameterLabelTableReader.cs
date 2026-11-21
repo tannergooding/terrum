@@ -170,12 +170,18 @@ internal readonly ref struct TrRmMethodParameterLabelTableReader
                 = parameters.GetTypeSpec(parameterRow);
             var parameterType
                 = typeSpecs.GetTypeSpecRef(parameterTypeSpecRef);
+            var parameterTypeEligible
+                = parameterType.Form == 0x01
+                    && parameterType.Qualifiers == 0
+                    && (schema.UsesForeignNativeInterfaceParameterSurface()
+                        ? TrRmFrozenValueNodeTableReader
+                            .IsRegisteredScalarTypeCode(
+                                parameterType.TypeCode)
+                        : parameterType.Row == 0
+                            && parameterType.TypeCode is not (0x10 or 0x11));
             if (parameters.GetMode(parameterRow) != 0
                 || parameters.GetFlags(parameterRow) != 0
-                || parameterType.Form != 0x01
-                || parameterType.Row != 0
-                || parameterType.Qualifiers != 0
-                || parameterType.TypeCode is 0x10 or 0x11)
+                || !parameterTypeEligible)
             {
                 throw InvalidTable();
             }

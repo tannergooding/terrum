@@ -103,10 +103,14 @@ public static partial class TrRmExecutableCompiler
 
         if (baseArtifact is not null
             && ((!schema.UsesClassParameterDefaults()
+                    && !schema.UsesForeignNativeInterfaceParameterSurface()
+                    && !schema.UsesForeignNativeInterface()
                     && (sourceClassMethodGenericFormalPlans is null
                         || sourceClassMethodGenericFormalPlans.Count == 0))
                 || baseSchema != schema
-                || frozenScalarValueBuilder is null))
+                || ((schema.UsesClassParameterDefaults()
+                        || schema.UsesForeignNativeInterfaceParameterSurface())
+                    && frozenScalarValueBuilder is null)))
         {
             throw new ArgumentException(
                 "A composed CM1 class artifact requires its shared frozen-value builder and exact schema.",
@@ -115,12 +119,14 @@ public static partial class TrRmExecutableCompiler
 
         var methodParameterSurfaceValues
             = schema.UsesClassParameterDefaults()
+                || schema.UsesForeignNativeInterfaceParameterSurface()
                 ? frozenScalarValueBuilder
                     ?? new TrRmFrozenScalarValueBuilder()
                 : null;
 
         if (sourceTypeExports is { Count: > 0 }
             && !schema.UsesGeneralMethodParameterLabels()
+            && !schema.UsesForeignNativeInterface()
             && sourceTypeExports.Any(static export =>
                 !export.InterfaceMethodExports.IsDefaultOrEmpty))
         {
@@ -336,8 +342,10 @@ public static partial class TrRmExecutableCompiler
         }
 
         if (methodParameterSurfaceValues is not null
-            && (baseArtifact is not null
-                || methodParameterSurfaceValues.ConstantSourceCount != 0))
+            && (schema.UsesForeignNativeInterfaceParameterSurface()
+                ? methodParameterSurfaceValues.ConstantSourceCount != 0
+                : baseArtifact is not null
+                    || methodParameterSurfaceValues.ConstantSourceCount != 0))
         {
             if (baseArtifact is null)
             {
@@ -366,8 +374,11 @@ public static partial class TrRmExecutableCompiler
 
         var index = new TrRmArtifactIndex(artifact, schema,
             standardSchemaIdentity: standardSchemaIdentity);
-        var tables = TrRmStructuralMetadataValidator
-            .ValidateGenericMethodCallsDraftAndGetExecutionTables(index);
+        var tables = schema.UsesForeignNativeInterface()
+            ? TrRmStructuralMetadataValidator
+                .ValidateAndGetExecutionTables(index)
+            : TrRmStructuralMetadataValidator
+                .ValidateGenericMethodCallsDraftAndGetExecutionTables(index);
         for (var methodRow = 1; methodRow <= tables.Methods.Count;
             methodRow++)
         {
@@ -5675,8 +5686,69 @@ public static partial class TrRmExecutableCompiler
         var interfaceDefRows = new List<TrRmInterfaceDefRow>(
             emissions.Count);
         var interfaceMethodRows = new List<TrRmInterfaceMethodRow>();
+        var foreignNativeInterface = schema.UsesForeignNativeInterface();
+        var nativeRawPointerTypeRow = 0;
+        var nativeFunctionPointerTypeRows
+            = new Dictionary<PrimitiveType, int>();
+        var nativePointerTypeRows = new Dictionary<PrimitiveType, int>();
+        var structureTypeDefRows = new Dictionary<int, int>();
+        var typeDefTypeSpecRows = new Dictionary<int, int>();
+        var foreignReceiverTypeSpecRows = new Dictionary<bool, uint>();
+        if (foreignNativeInterface)
+        {
+            nativeRawPointerTypeRow = typeSpecRows.Count + 1;
+            typeSpecRows.Add(TrRmTypeSpecTableWriter.InlineFamily(0x8C, 0));
+            foreignReceiverTypeSpecRows.Add(false,
+                checked((uint)nativeRawPointerTypeRow));
+        }
+
+        uint GetForeignNativeInterfaceTypeSpecRef(BoundInterfaceType type)
+        {
+            if (type.Kind != BoundInterfaceTypeKind.Primitive
+                || type.IsOptional || type.IsGarbageCollected
+                || type.IsInitialization || type.IsGenericNominalConstantDomain
+                || type.GenericNominalTypeIdentity is not null
+                || type.SourceGenericTypeDefinitionIndex != -1)
+            {
+                throw Unsupported(
+                    "F+I MethodSig types must be complete, closed native ABI values.");
+            }
+
+            if (type.PrimitiveType == PrimitiveType.Void)
+            {
+                return GetBuiltInTypeSpecRef(type.PrimitiveType,
+                    builtInTypeSpecRows, typeSpecRows);
+            }
+
+            var row = NativeValueTypeRow(type.PrimitiveType,
+                nativeRawPointerTypeRow, nativeFunctionPointerTypeRows,
+                typeSpecRows, nativePointerTypeRows,
+                program.NativePointerTypes, structureTypeDefRows,
+                typeDefTypeSpecRows,
+                primitive => checked((int)GetBuiltInTypeSpecRef(primitive,
+                    builtInTypeSpecRows, typeSpecRows)));
+            return checked((uint)row);
+        }
+
+        uint GetForeignNativeInterfaceReceiverTypeSpecRef(
+            bool requiresMutableReceiver)
+        {
+            if (foreignReceiverTypeSpecRows.TryGetValue(
+                    requiresMutableReceiver, out var existingRow))
+            {
+                return existingRow;
+            }
+
+            var row = checked((uint)typeSpecRows.Count + 1);
+            typeSpecRows.Add(TrRmTypeSpecTableWriter.InlineFamily(0x8C, 0,
+                requiresMutableReceiver ? (byte)1 : (byte)0));
+            foreignReceiverTypeSpecRows.Add(requiresMutableReceiver, row);
+            return row;
+        }
+
         var associatedTypeDefRows
             = new List<TrRmAssociatedTypeDefRow>();
+        var foreignInterfaceContractRows = new List<TrRmContractRow>();
         var methodParameterLabelCount = GetCount(sections, 0x0066);
         var methodParameterLabelBytes
             = TryGetSection(sections, 0x0066, out var labelSection)
@@ -5797,8 +5869,10 @@ public static partial class TrRmExecutableCompiler
                 }
             }
 
-            var receiverTypeSpecRef = interfaceTypeSpecRow;
-            if (formalTypeSpecArguments.Length != 0)
+            var receiverTypeSpecRef = foreignNativeInterface
+                ? 0u : interfaceTypeSpecRow;
+            if (!foreignNativeInterface
+                && formalTypeSpecArguments.Length != 0)
             {
                 receiverTypeSpecRef = checked(
                     (uint)typeSpecRows.Count + 1);
@@ -5883,12 +5957,15 @@ public static partial class TrRmExecutableCompiler
                     parameterOrdinal++)
                 {
                     var parameter = member.Parameters[parameterOrdinal];
-                    var parameterTypeSpecRef
-                        = GenericInterfaceTypeSpecRef(parameter.Type,
+                    var parameterTypeSpecRef = foreignNativeInterface
+                        ? GetForeignNativeInterfaceTypeSpecRef(
+                            parameter.Type)
+                        : GenericInterfaceTypeSpecRef(parameter.Type,
                             formalTypeSpecRows, builtInTypeSpecRows,
                             typeSpecRows);
                     var defaultConstantSourceRow = 0u;
-                    if (schema.UsesClassParameterDefaults())
+                    if (schema.UsesClassParameterDefaults()
+                        || schema.UsesForeignNativeInterfaceParameterSurface())
                     {
                         if (parameter.DefaultValue is BoundConstant value)
                         {
@@ -5923,7 +6000,7 @@ public static partial class TrRmExecutableCompiler
                         }
                     }
 
-                    if (schema.UsesGeneralMethodParameterLabels())
+                    if (schema.UsesMethodParameterLabels())
                     {
                         var parameterNameStringRow = names.Count + 1;
                         names.Add((parameter.Name, 1));
@@ -5950,17 +6027,56 @@ public static partial class TrRmExecutableCompiler
                 var resultTypeSpecRef = member.ResultType is null
                     ? GetBuiltInTypeSpecRef(PrimitiveType.Void,
                         builtInTypeSpecRows, typeSpecRows)
+                    : foreignNativeInterface
+                    ? GetForeignNativeInterfaceTypeSpecRef(member.ResultType)
                     : GenericInterfaceTypeSpecRef(member.ResultType,
                         formalTypeSpecRows, builtInTypeSpecRows,
                         typeSpecRows);
                 AppendUInt32(signatureBytes, resultTypeSpecRef);
-                AppendUInt32(signatureBytes, receiverTypeSpecRef);
+                AppendUInt32(signatureBytes,
+                    foreignNativeInterface
+                        ? GetForeignNativeInterfaceReceiverTypeSpecRef(
+                            member.RequiresMutableReceiver)
+                        : receiverTypeSpecRef);
                 AppendUInt32(signatureBytes,
                     checked((uint)firstParameter));
                 AppendUInt32(signatureBytes,
                     checked((uint)member.Parameters.Length));
                 AppendUInt32(signatureBytes, 0);
                 AppendUInt32(signatureBytes, 0);
+
+                var contractFirst = 0;
+                var methodContractCount = 0;
+                if (foreignNativeInterface)
+                {
+                    if (member.NativeCallableConvention
+                            is not NativeCallingConvention convention
+                        || member.NativeOutputContracts
+                            .IsDefaultOrEmpty == false)
+                    {
+                        throw Unsupported(
+                            "F+I member contracts require a normalized convention and currently exclude NativeOutput.");
+                    }
+
+                    contractFirst
+                        = checked(contractCount
+                            + foreignInterfaceContractRows.Count + 1);
+                    var effectPayload = new byte[sizeof(uint)];
+                    var effectsMask = 4u
+                        | (member.DoesNotReturn ? 2u : 0u);
+                    BinaryPrimitives.WriteUInt32LittleEndian(
+                        effectPayload, effectsMask);
+                    var methodOwner = 0x1600_0000u
+                        | checked((uint)methodRow);
+                    foreignInterfaceContractRows.Add(
+                        new TrRmContractRow(methodOwner, 1,
+                            effectPayload));
+                    foreignInterfaceContractRows.Add(
+                        new TrRmContractRow(methodOwner, 0x0C,
+                            StandardNativeCallableContractPayload(
+                                convention)));
+                    methodContractCount = 2;
+                }
 
                 AppendUInt32(methodBytes, checked((uint)typeDefRow));
                 AppendUInt32(methodBytes,
@@ -5969,8 +6085,8 @@ public static partial class TrRmExecutableCompiler
                 AppendUInt32(methodBytes, 2u
                     | (schema.UsesMethodReceiverAccess()
                         && member.RequiresMutableReceiver ? 4u : 0u));
-                AppendUInt32(methodBytes, 0);
-                AppendUInt32(methodBytes, 0);
+                AppendUInt32(methodBytes, contractFirst);
+                AppendUInt32(methodBytes, methodContractCount);
                 AppendUInt32(methodBytes, 0);
                 interfaceMethodRows.Add(new TrRmInterfaceMethodRow(
                     interfaceDefRow, interfaceMethodOrdinal++, methodRow));
@@ -5992,22 +6108,25 @@ public static partial class TrRmExecutableCompiler
             AppendUInt32(typeDefBytes, checked((uint)genericFirst));
             AppendUInt32(typeDefBytes,
                 checked((uint)definition.Formals.Length));
-            AppendUInt32(typeDefBytes,
-                checked((uint)(layoutRowBase + interfaceDefRows.Count)));
-            AppendUInt32(typeDefBytes, 1);
+            AppendUInt32(typeDefBytes, foreignNativeInterface ? 0
+                : checked((uint)(layoutRowBase + interfaceDefRows.Count)));
+            AppendUInt32(typeDefBytes, foreignNativeInterface ? 0u : 1u);
             AppendUInt32(typeDefBytes, 0);
             AppendUInt32(typeDefBytes, 0);
 
-            AppendUInt32(layoutBytes, checked((uint)typeDefRow));
-            AppendUInt32(layoutBytes, 0);
-            layoutBytes.Add(0);
-            layoutBytes.Add(0);
-            layoutBytes.Add(0);
-            layoutBytes.Add(0);
-            AppendUInt32(layoutBytes, 0);
-            AppendUInt32(layoutBytes, 0);
-            AppendUInt32(layoutBytes, 0);
-            AppendUInt32(layoutBytes, 0);
+            if (!foreignNativeInterface)
+            {
+                AppendUInt32(layoutBytes, checked((uint)typeDefRow));
+                AppendUInt32(layoutBytes, 0);
+                layoutBytes.Add(0);
+                layoutBytes.Add(0);
+                layoutBytes.Add(0);
+                layoutBytes.Add(0);
+                AppendUInt32(layoutBytes, 0);
+                AppendUInt32(layoutBytes, 0);
+                AppendUInt32(layoutBytes, 0);
+                AppendUInt32(layoutBytes, 0);
+            }
         }
 
         var rewrittenStrings = TrRmStringTableWriter.EncodeTextRows(names);
@@ -6017,7 +6136,10 @@ public static partial class TrRmExecutableCompiler
         var finalMethodCount = checked(methodCount + emittedMethods);
         var finalSignatureCount = checked(signatureCount + emittedSignatures);
         var finalParameterCount = checked(parameterCount + emittedParameters);
-        var finalLayoutCount = checked(layoutCount + emissions.Count);
+        var finalContractCount = checked(contractCount
+            + foreignInterfaceContractRows.Count);
+        var finalLayoutCount = checked(layoutCount
+            + (foreignNativeInterface ? 0 : emissions.Count));
         var finalGenericParamCount = genericParameterRows.Count;
         var typeSpecBytes = TrRmTypeSpecTableWriter.Encode(typeSpecRows,
             finalTypeDefCount, importCount, finalGenericParamCount,
@@ -6028,9 +6150,13 @@ public static partial class TrRmExecutableCompiler
             checked((int)moduleSection.RecordCount), stringTable,
             moduleRefCount, finalTypeDefCount, finalMethodCount,
             sourceFileCount, GetCount(sections, 0x0004));
+        var featureCount = GetCount(sections, 0x0004);
+        var features = featureCount == 0 ? default
+            : new TrRmFeatureTableReader(GetSection(sections, 0x0004)
+                .Bytes.Span, featureCount, schema);
         var typeDefs = new TrRmTypeDefTableReader(typeDefBytes.ToArray(),
             finalTypeDefCount, stringTable, modules, fieldCount,
-            finalGenericParamCount, finalLayoutCount, contractCount,
+            finalGenericParamCount, finalLayoutCount, finalContractCount,
             schema);
         var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes,
             typeSpecRows.Count, finalTypeDefCount, importCount,
@@ -6041,11 +6167,15 @@ public static partial class TrRmExecutableCompiler
             : new TrRmMethodSigTableReader(
                 finalSignatureBytes, finalSignatureCount, typeSpecs,
                 finalParameterCount, finalGenericParamCount);
+        var finalParameterBytes = parameterBytes.ToArray();
+        var parameters = finalParameterCount == 0 ? default
+            : new TrRmParamTableReader(finalParameterBytes,
+                finalParameterCount, signatures, typeSpecs, schema);
         var finalMethodBytes = methodBytes.ToArray();
         var methods = finalMethodCount == 0 ? default
             : new TrRmMethodDefTableReader(finalMethodBytes,
                 finalMethodCount, stringTable, modules, typeDefs, signatures,
-                contractCount, bodyCount, schema);
+                finalContractCount, bodyCount, schema);
 
         var genericParamBytes = finalGenericParamCount == 0 ? []
             : TrRmGenericParamTableWriter.Encode(genericParameterRows,
@@ -6083,6 +6213,22 @@ public static partial class TrRmExecutableCompiler
         var finalLayoutBytes = layoutBytes.ToArray();
         _ = new TrRmLayoutTableReader(finalLayoutBytes, finalLayoutCount,
             typeDefs, targetProfiles, GetCount(sections, 0x0023));
+        if (foreignNativeInterface)
+        {
+            if (contractCount != 0)
+            {
+                throw Unsupported(
+                    "The F+I source producer cannot merge pre-existing Contract rows.");
+            }
+
+            var contractBytes = TrRmContractTableWriter
+                .EncodeForeignInvocationDraft(foreignInterfaceContractRows,
+                    typeDefs, methods, signatures, parameters, typeSpecs,
+                    features, modules, 0, schema);
+            SetSection(sections, 0x001B,
+                checked((uint)foreignInterfaceContractRows.Count),
+                contractBytes);
+        }
         for (var index = 0; index < interfaceTypeExportNameRows.Count;
             index++)
         {
@@ -6114,8 +6260,11 @@ public static partial class TrRmExecutableCompiler
             checked((uint)typeSpecRows.Count), typeSpecBytes);
         SetSection(sections, 0x0013,
             checked((uint)finalTypeDefCount), [.. typeDefBytes]);
-        SetSection(sections, 0x0015, checked((uint)finalLayoutCount),
-            finalLayoutBytes);
+        if (!foreignNativeInterface || finalLayoutCount != 0)
+        {
+            SetSection(sections, 0x0015, checked((uint)finalLayoutCount),
+                finalLayoutBytes);
+        }
         SetSection(sections, 0x0016, checked((uint)finalMethodCount),
             finalMethodBytes);
         SetSection(sections, 0x0017, checked((uint)finalSignatureCount),
@@ -6137,10 +6286,17 @@ public static partial class TrRmExecutableCompiler
                     + associatedTypeDefRows.Count)),
                 associatedTypeDefBytes);
         }
-        SetSection(sections, 0x0066,
-            checked((uint)methodParameterLabelCount),
-            methodParameterLabelBytes.Count == 0 ? []
-                : [.. methodParameterLabelBytes]);
+        if (foreignNativeInterface && methodParameterLabelCount == 0)
+        {
+            sections.RemoveAll(static section => section.Kind == 0x0066);
+        }
+        else
+        {
+            SetSection(sections, 0x0066,
+                checked((uint)methodParameterLabelCount),
+                methodParameterLabelBytes.Count == 0 ? []
+                    : [.. methodParameterLabelBytes]);
+        }
         SetSection(sections, 0x001D, checked((uint)exportRows.Count),
             EncodeExportRows(exportRows));
 
@@ -7265,6 +7421,7 @@ public static partial class TrRmExecutableCompiler
             IReadOnlyList<TrRmSourceTypeExport> typeExports,
             TrRmArtifactSchema schema)
     {
+        var foreignNativeInterface = schema.UsesForeignNativeInterface();
         var result = new List<GenericInterfaceEmission>(typeExports.Count);
         var selectors = new HashSet<(string Namespace, string Name, int Arity)>();
         foreach (var export in typeExports)
@@ -7323,14 +7480,24 @@ public static partial class TrRmExecutableCompiler
                         >= (uint)definition.Formals.Length
                     || definition.Formals[constraint.FormalOrdinal].Kind
                         != BoundInterfaceFormalKind.Type)
-                || !definition.AttributeTokens.IsDefaultOrEmpty
-                || definition.ForeignNativeInterface is not null
+                || (!foreignNativeInterface
+                    && !definition.AttributeTokens.IsDefaultOrEmpty)
+                || (foreignNativeInterface
+                    ? definition.ForeignNativeInterface is null
+                        || definition.Accessibility
+                            != BoundInterfaceAccessibility.Public
+                        || definition.IsPartial
+                    : definition.ForeignNativeInterface is not null)
                 || definition.Formals.IsDefault
                 || definition.Formals.Length
                     > SemanticVerifier.MaximumArguments
+                || (foreignNativeInterface
+                    && definition.Formals.Length != 0)
                 || definition.Members.IsDefault
                 || methodMembers.Length + associatedTypeMembers.Length
                     != definition.Members.Length
+                || (foreignNativeInterface
+                    && associatedTypeMembers.Length != 0)
                 || definition.Formals.Any(static formal =>
                     formal.Kind != BoundInterfaceFormalKind.Type
                     || formal.ConstantType is not null
@@ -7404,15 +7571,30 @@ public static partial class TrRmExecutableCompiler
                         != BoundInterfaceAccessibility.Public
                         || member.IsStatic || member.IsExternal
                         || (member.RequiresMutableReceiver
+                            && !foreignNativeInterface
                             && !schema.UsesMethodReceiverAccess())
-                        || member.IsPartial || member.RequiresUnsafeCaller
-                        || member.DeclaredRequiresUnsafeCaller
-                        || member.DoesNotReturn || member.IsAsync
+                        || member.IsPartial || member.IsAsync
                         || member.HasBody
-                        || member.NativeCallableConvention is not null
-                        || !member.Attributes.IsDefaultOrEmpty
-                        || !member.AttributeTokens.IsDefaultOrEmpty
-                        || !member.ContractTokens.IsDefaultOrEmpty
+                        || (!foreignNativeInterface
+                            && (member.RequiresUnsafeCaller
+                                || member.DeclaredRequiresUnsafeCaller
+                                || member.NativeCallableConvention is not null
+                                || member.DoesNotReturn))
+                        || (foreignNativeInterface
+                            && (!member.RequiresUnsafeCaller
+                                || !member.DeclaredRequiresUnsafeCaller
+                                || member.NativeCallableConvention
+                                    is not (NativeCallingConvention.Unmanaged
+                                        or NativeCallingConvention.Cdecl
+                                        or NativeCallingConvention.Stdcall)
+                                || !ForeignNativeInterfaceContract
+                                    .IsValidMethodSignature(member,
+                                        program.NativePointerTypes,
+                                        program.NativeFunctionPointerSignatures)))
+                        || (!foreignNativeInterface
+                            && (!member.Attributes.IsDefaultOrEmpty
+                                || !member.AttributeTokens.IsDefaultOrEmpty
+                                || !member.ContractTokens.IsDefaultOrEmpty))
                         || !member.AdditionalDeclarationKeys.IsDefaultOrEmpty
                         || !member.TypeParameters.IsDefaultOrEmpty
                         || !member.Constraints.IsDefaultOrEmpty
@@ -7421,23 +7603,34 @@ public static partial class TrRmExecutableCompiler
                         || member.AssociatedDefaultType is not null
                         || member.AssociatedConstantType is not null
                         || member.AssociatedConstantDefault is not null
+                        || (foreignNativeInterface
+                            && !member.NativeOutputContracts.IsDefaultOrEmpty)
                         || member.Parameters.IsDefault
                         || member.Parameters.Length
                             > SemanticVerifier.MaximumArguments
                         || member.Parameters.Any(parameter =>
                             parameter.Mode
                                 != BoundInterfaceParameterMode.Value
-                            || !parameter.Attributes.IsDefaultOrEmpty
-                            || !parameter.AttributeTokens.IsDefaultOrEmpty
-                            || !IsSupportedGenericInterfaceSignatureType(
-                                parameter.Type,
-                                definition.Formals.Length,
-                                isReturn: false))
+                            || (!foreignNativeInterface
+                                && (!parameter.Attributes.IsDefaultOrEmpty
+                                    || !parameter.AttributeTokens.IsDefaultOrEmpty
+                                    || !IsSupportedGenericInterfaceSignatureType(
+                                        parameter.Type,
+                                        definition.Formals.Length,
+                                        isReturn: false)))
+                            || (foreignNativeInterface
+                                && (!parameter.Attributes.IsDefaultOrEmpty
+                                    || !parameter.AttributeTokens.IsDefaultOrEmpty
+                                    || parameter.Type.Kind
+                                        != BoundInterfaceTypeKind.Primitive)))
                         || (member.ResultType is not null
-                            && !IsSupportedGenericInterfaceSignatureType(
-                                member.ResultType,
-                                definition.Formals.Length,
-                                isReturn: true)))
+                            && (foreignNativeInterface
+                                ? member.ResultType.Kind
+                                    != BoundInterfaceTypeKind.Primitive
+                                : !IsSupportedGenericInterfaceSignatureType(
+                                    member.ResultType,
+                                    definition.Formals.Length,
+                                    isReturn: true))))
                     {
                         throw Unsupported(
                             $"Interface requirement '{definition.QualifiedName}.{member.Name}' is outside the G1 bodyless scalar/value signature subset.");
@@ -9525,16 +9718,28 @@ public static partial class TrRmExecutableCompiler
     {
         if (count >= 0xFF_FFFF
             || (!schema.UsesClassParameterDefaults()
+                && !schema.UsesForeignNativeInterfaceParameterSurface()
                 && defaultConstantSourceRow != 0))
         {
             throw Unsupported(
                 "The MethodParameterSurface exceeds its selected row contract.");
         }
 
+        if (schema.UsesForeignNativeInterfaceParameterSurface())
+        {
+            TrRmForeignInterfaceParameterSurfaceTableWriter.AppendRow(bytes,
+                new TrRmForeignInterfaceParameterSurfaceRow(
+                    methodDefRow, ordinal, nameStringRow,
+                    defaultConstantSourceRow));
+            count = checked(count + 1);
+            return;
+        }
+
         AppendUInt32(bytes, methodDefRow);
         AppendUInt32(bytes, ordinal);
         AppendUInt32(bytes, nameStringRow);
-        if (schema.UsesClassParameterDefaults())
+        if (schema.UsesClassParameterDefaults()
+            || schema.UsesForeignNativeInterfaceParameterSurface())
         {
             AppendUInt32(bytes, defaultConstantSourceRow);
         }
@@ -9559,7 +9764,8 @@ public static partial class TrRmExecutableCompiler
                 "CM1 parameter defaults require exact fixed-width SF1 scalar values.");
         }
 
-        var frozenValue = frozenValues.Add(value);
+        var frozenValue = frozenValues.AddScalarParameterDefault(value,
+            parameterTypeSpecRef, parameterType);
         if (frozenValue.TypeSpecRef != parameterTypeSpecRef)
         {
             throw Unsupported(
@@ -9571,7 +9777,9 @@ public static partial class TrRmExecutableCompiler
 
     private static int GetMethodParameterSurfaceRowSize(
         TrRmArtifactSchema schema)
-        => schema.UsesClassParameterDefaults() ? 16 : 12;
+        => schema.UsesClassParameterDefaults()
+            || schema.UsesForeignNativeInterfaceParameterSurface()
+                ? 16 : 12;
 
     private static void WriteUInt32(List<byte> bytes, int offset,
         uint value)

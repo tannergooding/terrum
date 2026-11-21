@@ -29,15 +29,19 @@ internal sealed class TrRmForeignInterfaceParameterSurfaceTests
         ], strings, 0, 0, 1, 0, 2);
         var modules = new TrRmModuleTableReader(moduleBytes, 1, strings,
             0, 0, 1, 0, 2);
-        var typeSpecs = default(TrRmTypeSpecTableReader);
+        var typeSpecRows = TrRmTypeSpecTableWriter.Encode([
+            new ReadOnlyMemory<byte>(TrRmTypeSpecTableWriter.Builtin(0x08)),
+        ], 0, 0, 0, 0, schema, methodDefCount: 1);
+        var typeSpecs = new TrRmTypeSpecTableReader(typeSpecRows, 1,
+            0, 0, 0, 0, schema, 1);
         var signatureBytes = TrRmMethodSigTableWriter.Encode([
             new TrRmMethodSigRow(0xF200_0000, 0, 1, 2, 0, 0),
         ], typeSpecs, 2, 0);
         var signatures = new TrRmMethodSigTableReader(signatureBytes, 1,
             typeSpecs, 2, 0);
         var parameterBytes = TrRmParamTableWriter.Encode([
-            new TrRmParamRow(1, 0, 0xF200_0008, 0),
-            new TrRmParamRow(1, 1, 0xF200_0008, 0),
+            new TrRmParamRow(1, 0, 1, 0),
+            new TrRmParamRow(1, 1, 1, 0),
         ], signatures, typeSpecs, schema);
         var parameters = new TrRmParamTableReader(parameterBytes, 2,
             signatures, typeSpecs, schema);
@@ -58,7 +62,7 @@ internal sealed class TrRmForeignInterfaceParameterSurfaceTests
         ]);
         var blobs = new TrRmBlobTableReader(blobBytes, 1);
         var frozenValueNodeBytes = TrRmFrozenValueNodeTableWriter.Encode([
-            new TrRmFrozenValueNodeRow(0xF200_0008, 1, 1, 0, 0, 0),
+            new TrRmFrozenValueNodeRow(1, 1, 1, 0, 0, 0),
         ], typeSpecs, blobs, 0, 0);
         var frozenValueNodes = new TrRmFrozenValueNodeTableReader(
             frozenValueNodeBytes, 1, typeSpecs, 1, 0, 0);
