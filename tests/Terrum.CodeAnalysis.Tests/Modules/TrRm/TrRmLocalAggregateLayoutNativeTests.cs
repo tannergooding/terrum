@@ -1289,6 +1289,176 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
     }
 
     [Test]
+    public async Task L1PointerLoadReadsPackedAggregateAtPageBoundaryAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+
+        const string moduleIdentity = "l1p-packed-page-tail";
+        const string l1pSchemaIdentity
+            = "trrm/1-draft-local-aggregate-layout-execution-pointer-loads-1";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Blittable]
+            [Layout(LayoutKind.Sequential, Packing: 1)]
+            struct Packed {
+                public uint8 Tag;
+                public uint32 Value;
+            }
+            public int32 Main(ptr<Packed> source) {
+                unsafe {
+                    Packed captured = *source;
+                    if (captured.Tag != uint8(0x5A)) { return -1; }
+                    return int32(captured.Value);
+                }
+            }
+            """), new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Program!.Structures.Single(
+            static structure => structure.Name == "Packed").Size,
+            Is.EqualTo(5));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program, moduleIdentity, l1pSchemaIdentity,
+            moduleTargetRequirement: 1);
+        var input = new TrRmStandardArtifactInput(l1pSchemaIdentity,
+            artifact);
+        var loaded = TrRmExecutableCompiler.LoadStandard(input,
+            moduleIdentity, []);
+        var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
+            moduleIdentity + "-reemitted", l1pSchemaIdentity,
+            moduleTargetRequirement: 1);
+        var reemittedIdentity = moduleIdentity + "-reemitted";
+        var reemittedInput = new TrRmStandardArtifactInput(
+            l1pSchemaIdentity, reemitted);
+        var reloaded = TrRmExecutableCompiler.LoadStandard(reemittedInput,
+            reemittedIdentity, []);
+        var jitCode = NativeEmitter.EmitCode(reloaded.Program,
+            NativeRuntimePolicy.FailFast);
+        var functionIndex = reloaded.Program.Functions.IndexOf(
+            reloaded.Program.Functions.Single(
+                static function => function.Name == "Main"));
+        var functionOffset = jitCode.SourceFunctionOffsets[functionIndex];
+        Assert.That(functionOffset, Is.GreaterThanOrEqualTo(0));
+
+        var pageSize = Environment.SystemPageSize;
+        var memory = VirtualAlloc(0,
+            checked((nuint)(pageSize * 2)), 0x3000, 0x04);
+        Assert.That(memory, Is.Not.Zero,
+            $"VirtualAlloc failed with error {Marshal.GetLastPInvokeError()}.");
+        var freeSucceeded = false;
+        var freeError = 0;
+        try
+        {
+            var source = IntPtr.Add(memory, pageSize - 5);
+            Marshal.WriteByte(IntPtr.Add(source, -1), 0xC3);
+            Marshal.WriteByte(source, 0x5A);
+            Marshal.WriteInt32(source, 1, 42);
+            var guardAddress = IntPtr.Add(memory, pageSize);
+            Assert.That(VirtualProtect(guardAddress, (nuint)pageSize,
+                    0x01, out _),
+                Is.True,
+                $"VirtualProtect failed with error "
+                + $"{Marshal.GetLastPInvokeError()}.");
+
+            var wrapperStart = jitCode.Code.Length;
+            byte[] wrapper = [
+                0x55,
+                0x48, 0x81, 0xEC, 0x20, 0x00, 0x00, 0x00,
+                0x48, 0x89, 0xE5,
+                0x48, 0xB9, 0, 0, 0, 0, 0, 0, 0, 0,
+                0xE8, 0, 0, 0, 0,
+                0x48, 0x81, 0xC4, 0x20, 0x00, 0x00, 0x00,
+                0x5D,
+                0xC3,
+            ];
+            BinaryPrimitives.WriteInt64LittleEndian(
+                wrapper.AsSpan(13, sizeof(long)), source.ToInt64());
+            BinaryPrimitives.WriteInt32LittleEndian(
+                wrapper.AsSpan(22, sizeof(int)),
+                checked(functionOffset - (wrapperStart + 26)));
+            var codeBytes = new byte[checked(
+                jitCode.Code.Length + wrapper.Length)];
+            jitCode.Code.CopyTo(codeBytes, 0);
+            wrapper.CopyTo(codeBytes, jitCode.Code.Length);
+            var callable = jitCode with {
+                Code = codeBytes,
+                EntryPoint = wrapperStart,
+                Functions = jitCode.Functions.Add(
+                    new NativeFunctionRange(wrapperStart,
+                        checked(wrapperStart + wrapper.Length), 40) {
+                        UsesFramePointer = true,
+                    }),
+            };
+            Assert.That(NativeJit.ExecuteImportedCode(callable, [], []),
+                Is.EqualTo(42));
+
+            var image = NativeModuleCompiler.EmitStandardLibrary(
+                reemittedInput, reemittedIdentity, [], ["Main"],
+                NativeRuntimePolicy.FailFast);
+            var directory = TestArtifactPaths.CreateDirectory(
+                "terrum-l1p-packed-page-tail-");
+            try
+            {
+                var imagePath = Path.Combine(directory, "library.dll");
+                await File.WriteAllBytesAsync(imagePath, image)
+                    .ConfigureAwait(true);
+                var library = NativeLibrary.Load(imagePath);
+                try
+                {
+                    var function = Marshal.GetDelegateForFunctionPointer<
+                        GetPointerValueDelegate>(
+                        NativeLibrary.GetExport(library, "Main"));
+                    Assert.That(function(source), Is.EqualTo(42));
+                    Assert.That(Marshal.ReadByte(IntPtr.Add(source, -1)),
+                        Is.EqualTo(0xC3));
+                    Assert.That(Marshal.ReadByte(source), Is.EqualTo(0x5A));
+                    Assert.That(Marshal.ReadInt32(source, 1),
+                        Is.EqualTo(42));
+                }
+                finally
+                {
+                    NativeLibrary.Free(library);
+                }
+            }
+            finally
+            {
+                await TestFileCleanup.DeleteDirectoryWithRetryAsync(
+                    directory).ConfigureAwait(true);
+            }
+        }
+        finally
+        {
+            freeSucceeded = VirtualFree(memory, 0, 0x8000);
+            if (!freeSucceeded)
+            {
+                freeError = Marshal.GetLastPInvokeError();
+            }
+        }
+        Assert.That(freeSucceeded, Is.True,
+            $"VirtualFree failed with error {freeError}.");
+    }
+
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern nint VirtualAlloc(nint address, nuint size,
+        uint allocationType, uint protection);
+
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool VirtualProtect(nint address, nuint size,
+        uint protection, out uint previousProtection);
+
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool VirtualFree(nint address, nuint size,
+        uint freeType);
+
+    [Test]
     public async Task L1PointerLoadSnapshotsLocalAggregateThroughStandardJitAndAotAsync()
     {
         Assume.That(OperatingSystem.IsWindows()
