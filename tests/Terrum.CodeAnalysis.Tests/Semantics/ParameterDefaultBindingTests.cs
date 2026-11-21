@@ -2,6 +2,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Linq;
 using NUnit.Framework;
 using Terrum.CodeAnalysis.Native;
@@ -222,6 +223,57 @@ internal sealed class ParameterDefaultBindingTests
             string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = compilation.Program!;
         SemanticVerifier.VerifyLibrary(program);
+
+        var read = program.GenericMethodDefinitions.Single(
+            static definition => definition.Name == "Read");
+        var readFunction = read.ProofProgram!.Functions[read.FunctionIndex];
+        var parameterDefault = readFunction.OrdinaryParameterDefaults
+            .Single()!;
+        Assert.That(parameterDefault.Expression, Is.TypeOf<BoundBinary>());
+        var defaultRead = (BoundRead)((BoundBinary)
+            parameterDefault.Expression!).Left;
+        var variableCount = readFunction.Variables.Length;
+        Assert.That(variableCount, Is.GreaterThan(1));
+        Assert.That(readFunction.Variables[defaultRead.Variable].Name,
+            Is.EqualTo("N"));
+        var visitedDefaultReads = 0;
+        var expressionRewrittenFunction
+            = BoundTreeTraversal.RewriteExpressions(readFunction,
+                expression =>
+                {
+                    if (ReferenceEquals(expression, defaultRead))
+                    {
+                        visitedDefaultReads++;
+                    }
+
+                    return expression;
+                });
+        Assert.That(visitedDefaultReads, Is.EqualTo(1));
+        Assert.That(expressionRewrittenFunction.OrdinaryParameterDefaults
+                .Single()!.Expression,
+            Is.TypeOf<BoundBinary>());
+        var remappedVariables = readFunction.Variables.Skip(1)
+            .Append(readFunction.Variables[0]).ToImmutableArray();
+        var remappedFunction = BoundTreeTraversal.RewriteVariables(
+            readFunction, remappedVariables,
+            variable => (variable + variableCount - 1) % variableCount);
+        var remappedDefault = remappedFunction.OrdinaryParameterDefaults
+            .Single()!;
+        Assert.That(remappedDefault.ParameterOrdinal,
+            Is.EqualTo(parameterDefault.ParameterOrdinal));
+        Assert.That(remappedDefault.SourceInputOrdinal,
+            Is.EqualTo(parameterDefault.SourceInputOrdinal));
+        Assert.That(remappedDefault.Span, Is.EqualTo(parameterDefault.Span));
+        Assert.That(remappedDefault.IsPending,
+            Is.EqualTo(parameterDefault.IsPending));
+        var remappedDefaultRead = (BoundRead)((BoundBinary)
+            remappedDefault.Expression!).Left;
+        Assert.That(remappedDefaultRead.Variable,
+            Is.EqualTo((defaultRead.Variable + variableCount - 1)
+                % variableCount));
+        Assert.That(remappedFunction.Variables[
+                remappedDefaultRead.Variable].Name,
+            Is.EqualTo("N"));
 
         var use = program.Functions.Single(
             static function => function.Name == "Use");
