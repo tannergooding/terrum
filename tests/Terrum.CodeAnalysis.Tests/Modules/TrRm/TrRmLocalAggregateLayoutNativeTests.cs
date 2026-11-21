@@ -1443,6 +1443,9 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
         };
         var methodProvider = Compilation.CreateLibrary(SyntaxTree.Parse("""
             public int32 Actual(ptr<Snapshot> source) {
+                unsafe { return (*source).Nested.First; }
+            }
+            internal int32 ActualLocal(ptr<Snapshot> source) {
                 unsafe {
                     Snapshot captured = *source;
                     return captured.Nested.First;
