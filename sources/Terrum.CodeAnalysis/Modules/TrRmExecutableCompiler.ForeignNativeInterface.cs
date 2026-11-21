@@ -20,7 +20,6 @@ public static partial class TrRmExecutableCompiler
         if (!schema.UsesForeignNativeInterface()
             || moduleTargetRequirement
                 != TrRmModuleTableReader.WindowsX64NativeTargetRequirement
-            || sourceTypeExports is not { Count: > 0 }
             || program.EntryPoint >= 0
             || !program.Functions.IsEmpty
             || !program.Structures.IsEmpty
@@ -50,14 +49,15 @@ public static partial class TrRmExecutableCompiler
                 "The current F+I source producer requires a declaration-only native interface library.");
         }
 
+        var localInterfaceCount = program.Interfaces.Count(
+            static definition => definition.ModuleImport is null);
         if (program.Interfaces.IsDefaultOrEmpty
-            || sourceTypeExports.Count != program.Interfaces.Length
+            || (sourceTypeExports?.Count ?? 0) != localInterfaceCount
             || program.Interfaces.Any(static definition =>
-                definition.ForeignNativeInterface is null
-                || definition.ModuleImport is not null))
+                definition.ForeignNativeInterface is null))
         {
             throw Unsupported(
-                "The F+I declaration library must contain only local ForeignNativeInterface definitions.");
+                "The F+I declaration library must contain only local or imported ForeignNativeInterface definitions.");
         }
 
         if (!schema.UsesForeignNativeInterfaceParameterSurface()
@@ -119,7 +119,6 @@ public static partial class TrRmExecutableCompiler
             new(0x0002, 0, 1, moduleNameRows),
             new(0x0004, 0, checked((uint)featureRows.Count), featureBytes),
             new(0x0048, 0, 1, targetProfileBytes),
-            new(0x004C, 0, 1, new byte[12]),
         };
         sections.Sort(static (left, right) =>
             left.Kind.CompareTo(right.Kind));
@@ -128,13 +127,13 @@ public static partial class TrRmExecutableCompiler
             program, moduleIdentity, []);
         var artifact = EmitGenericMethodCallsDraftSource(program,
             moduleIdentity, moduleTargetRequirement, sourceMethodExports,
-            sourceTypeExports, schema, baseSchema: schema,
+            sourceTypeExports ?? [], schema, baseSchema: schema,
             baseArtifact: shell,
             frozenScalarValueBuilder: schema
                 .UsesForeignNativeInterfaceParameterSurface()
                     ? new TrRmFrozenScalarValueBuilder() : null);
         artifact = AddForeignNativeInterfaceRows(artifact, program,
-            sourceTypeExports, schema);
+            sourceTypeExports ?? [], schema);
         _ = TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
             new TrRmArtifactIndex(artifact, schema));
         return artifact;
@@ -175,6 +174,9 @@ public static partial class TrRmExecutableCompiler
             out var interfaceMethodCount);
         _ = index.TryGetSection(0x0025, out var interfaceBytes,
             out var interfaceCount);
+        _ = index.TryGetSection(0x004C,
+            out var foreignNativeInterfaceBytes,
+            out var foreignNativeInterfaceCount);
         _ = index.TryGetSection(0x0048, out var targetProfileBytes,
             out var targetProfileCount);
         var strings = new TrRmStringTableReader(stringBytes, stringCount);
@@ -202,25 +204,53 @@ public static partial class TrRmExecutableCompiler
         var targetProfiles = new TrRmTargetProfileTableReader(
             targetProfileBytes, targetProfileCount, schema);
         var foreignInterfaceRows = new List<TrRmForeignNativeInterfaceRow>(
-            typeExports.Count);
-        foreach (var export in typeExports)
+            checked(typeExports.Count + foreignNativeInterfaceCount));
+        if (foreignNativeInterfaceCount != 0)
         {
+            var importedForeignInterfaces
+                = new TrRmForeignNativeInterfaceTableReader(
+                    foreignNativeInterfaceBytes,
+                    foreignNativeInterfaceCount, interfaces,
+                    targetProfiles, schema);
+            for (var row = 1;
+                row <= importedForeignInterfaces.Count; row++)
+            {
+                foreignInterfaceRows.Add(
+                    new TrRmForeignNativeInterfaceRow(
+                        importedForeignInterfaces.GetOwnerInterfaceDef(row),
+                        importedForeignInterfaces.GetTargetProfile(row),
+                        importedForeignInterfaces.GetVTableByteOffset(row)));
+            }
+        }
+
+        for (var exportIndex = 0; exportIndex < typeExports.Count;
+            exportIndex++)
+        {
+            var export = typeExports[exportIndex];
             var qualifiedName = string.IsNullOrEmpty(export.Namespace)
                 ? export.Name : $"{export.Namespace}.{export.Name}";
             var definition = program.Interfaces.SingleOrDefault(candidate =>
                 StringComparer.Ordinal.Equals(candidate.QualifiedName,
-                    qualifiedName));
+                    qualifiedName)
+                && candidate.ModuleImport is null);
             if (definition?.ForeignNativeInterface is not
                     BoundForeignNativeInterfaceLayout layout
-                || !TryGetForeignInterfaceDefRow(typeDefs, interfaces,
-                    export.Namespace, export.Name, out var interfaceDefRow))
+                || exportIndex >= interfaces.Count
+                || !StringComparer.Ordinal.Equals(
+                    typeDefs.GetNamespace(
+                        interfaces.GetOwnerTypeDef(exportIndex + 1)),
+                    export.Namespace)
+                || !StringComparer.Ordinal.Equals(
+                    typeDefs.GetName(
+                        interfaces.GetOwnerTypeDef(exportIndex + 1)),
+                    export.Name))
             {
                 throw Invalid(
                     $"ForeignNativeInterface '{qualifiedName}' has no emitted InterfaceDef row.");
             }
 
             foreignInterfaceRows.Add(new TrRmForeignNativeInterfaceRow(
-                checked((uint)interfaceDefRow), 1,
+                checked((uint)(exportIndex + 1)), 1,
                 layout.VTableByteOffset));
         }
 
@@ -246,51 +276,4 @@ public static partial class TrRmExecutableCompiler
         return TrRmArtifactWriter.Encode(sections, schema);
     }
 
-    private static bool TryGetForeignInterfaceDefRow(
-        TrRmTypeDefTableReader types,
-        TrRmInterfaceDefTableReader interfaces,
-        string interfaceNamespace, string interfaceName,
-        out int interfaceDefRow)
-    {
-        interfaceDefRow = 0;
-        var typeDefRow = 0;
-        for (var type = 1; type <= types.Count; type++)
-        {
-            if (StringComparer.Ordinal.Equals(types.GetNamespace(type),
-                    interfaceNamespace)
-                && StringComparer.Ordinal.Equals(types.GetName(type),
-                    interfaceName))
-            {
-                if (typeDefRow != 0)
-                {
-                    return false;
-                }
-
-                typeDefRow = type;
-            }
-        }
-
-        if (typeDefRow == 0)
-        {
-            return false;
-        }
-
-        for (var interfaceRow = 1; interfaceRow <= interfaces.Count;
-            interfaceRow++)
-        {
-            if (interfaces.GetOwnerTypeDef(interfaceRow) != typeDefRow)
-            {
-                continue;
-            }
-
-            if (interfaceDefRow != 0)
-            {
-                return false;
-            }
-
-            interfaceDefRow = interfaceRow;
-        }
-
-        return interfaceDefRow != 0;
-    }
 }

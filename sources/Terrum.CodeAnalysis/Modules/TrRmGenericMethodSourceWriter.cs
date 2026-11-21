@@ -266,7 +266,8 @@ public static partial class TrRmExecutableCompiler
                 out exportedInterfaceAssociatedTypeDefRows);
         }
         if (emissionRows.Count != 0
-            || !sourceClassMethodGenericPlans.IsEmpty)
+            || !sourceClassMethodGenericPlans.IsEmpty
+            || schema.UsesForeignNativeInterface())
         {
             artifact = AddImportedGenericInterfaceMetadata(artifact,
                 interfaceMetadataProgram, schema,
@@ -6059,180 +6060,20 @@ public static partial class TrRmExecutableCompiler
                 var methodContractCount = 0;
                 if (foreignNativeInterface)
                 {
-                    if (member.NativeCallableConvention
-                            is not NativeCallingConvention convention)
-                    {
-                        throw Unsupported(
-                            "F+I member contracts require a normalized convention.");
-                    }
-
-                    contractFirst
-                        = checked(contractCount
-                            + foreignInterfaceContractRows.Count + 1);
-                    var effectPayload = new byte[sizeof(uint)];
-                    var effectsMask = 4u
-                        | (member.DoesNotReturn ? 2u : 0u);
-                    BinaryPrimitives.WriteUInt32LittleEndian(
-                        effectPayload, effectsMask);
-                    var methodOwner = 0x1600_0000u
-                        | checked((uint)methodRow);
-                    foreignInterfaceContractRows.Add(
-                        new TrRmContractRow(methodOwner, 1,
-                            effectPayload));
-                    foreignInterfaceContractRows.Add(
-                        new TrRmContractRow(methodOwner, 0x0C,
-                            StandardNativeCallableContractPayload(
-                                convention)));
-                    methodContractCount = 2;
-                    methodContractCount +=
-                        AddForeignNativeInterfaceDependencyContracts(
-                            member.Dependencies, methodOwner,
-                            foreignInterfaceContractRows);
-                    if (!member.NativeOutputContracts.IsDefaultOrEmpty)
-                    {
-                        if (member.DoesNotReturn)
-                        {
-                            throw Unsupported(
-                                "F+I NativeOutput requires a normal completion outcome.");
-                        }
-
-                        var selectors = new SortedSet<byte>();
-                        foreach (var output in member.NativeOutputContracts)
-                        {
-                            _ = selectors.Add((byte)output.SuccessSelector);
-                            _ = selectors.Add(
-                                (byte)output.ComplementSelector);
-                        }
-
-                        var graphBySelector = new Dictionary<byte, int>();
-                        uint phaseOrdinal = 0;
-                        foreach (var selector in selectors)
-                        {
-                            var graphRow = checked(
-                                GetCount(sections, 0x0037)
-                                + foreignInterfacePredicateGraphs.Count + 1);
-                            var footprintRow = checked(
-                                GetCount(sections, 0x0038)
-                                + foreignInterfacePredicateFootprints.Count
-                                + 1);
-                            var rootRow = checked(
-                                GetCount(sections, 0x0039)
-                                + foreignInterfacePredicateRoots.Count + 1);
-                            var nodeRow = checked(
-                                GetCount(sections, 0x003B)
-                                + foreignInterfacePredicateNodes.Count + 1);
-                            var operandRow = checked(
-                                GetCount(sections, 0x003C)
-                                + foreignInterfacePredicateOperands.Count
-                                + 1);
-                            foreignInterfacePredicateGraphs.Add(
-                                new TrRmPredicateGraphRow(nodeRow,
-                                    footprintRow));
-                            foreignInterfacePredicateFootprints.Add(
-                                new TrRmPredicateReadFootprintRow(rootRow,
-                                    1, 0, 0));
-                            foreignInterfacePredicateRoots.Add(
-                                new TrRmPredicateReadRootRow(5, 0));
-                            foreignInterfacePredicateNodes.Add(
-                                new TrRmPredicateNodeRow(selector,
-                                    0xF200_0001,
-                                    checked((uint)operandRow), 1));
-                            foreignInterfacePredicateOperands.Add(
-                                new TrRmPredicateNodeOperandRow(1,
-                                    checked((uint)rootRow)));
-                            var predicatePayload = new byte[12];
-                            predicatePayload[0] = 3;
-                            BinaryPrimitives.WriteUInt32LittleEndian(
-                                predicatePayload.AsSpan(4), phaseOrdinal++);
-                            BinaryPrimitives.WriteUInt32LittleEndian(
-                                predicatePayload.AsSpan(8),
-                                checked((uint)graphRow));
-                            foreignInterfaceContractRows.Add(
-                                new TrRmContractRow(methodOwner, 0x0B,
-                                    predicatePayload));
-                            methodContractCount++;
-                            graphBySelector.Add(selector, graphRow);
-                        }
-
-                        foreach (var output in member.NativeOutputContracts)
-                        {
-                            var resultType = member.ResultType
-                                is { Kind: BoundInterfaceTypeKind.Primitive }
-                                    ? member.ResultType.PrimitiveType
-                                    : throw Unsupported(
-                                        "F+I NativeOutput requires a scalar result.");
-                            var resultCondition
-                                = (output.SuccessSelector, resultType) switch {
-                                    (NativeOutputSelector.NonZero,
-                                        PrimitiveType.UInt32)
-                                        => DirectNativeImportContract
-                                            .UInt32NonZeroResultCondition,
-                                    (NativeOutputSelector.NonZero,
-                                        PrimitiveType.Int32)
-                                        => DirectNativeImportContract
-                                            .Int32NonZeroResultCondition,
-                                    (NativeOutputSelector.NonNegative,
-                                        PrimitiveType.Int32)
-                                        => DirectNativeImportContract
-                                            .Int32NonNegativeResultCondition,
-                                    _ => throw Unsupported(
-                                        "F+I NativeOutput has an unsupported result selector."),
-                                };
-                            foreignInterfaceContractRows.Add(
-                                new TrRmContractRow(methodOwner, 0x12,
-                                    NativeOutputPayload(
-                                        output.FormalOrdinal,
-                                        resultCondition, 1)));
-                            methodContractCount++;
-                            AddOutputState((byte)output.SuccessState,
-                                output.FormalOrdinal,
-                                graphBySelector[
-                                    (byte)output.SuccessSelector]);
-                            AddOutputState((byte)output.ComplementState,
-                                output.FormalOrdinal,
-                                graphBySelector[
-                                    (byte)output.ComplementSelector]);
-                            foreach (var dependency in output.Dependencies)
-                            {
-                                var dependencyPayload = new byte[12];
-                                dependencyPayload[0]
-                                    = dependency.DestinationKind;
-                                dependencyPayload[1]
-                                    = (byte)dependency.SourceKind;
-                                dependencyPayload[2]
-                                    = (byte)dependency.Relationship;
-                                dependencyPayload[3] = (byte)dependency.Phase;
-                                BinaryPrimitives.WriteUInt32LittleEndian(
-                                    dependencyPayload.AsSpan(4),
-                                    checked((uint)
-                                        dependency.DestinationOrdinal));
-                                BinaryPrimitives.WriteUInt32LittleEndian(
-                                    dependencyPayload.AsSpan(8),
-                                    checked((uint)dependency.SourceOrdinal));
-                                foreignInterfaceContractRows.Add(
-                                    new TrRmContractRow(methodOwner, 4,
-                                        dependencyPayload));
-                                methodContractCount++;
-                            }
-                        }
-
-                        void AddOutputState(byte state, int formalOrdinal,
-                            int graphRow)
-                        {
-                            var outputStatePayload = new byte[12];
-                            BinaryPrimitives.WriteUInt32LittleEndian(
-                                outputStatePayload,
-                                checked((uint)formalOrdinal));
-                            BinaryPrimitives.WriteUInt32LittleEndian(
-                                outputStatePayload.AsSpan(4),
-                                checked((uint)graphRow));
-                            outputStatePayload[8] = state;
-                            foreignInterfaceContractRows.Add(
-                                new TrRmContractRow(methodOwner, 2,
-                                    outputStatePayload));
-                            methodContractCount++;
-                        }
-                    }
+                    (contractFirst, methodContractCount)
+                        = AddForeignNativeInterfaceMethodContracts(member,
+                            methodRow, contractCount,
+                            foreignInterfaceContractRows,
+                            foreignInterfacePredicateGraphs,
+                            foreignInterfacePredicateFootprints,
+                            foreignInterfacePredicateRoots,
+                            foreignInterfacePredicateNodes,
+                            foreignInterfacePredicateOperands,
+                            GetCount(sections, 0x0037),
+                            GetCount(sections, 0x0038),
+                            GetCount(sections, 0x0039),
+                            GetCount(sections, 0x003B),
+                            GetCount(sections, 0x003C));
                 }
 
                 AppendUInt32(methodBytes, checked((uint)typeDefRow));
@@ -6530,13 +6371,26 @@ public static partial class TrRmExecutableCompiler
         {
             return artifact;
         }
+        var foreignNativeInterface
+            = schema.UsesForeignNativeInterface();
         if (!schema.UsesGeneralMethodParameterLabels()
+            && !schema.UsesForeignNativeInterfaceParameterSurface()
+            && !foreignNativeInterface
             && emissions.Any(static emission =>
                 emission.Definition.Members.Any(static member =>
                     member.Kind == BoundInterfaceMemberKind.Callable)))
         {
             throw Unsupported(
                 "Imported G1 interface constraints require the exact G1L1 schema.");
+        }
+        if (foreignNativeInterface
+            && !schema.UsesForeignNativeInterfaceParameterSurface()
+            && emissions.Any(static emission =>
+                emission.Definition.Members.Any(static member =>
+                    member.Parameters.Length != 0)))
+        {
+            throw Unsupported(
+                "Parameterized imported ForeignNativeInterface members require the exact PS1 profile.");
         }
 
         var artifactIndex = new TrRmArtifactIndex(artifact, schema,
@@ -6713,6 +6567,79 @@ public static partial class TrRmExecutableCompiler
 
         var typeSpecRows = ReadVariableRows(sections, 0x0011, 2, 1);
         var builtInTypeSpecRows = GetBuiltInTypeSpecRows(typeSpecRows);
+        var foreignNativePointerTypeRows
+            = new Dictionary<PrimitiveType, int>();
+        var foreignNativeFunctionPointerTypeRows
+            = new Dictionary<PrimitiveType, int>();
+        var foreignNativeStructureTypeDefRows
+            = new Dictionary<int, int>();
+        var foreignNativeTypeDefTypeSpecRows
+            = new Dictionary<int, int>();
+        var foreignNativeRawPointerTypeRow = 0;
+        var hasForeignNativeRawPointerSignatureType
+            = foreignNativeInterface && emissions.Any(static emission =>
+                emission.Definition.Members.Any(static member =>
+                    member.ResultType?.PrimitiveType
+                        == PrimitiveType.NativeRawPointer
+                    || member.Parameters.Any(static parameter =>
+                        parameter.Type.PrimitiveType
+                            == PrimitiveType.NativeRawPointer)));
+        if (foreignNativeInterface
+            && (hasForeignNativeRawPointerSignatureType
+                || program.NativePointerTypes.Any(static pointer =>
+                    pointer.PointeeType
+                        == PrimitiveType.NativeRawPointer)))
+        {
+            foreignNativeRawPointerTypeRow = typeSpecRows.Count + 1;
+            typeSpecRows.Add(
+                TrRmTypeSpecTableWriter.InlineFamily(0x8C, 0));
+        }
+        var foreignReceiverTypeSpecRows = new Dictionary<bool, uint>();
+        uint GetForeignNativeInterfaceTypeSpecRef(BoundInterfaceType type)
+        {
+            if (type.Kind != BoundInterfaceTypeKind.Primitive
+                || type.IsOptional || type.IsGarbageCollected
+                || type.IsInitialization || type.IsGenericNominalConstantDomain
+                || type.GenericNominalTypeIdentity is not null
+                || type.SourceGenericTypeDefinitionIndex != -1)
+            {
+                throw Unsupported(
+                    "Imported F+I MethodSig types must be complete, closed native ABI values.");
+            }
+
+            if (type.PrimitiveType == PrimitiveType.Void)
+            {
+                return GetBuiltInTypeSpecRef(PrimitiveType.Void,
+                    builtInTypeSpecRows, typeSpecRows);
+            }
+
+            var row = NativeValueTypeRow(type.PrimitiveType,
+                foreignNativeRawPointerTypeRow,
+                foreignNativeFunctionPointerTypeRows, typeSpecRows,
+                foreignNativePointerTypeRows, program.NativePointerTypes,
+                foreignNativeStructureTypeDefRows,
+                foreignNativeTypeDefTypeSpecRows,
+                primitive => checked((int)GetBuiltInTypeSpecRef(primitive,
+                    builtInTypeSpecRows, typeSpecRows)));
+            return checked((uint)row);
+        }
+
+        uint GetForeignNativeInterfaceReceiverTypeSpecRef(
+            bool requiresMutableReceiver)
+        {
+            if (foreignReceiverTypeSpecRows.TryGetValue(
+                    requiresMutableReceiver, out var existing))
+            {
+                return existing;
+            }
+
+            var row = checked((uint)typeSpecRows.Count + 1);
+            typeSpecRows.Add(TrRmTypeSpecTableWriter.InlineFamily(0x8C, 0,
+                requiresMutableReceiver ? (byte)1 : (byte)0));
+            foreignReceiverTypeSpecRows.Add(requiresMutableReceiver, row);
+            return row;
+        }
+
         var genericParameterRows = ReadGenericParamRows(sections);
         var constraintRows = ReadConstraintRows(sections);
         var associatedTypeDefRows
@@ -6725,6 +6652,19 @@ public static partial class TrRmExecutableCompiler
         var interfaceDefRows = new List<TrRmInterfaceDefRow>(
             emissions.Count);
         var interfaceMethodRows = new List<TrRmInterfaceMethodRow>();
+        var foreignInterfaceRows
+            = new List<TrRmForeignNativeInterfaceRow>(emissions.Count);
+        var foreignInterfaceContractRows = new List<TrRmContractRow>();
+        var foreignInterfacePredicateGraphs
+            = new List<TrRmPredicateGraphRow>();
+        var foreignInterfacePredicateFootprints
+            = new List<TrRmPredicateReadFootprintRow>();
+        var foreignInterfacePredicateRoots
+            = new List<TrRmPredicateReadRootRow>();
+        var foreignInterfacePredicateNodes
+            = new List<TrRmPredicateNodeRow>();
+        var foreignInterfacePredicateOperands
+            = new List<TrRmPredicateNodeOperandRow>();
         var emissionOrdinal = 0;
         var emittedMethods = 0;
         var emittedSignatures = 0;
@@ -6736,6 +6676,19 @@ public static partial class TrRmExecutableCompiler
             var typeDefRow = checked(typeDefCount + emissionOrdinal + 1);
             var interfaceDefRow = checked(interfaceDefCount
                 + emissionOrdinal + 1);
+            if (foreignNativeInterface)
+            {
+                if (definition.ForeignNativeInterface
+                    is not BoundForeignNativeInterfaceLayout layout)
+                {
+                    throw Unsupported(
+                        "An imported F+I interface has no retained vtable layout.");
+                }
+
+                foreignInterfaceRows.Add(new TrRmForeignNativeInterfaceRow(
+                    checked((uint)interfaceDefRow), 1,
+                    layout.VTableByteOffset));
+            }
             var moduleRefRow = GetModuleRefRow(emission.Import);
             var namespaceStringRow = names.Count + 1;
             var separator = definition.QualifiedName.LastIndexOf('.',
@@ -6771,10 +6724,14 @@ public static partial class TrRmExecutableCompiler
                 formalConstraints.Add(constraint);
             }
 
-            var interfaceTypeSpecRow = checked(
-                (uint)typeSpecRows.Count + 1);
-            typeSpecRows.Add(TrRmTypeSpecTableWriter.Reference(0x02,
-                checked((uint)typeDefRow)));
+            var interfaceTypeSpecRow = 0u;
+            if (!foreignNativeInterface)
+            {
+                interfaceTypeSpecRow = checked(
+                    (uint)typeSpecRows.Count + 1);
+                typeSpecRows.Add(TrRmTypeSpecTableWriter.Reference(0x02,
+                    checked((uint)typeDefRow)));
+            }
             var formalTypeSpecRows = new Dictionary<int, uint>();
             var formalTypeSpecArguments = new uint[
                 definition.Formals.Length];
@@ -6882,11 +6839,16 @@ public static partial class TrRmExecutableCompiler
                 {
                     var parameter = member.Parameters[parameterOrdinal];
                     var parameterTypeSpecRef
-                        = GenericInterfaceTypeSpecRef(parameter.Type,
-                            formalTypeSpecRows, builtInTypeSpecRows,
-                            typeSpecRows);
+                        = foreignNativeInterface
+                            ? GetForeignNativeInterfaceTypeSpecRef(
+                                parameter.Type)
+                            : GenericInterfaceTypeSpecRef(parameter.Type,
+                                formalTypeSpecRows, builtInTypeSpecRows,
+                                typeSpecRows);
                     var defaultConstantSourceRow = 0u;
-                    if (schema.UsesClassParameterDefaults())
+                    if (schema.UsesClassParameterDefaults()
+                        || schema
+                            .UsesForeignNativeInterfaceParameterSurface())
                     {
                         if (parameter.DefaultValue is BoundConstant value)
                         {
@@ -6945,17 +6907,43 @@ public static partial class TrRmExecutableCompiler
                 var resultTypeSpecRef = member.ResultType is null
                     ? GetBuiltInTypeSpecRef(PrimitiveType.Void,
                         builtInTypeSpecRows, typeSpecRows)
-                    : GenericInterfaceTypeSpecRef(member.ResultType,
-                        formalTypeSpecRows, builtInTypeSpecRows,
-                        typeSpecRows);
+                    : foreignNativeInterface
+                        ? GetForeignNativeInterfaceTypeSpecRef(
+                            member.ResultType)
+                        : GenericInterfaceTypeSpecRef(member.ResultType,
+                            formalTypeSpecRows, builtInTypeSpecRows,
+                            typeSpecRows);
                 AppendUInt32(signatureBytes, resultTypeSpecRef);
-                AppendUInt32(signatureBytes, receiverTypeSpecRef);
+                AppendUInt32(signatureBytes, foreignNativeInterface
+                    ? GetForeignNativeInterfaceReceiverTypeSpecRef(
+                        member.RequiresMutableReceiver)
+                    : receiverTypeSpecRef);
                 AppendUInt32(signatureBytes,
                     checked((uint)firstParameter));
                 AppendUInt32(signatureBytes,
                     checked((uint)member.Parameters.Length));
                 AppendUInt32(signatureBytes, 0);
                 AppendUInt32(signatureBytes, 0);
+
+                var methodContractFirst = 0;
+                var methodContractCount = 0;
+                if (foreignNativeInterface)
+                {
+                    (methodContractFirst, methodContractCount)
+                        = AddForeignNativeInterfaceMethodContracts(member,
+                            methodRow, contractCount,
+                            foreignInterfaceContractRows,
+                            foreignInterfacePredicateGraphs,
+                            foreignInterfacePredicateFootprints,
+                            foreignInterfacePredicateRoots,
+                            foreignInterfacePredicateNodes,
+                            foreignInterfacePredicateOperands,
+                            GetCount(sections, 0x0037),
+                            GetCount(sections, 0x0038),
+                            GetCount(sections, 0x0039),
+                            GetCount(sections, 0x003B),
+                            GetCount(sections, 0x003C));
+                }
 
                 AppendUInt32(methodBytes, checked((uint)typeDefRow));
                 AppendUInt32(methodBytes,
@@ -6964,8 +6952,10 @@ public static partial class TrRmExecutableCompiler
                 AppendUInt32(methodBytes, 2u
                     | (schema.UsesMethodReceiverAccess()
                         && member.RequiresMutableReceiver ? 4u : 0u));
-                AppendUInt32(methodBytes, 0);
-                AppendUInt32(methodBytes, 0);
+                AppendUInt32(methodBytes,
+                    checked((uint)methodContractFirst));
+                AppendUInt32(methodBytes,
+                    checked((uint)methodContractCount));
                 AppendUInt32(methodBytes, 0);
                 interfaceMethodRows.Add(new TrRmInterfaceMethodRow(
                     interfaceDefRow, interfaceMethodOrdinal++, methodRow));
@@ -7044,22 +7034,25 @@ public static partial class TrRmExecutableCompiler
             AppendUInt32(typeDefBytes, checked((uint)genericFirst));
             AppendUInt32(typeDefBytes,
                 checked((uint)definition.Formals.Length));
-            AppendUInt32(typeDefBytes,
-                checked((uint)(layoutCount + emissionOrdinal + 1)));
-            AppendUInt32(typeDefBytes, 1);
+            AppendUInt32(typeDefBytes, foreignNativeInterface ? 0
+                : checked((uint)(layoutCount + emissionOrdinal + 1)));
+            AppendUInt32(typeDefBytes, foreignNativeInterface ? 0u : 1u);
             AppendUInt32(typeDefBytes, 0);
             AppendUInt32(typeDefBytes, 0);
 
-            AppendUInt32(layoutBytes, checked((uint)typeDefRow));
-            AppendUInt32(layoutBytes, 0);
-            layoutBytes.Add(0);
-            layoutBytes.Add(0);
-            layoutBytes.Add(0);
-            layoutBytes.Add(0);
-            AppendUInt32(layoutBytes, 0);
-            AppendUInt32(layoutBytes, 0);
-            AppendUInt32(layoutBytes, 0);
-            AppendUInt32(layoutBytes, 0);
+            if (!foreignNativeInterface)
+            {
+                AppendUInt32(layoutBytes, checked((uint)typeDefRow));
+                AppendUInt32(layoutBytes, 0);
+                layoutBytes.Add(0);
+                layoutBytes.Add(0);
+                layoutBytes.Add(0);
+                layoutBytes.Add(0);
+                AppendUInt32(layoutBytes, 0);
+                AppendUInt32(layoutBytes, 0);
+                AppendUInt32(layoutBytes, 0);
+                AppendUInt32(layoutBytes, 0);
+            }
 
             emissionOrdinal++;
         }
@@ -7071,7 +7064,10 @@ public static partial class TrRmExecutableCompiler
         var finalMethodCount = checked(methodCount + emittedMethods);
         var finalSignatureCount = checked(signatureCount + emittedSignatures);
         var finalParameterCount = checked(parameterCount + emittedParameters);
-        var finalLayoutCount = checked(layoutCount + emissions.Count);
+        var finalContractCount = checked(contractCount
+            + foreignInterfaceContractRows.Count);
+        var finalLayoutCount = checked(layoutCount
+            + (foreignNativeInterface ? 0 : emissions.Count));
         var finalGenericParameterCount = genericParameterRows.Count;
         var moduleSection = GetSection(sections, 0x0001);
         var modules = new TrRmModuleTableReader(moduleSection.Bytes.Span,
@@ -7085,7 +7081,7 @@ public static partial class TrRmExecutableCompiler
         var finalTypeDefBytes = typeDefBytes.ToArray();
         var typeDefs = new TrRmTypeDefTableReader(finalTypeDefBytes,
             finalTypeDefCount, stringTable, modules, fieldCount,
-            finalGenericParameterCount, finalLayoutCount, contractCount,
+            finalGenericParameterCount, finalLayoutCount, finalContractCount,
             schema);
         var typeSpecBytes = TrRmTypeSpecTableWriter.Encode(typeSpecRows,
             finalTypeDefCount, importRows.Count,
@@ -7104,7 +7100,7 @@ public static partial class TrRmExecutableCompiler
         var methods = finalMethodCount == 0 ? default
             : new TrRmMethodDefTableReader(finalMethodBytes,
                 finalMethodCount, stringTable, modules, typeDefs, signatures,
-                contractCount, GetCount(sections, 0x0020), schema);
+                finalContractCount, GetCount(sections, 0x0020), schema);
         var genericParameterBytes = genericParameterRows.Count == 0 ? []
             : TrRmGenericParamTableWriter.Encode(genericParameterRows,
                 stringTable, typeDefs, methods, signatures, typeSpecs,
@@ -7170,6 +7166,145 @@ public static partial class TrRmExecutableCompiler
             : new TrRmFeatureTableReader(
                 GetSection(sections, 0x0004).Bytes.Span,
                 featureCount, schema);
+        if (foreignNativeInterface)
+        {
+            var finalParameterBytes = parameterBytes.ToArray();
+            var parameters = finalParameterCount == 0 ? default
+                : new TrRmParamTableReader(finalParameterBytes,
+                    finalParameterCount, signatures, typeSpecs, schema);
+            var targetProfileSection = GetSection(sections, 0x0048);
+            var targetProfiles = new TrRmTargetProfileTableReader(
+                targetProfileSection.Bytes.Span,
+                checked((int)targetProfileSection.RecordCount), schema);
+            var targetProfileRow = 0;
+            for (var row = 1; row <= targetProfiles.Count; row++)
+            {
+                var profile = targetProfiles.GetProfile(row);
+                if (profile.ProfileId
+                        != TrRmTargetProfileTableReader
+                            .WindowsX64NativeProfileId
+                    || profile.RuleRevision
+                        != TrRmTargetProfileTableReader
+                            .WindowsX64NativeProfileRuleRevision)
+                {
+                    continue;
+                }
+
+                if (targetProfileRow != 0)
+                {
+                    throw Invalid(
+                        "The F+I TargetProfile table has duplicate Windows x64 native profiles.");
+                }
+
+                targetProfileRow = row;
+            }
+            if (targetProfileRow == 0)
+            {
+                throw Invalid(
+                    "Imported F+I declarations have no Windows x64 native TargetProfile.");
+            }
+            if (foreignInterfaceRows.Count != emissions.Count)
+            {
+                throw Invalid(
+                    "Imported F+I declarations have an incomplete layout-row set.");
+            }
+            foreignInterfaceRows = [.. foreignInterfaceRows.Select(
+                row => row with {
+                    TargetProfileRow = checked((uint)targetProfileRow),
+                })];
+            var foreignInterfaceBytes
+                = TrRmForeignNativeInterfaceTableWriter.Encode(
+                    foreignInterfaceRows, interfaces, targetProfiles);
+            SetSection(sections, 0x004C,
+                checked((uint)foreignInterfaceRows.Count),
+                foreignInterfaceBytes);
+
+            if (foreignInterfaceContractRows.Count != 0)
+            {
+                var existingContractRows = ReadVariableRows(sections,
+                    0x001B, 8, 4);
+                var contractRows = new List<TrRmContractRow>(
+                    existingContractRows.Count
+                        + foreignInterfaceContractRows.Count);
+                foreach (var existingRow in existingContractRows)
+                {
+                    var data = existingRow.Span;
+                    contractRows.Add(new TrRmContractRow(
+                        BinaryPrimitives.ReadUInt32LittleEndian(data),
+                        BinaryPrimitives.ReadUInt16LittleEndian(
+                            data[4..]),
+                        data[8..].ToArray()));
+                }
+                contractRows.AddRange(foreignInterfaceContractRows);
+                var predicateGraphCount = checked(
+                    GetCount(sections, 0x0037)
+                    + foreignInterfacePredicateGraphs.Count);
+                var contractBytes
+                    = TrRmContractTableWriter
+                        .EncodeForeignInvocationDraft(contractRows,
+                            typeDefs, methods, signatures, parameters,
+                            typeSpecs, features, modules,
+                            predicateGraphCount, schema);
+                SetSection(sections, 0x001B,
+                    checked((uint)finalContractCount), contractBytes);
+
+                if (foreignInterfacePredicateGraphs.Count != 0)
+                {
+                    var predicateGraphRows = checked(
+                        GetCount(sections, 0x0037)
+                        + foreignInterfacePredicateGraphs.Count);
+                    var predicateFootprintRows = checked(
+                        GetCount(sections, 0x0038)
+                        + foreignInterfacePredicateFootprints.Count);
+                    var predicateRootRows = checked(
+                        GetCount(sections, 0x0039)
+                        + foreignInterfacePredicateRoots.Count);
+                    var predicateNodeRows = checked(
+                        GetCount(sections, 0x003B)
+                        + foreignInterfacePredicateNodes.Count);
+                    var predicateOperandRows = checked(
+                        GetCount(sections, 0x003C)
+                        + foreignInterfacePredicateOperands.Count);
+                    var predicateGraphBytes
+                        = TrRmPredicateGraphTableWriter.Encode(
+                            foreignInterfacePredicateGraphs,
+                            predicateNodeRows, predicateFootprintRows);
+                    var predicateFootprintBytes
+                        = TrRmPredicateReadFootprintTableWriter.Encode(
+                            foreignInterfacePredicateFootprints,
+                            predicateRootRows, 0);
+                    var predicateRootBytes
+                        = TrRmPredicateReadRootTableWriter.Encode(
+                            foreignInterfacePredicateRoots, 0, 0, schema);
+                    var predicateNodeBytes
+                        = TrRmPredicateNodeTableWriter.Encode(
+                            foreignInterfacePredicateNodes,
+                            predicateOperandRows, typeSpecs, schema);
+                    var operandCounts = new TrRmPredicateTableRowCounts(
+                        predicateRootRows, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+                    var predicateOperandBytes
+                        = TrRmPredicateNodeOperandTableWriter.Encode(
+                            foreignInterfacePredicateOperands,
+                            operandCounts, schema);
+                    AppendRowsSection(sections, 0x0037,
+                        checked((uint)predicateGraphRows),
+                        predicateGraphBytes);
+                    AppendRowsSection(sections, 0x0038,
+                        checked((uint)predicateFootprintRows),
+                        predicateFootprintBytes);
+                    AppendRowsSection(sections, 0x0039,
+                        checked((uint)predicateRootRows),
+                        predicateRootBytes);
+                    AppendRowsSection(sections, 0x003B,
+                        checked((uint)predicateNodeRows),
+                        predicateNodeBytes);
+                    AppendRowsSection(sections, 0x003C,
+                        checked((uint)predicateOperandRows),
+                        predicateOperandBytes);
+                }
+            }
+        }
+
         var finalImportBytes = TrRmImportTableWriter.Encode(importRows,
             stringTable, moduleRefs, typeDefs, methods, default, interfaces,
             associatedTypeDefs, fields, features, modules, schema);
@@ -7182,8 +7317,11 @@ public static partial class TrRmExecutableCompiler
             checked((uint)typeSpecRows.Count), typeSpecBytes);
         SetSection(sections, 0x0013, checked((uint)finalTypeDefCount),
             finalTypeDefBytes);
-        SetSection(sections, 0x0015, checked((uint)finalLayoutCount),
-            layoutBytes.ToArray());
+        if (!foreignNativeInterface || finalLayoutCount != 0)
+        {
+            SetSection(sections, 0x0015, checked((uint)finalLayoutCount),
+                layoutBytes.ToArray());
+        }
         SetSection(sections, 0x0016, checked((uint)finalMethodCount),
             finalMethodBytes);
         SetSection(sections, 0x0017, checked((uint)finalSignatureCount),
@@ -7221,6 +7359,48 @@ public static partial class TrRmExecutableCompiler
         CaptureImportedGenericInterfaceEmissions(BoundProgram program,
             TrRmArtifactSchema schema)
     {
+        if (schema.UsesForeignNativeInterface())
+        {
+            var importedFni = new List<GenericImportedInterfaceEmission>();
+            var selectors = new HashSet<(string ProducerIdentity,
+                string ExportKey, string QualifiedName, uint TargetRequirement,
+                uint RuntimePolicy)>();
+            foreach (var definition in program.Interfaces)
+            {
+                if (definition.ForeignNativeInterface is null)
+                {
+                    throw Unsupported(
+                        "F+I imported references cannot retain ordinary interface declarations.");
+                }
+
+                if (definition.ModuleImport is not BoundModuleImport import)
+                {
+                    continue;
+                }
+
+                ValidateImportedGenericInterface(definition, schema,
+                    program);
+                if (!selectors.Add((import.ProducerIdentity,
+                        import.ExportKey, definition.QualifiedName,
+                        import.TargetRequirement, import.RuntimePolicy)))
+                {
+                    throw Unsupported(
+                        "F+I imported interface references contain a duplicate owner identity.");
+                }
+
+                importedFni.Add(new GenericImportedInterfaceEmission(
+                    definition, import));
+            }
+
+            return [.. importedFni.OrderBy(
+                    static emission => emission.Import.ProducerIdentity,
+                    StringComparer.Ordinal)
+                .ThenBy(static emission => emission.Import.ExportKey,
+                    StringComparer.Ordinal)
+                .ThenBy(static emission => emission.Definition.QualifiedName,
+                    StringComparer.Ordinal)];
+        }
+
         var required = new Dictionary<(
             string ProviderIdentity, string ExportKey, string QualifiedName,
             int Arity, uint TargetRequirement, uint RuntimePolicy),
@@ -7396,7 +7576,7 @@ public static partial class TrRmExecutableCompiler
                     "An imported G1 interface constraint has no unique retained provider declaration.");
             }
 
-            ValidateImportedGenericInterface(matches[0], schema);
+            ValidateImportedGenericInterface(matches[0], schema, program);
             var definitionVisits = checked(1
                 + matches[0].Formals.Length
                 + matches[0].Members.Length
@@ -7422,8 +7602,43 @@ public static partial class TrRmExecutableCompiler
     }
 
     private static void ValidateImportedGenericInterface(
-        BoundInterfaceDefinition definition, TrRmArtifactSchema schema)
+        BoundInterfaceDefinition definition, TrRmArtifactSchema schema,
+        BoundProgram program)
     {
+        if (schema.UsesForeignNativeInterface())
+        {
+            if (!definition.IsPublic
+                || definition.Accessibility
+                    != BoundInterfaceAccessibility.Public
+                || definition.IsPartial
+                || definition.ModuleImport is not BoundModuleImport import
+                || string.IsNullOrEmpty(import.ProducerIdentity)
+                || string.IsNullOrEmpty(import.ExportKey)
+                || !IsValidSourceGenericMethodExportKey(import.ExportKey)
+                || import.ExportKey.Contains('\0',
+                    StringComparison.Ordinal)
+                || !definition.Bases.IsEmpty
+                || !definition.Formals.IsEmpty
+                || !definition.Constraints.IsEmpty
+                || definition.Members.IsDefaultOrEmpty
+                || !ForeignNativeInterfaceContract.IsValidTable(
+                    [definition], program.NativePointerTypes,
+                    program.NativeFunctionPointerSignatures,
+                    program.NativeCoreRegistration)
+                || !NativeOutputContractValidator.IsValidInterfaceTable(
+                    [definition], program.Structures,
+                    program.NativePointerTypes,
+                    program.NativeFunctionPointerSignatures,
+                    program.EnumDefinitions, program.NativeCoreRegistration,
+                    program.NativeOutputCoreRegistration))
+            {
+                throw Unsupported(
+                    $"Imported ForeignNativeInterface '{definition.QualifiedName}' has an invalid retained contract.");
+            }
+
+            return;
+        }
+
         if (!definition.IsPublic
             || definition.Accessibility
                 != BoundInterfaceAccessibility.Public
@@ -7623,6 +7838,157 @@ public static partial class TrRmExecutableCompiler
                 throw Unsupported(
                     $"Imported associated type '{definition.QualifiedName}.{member.Name}' is outside the CM1AR1 declaration subset.");
             }
+        }
+    }
+
+    private static (int First, int Count)
+        AddForeignNativeInterfaceMethodContracts(
+        BoundInterfaceMemberDefinition member, int methodRow,
+        int contractBaseCount, List<TrRmContractRow> contractRows,
+        List<TrRmPredicateGraphRow> predicateGraphs,
+        List<TrRmPredicateReadFootprintRow> predicateFootprints,
+        List<TrRmPredicateReadRootRow> predicateRoots,
+        List<TrRmPredicateNodeRow> predicateNodes,
+        List<TrRmPredicateNodeOperandRow> predicateOperands,
+        int predicateGraphBaseCount, int predicateFootprintBaseCount,
+        int predicateRootBaseCount, int predicateNodeBaseCount,
+        int predicateOperandBaseCount)
+    {
+        if (member.NativeCallableConvention
+                is not NativeCallingConvention convention)
+        {
+            throw Unsupported(
+                "F+I member contracts require a normalized convention.");
+        }
+
+        var firstContract = checked(contractBaseCount + contractRows.Count
+            + 1);
+        var firstContractIndex = contractRows.Count;
+        var methodOwner = 0x1600_0000u | checked((uint)methodRow);
+        var effectsPayload = new byte[sizeof(uint)];
+        var effectsMask = 4u | (member.DoesNotReturn ? 2u : 0u);
+        BinaryPrimitives.WriteUInt32LittleEndian(effectsPayload,
+            effectsMask);
+        contractRows.Add(new TrRmContractRow(methodOwner, 1,
+            effectsPayload));
+        contractRows.Add(new TrRmContractRow(methodOwner, 0x0C,
+            StandardNativeCallableContractPayload(convention)));
+        _ = AddForeignNativeInterfaceDependencyContracts(
+            member.Dependencies, methodOwner, contractRows);
+
+        if (!member.NativeOutputContracts.IsDefaultOrEmpty)
+        {
+            if (member.DoesNotReturn)
+            {
+                throw Unsupported(
+                    "F+I NativeOutput requires a normal completion outcome.");
+            }
+
+            var selectors = new SortedSet<byte>();
+            foreach (var output in member.NativeOutputContracts)
+            {
+                _ = selectors.Add((byte)output.SuccessSelector);
+                _ = selectors.Add((byte)output.ComplementSelector);
+            }
+
+            var graphBySelector = new Dictionary<byte, int>();
+            uint phaseOrdinal = 0;
+            foreach (var selector in selectors)
+            {
+                var graphRow = checked(predicateGraphBaseCount
+                    + predicateGraphs.Count + 1);
+                var footprintRow = checked(predicateFootprintBaseCount
+                    + predicateFootprints.Count + 1);
+                var rootRow = checked(predicateRootBaseCount
+                    + predicateRoots.Count + 1);
+                var nodeRow = checked(predicateNodeBaseCount
+                    + predicateNodes.Count + 1);
+                var operandRow = checked(predicateOperandBaseCount
+                    + predicateOperands.Count + 1);
+                predicateGraphs.Add(new TrRmPredicateGraphRow(nodeRow,
+                    footprintRow));
+                predicateFootprints.Add(
+                    new TrRmPredicateReadFootprintRow(rootRow, 1, 0, 0));
+                predicateRoots.Add(new TrRmPredicateReadRootRow(5, 0));
+                predicateNodes.Add(new TrRmPredicateNodeRow(selector,
+                    0xF200_0001, checked((uint)operandRow), 1));
+                predicateOperands.Add(new TrRmPredicateNodeOperandRow(1,
+                    checked((uint)rootRow)));
+                var predicatePayload = new byte[12];
+                predicatePayload[0] = 3;
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    predicatePayload.AsSpan(4), phaseOrdinal++);
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    predicatePayload.AsSpan(8), checked((uint)graphRow));
+                contractRows.Add(new TrRmContractRow(methodOwner, 0x0B,
+                    predicatePayload));
+                graphBySelector.Add(selector, graphRow);
+            }
+
+            foreach (var output in member.NativeOutputContracts)
+            {
+                var resultType = member.ResultType
+                    is { Kind: BoundInterfaceTypeKind.Primitive }
+                        ? member.ResultType.PrimitiveType
+                        : throw Unsupported(
+                            "F+I NativeOutput requires a scalar result.");
+                var resultCondition
+                    = (output.SuccessSelector, resultType) switch {
+                        (NativeOutputSelector.NonZero,
+                            PrimitiveType.UInt32)
+                            => DirectNativeImportContract
+                                .UInt32NonZeroResultCondition,
+                        (NativeOutputSelector.NonZero,
+                            PrimitiveType.Int32)
+                            => DirectNativeImportContract
+                                .Int32NonZeroResultCondition,
+                        (NativeOutputSelector.NonNegative,
+                            PrimitiveType.Int32)
+                            => DirectNativeImportContract
+                                .Int32NonNegativeResultCondition,
+                        _ => throw Unsupported(
+                            "F+I NativeOutput has an unsupported result selector."),
+                    };
+                contractRows.Add(new TrRmContractRow(methodOwner, 0x12,
+                    NativeOutputPayload(output.FormalOrdinal,
+                        resultCondition, 1)));
+                AddOutputState((byte)output.SuccessState,
+                    output.FormalOrdinal,
+                    graphBySelector[(byte)output.SuccessSelector]);
+                AddOutputState((byte)output.ComplementState,
+                    output.FormalOrdinal,
+                    graphBySelector[(byte)output.ComplementSelector]);
+                foreach (var dependency in output.Dependencies)
+                {
+                    var dependencyPayload = new byte[12];
+                    dependencyPayload[0] = dependency.DestinationKind;
+                    dependencyPayload[1] = (byte)dependency.SourceKind;
+                    dependencyPayload[2] = (byte)dependency.Relationship;
+                    dependencyPayload[3] = (byte)dependency.Phase;
+                    BinaryPrimitives.WriteUInt32LittleEndian(
+                        dependencyPayload.AsSpan(4),
+                        checked((uint)dependency.DestinationOrdinal));
+                    BinaryPrimitives.WriteUInt32LittleEndian(
+                        dependencyPayload.AsSpan(8),
+                        checked((uint)dependency.SourceOrdinal));
+                    contractRows.Add(new TrRmContractRow(methodOwner, 4,
+                        dependencyPayload));
+                }
+            }
+        }
+
+        return (firstContract,
+            checked(contractRows.Count - firstContractIndex));
+
+        void AddOutputState(byte state, int formalOrdinal, int graphRow)
+        {
+            var payload = new byte[12];
+            BinaryPrimitives.WriteUInt32LittleEndian(payload,
+                checked((uint)formalOrdinal));
+            BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(4),
+                checked((uint)graphRow));
+            payload[8] = state;
+            contractRows.Add(new TrRmContractRow(methodOwner, 2, payload));
         }
     }
 
@@ -10174,6 +10540,18 @@ public static partial class TrRmExecutableCompiler
         {
             sections.Add(replacement);
         }
+    }
+
+    private static void AppendRowsSection(List<TrRmSection> sections,
+        ushort kind, uint recordCount, byte[] appendedBytes)
+    {
+        var existingBytes = TryGetSection(sections, kind, out var existing)
+            ? existing.Bytes.ToArray() : [];
+        var combined = new byte[checked(existingBytes.Length
+            + appendedBytes.Length)];
+        existingBytes.CopyTo(combined, 0);
+        appendedBytes.CopyTo(combined, existingBytes.Length);
+        SetSection(sections, kind, recordCount, combined);
     }
 
     private static int ReadInt(ReadOnlySpan<byte> bytes, int offset)

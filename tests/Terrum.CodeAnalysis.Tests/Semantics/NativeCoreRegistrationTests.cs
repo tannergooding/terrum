@@ -350,7 +350,13 @@ internal sealed class NativeCoreRegistrationTests
     {
         var (native, output) = NativeOutputCoreRegistrationTests
             .CreateCombinedRegistrations(includeForeignNativeInterface: true);
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var options = new CompilationOptions {
+            NativeCoreRegistration = native,
+            LayoutCoreRegistration =
+                CreateLayoutRegistration(native),
+            NativeOutputCoreRegistration = output,
+        };
+        const string providerSource = """
             [Terrum.Interop.NativeCallable(
                 CallConv: Terrum.Interop.NativeCallingConvention.Cdecl)]
             [Terrum.Interop.ForeignNativeInterface(VTableByteOffset: uint32(0))]
@@ -366,13 +372,11 @@ internal sealed class NativeCoreRegistrationTests
                 [return: Terrum.CodeAnalysis.DependsOn(nameof(source))]
                 [return: Terrum.CodeAnalysis.ForwardsBacking(nameof(source))]
                 public unsafe ptr<int32> Get(ptr<int32> source);
+                public unsafe int32 Count(int32 count = 1);
             }
-            """), new CompilationOptions {
-                NativeCoreRegistration = native,
-                LayoutCoreRegistration =
-                    CreateLayoutRegistration(native),
-                NativeOutputCoreRegistration = output,
-            });
+            """;
+        var compilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(providerSource), options);
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = compilation.Program
@@ -460,6 +464,72 @@ internal sealed class NativeCoreRegistrationTests
             """), reference);
         Assert.That(caller.HasErrors, Is.False,
             string.Join(Environment.NewLine, caller.Diagnostics));
+
+        var changedProviderCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(providerSource
+                .Replace("source", "input", StringComparison.Ordinal)
+                .Replace("int32 Count(int32 count = 1)",
+                    "int32 Count(int32 limit = 2)",
+                    StringComparison.Ordinal)), options);
+        Assert.That(changedProviderCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                changedProviderCompilation.Diagnostics));
+        var changedProviderProgram = changedProviderCompilation.Program
+            ?? throw new AssertionException(
+                "Expected a bound replacement provider.");
+        var changedProviderMembers
+            = changedProviderProgram.Interfaces.Single().Members;
+        var changedProviderExport = new TrRmSourceTypeExport("", "IProbe",
+            "provider/IProbe") {
+            GenericArity = 0,
+            InterfaceMethodExports = [.. changedProviderMembers.Select(member =>
+                new TrRmSourceInterfaceMethodExport(
+                    member.SourceInputOrdinal, member.SourceDeclarationSpan,
+                    $"provider/IProbe.{member.Name}"))],
+        };
+        var changedProviderArtifact = TrRmExecutableCompiler.EmitStandard(
+            changedProviderProgram, "provider.module",
+            "trrm/1-draft-foreign-native-interface-parameter-surface-1", 1,
+            [changedProviderExport]);
+
+        var importOnlyCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(""), reference);
+        Assert.That(importOnlyCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                importOnlyCompilation.Diagnostics));
+        var importerArtifact = TrRmExecutableCompiler.EmitStandard(
+            importOnlyCompilation.Program
+                ?? throw new AssertionException(
+                    "Expected an imported FNI program."),
+            "consumer.module",
+            "trrm/1-draft-foreign-native-interface-parameter-surface-1", 1,
+            []);
+        var importerTables = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
+                importerArtifact, schema));
+        Assert.That(importerTables.ForeignNativeInterfaces.Count,
+            Is.EqualTo(1));
+        Assert.That(importerTables.Imports.Count, Is.EqualTo(4));
+
+        var reboundReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(
+                "trrm/1-draft-foreign-native-interface-parameter-surface-1",
+                importerArtifact), "consumer.module", [
+                new TrRmStandardArtifactInput(
+                    "trrm/1-draft-foreign-native-interface-parameter-surface-1",
+                    changedProviderArtifact),
+            ]);
+        var reboundInterface = reboundReference.Interfaces.Single();
+        Assert.That(reboundInterface.ModuleImport?.ProducerIdentity,
+            Is.EqualTo("provider.module"));
+        Assert.That(reboundInterface.Members[0].NativeOutputContracts
+            .Single().FormalOrdinal, Is.EqualTo(1));
+        var countMember = reboundInterface.Members.Single(static member =>
+            member.Name == "Count");
+        Assert.That(countMember.Parameters.Single().Name,
+            Is.EqualTo("limit"));
+        Assert.That(countMember.Parameters.Single().DefaultValue,
+            Is.Not.Null);
     }
 
     [Test]

@@ -11,18 +11,12 @@ namespace Terrum.CodeAnalysis.Modules;
 public static partial class TrRmExecutableCompiler
 {
     private static ImmutableArray<BoundInterfaceDefinition>
-        CreateExportedForeignNativeInterfaceDefinitions(
+        CreateForeignNativeInterfaceDefinitions(
         TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
         GenericMethodReadContext context, int artifactIndex, int moduleRow)
     {
-        var (moduleRefStart, moduleRefEnd)
-            = tables.Modules.GetModuleRefRange(moduleRow);
-        if (moduleRefStart != moduleRefEnd)
-        {
-            throw Unsupported(
-                "The source-free F+I reader does not yet bind imported interface expectations.");
-        }
-
+        var importRows = CreateGenericInterfaceImportRows(tables, moduleRow);
+        var usedImportRows = new HashSet<int>();
         var typeExportKeys = new Dictionary<uint, string>();
         var methodExportKeys = new Dictionary<uint, List<string>>();
         foreach (var (definition, exportKey)
@@ -77,8 +71,12 @@ public static partial class TrRmExecutableCompiler
             = tables.Modules.GetTypeDefRange(moduleRow);
         var (targetRequirement, runtimePolicy)
             = tables.Modules.GetRequirements(moduleRow);
-        var definitions = ImmutableArray.CreateBuilder<
+        var exportedDefinitions = ImmutableArray.CreateBuilder<
             BoundInterfaceDefinition>();
+        var exposedDefinitions = ImmutableArray.CreateBuilder<
+            BoundInterfaceDefinition>();
+        var exposedProviderViews = new HashSet<(
+            string ProducerIdentity, string ExportKey)>();
         for (var typeDef = firstTypeDef; typeDef < endTypeDef; typeDef++)
         {
             var interfaceDef
@@ -89,8 +87,17 @@ public static partial class TrRmExecutableCompiler
             }
 
             var typeDefId = 0x1300_0000u | checked((uint)typeDef);
-            if (!typeExportKeys.TryGetValue(typeDefId,
-                    out var typeExportKey))
+            var hasTypeExport = typeExportKeys.TryGetValue(typeDefId,
+                out var typeExportKey);
+            var hasTypeImport = importRows.DefinitionRows.TryGetValue(
+                typeDefId, out var typeImportRow);
+            if (hasTypeExport && hasTypeImport)
+            {
+                throw Invalid(
+                    "A ForeignNativeInterface TypeDef is both exported and imported.");
+            }
+
+            if (!hasTypeExport && !hasTypeImport)
             {
                 var (unexportedFirstMethod, unexportedMethodCount)
                     = tables.Interfaces.GetMethodRange(interfaceDef);
@@ -108,15 +115,60 @@ public static partial class TrRmExecutableCompiler
                         throw Invalid(
                             "A ForeignNativeInterface MethodDef is exported without its owner TypeDef.");
                     }
+                    if (importRows.MethodRows.ContainsKey(methodId))
+                    {
+                        throw Invalid(
+                            "A ForeignNativeInterface MethodDef is imported without its owner TypeDef.");
+                    }
                 }
 
                 continue;
             }
 
-            if (definitions.Count >= SemanticVerifier.MaximumAnalysisVisits)
+            if (exposedDefinitions.Count
+                >= SemanticVerifier.MaximumAnalysisVisits)
             {
                 throw Unsupported(
                     "The F+I source view exceeds the supported declaration limit.");
+            }
+
+            if (!hasTypeExport)
+            {
+                var (firstMethod, methodCount)
+                    = tables.Interfaces.GetMethodRange(interfaceDef);
+                if (!foreignInterfaceRowsByOwner.TryGetValue(interfaceDef,
+                        out var foreignInterfaceRow))
+                {
+                    throw Invalid(
+                        "A ForeignNativeInterface InterfaceDef has no layout row.");
+                }
+
+                var providerView
+                    = BindExpectedForeignNativeInterfaceDefinition(tables,
+                        context, artifactIndex, moduleRow, interfaceDef,
+                        typeDef, typeImportRow, importRows,
+                        usedImportRows, foreignInterfaceRow,
+                        context.ForeignNativeInterfacePointerTypes,
+                        signatureIndexByAnchorMethod,
+                        structureTypeByTypeDef, firstMethod, methodCount);
+                if (!context.InterfaceDefinitionsByTypeDef.TryAdd(
+                        (artifactIndex, moduleRow, typeDef), providerView))
+                {
+                    throw Invalid(
+                        "A ForeignNativeInterface TypeDef has multiple declaration views.");
+                }
+
+                var providerImport = providerView.ModuleImport
+                    ?? throw Invalid(
+                        "A selected ForeignNativeInterface provider has no module identity.");
+                if (exposedProviderViews.Add((
+                        providerImport.ProducerIdentity,
+                        providerImport.ExportKey)))
+                {
+                    exposedDefinitions.Add(providerView);
+                }
+
+                continue;
             }
 
             var (firstMethod, methodCount)
@@ -183,13 +235,405 @@ public static partial class TrRmExecutableCompiler
                     "A ForeignNativeInterface TypeDef ExportKey selects multiple declarations.");
             }
 
-            definitions.Add(definition);
+            exportedDefinitions.Add(definition);
+            exposedDefinitions.Add(definition);
         }
 
-        var result = definitions.ToImmutable();
+        foreach (var importRow in importRows.DefinitionRows.Values)
+        {
+            if (!usedImportRows.Contains(importRow))
+            {
+                throw Invalid(
+                    "A ForeignNativeInterface TypeDef Import is unused by a retained declaration.");
+            }
+        }
+        foreach (var importRowsForMethod in importRows.MethodRows.Values)
+        {
+            foreach (var importRow in importRowsForMethod)
+            {
+                if (!usedImportRows.Contains(importRow))
+                {
+                    throw Invalid(
+                        "A ForeignNativeInterface MethodDef Import is unused by a retained declaration.");
+                }
+            }
+        }
+        if (importRows.AssociatedTypeRows.Count != 0)
+        {
+            throw Invalid(
+                "A ForeignNativeInterface declaration contains an associated-type Import.");
+        }
+        var usedModuleRefs = new HashSet<int>();
+        for (var importRow = 1; importRow <= tables.Imports.Count;
+            importRow++)
+        {
+            var moduleRefRow
+                = tables.Imports.GetModuleRefForImportRow(importRow);
+            if (tables.ModuleRefs.GetOwnerModule(moduleRefRow) != moduleRow)
+            {
+                continue;
+            }
+
+            if (!usedImportRows.Contains(importRow))
+            {
+                throw Unsupported(
+                    "The F+I source reference has an unrelated unbound Import.");
+            }
+
+            _ = usedModuleRefs.Add(moduleRefRow);
+        }
+
+        var (moduleRefStart, moduleRefEnd)
+            = tables.Modules.GetModuleRefRange(moduleRow);
+        for (var moduleRefRow = moduleRefStart;
+            moduleRefRow < moduleRefEnd; moduleRefRow++)
+        {
+            if (!usedModuleRefs.Contains(moduleRefRow))
+            {
+                throw Unsupported(
+                    "The F+I source reference has an unused ModuleRef.");
+            }
+        }
+
+        var result = exportedDefinitions.ToImmutable();
         context.ExportedInterfaceDefinitions.Add(
             (artifactIndex, moduleRow), result);
-        return result;
+        return exposedDefinitions.ToImmutable();
+    }
+
+    private static BoundInterfaceDefinition
+        BindExpectedForeignNativeInterfaceDefinition(
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+        GenericMethodReadContext context, int artifactIndex, int moduleRow,
+        int interfaceDef, int typeDef, int typeImportRow,
+        GenericInterfaceImportRows importRows,
+        HashSet<int> usedImportRows, int foreignInterfaceRow,
+        List<NativePointerTypeDefinition> nativePointerTypeDefinitions,
+        int[] signatureIndexByAnchorMethod, int[] structureTypeByTypeDef,
+        int firstMethod, int methodCount)
+    {
+        _ = usedImportRows.Add(typeImportRow);
+        var typeModuleRef = tables.Imports.GetModuleRefForImportRow(
+            typeImportRow);
+        var selectedType = tables.Imports.GetBindingForImportRow(
+            typeImportRow);
+        if (tables.ModuleRefs.GetOwnerModule(typeModuleRef) != moduleRow
+            || !context.Modules.TryGetValue(selectedType.ProducerIdentity,
+                out var providerSelection))
+        {
+            throw Invalid(
+                "A ForeignNativeInterface TypeDef expectation has no selected provider.");
+        }
+
+        var providerModuleRow = providerSelection.ModuleRow;
+        var providerArtifactIndex = providerSelection.ArtifactIndex;
+        var providerRequirements = context.ModuleRequirements[
+            (providerArtifactIndex, providerModuleRow)];
+        if (providerRequirements.TargetRequirement
+                != selectedType.TargetRequirement
+            || providerRequirements.RuntimePolicy
+                != selectedType.RuntimePolicy)
+        {
+            throw Invalid(
+                "The selected F+I TypeDef provider does not match the retained Import.");
+        }
+
+        var providerKey = (providerSelection.ArtifactIndex,
+            providerModuleRow, selectedType.ExportKey);
+        if (!context.ExportedInterfaceDefinitionsByKey.TryGetValue(
+                providerKey, out var providerInterface))
+        {
+            var providerTables = TrRmStructuralMetadataValidator
+                .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
+                    context.Artifacts[providerArtifactIndex],
+                    context.Schema));
+            _ = CreateGenericInterfaceDefinitions(providerTables, context,
+                providerArtifactIndex, providerModuleRow);
+        }
+
+        if (!context.ExportedInterfaceDefinitionsByKey.TryGetValue(
+                providerKey, out providerInterface))
+        {
+            throw Invalid(
+                "The selected F+I TypeDef provider has no exported interface declaration.");
+        }
+
+        var providerImport = providerInterface.ModuleImport;
+        if (providerImport is null
+            || !StringComparer.Ordinal.Equals(providerImport.ProducerIdentity,
+                selectedType.ProducerIdentity)
+            || !StringComparer.Ordinal.Equals(providerImport.ExportKey,
+                selectedType.ExportKey)
+            || providerImport.TargetRequirement
+                != selectedType.TargetRequirement
+            || providerImport.RuntimePolicy != selectedType.RuntimePolicy)
+        {
+            throw Invalid(
+                "The selected F+I interface provider identity changed.");
+        }
+
+        if (!context.ForeignNativeInterfaceMembersByExportKey.TryGetValue(
+                providerKey, out var providerMembersByKey))
+        {
+            providerMembersByKey = new Dictionary<string,
+                BoundInterfaceMemberDefinition>(
+                    providerInterface.Members.Length,
+                    StringComparer.Ordinal);
+            foreach (var member in providerInterface.Members)
+            {
+                if (!providerMembersByKey.TryAdd(member.DeclarationKey,
+                        member))
+                {
+                    throw Invalid(
+                        "The selected F+I provider interface has duplicate method ExportKeys.");
+                }
+
+                foreach (var alias in member.AdditionalDeclarationKeys)
+                {
+                    if (!providerMembersByKey.TryAdd(alias, member))
+                    {
+                        throw Invalid(
+                            "The selected F+I provider interface has conflicting method aliases.");
+                    }
+                }
+            }
+
+            context.ForeignNativeInterfaceMembersByExportKey.Add(
+                providerKey, providerMembersByKey);
+        }
+
+        var methodExportKeys
+            = new ImmutableArray<string>[methodCount];
+        var selectedMethodKeys = new HashSet<string>(StringComparer.Ordinal);
+        for (var methodOrdinal = 0; methodOrdinal < methodCount;
+            methodOrdinal++)
+        {
+            var interfaceMethod = firstMethod + methodOrdinal;
+            if (tables.InterfaceMethods.GetOwnerInterfaceDef(interfaceMethod)
+                    != interfaceDef
+                || tables.InterfaceMethods.GetOrdinal(interfaceMethod)
+                    != methodOrdinal)
+            {
+                throw Invalid(
+                    "A ForeignNativeInterface InterfaceMethod expectation is not declaration-ordered.");
+            }
+
+            var methodRow = tables.InterfaceMethods.GetMethodDefRow(
+                interfaceMethod);
+            var methodId = 0x1600_0000u | checked((uint)methodRow);
+            if (!importRows.MethodRows.TryGetValue(methodId,
+                    out var methodImportRows)
+                || methodImportRows.Count == 0)
+            {
+                throw Invalid(
+                    "A ForeignNativeInterface InterfaceMethod has no MethodDef Import row.");
+            }
+
+            var exportsForMethod = ImmutableArray.CreateBuilder<string>(
+                methodImportRows.Count);
+            BoundInterfaceMemberDefinition? selectedMember = null;
+            foreach (var methodImportRow in methodImportRows)
+            {
+                if (!usedImportRows.Add(methodImportRow))
+                {
+                    throw Invalid(
+                        "A ForeignNativeInterface MethodDef Import is shared by multiple members.");
+                }
+
+                var methodModuleRef
+                    = tables.Imports.GetModuleRefForImportRow(
+                        methodImportRow);
+                var selectedMethod = tables.Imports
+                    .GetBindingForImportRow(methodImportRow);
+                if (tables.ModuleRefs.GetOwnerModule(methodModuleRef)
+                        != moduleRow
+                    || !StringComparer.Ordinal.Equals(
+                        selectedMethod.ProducerIdentity,
+                        selectedType.ProducerIdentity)
+                    || selectedMethod.TargetRequirement
+                        != selectedType.TargetRequirement
+                    || selectedMethod.RuntimePolicy
+                        != selectedType.RuntimePolicy
+                    || !selectedMethodKeys.Add(selectedMethod.ExportKey)
+                    || !providerMembersByKey.TryGetValue(
+                        selectedMethod.ExportKey, out var providerMember)
+                    || providerMember.Kind
+                        != BoundInterfaceMemberKind.Callable
+                    || providerMember.Ordinal != methodOrdinal
+                    || (selectedMember is not null
+                        && selectedMember.Ordinal != providerMember.Ordinal))
+                {
+                    throw Invalid(
+                        "A ForeignNativeInterface MethodDef Import selects a different or ambiguous provider member.");
+                }
+
+                selectedMember = providerMember;
+                exportsForMethod.Add(selectedMethod.ExportKey);
+            }
+
+            methodExportKeys[methodOrdinal] = [.. exportsForMethod
+                .OrderBy(static key => key, StringComparer.Ordinal)];
+        }
+
+        var interfaceNamespace = tables.TypeDefs.GetNamespace(typeDef);
+        var interfaceName = tables.TypeDefs.GetName(typeDef);
+        var qualifiedName = interfaceNamespace.Length == 0
+            ? interfaceName
+            : string.Concat(interfaceNamespace, ".", interfaceName);
+        var expected = ReadForeignNativeInterfaceDefinition(tables,
+            context, interfaceDef, typeDef, foreignInterfaceRow,
+            qualifiedName, selectedType.ExportKey,
+            selectedType.TargetRequirement, selectedType.RuntimePolicy,
+            methodExportKeys, nativePointerTypeDefinitions,
+            signatureIndexByAnchorMethod, structureTypeByTypeDef,
+            selectedType.ProducerIdentity);
+        ValidateForeignNativeInterfaceProviderContract(expected,
+            providerInterface, providerMembersByKey);
+        return providerInterface;
+    }
+
+    private static void ValidateForeignNativeInterfaceProviderContract(
+        BoundInterfaceDefinition expected, BoundInterfaceDefinition provider,
+        Dictionary<string, BoundInterfaceMemberDefinition>
+            providerMembersByKey)
+    {
+        if (expected.ModuleImport != provider.ModuleImport
+            || expected.ForeignNativeInterface
+                != provider.ForeignNativeInterface
+            || expected.IsPublic != provider.IsPublic
+            || expected.Accessibility != provider.Accessibility
+            || !expected.Bases.IsEmpty || !provider.Bases.IsEmpty
+            || !expected.Formals.IsEmpty || !provider.Formals.IsEmpty
+            || expected.Members.Length != provider.Members.Length)
+        {
+            throw Invalid(
+                "The selected F+I provider changes the retained owner contract.");
+        }
+
+        foreach (var expectedMember in expected.Members)
+        {
+            if (!providerMembersByKey.TryGetValue(expectedMember.DeclarationKey,
+                    out var providerMember)
+                || expectedMember.Ordinal != providerMember.Ordinal
+                || expectedMember.Kind != providerMember.Kind
+                || expectedMember.IsStatic != providerMember.IsStatic
+                || expectedMember.IsExternal != providerMember.IsExternal
+                || expectedMember.RequiresUnsafeCaller
+                    != providerMember.RequiresUnsafeCaller
+                || expectedMember.DeclaredRequiresUnsafeCaller
+                    != providerMember.DeclaredRequiresUnsafeCaller
+                || expectedMember.DoesNotReturn
+                    != providerMember.DoesNotReturn
+                || expectedMember.RequiresMutableReceiver
+                    != providerMember.RequiresMutableReceiver
+                || expectedMember.NativeCallableConvention
+                    != providerMember.NativeCallableConvention
+                || !AreEquivalentG1InterfaceTypes(expectedMember.ResultType,
+                    providerMember.ResultType)
+                || expectedMember.Parameters.Length
+                    != providerMember.Parameters.Length
+                || !ForeignNativeInterfaceDependenciesEqual(
+                    expectedMember.Dependencies,
+                    providerMember.Dependencies)
+                || !ForeignNativeInterfaceOutputsEqual(
+                    expectedMember.NativeOutputContracts,
+                    providerMember.NativeOutputContracts))
+            {
+                throw Invalid(
+                    "The selected F+I provider changes a retained InterfaceMethod contract.");
+            }
+
+            for (var ordinal = 0; ordinal < expectedMember.Parameters.Length;
+                ordinal++)
+            {
+                var expectedParameter = expectedMember.Parameters[ordinal];
+                var providerParameter = providerMember.Parameters[ordinal];
+                if (expectedParameter.Mode != providerParameter.Mode
+                    || !AreEquivalentG1InterfaceTypes(
+                        expectedParameter.Type, providerParameter.Type))
+                {
+                    throw Invalid(
+                        "The selected F+I provider changes an ordered parameter ABI contract.");
+                }
+            }
+        }
+    }
+
+    private static bool ForeignNativeInterfaceDependenciesEqual(
+        ImmutableArray<BoundDependencyContract> expected,
+        ImmutableArray<BoundDependencyContract> provider)
+    {
+        if (expected.IsDefault || provider.IsDefault
+            || expected.Length != provider.Length)
+        {
+            return false;
+        }
+
+        var expectedContracts = expected.OrderBy(
+                static contract => contract.Destination)
+            .ThenBy(static contract => contract.DestinationOrdinal ?? -1)
+            .ThenBy(static contract => contract.Relation)
+            .ToArray();
+        var providerContracts = provider.OrderBy(
+                static contract => contract.Destination)
+            .ThenBy(static contract => contract.DestinationOrdinal ?? -1)
+            .ThenBy(static contract => contract.Relation)
+            .ToArray();
+        for (var index = 0; index < expectedContracts.Length; index++)
+        {
+            var left = expectedContracts[index];
+            var right = providerContracts[index];
+            if (left.Relation != right.Relation
+                || left.Destination != right.Destination
+                || left.DestinationOrdinal != right.DestinationOrdinal
+                || left.Sources.IsDefault || right.Sources.IsDefault
+                || !left.Sources.OrderBy(static source => source.Kind)
+                    .ThenBy(static source => source.FormalOrdinal ?? -1)
+                    .SequenceEqual(right.Sources.OrderBy(
+                        static source => source.Kind).ThenBy(
+                        static source => source.FormalOrdinal ?? -1)))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool ForeignNativeInterfaceOutputsEqual(
+        ImmutableArray<NativeOutputContract> expected,
+        ImmutableArray<NativeOutputContract> provider)
+    {
+        if (expected.IsDefault || provider.IsDefault
+            || expected.Length != provider.Length)
+        {
+            return false;
+        }
+
+        var expectedOutputs = expected.OrderBy(
+            static output => output.FormalOrdinal).ToArray();
+        var providerOutputs = provider.OrderBy(
+            static output => output.FormalOrdinal).ToArray();
+        for (var index = 0; index < expectedOutputs.Length; index++)
+        {
+            var left = expectedOutputs[index];
+            var right = providerOutputs[index];
+            if (left.FormalOrdinal != right.FormalOrdinal
+                || left.PointeeType != right.PointeeType
+                || left.Formation != right.Formation
+                || left.PublicationPhase != right.PublicationPhase
+                || left.SuccessSelector != right.SuccessSelector
+                || left.SuccessState != right.SuccessState
+                || left.ComplementSelector != right.ComplementSelector
+                || left.ComplementState != right.ComplementState
+                || left.Dependencies.IsDefault || right.Dependencies.IsDefault
+                || !left.Dependencies.SequenceEqual(right.Dependencies))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static BoundInterfaceDefinition
@@ -213,7 +657,7 @@ public static partial class TrRmExecutableCompiler
             || typeContractCount != 0
             || tables.Interfaces.GetMethodRange(interfaceDef).Count
                 != methodExportKeys.Length
-            || tables.ForeignNativeInterfaces.GetTargetProfileRef(
+            || tables.ForeignNativeInterfaces.GetTargetProfile(
                 foreignInterfaceRow) == 0)
         {
             throw Invalid(

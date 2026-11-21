@@ -151,11 +151,27 @@ public static partial class TrRmExecutableCompiler
 
         if (context.Schema.UsesForeignNativeInterface())
         {
-            var foreignDefinitions
-                = CreateExportedForeignNativeInterfaceDefinitions(tables,
-                    context, artifactIndex, moduleRow);
-            context.InterfaceDefinitions.Add(cacheKey, foreignDefinitions);
-            return foreignDefinitions;
+            if (!context.ForeignNativeInterfaceModulesBeingLoaded.Add(
+                    cacheKey))
+            {
+                throw Invalid(
+                    "The selected F+I provider graph contains a cycle.");
+            }
+
+            try
+            {
+                var foreignDefinitions
+                    = CreateForeignNativeInterfaceDefinitions(tables,
+                        context, artifactIndex, moduleRow);
+                context.InterfaceDefinitions.Add(cacheKey,
+                    foreignDefinitions);
+                return foreignDefinitions;
+            }
+            finally
+            {
+                _ = context.ForeignNativeInterfaceModulesBeingLoaded.Remove(
+                    cacheKey);
+            }
         }
 
         if (!context.Schema.UsesGeneralMethodParameterLabels())

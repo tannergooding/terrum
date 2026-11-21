@@ -22,6 +22,9 @@ public static partial class TrRmExecutableCompiler
             ModuleSelections { get; }
         internal Dictionary<string, (int ArtifactIndex, int ModuleRow)>
             Modules { get; } = new(StringComparer.Ordinal);
+        internal Dictionary<(int ArtifactIndex, int ModuleRow),
+            (uint TargetRequirement, uint RuntimePolicy)>
+            ModuleRequirements { get; } = [];
         internal Dictionary<(int ArtifactIndex, int MethodRow),
             BoundGenericMethodImport> MethodTargets { get; } = [];
         internal Dictionary<(int ArtifactIndex, int ImportRow),
@@ -37,6 +40,9 @@ public static partial class TrRmExecutableCompiler
         internal Dictionary<(int ArtifactIndex, int ModuleRow, string ExportKey),
             BoundInterfaceDefinition> ExportedInterfaceDefinitionsByKey
                 { get; } = [];
+        internal Dictionary<(int ArtifactIndex, int ModuleRow, string ExportKey),
+            Dictionary<string, BoundInterfaceMemberDefinition>>
+            ForeignNativeInterfaceMembersByExportKey { get; } = [];
         internal Dictionary<(int ArtifactIndex, int ModuleRow),
             ImmutableArray<BoundInterfaceDefinition>> InterfaceDefinitions
                 { get; } = [];
@@ -45,6 +51,8 @@ public static partial class TrRmExecutableCompiler
                 { get; } = [];
         internal HashSet<(int ArtifactIndex, int ModuleRow)>
             ModulesWithValidatedG1InterfaceMethodClosure { get; } = [];
+        internal HashSet<(int ArtifactIndex, int ModuleRow)>
+            ForeignNativeInterfaceModulesBeingLoaded { get; } = [];
         internal Dictionary<(int ArtifactIndex, int MethodRow),
             BoundFunction> DecodedMethods { get; } = [];
         internal Dictionary<(int ArtifactIndex, int MethodRow),
@@ -781,6 +789,8 @@ public static partial class TrRmExecutableCompiler
 
                     var requirements
                         = tables.Modules.GetRequirements(moduleRow);
+                    ModuleRequirements.Add((index, moduleRow),
+                        requirements);
                     var (methodStart, methodEnd)
                         = tables.Modules.GetMethodDefRange(moduleRow);
                     moduleSelections.Add(new TrRmStandardModuleSelection(
