@@ -2093,6 +2093,27 @@ internal sealed class NativePointerModuleTests
     }
 
     [Test]
+    public void NativePointerLoadCapturesCellValueBeforeLaterStore()
+    {
+        var compilation = CreateLibrary(SyntaxTree.Parse("""
+            unsafe ptr<int32> ReadBeforeOverwrite(ptr<int32> incoming) {
+                mut int32 local = 1;
+                mut ptr<int32> cell = incoming;
+                mut ptr<int32> result = null;
+                unsafe {
+                    write ptr<ptr<int32>> cellAddress = &cell;
+                    result = *cellAddress;
+                    *cellAddress = &local;
+                }
+                return result;
+            }
+            """), LayoutOptions());
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Test]
     public void InitializationReferenceInitializesPointerCellWithoutInitializingPointee()
     {
         var compilation = Create(SyntaxTree.Parse("""
