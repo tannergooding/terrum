@@ -351,6 +351,252 @@ internal sealed class NativeOutputCoreRegistrationTests
             string.Join(Environment.NewLine, wrongEnum.Diagnostics));
     }
 
+    [Test]
+    public void ForeignNativeInterfaceBindsOutputContractsAndDependencySources()
+    {
+        var compilation = CreateForeignNativeOutputCompilation("""
+            [param(result): Terrum.Interop.NativeOutput(
+                When: Terrum.Interop.NativeOutputCondition.NonNegative)]
+            public unsafe int32 Read(ptr<int32> source,
+                [Terrum.CodeAnalysis.DependsOn(this, nameof(source))]
+                [Terrum.CodeAnalysis.ForwardsBacking(this, nameof(source))]
+                write ptr<int32> result);
+
+            [param(result): Terrum.CodeAnalysis.DependsOn(
+                this, nameof(source))]
+            [param(result): Terrum.CodeAnalysis.ForwardsBacking(
+                this, nameof(source))]
+            public unsafe int32 ReadInline(ptr<int32> source,
+                [Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                write ptr<int32> result);
+            """);
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var definition = program.Interfaces.Single();
+        var members = definition.Members.ToDictionary(
+            static member => member.Name, StringComparer.Ordinal);
+        Assert.That(members["Read"].NativeCallableConvention,
+            Is.EqualTo(NativeCallingConvention.Cdecl));
+        Assert.That(members["ReadInline"].NativeCallableConvention,
+            Is.EqualTo(NativeCallingConvention.Cdecl));
+
+        var nonNegative = members["Read"].NativeOutputContracts.Single();
+        Assert.That(nonNegative.FormalOrdinal, Is.EqualTo(1));
+        Assert.That(nonNegative.PointeeType, Is.EqualTo(PrimitiveType.Int32));
+        Assert.That(nonNegative.Formation,
+            Is.EqualTo(NativeOutputFormation.VacantWholeObject));
+        Assert.That(nonNegative.PublicationPhase,
+            Is.EqualTo(NativeOutputPublicationPhase.NormalCompletion));
+        Assert.That(nonNegative.SuccessSelector,
+            Is.EqualTo(NativeOutputSelector.NonNegative));
+        Assert.That(nonNegative.SuccessState, Is.EqualTo(NativeOutputState.Live));
+        Assert.That(nonNegative.ComplementSelector,
+            Is.EqualTo(NativeOutputSelector.Negative));
+        Assert.That(nonNegative.ComplementState,
+            Is.EqualTo(NativeOutputState.Vacant));
+        AssertOutputDependencies(nonNegative);
+
+        var nonZero = members["ReadInline"].NativeOutputContracts.Single();
+        Assert.That(nonZero.FormalOrdinal, Is.EqualTo(1));
+        Assert.That(nonZero.SuccessSelector,
+            Is.EqualTo(NativeOutputSelector.NonZero));
+        Assert.That(nonZero.ComplementSelector,
+            Is.EqualTo(NativeOutputSelector.Zero));
+        AssertOutputDependencies(nonZero);
+
+        SemanticVerifier.VerifyLibrary(program);
+
+        var missingOutputContract = program with {
+            Interfaces = program.Interfaces.SetItem(0, definition with {
+                Members = definition.Members.SetItem(0,
+                    members["Read"] with {
+                        NativeOutputContracts = [],
+                    }),
+            }),
+        };
+        Assert.Throws<ArgumentException>(() =>
+            SemanticVerifier.VerifyLibrary(missingOutputContract));
+
+        var mismatchedPointee = program with {
+            Interfaces = program.Interfaces.SetItem(0, definition with {
+                Members = definition.Members.SetItem(0,
+                    members["Read"] with {
+                        NativeOutputContracts = [
+                            nonNegative with {
+                                PointeeType = PrimitiveType.UInt32,
+                            },
+                        ],
+                    }),
+            }),
+        };
+        Assert.Throws<ArgumentException>(() =>
+            SemanticVerifier.VerifyLibrary(mismatchedPointee));
+    }
+
+    [Test]
+    public void ForeignNativeInterfaceRejectsUnregisteredOrIneligibleOutputs()
+    {
+        const string output = """
+            public unsafe int32 Read(
+                [Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                write ptr<int32> result);
+            """;
+
+        var missingRegistration = CreateForeignNativeOutputCompilation(
+            output, includeOutputRegistration: false);
+        AssertNativeOutputDiagnostic(missingRegistration);
+
+        var nonForeignInterface = CreateForeignNativeOutputCompilation(
+            output, includeForeignNativeInterface: false);
+        AssertNativeOutputDiagnostic(nonForeignInterface);
+
+        var readonlyPointer = CreateForeignNativeOutputCompilation("""
+            public unsafe int32 Read(
+                [Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                ptr<int32> result);
+            """);
+        AssertNativeOutputDiagnostic(readonlyPointer);
+
+        var unsupportedCellType = CreateForeignNativeOutputCompilation("""
+            public unsafe int32 Read(
+                [Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                write ptr<void> result);
+            """);
+        Assert.That(unsupportedCellType.HasErrors, Is.True,
+            string.Join(Environment.NewLine,
+                unsupportedCellType.Diagnostics));
+
+        var duplicateOutputTarget = CreateForeignNativeOutputCompilation("""
+            [param(result): Terrum.Interop.NativeOutput(
+                When: Terrum.Interop.NativeOutputCondition.NonZero)]
+            public unsafe int32 Read(
+                [Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                write ptr<int32> result);
+            """);
+        AssertNativeOutputDiagnostic(duplicateOutputTarget);
+
+        var invalidCondition = CreateForeignNativeOutputCompilation("""
+            public unsafe uint32 Read(
+                [Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonNegative)]
+                write ptr<int32> result);
+            """);
+        AssertNativeOutputDiagnostic(invalidCondition);
+
+        var receiverOutput = CreateForeignNativeOutputCompilation("""
+            [param(this): Terrum.Interop.NativeOutput(
+                When: Terrum.Interop.NativeOutputCondition.NonZero)]
+            public unsafe int32 Read();
+            """);
+        AssertNativeOutputDiagnostic(receiverOutput);
+
+        var unsupportedDependency = CreateForeignNativeOutputCompilation("""
+            [param(result): Terrum.CodeAnalysis.Captures(this)]
+            public unsafe int32 Read(
+                [Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                write ptr<int32> result);
+            """);
+        Assert.That(unsupportedDependency.HasErrors, Is.True,
+            string.Join(Environment.NewLine,
+                unsupportedDependency.Diagnostics));
+        Assert.That(unsupportedDependency.Diagnostics.Any(
+            static diagnostic => diagnostic.Code == "TRM3023"), Is.True,
+            string.Join(Environment.NewLine,
+                unsupportedDependency.Diagnostics));
+
+        var unpairedForwarding = CreateForeignNativeOutputCompilation("""
+            [param(result): Terrum.CodeAnalysis.ForwardsBacking(this)]
+            public unsafe int32 Read(
+                [Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                write ptr<int32> result);
+            """);
+        Assert.That(unpairedForwarding.HasErrors, Is.True,
+            string.Join(Environment.NewLine,
+                unpairedForwarding.Diagnostics));
+        Assert.That(unpairedForwarding.Diagnostics.Any(
+            static diagnostic => diagnostic.Code == "TRM3023"), Is.True,
+            string.Join(Environment.NewLine,
+                unpairedForwarding.Diagnostics));
+
+        var nativeParameterOverlap = CreateForeignNativeOutputCompilation("""
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+            public unsafe int32 Read(
+                [Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                write ptr<int32> result);
+            """);
+        AssertNativeOutputDiagnostic(nativeParameterOverlap);
+    }
+
+    private static void AssertOutputDependencies(NativeOutputContract output)
+    {
+        Assert.That(output.Dependencies, Has.Length.EqualTo(2));
+        Assert.That(output.Dependencies.All(dependency =>
+                dependency.DestinationKind == 2
+                && dependency.DestinationOrdinal == output.FormalOrdinal
+                && dependency.Phase
+                    == NativeOutputPublicationPhase.NormalCompletion
+                && dependency.Relationship
+                    == NativeOutputDependencyRelationship.Forward),
+            Is.True);
+        Assert.That(output.Dependencies.Any(dependency =>
+                dependency.SourceKind
+                    == NativeOutputDependencySourceKind.Formal
+                && dependency.SourceOrdinal == 0),
+            Is.True);
+        Assert.That(output.Dependencies.Any(dependency =>
+                dependency.SourceKind
+                    == NativeOutputDependencySourceKind.Receiver
+                && dependency.SourceOrdinal == 0),
+            Is.True);
+    }
+
+    private static void AssertNativeOutputDiagnostic(Compilation compilation)
+    {
+        Assert.That(compilation.HasErrors, Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Diagnostics.Any(
+            static diagnostic => diagnostic.Code == "TRM3030"), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    private static Compilation CreateForeignNativeOutputCompilation(
+        string memberDeclarations,
+        bool includeOutputRegistration = true,
+        bool includeForeignNativeInterface = true)
+    {
+        var (native, output) = CreateCombinedRegistrations(
+            includeForeignNativeInterface: true);
+        var options = new CompilationOptions {
+            NativeCoreRegistration = native,
+            LayoutCoreRegistration =
+                NativeCoreRegistrationTests.CreateLayoutRegistration(native),
+            NativeOutputCoreRegistration = includeOutputRegistration
+                ? output : null,
+        };
+        var foreignInterfaceAttribute = includeForeignNativeInterface
+            ? "[Terrum.Interop.ForeignNativeInterface(VTableByteOffset: uint32(0))]"
+            : "";
+        var source = $$"""
+            [Terrum.Interop.NativeCallable(
+                CallConv: Terrum.Interop.NativeCallingConvention.Cdecl)]
+            {{foreignInterfaceAttribute}}
+            public interface IProbe {
+            {{memberDeclarations}}
+            }
+            """;
+        return Compilation.CreateLibrary(SyntaxTree.Parse(source), options);
+    }
+
     internal static (
         NativeCoreRegistrationSet NativeCore,
         NativeOutputCoreRegistrationSet NativeOutput)

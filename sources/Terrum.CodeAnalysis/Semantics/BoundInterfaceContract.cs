@@ -293,6 +293,9 @@ internal static class BoundInterfaceContract
                 || member.Constraints.IsDefault || member.Parameters.IsDefault
                 || member.Parameters.Length > SemanticVerifier.MaximumArguments
                 || member.Dependencies.IsDefault || member.Accessors.IsDefault
+                || member.NativeOutputContracts.IsDefault
+                || member.NativeOutputContracts.Length
+                    > member.Parameters.Length
                 || member.Accessors.Length > 3
                 || (member.DeclaredRequiresUnsafeCaller
                     && !member.RequiresUnsafeCaller)
@@ -554,7 +557,11 @@ internal static class BoundInterfaceContract
                 BoundDependencyDestination.InitializedOutput =>
                     contract.DestinationOrdinal is int output
                         && (uint)output < (uint)parameters.Length
-                        && parameters[output].Mode == BoundInterfaceParameterMode.Init
+                        && (parameters[output].Mode
+                                == BoundInterfaceParameterMode.Init
+                            || member.NativeOutputContracts.Any(
+                                nativeOutput => nativeOutput.FormalOrdinal
+                                    == output))
                         && contract.Relation is BoundDependencyRelation.DependsOn
                             or BoundDependencyRelation.Captures
                             or BoundDependencyRelation.ForwardsBacking
@@ -586,7 +593,10 @@ internal static class BoundInterfaceContract
                     || source.FormalOrdinal is not int sourceFormal
                     || (uint)sourceFormal >= (uint)parameters.Length
                     || parameters[sourceFormal].Mode is BoundInterfaceParameterMode.Out
-                        or BoundInterfaceParameterMode.Init)
+                        or BoundInterfaceParameterMode.Init
+                    || member.NativeOutputContracts.Any(
+                        nativeOutput => nativeOutput.FormalOrdinal
+                            == sourceFormal))
                 {
                     return false;
                 }

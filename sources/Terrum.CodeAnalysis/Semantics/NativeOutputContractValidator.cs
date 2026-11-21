@@ -79,6 +79,140 @@ internal static class NativeOutputContractValidator
         return true;
     }
 
+    internal static bool IsValidInterfaceTable(BoundProgram program)
+    {
+        if (program.Interfaces.IsDefault)
+        {
+            return false;
+        }
+
+        var hasOutputs = false;
+        foreach (var definition in program.Interfaces)
+        {
+            if (definition is null || definition.Members.IsDefault)
+            {
+                return false;
+            }
+
+            foreach (var member in definition.Members)
+            {
+                if (member is null || member.NativeOutputContracts.IsDefault)
+                {
+                    return false;
+                }
+                if (member.NativeOutputContracts.IsEmpty)
+                {
+                    continue;
+                }
+
+                hasOutputs = true;
+                if (definition.ForeignNativeInterface is null
+                    || member.Kind != BoundInterfaceMemberKind.Callable
+                    || member.IsStatic || member.IsExternal || member.HasBody
+                    || !member.DeclaredRequiresUnsafeCaller
+                    || !member.RequiresUnsafeCaller
+                    || member.NativeCallableConvention is null
+                    || member.ResultType is not BoundInterfaceType resultType
+                    || resultType.Kind != BoundInterfaceTypeKind.Primitive
+                    || resultType.PrimitiveType is not (
+                        PrimitiveType.Int32 or PrimitiveType.UInt32)
+                    || resultType.IsWritable || resultType.IsOptional
+                    || resultType.IsGarbageCollected
+                    || resultType.IsInitialization
+                    || member.Parameters.IsDefault
+                    || member.NativeOutputContracts.Length
+                        > member.Parameters.Length
+                    || member.Dependencies.IsDefault)
+                {
+                    return false;
+                }
+
+                var outputFormals = new HashSet<int>();
+                foreach (var output in member.NativeOutputContracts)
+                {
+                    if (output is null
+                        || !outputFormals.Add(output.FormalOrdinal))
+                    {
+                        return false;
+                    }
+                }
+
+                var resultPrimitive = resultType.PrimitiveType;
+                var previousFormal = -1;
+                foreach (var output in member.NativeOutputContracts)
+                {
+                    if (output is null
+                        || output.FormalOrdinal <= previousFormal
+                        || (uint)output.FormalOrdinal
+                            >= (uint)member.Parameters.Length
+                        || output.Formation
+                            != NativeOutputFormation.VacantWholeObject
+                        || output.PublicationPhase
+                            != NativeOutputPublicationPhase.NormalCompletion
+                        || output.SuccessState != NativeOutputState.Live
+                        || output.ComplementState != NativeOutputState.Vacant
+                        || !ValidSelectors(output, resultPrimitive)
+                        || !TryGetInterfaceOutputPointee(
+                            member.Parameters[output.FormalOrdinal],
+                            program.Structures, program.NativePointerTypes,
+                            program.NativeFunctionPointerSignatures,
+                            program.EnumDefinitions, out var pointeeType)
+                        || pointeeType != output.PointeeType
+                        || !HasValidInterfaceDependencies(output, member,
+                            outputFormals))
+                    {
+                        return false;
+                    }
+
+                    previousFormal = output.FormalOrdinal;
+                }
+            }
+        }
+
+        return !hasOutputs
+            || (program.NativeCoreRegistration?
+                    .ForeignNativeInterface is not null
+                && program.NativeOutputCoreRegistration
+                    is NativeOutputCoreRegistrationSet registration
+                && registration.IsValid());
+    }
+
+    internal static bool TryGetInterfaceOutputPointee(
+        BoundInterfaceParameter parameter,
+        IReadOnlyList<BoundStruct> structures,
+        ImmutableArray<NativePointerTypeDefinition> pointerTypes,
+        ImmutableArray<NativeFunctionPointerSignatureDefinition>
+            functionPointerSignatures,
+        IReadOnlyList<BoundEnumDefinition>? enumDefinitions,
+        out PrimitiveType pointeeType)
+    {
+        pointeeType = default;
+        if (parameter.Mode != BoundInterfaceParameterMode.Value
+            || parameter.Type.Kind != BoundInterfaceTypeKind.Primitive
+            || !parameter.Type.IsWritable
+            || parameter.Type.IsOptional
+            || parameter.Type.IsGarbageCollected
+            || parameter.Type.IsInitialization
+            || !NativePointerTypeContract.IsValidType(
+                parameter.Type.PrimitiveType, pointerTypes))
+        {
+            return false;
+        }
+
+        var pointerType = pointerTypes[NativePointerTypes.Index(
+            parameter.Type.PrimitiveType)];
+        if (!pointerType.IsWritable
+            || !DirectNativeImportContract.IsNativeOutputCellType(
+                pointerType.PointeeType, structures,
+                functionPointerSignatures, pointerTypes, enumDefinitions))
+        {
+            return false;
+        }
+
+        pointeeType = pointerType.PointeeType;
+        return true;
+    }
+
     internal static ImmutableArray<NativeOutputDependency> CreateDependencies(
         ImmutableArray<BoundDependencyContract> contracts, int formalOrdinal)
     {
@@ -242,6 +376,86 @@ internal static class NativeOutputContractValidator
                         || outputFormals.Contains(dependency.SourceOrdinal)))
                 || (dependency.SourceKind == NativeOutputDependencySourceKind.Receiver
                     && dependency.SourceOrdinal != 0)
+                || (byte)dependency.SourceKind < previousKind
+                || ((byte)dependency.SourceKind == previousKind
+                    && dependency.SourceOrdinal <= previousOrdinal))
+            {
+                return false;
+            }
+
+            previousKind = (byte)dependency.SourceKind;
+            previousOrdinal = dependency.SourceOrdinal;
+        }
+
+        return true;
+    }
+
+    private static bool HasValidInterfaceDependencies(
+        NativeOutputContract output,
+        BoundInterfaceMemberDefinition member,
+        HashSet<int> outputFormals)
+    {
+        var dependencies = output.Dependencies;
+        var expected = CreateDependencies(member.Dependencies,
+            output.FormalOrdinal);
+        if (dependencies.IsDefault || dependencies.IsEmpty
+            || expected.IsDefault || dependencies.Length != expected.Length)
+        {
+            return false;
+        }
+
+        var previousKind = 0;
+        var previousOrdinal = -1;
+        for (var index = 0; index < dependencies.Length; index++)
+        {
+            var dependency = dependencies[index];
+            if (dependency != expected[index]
+                || dependency.DestinationKind != 2
+                || dependency.Phase
+                    != NativeOutputPublicationPhase.NormalCompletion
+                || dependency.DestinationOrdinal != output.FormalOrdinal)
+            {
+                return false;
+            }
+
+            if (dependency.SourceKind
+                == NativeOutputDependencySourceKind.Empty)
+            {
+                return dependencies.Length == 1
+                    && dependency.Relationship
+                        == NativeOutputDependencyRelationship.Empty
+                    && dependency.SourceOrdinal == 0;
+            }
+
+            if (dependency.SourceKind
+                    == NativeOutputDependencySourceKind.Formal)
+            {
+                if (dependency.SourceOrdinal < 0
+                    || dependency.SourceOrdinal >= member.Parameters.Length
+                    || outputFormals.Contains(dependency.SourceOrdinal)
+                    || member.Parameters[dependency.SourceOrdinal].Mode
+                        is BoundInterfaceParameterMode.Out
+                            or BoundInterfaceParameterMode.Init)
+                {
+                    return false;
+                }
+            }
+            else if (dependency.SourceKind
+                    == NativeOutputDependencySourceKind.Receiver)
+            {
+                if (member.IsStatic || dependency.SourceOrdinal != 0)
+                {
+                    return false;
+                }
+            }
+            else
+            {
+                return false;
+            }
+
+            if (dependency.Relationship is not (
+                    NativeOutputDependencyRelationship.Forward
+                    or NativeOutputDependencyRelationship.Union)
                 || (byte)dependency.SourceKind < previousKind
                 || ((byte)dependency.SourceKind == previousKind
                     && dependency.SourceOrdinal <= previousOrdinal))

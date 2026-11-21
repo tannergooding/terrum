@@ -500,6 +500,7 @@ internal sealed record BoundInterfaceMemberDefinition(
     internal bool DeclaredRequiresUnsafeCaller { get; init; }
     internal bool RequiresMutableReceiver { get; init; }
     internal NativeCallingConvention? NativeCallableConvention { get; init; }
+    internal ImmutableArray<NativeOutputContract> NativeOutputContracts { get; init; } = [];
     internal int SourceInputOrdinal { get; init; } = -1;
     internal TextSpan SourceDeclarationSpan { get; init; }
 }

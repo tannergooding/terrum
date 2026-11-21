@@ -1307,6 +1307,10 @@ internal static class BoundTreeTraversal
                 ? RewriteTypes(associatedConstantType, rewriteType) : null,
             AssociatedConstantDefault = member.AssociatedConstantDefault is BoundConstant associatedConstant
                 ? RewriteConstantType(associatedConstant, rewriteType) : null,
+            NativeOutputContracts = [.. member.NativeOutputContracts.Select(
+                output => output with {
+                    PointeeType = rewriteType(output.PointeeType),
+                })],
         };
 
     internal static BoundInterfaceMemberIdentity RewriteTypes(

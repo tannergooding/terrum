@@ -77,6 +77,16 @@ internal sealed partial class Binder
     private readonly List<PendingInterfaceNativeCallableConvention>
         _pendingInterfaceNativeCallableConventions = [];
 
+    private sealed record PendingInterfaceNativeOutputCondition(
+        int InterfaceIndex,
+        int MemberOrdinal,
+        int FormalOrdinal,
+        SyntaxTree Tree,
+        SyntaxNode Expression);
+
+    private readonly List<PendingInterfaceNativeOutputCondition>
+        _pendingInterfaceNativeOutputConditions = [];
+
     private sealed record ResolvedInterfaceType(
         string QualifiedName,
         BoundModuleImport? ModuleImport,
@@ -205,6 +215,9 @@ internal sealed partial class Binder
             var formals = BindInterfaceFormals(first.Formals, typeParameters, groups);
             var constantParameters = InterfaceConstantParameters(formals,
                 BoundInterfaceTypeParameterScope.Interface);
+            var hasForeignNativeInterfaceAttribute = parts.Any(part =>
+                part.Declaration.Children.OfType<SyntaxNode>()
+                    .Any(IsForeignNativeInterfaceAttribute));
             var bases = ImmutableArray.CreateBuilder<BoundInterfaceType>();
             var constraints = ImmutableArray.CreateBuilder<BoundInterfaceConstraint>();
             var members = ImmutableArray.CreateBuilder<BoundInterfaceMemberDefinition>();
@@ -262,7 +275,8 @@ internal sealed partial class Binder
                     formals, members.Count, interfaceIndex,
                     nativeCallableDefaultConvention,
                     nativeCallableDefaultExpression,
-                    inheritedNativeCallableMemberOrdinals));
+                    inheritedNativeCallableMemberOrdinals,
+                    hasForeignNativeInterfaceAttribute));
             }
 
             var boundMembers = members.ToImmutable();
@@ -4066,7 +4080,8 @@ internal sealed partial class Binder
         int interfaceIndex,
         NativeCallingConvention? interfaceDefaultConvention,
         SyntaxNode? interfaceDefaultExpression,
-        List<int> inheritedDefaultMemberOrdinals)
+        List<int> inheritedDefaultMemberOrdinals,
+        bool hasForeignNativeInterfaceAttribute)
     {
         var result = ImmutableArray.CreateBuilder<BoundInterfaceMemberDefinition>();
         var interfaceConstantParameters = InterfaceConstantParameters(ownerFormals,
@@ -4291,12 +4306,19 @@ internal sealed partial class Binder
             {
                 Report("TRM3017", "The general NoThrow source contract is retired.", declaration.Span);
             }
+            var boundParameters = parameters.ToImmutable();
+            var nativeOutputFormalOrdinals =
+                BindInterfaceNativeOutputFormals(part, declaration,
+                    memberKind, boundParameters, resultType, interfaceIndex,
+                    firstOrdinal + result.Count,
+                    hasForeignNativeInterfaceAttribute);
             var contractTokens = declaration.Children.OfType<SyntaxNode>()
                 .Where(static child => child.Kind == SyntaxKind.ContractClause)
                 .Select(NormalizeSyntax).Where(static text => text is not null)
                 .Select(static text => text!).ToImmutableArray();
             var dependencies = BindInterfaceMemberDependencies(
-                declaration, memberKind, parameters.ToImmutable(), resultType);
+                declaration, memberKind, boundParameters, resultType,
+                nativeOutputFormalOrdinals);
             var declarationKey = InterfaceMemberKey(memberKind, name, operatorToken,
                 parameters, methodFormals, requiresMutableReceiver,
                 accessors);
@@ -4336,7 +4358,7 @@ internal sealed partial class Binder
                 resultType,
                 methodFormals,
                 constraints.ToImmutable(),
-                parameters.ToImmutable(),
+                boundParameters,
                 dependencies,
                 accessors,
                 associatedDefaultType,
@@ -4418,13 +4440,231 @@ internal sealed partial class Binder
         return result.ToImmutable();
     }
 
+    private ImmutableArray<int> BindInterfaceNativeOutputFormals(
+        InterfaceDeclarationPart part,
+        SyntaxNode declaration,
+        BoundInterfaceMemberKind memberKind,
+        ImmutableArray<BoundInterfaceParameter> parameters,
+        BoundInterfaceType? resultType,
+        int interfaceIndex,
+        int memberOrdinal,
+        bool hasForeignNativeInterfaceAttribute)
+    {
+        var outputFormals = new HashSet<int>();
+        var outputConditions = new List<(int FormalOrdinal,
+            SyntaxNode Expression)>();
+
+        foreach (var attribute in declaration.Children.OfType<SyntaxNode>()
+                     .Where(static child => child.Kind == SyntaxKind.Attribute)
+                     .Where(child => IsNativeOutputAttribute(
+                         AttributeName(child))))
+        {
+            if (!TryGetParameterAttributeTarget(attribute,
+                out var parameterName))
+            {
+                Report("TRM3030",
+                    "NativeOutput must target one explicit foreign-interface method parameter.",
+                    attribute.Span);
+                continue;
+            }
+
+            var formalOrdinal = FindInterfaceParameterOrdinal(parameters,
+                parameterName);
+            if (formalOrdinal < 0)
+            {
+                Report("TRM3030",
+                    $"NativeOutput targets unknown parameter '{parameterName}'.",
+                    attribute.Span);
+                continue;
+            }
+
+            AddNativeOutput(attribute, formalOrdinal);
+        }
+
+        var parameterSyntax = declaration.Children.OfType<SyntaxNode>()
+            .Where(static child => child.Kind is SyntaxKind.ParameterList
+                or SyntaxKind.IndexerParameterList)
+            .SelectMany(static child => child.Children.OfType<SyntaxNode>()
+                .Where(static parameter =>
+                    parameter.Kind == SyntaxKind.Parameter))
+            .ToArray();
+        for (var formalOrdinal = 0;
+            formalOrdinal < parameterSyntax.Length; formalOrdinal++)
+        {
+            foreach (var attribute in parameterSyntax[formalOrdinal].Children
+                         .OfType<SyntaxNode>()
+                         .Where(static child => child.Kind
+                             == SyntaxKind.Attribute)
+                         .Where(child => IsNativeOutputAttribute(
+                             AttributeName(child))))
+            {
+                if (TryGetParameterAttributeTarget(attribute, out _))
+                {
+                    Report("TRM3030",
+                        "A parameter-local NativeOutput cannot select a second parameter target.",
+                        attribute.Span);
+                    continue;
+                }
+
+                if ((uint)formalOrdinal >= (uint)parameters.Length)
+                {
+                    Report("TRM3030",
+                        "NativeOutput does not identify a valid explicit interface method parameter.",
+                        attribute.Span);
+                    continue;
+                }
+
+                AddNativeOutput(attribute, formalOrdinal);
+            }
+        }
+
+        if (hasForeignNativeInterfaceAttribute)
+        {
+            foreach (var attribute in declaration.Children
+                         .OfType<SyntaxNode>()
+                         .Where(static child => child.Kind
+                             == SyntaxKind.Attribute))
+            {
+                var name = AttributeName(attribute);
+                if (IsNativeAttributeSpelling(name,
+                        "Terrum.Interop.NativeImport")
+                    || IsNativeAttributeSpelling(name,
+                        "Terrum.Interop.NativeExport")
+                    || IsNativeAttributeSpelling(name,
+                        "Terrum.Interop.NativeVTableMethod"))
+                {
+                    Report("TRM3030",
+                        $"{name} is not a role on a ForeignNativeInterface method.",
+                        attribute.Span);
+                }
+
+                if (IsNativeAttributeSpelling(name,
+                    "Terrum.Interop.NativeParameter"))
+                {
+                    var overlapsOutput = TryDecodeNativeParameterAttribute(
+                            attribute, out var nativeParameter)
+                        && outputFormals.Contains(
+                            nativeParameter.ParameterIndex - 1);
+                    Report("TRM3030", overlapsOutput
+                            ? "NativeParameter cannot overlap a NativeOutput formal."
+                            : "NativeParameter is not admitted on a ForeignNativeInterface method.",
+                        attribute.Span);
+                }
+            }
+
+            foreach (var parameter in parameterSyntax)
+            {
+                foreach (var attribute in parameter.Children
+                             .OfType<SyntaxNode>()
+                             .Where(static child => child.Kind
+                                 == SyntaxKind.Attribute)
+                             .Where(child => IsNativeAttributeSpelling(
+                                 AttributeName(child),
+                                 "Terrum.Interop.NativeParameter")))
+                {
+                    Report("TRM3030",
+                        "NativeParameter is not admitted on a ForeignNativeInterface method parameter.",
+                        attribute.Span);
+                }
+            }
+        }
+
+        if (outputFormals.Count != 0
+            && (resultType is not {
+                Kind: BoundInterfaceTypeKind.Primitive,
+                PrimitiveType: PrimitiveType.Int32 or PrimitiveType.UInt32,
+                IsWritable: false,
+                IsOptional: false,
+                IsGarbageCollected: false,
+                IsInitialization: false,
+            }))
+        {
+            Report("TRM3030",
+                "NativeOutput requires an int32 or uint32 method result.",
+                declaration.Span);
+            outputConditions.Clear();
+        }
+
+        foreach (var (formalOrdinal, expression) in outputConditions)
+        {
+            _pendingInterfaceNativeOutputConditions.Add(
+                new PendingInterfaceNativeOutputCondition(interfaceIndex,
+                    memberOrdinal, formalOrdinal, part.Tree, expression));
+        }
+
+        return [.. outputFormals.OrderBy(static ordinal => ordinal)];
+
+        void AddNativeOutput(SyntaxNode attribute, int formalOrdinal)
+        {
+            if (memberKind != BoundInterfaceMemberKind.Callable
+                || !hasForeignNativeInterfaceAttribute
+                || part.IsPartial)
+            {
+                Report("TRM3030",
+                    "NativeOutput is only valid on an explicit formal of a primary, nonpartial ForeignNativeInterface method.",
+                    attribute.Span);
+                return;
+            }
+
+            if (!TryBindNativeOutputAttribute(attribute,
+                    out var whenExpression))
+            {
+                return;
+            }
+
+            if ((uint)formalOrdinal >= (uint)parameters.Length
+                || !NativeOutputContractValidator
+                    .TryGetInterfaceOutputPointee(parameters[formalOrdinal],
+                        _structs, [.. _nativePointerTypes],
+                        [.. _nativeFunctionPointerSignatures],
+                        _enumDefinitions, out _))
+            {
+                Report("TRM3030",
+                    "NativeOutput requires an eligible write ptr<T> explicit formal.",
+                    attribute.Span);
+                return;
+            }
+
+            if (!outputFormals.Add(formalOrdinal))
+            {
+                Report("TRM3030",
+                    "NativeOutput may appear only once on each explicit formal.",
+                    attribute.Span);
+                return;
+            }
+
+            outputConditions.Add((formalOrdinal, whenExpression));
+        }
+
+        int FindInterfaceParameterOrdinal(
+            ImmutableArray<BoundInterfaceParameter> boundParameters,
+            string parameterName)
+        {
+            for (var index = 0; index < boundParameters.Length; index++)
+            {
+                if (StringComparer.Ordinal.Equals(
+                    boundParameters[index].Name, parameterName))
+                {
+                    return index;
+                }
+            }
+            return -1;
+        }
+    }
+
     private ImmutableArray<BoundDependencyContract> BindInterfaceMemberDependencies(
         SyntaxNode declaration,
         BoundInterfaceMemberKind memberKind,
         ImmutableArray<BoundInterfaceParameter> parameters,
         BoundInterfaceType? resultType,
+        ImmutableArray<int> nativeOutputFormalOrdinals = default,
         bool? receiverOverride = null)
     {
+        if (nativeOutputFormalOrdinals.IsDefault)
+        {
+            nativeOutputFormalOrdinals = [];
+        }
+
         var attributes = new List<(SyntaxNode Attribute, int? InlineParameterOrdinal)>();
         foreach (var attribute in declaration.Children.OfType<SyntaxNode>()
                      .Where(static child => child.Kind == SyntaxKind.Attribute))
@@ -4495,7 +4735,10 @@ internal sealed partial class Binder
             {
                 if (target.Kind != DependencyAttributeTargetKind.Default
                     || (uint)inlineOrdinal >= (uint)parameters.Length
-                    || parameters[inlineOrdinal].Mode != BoundInterfaceParameterMode.Init
+                    || (parameters[inlineOrdinal].Mode
+                            != BoundInterfaceParameterMode.Init
+                        && !nativeOutputFormalOrdinals.Contains(
+                            inlineOrdinal))
                     || relation is not (BoundDependencyRelation.DependsOn
                         or BoundDependencyRelation.ForwardsBacking))
                 {
@@ -4509,6 +4752,7 @@ internal sealed partial class Binder
             }
             if (!TryResolveInterfaceDependencyDestination(
                 relation, target, parameters, resultType, hasReceiver,
+                nativeOutputFormalOrdinals,
                 attribute.Span, out var destination, out var destinationOrdinal))
             {
                 continue;
@@ -4516,6 +4760,16 @@ internal sealed partial class Binder
             if (!TryBindDependencySources(attribute, placeholderParameters, hasReceiver,
                 out var sources))
             {
+                continue;
+            }
+            if (sources.Any(source =>
+                source.Kind == BoundDependencySourceKind.Formal
+                && source.FormalOrdinal is int sourceOrdinal
+                && nativeOutputFormalOrdinals.Contains(sourceOrdinal)))
+            {
+                Report("TRM3023",
+                    "A NativeOutput formal cannot be a dependency source.",
+                    attribute.Span);
                 continue;
             }
             if (relation == BoundDependencyRelation.ForwardsBacking && sources.IsEmpty)
@@ -4572,6 +4826,7 @@ internal sealed partial class Binder
         ImmutableArray<BoundInterfaceParameter> parameters,
         BoundInterfaceType? resultType,
         bool hasReceiver,
+        ImmutableArray<int> nativeOutputFormalOrdinals,
         TextSpan span,
         out BoundDependencyDestination destination,
         out int? destinationOrdinal)
@@ -4651,6 +4906,21 @@ internal sealed partial class Binder
                     return false;
                 }
                 var formal = parameters[parameterOrdinal];
+                if (nativeOutputFormalOrdinals.Contains(parameterOrdinal))
+                {
+                    if (relation is not (BoundDependencyRelation.DependsOn
+                        or BoundDependencyRelation.ForwardsBacking))
+                    {
+                        Report("TRM3023",
+                            "A NativeOutput dependency target supports only DependsOn and ForwardsBacking.",
+                            span);
+                        return false;
+                    }
+
+                    destination = BoundDependencyDestination.InitializedOutput;
+                    destinationOrdinal = parameterOrdinal;
+                    return true;
+                }
                 if (relation == BoundDependencyRelation.DependsOn)
                 {
                     if (formal.Mode != BoundInterfaceParameterMode.Init)

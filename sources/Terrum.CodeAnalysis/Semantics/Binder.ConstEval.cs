@@ -180,7 +180,8 @@ internal sealed partial class Binder
             && !_signatures.Any(static signature =>
                 signature.NativeCallableConventionExpression is not null
                 || signature.NativeImportEnumArguments is not null
-                || !signature.NativeOutputConditionExpressions.IsEmpty))
+                || !signature.NativeOutputConditionExpressions.IsEmpty)
+            && _pendingInterfaceNativeOutputConditions.Count == 0)
         {
             return true;
         }
@@ -406,7 +407,8 @@ internal sealed partial class Binder
         }
 
         return ResolvePendingNativeCallConvTypes(functions)
-            && ResolvePendingInterfaceNativeCallableConventions(functions);
+            && ResolvePendingInterfaceNativeCallableConventions(functions)
+            && ResolvePendingInterfaceNativeOutputConditions(functions);
     }
 
     private bool TryResolveNativeOutputConditionExpressions(
@@ -687,6 +689,227 @@ internal sealed partial class Binder
         }
 
         _pendingInterfaceNativeCallableConventions.Clear();
+        return true;
+    }
+
+    private bool ResolvePendingInterfaceNativeOutputConditions(
+        ImmutableArray<BoundFunction>.Builder functions)
+    {
+        if (_pendingInterfaceNativeOutputConditions.Count == 0)
+        {
+            return true;
+        }
+
+        if (_nativeOutputCoreRegistration is not
+                NativeOutputCoreRegistrationSet registration
+            || !registration.IsValid()
+            || !TryGetBoundEnumType(registration.OutputConditions,
+                out var outputConditionType))
+        {
+            var pending = _pendingInterfaceNativeOutputConditions[0];
+            SetContext(pending.Tree, pending.Expression);
+            Report("TRM3030",
+                "Foreign-interface NativeOutput requires the selected Core condition enum.",
+                pending.Expression.Span);
+            return false;
+        }
+
+        var resolved = new List<(
+            PendingInterfaceNativeOutputCondition Pending,
+            bool NonNegative)>(
+                _pendingInterfaceNativeOutputConditions.Count);
+        var success = true;
+        foreach (var pending in _pendingInterfaceNativeOutputConditions)
+        {
+            if ((uint)pending.InterfaceIndex >= (uint)_interfaces.Count)
+            {
+                throw new InvalidOperationException(
+                    "A pending interface NativeOutput condition has an invalid owner index.");
+            }
+
+            SetContext(pending.Tree, pending.Expression);
+            _variables.Clear();
+            _scopes.Clear();
+            _scopes.Add(new Dictionary<string, int>(StringComparer.Ordinal));
+            _unresolvedVacantLocals.Clear();
+            _constLocals.Clear();
+            _constScalarValues.Clear();
+            _localStart = 0;
+            _returnType = PrimitiveType.Void;
+            _currentStruct = null;
+            _constructor = false;
+            _unsafeDepth = 0;
+            _hasReceiver = false;
+            _genericContext = null;
+
+            if (!TryEvaluateNativeEnumValue(pending.Expression,
+                    outputConditionType, functions, "NativeOutput.When",
+                    out var value))
+            {
+                success = false;
+                continue;
+            }
+            if (!TryMapNativeOutputCondition(value,
+                out var nonNegative))
+            {
+                Report("TRM3030",
+                    "NativeOutput.When must evaluate to NonZero or NonNegative of the registered enum.",
+                    pending.Expression.Span);
+                success = false;
+                continue;
+            }
+
+            resolved.Add((pending, nonNegative));
+        }
+        if (!success || DiagnosticCount != 0)
+        {
+            return false;
+        }
+
+        var updates = new List<(
+            int InterfaceIndex,
+            int MemberOrdinal,
+            NativeOutputContract Contract)>(resolved.Count);
+        foreach (var (pending, nonNegative) in resolved
+                     .OrderBy(static item => item.Pending.InterfaceIndex)
+                     .ThenBy(static item => item.Pending.MemberOrdinal)
+                     .ThenBy(static item => item.Pending.FormalOrdinal))
+        {
+            var definition = _interfaces[pending.InterfaceIndex];
+            if (definition.ForeignNativeInterface is null
+                || (uint)pending.MemberOrdinal
+                    >= (uint)definition.Members.Length)
+            {
+                SetContext(pending.Tree, pending.Expression);
+                Report("TRM3030",
+                    "NativeOutput requires an exact ForeignNativeInterface method.",
+                    pending.Expression.Span);
+                success = false;
+                continue;
+            }
+
+            var member = definition.Members[pending.MemberOrdinal];
+            if (member.Ordinal != pending.MemberOrdinal
+                || member.Kind != BoundInterfaceMemberKind.Callable
+                || member.ResultType is not BoundInterfaceType resultType
+                || resultType.Kind != BoundInterfaceTypeKind.Primitive
+                || resultType.PrimitiveType is not (
+                    PrimitiveType.Int32 or PrimitiveType.UInt32)
+                || (uint)pending.FormalOrdinal
+                    >= (uint)member.Parameters.Length
+                || !NativeOutputContractValidator
+                    .TryGetInterfaceOutputPointee(
+                        member.Parameters[pending.FormalOrdinal], _structs,
+                        [.. _nativePointerTypes],
+                        [.. _nativeFunctionPointerSignatures],
+                        _enumDefinitions, out var pointeeType))
+            {
+                SetContext(pending.Tree, pending.Expression);
+                Report("TRM3030",
+                    "NativeOutput requires an eligible write ptr<T> formal and int32 or uint32 method result.",
+                    pending.Expression.Span);
+                success = false;
+                continue;
+            }
+
+            var resultCondition
+                = DirectNativeImportContract.ResolveResultCondition(
+                    resultType.PrimitiveType, nonNegative
+                        ? DirectNativeImportContract
+                            .Int32NonNegativeResultCondition
+                        : DirectNativeImportContract
+                            .Int32NonZeroResultCondition);
+            if (!DirectNativeImportContract.IsValidResultCondition(
+                    resultType.PrimitiveType, resultCondition))
+            {
+                SetContext(pending.Tree, pending.Expression);
+                Report("TRM3030",
+                    "NativeOutput result conditions must be compatible with the method result type.",
+                    pending.Expression.Span);
+                success = false;
+                continue;
+            }
+
+            var dependencies = NativeOutputContractValidator
+                .CreateDependencies(member.Dependencies,
+                    pending.FormalOrdinal);
+            if (dependencies.IsDefault)
+            {
+                SetContext(pending.Tree, pending.Expression);
+                Report("TRM3023",
+                    "NativeOutput dependencies support only a complete DependsOn source set and its ForwardsBacking refinement.",
+                    pending.Expression.Span);
+                success = false;
+                continue;
+            }
+
+            var (successSelector, complementSelector) = resultCondition switch {
+                DirectNativeImportContract.Int32NonZeroResultCondition
+                    or DirectNativeImportContract
+                        .UInt32NonZeroResultCondition
+                    => (NativeOutputSelector.NonZero,
+                        NativeOutputSelector.Zero),
+                DirectNativeImportContract
+                    .Int32NonNegativeResultCondition
+                    => (NativeOutputSelector.NonNegative,
+                        NativeOutputSelector.Negative),
+                _ => throw new InvalidOperationException(
+                    "Validated native output condition is unassigned."),
+            };
+            updates.Add((pending.InterfaceIndex, pending.MemberOrdinal,
+                new NativeOutputContract(pending.FormalOrdinal,
+                    pointeeType,
+                    NativeOutputFormation.VacantWholeObject,
+                    NativeOutputPublicationPhase.NormalCompletion,
+                    successSelector, NativeOutputState.Live,
+                    complementSelector, NativeOutputState.Vacant,
+                    dependencies)));
+        }
+
+        if (!success || DiagnosticCount != 0)
+        {
+            return false;
+        }
+
+        foreach (var update in updates)
+        {
+            var definition = _interfaces[update.InterfaceIndex];
+            var members = definition.Members.ToBuilder();
+            var member = members[update.MemberOrdinal];
+            if (member.NativeOutputContracts.Any(output =>
+                    output.FormalOrdinal
+                        == update.Contract.FormalOrdinal))
+            {
+                throw new InvalidOperationException(
+                    "A foreign-interface method has duplicate NativeOutput formal contracts.");
+            }
+
+            members[update.MemberOrdinal] = member with {
+                NativeOutputContracts = [
+                    .. member.NativeOutputContracts,
+                    update.Contract,
+                ],
+            };
+            _interfaces[update.InterfaceIndex] = definition with {
+                Members = members.ToImmutable(),
+            };
+        }
+
+        foreach (var pending in _pendingInterfaceNativeOutputConditions)
+        {
+            var definition = _interfaces[pending.InterfaceIndex];
+            var members = definition.Members.ToBuilder();
+            var member = members[pending.MemberOrdinal];
+            members[pending.MemberOrdinal] = member with {
+                NativeOutputContracts = [.. member.NativeOutputContracts
+                    .OrderBy(static output => output.FormalOrdinal)],
+            };
+            _interfaces[pending.InterfaceIndex] = definition with {
+                Members = members.ToImmutable(),
+            };
+        }
+
+        _pendingInterfaceNativeOutputConditions.Clear();
         return true;
     }
 

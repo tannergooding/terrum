@@ -1291,8 +1291,16 @@ transfer depth. Irreducible or ambiguous loop exits remain unsupported.
 Direct NativeOutput reservations inside a loop remain unsupported so one
 reservation cannot be repeated; loop, comparison, short-circuit, named outer
 transfer and rejection regressions remain unverified under the active hold.
-General aggregate output Bodies and native-interface/vtable outputs remain
-incomplete.
+Under the explicitly provisional ForeignNativeInterface identity candidate,
+source binding now carries registered NativeOutput contracts on eligible
+explicit method formals, including result selectors, vacant/live outcome
+states and target-only DependsOn/ForwardsBacking sources with receiver
+identity kept separate. NativeParameter is not admitted on these methods.
+Binding and verifier regressions are added but remain
+unverified under the active hold. Foreign-interface calls, Standard/private
+identity persistence, provider replacement, dispatch and lowering remain
+open; the proposal remains unapproved. General aggregate output Bodies and
+native-interface execution remain incomplete.
 [CG-004](implementation/conformance-gaps.md#cg-004) owns
 the detailed composition and qualification gates. Earlier TRRM NativeOutput
 clauses and ScalarInitOutput encoding are prototype artifacts, not a fallback
