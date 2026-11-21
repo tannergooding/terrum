@@ -1673,8 +1673,10 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
                     malformed), moduleIdentity, []));
     }
 
-    [Test]
-    public void L1StorageAddressRejectsOutOfRangeHomeIndex()
+    [TestCase(false)]
+    [TestCase(true)]
+    public void L1StorageAddressRejectsOutOfRangeHomeIndex(
+        bool resultHomeIndex)
     {
         const string moduleIdentity = "l1p-storage-address-home-index";
         const string l1pSchemaIdentity
@@ -1702,8 +1704,8 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
         var artifact = TrRmExecutableCompiler.EmitStandard(
             compilation.Program!, moduleIdentity, l1pSchemaIdentity,
             moduleTargetRequirement: 1);
-        var malformed = MutateL1pStorageAddressSourceIndex(artifact,
-            l1pSchemaIdentity, "Main");
+        var malformed = MutateL1pStorageAddressHomeIndex(artifact,
+            l1pSchemaIdentity, "Main", resultHomeIndex);
         Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.LoadStandard(
                 new TrRmStandardArtifactInput(l1pSchemaIdentity,
@@ -2908,13 +2910,15 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
                 BinaryPrimitives.WriteUInt32LittleEndian(
                     bodyBytes.AsSpan(recordStart + 12), 2));
 
-    private static byte[] MutateL1pStorageAddressSourceIndex(
-        byte[] artifact, string schemaIdentity, string methodName)
+    private static byte[] MutateL1pStorageAddressHomeIndex(
+        byte[] artifact, string schemaIdentity, string methodName,
+        bool resultHomeIndex)
         => MutateL1pStorageAddressRecord(artifact, schemaIdentity,
             methodName, 2,
-            static (bodyBytes, recordStart) =>
+            (bodyBytes, recordStart) =>
                 BinaryPrimitives.WriteUInt16LittleEndian(
-                    bodyBytes.AsSpan(recordStart + 6),
+                    bodyBytes.AsSpan(recordStart
+                        + (resultHomeIndex ? 8 : 6)),
                     ushort.MaxValue));
 
     private static byte[] MutateL1pStorageAddressTypeMapIndex(
