@@ -13,7 +13,28 @@ public static partial class ModuleCompiler
     /// <summary>Combines independent producer declarations for binding; overlapping public names are ambiguous.</summary>
     public static CompilationReference CreateReferenceSet(IReadOnlyList<byte[]> producers)
     {
+        return CreateReferenceSet(ReadSet(producers));
+    }
+
+    /// <summary>Combines producers selected under one exact private schema.</summary>
+    /// <param name="producers">The selected producer artifacts.</param>
+    /// <param name="schemaIdentity">The exact private schema identity.</param>
+    /// <returns>The combined declarations and retained provider identities.</returns>
+    public static CompilationReference CreateReferenceSetWithSchema(
+        IReadOnlyList<byte[]> producers, string schemaIdentity)
+    {
+        var formatVersion = GetPrivateSchemaFormatVersion(schemaIdentity);
         var modules = ReadSet(producers);
+        if (modules.Any(module => module.FormatVersion != formatVersion))
+        {
+            throw new ModuleContractException(
+                "The explicitly selected private schema does not match every producer revision.");
+        }
+        return CreateReferenceSet(modules);
+    }
+
+    private static CompilationReference CreateReferenceSet(Module[] modules)
+    {
         var references = new CompilationReference[modules.Length];
         for (var index = 0; index < modules.Length; index++)
         {
@@ -1044,6 +1065,14 @@ public static partial class ModuleCompiler
             {
                 throw new ModuleContractException("Native module set runtime policies differ.");
             }
+        }
+        if (modules.Any(static module =>
+                module.FormatVersion == ForeignInterfacePrivateVersion)
+            && modules.Any(static module =>
+                module.FormatVersion != ForeignInterfacePrivateVersion))
+        {
+            throw new ModuleContractException(
+                "PF111 module sets cannot mix revision 111 with revision 104 or 106 providers.");
         }
         return modules;
     }

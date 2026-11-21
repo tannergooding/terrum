@@ -185,6 +185,42 @@ internal sealed class PrivateRevision106BodyTests
     }
 
     [Test]
+    public void PF111ReferenceSetsRequireOneExactRevision()
+    {
+        const string schemaIdentity
+            = "terrum/private-semantic-111-foreign-native-interfaces-1";
+        var firstCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "public int32 First() { return 1; }"));
+        Assert.That(firstCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, firstCompilation.Diagnostics));
+        var firstProgram = firstCompilation.Program
+            ?? throw new AssertionException("Expected a first provider.");
+        var secondCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "public int32 Second() { return 2; }"));
+        Assert.That(secondCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, secondCompilation.Diagnostics));
+        var secondProgram = secondCompilation.Program
+            ?? throw new AssertionException("Expected a second provider.");
+        var first = ModuleCompiler.CreateProducerWithSchema(firstProgram,
+            ["First"], schemaIdentity);
+        var second = ModuleCompiler.CreateProducerWithSchema(secondProgram,
+            ["Second"], schemaIdentity);
+        var reference = ModuleCompiler.CreateReferenceSetWithSchema(
+            [first, second], schemaIdentity);
+        Assert.That(reference.Functions.Select(static function => function.Name)
+            .OrderBy(static name => name, StringComparer.Ordinal),
+            Is.EqualTo(new[] { "First", "Second" }));
+
+        var legacySecond = ModuleCompiler.CreateProducer(secondProgram,
+            ["Second"]);
+        _ = Assert.Throws<ModuleContractException>(() =>
+            ModuleCompiler.CreateReferenceSet([first, legacySecond]));
+        _ = Assert.Throws<ModuleContractException>(() =>
+            ModuleCompiler.CreateReferenceSetWithSchema([first, legacySecond],
+                schemaIdentity));
+    }
+
+    [Test]
     public void GeneralDependencyRowsRoundTripAndConstrainProviderReplacement()
     {
         static byte[] CreateProvider(string dependencyAttribute)
