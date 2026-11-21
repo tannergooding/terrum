@@ -1329,6 +1329,134 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
     }
 
     [Test]
+    public async Task L1PointerLoadLinksImportedAggregateThroughStandardJitAndAotAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+
+        const string schemaIdentity
+            = "trrm/1-draft-local-aggregate-layout-execution-pointer-loads-1";
+        const string typeProviderIdentity = "l1p-jit-snapshot-types";
+        const string methodProviderIdentity = "l1p-jit-snapshot-methods";
+        const string rootIdentity = "l1p-jit-snapshot-root";
+        var options = new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+        };
+        var typeProviderCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                [Blittable] [Layout(LayoutKind.Union)]
+                public struct RawWord {
+                    public mut uint32 Narrow;
+                    public mut uint64 Wide;
+                }
+                [Blittable] [Layout(LayoutKind.Sequential)]
+                public struct Snapshot {
+                    public mut RawWord Value;
+                    public mut int32 First;
+                    public mut int32 Second;
+                    public mut int32 Third;
+                    public Snapshot(uint64 wide, int32 first, int32 second,
+                        int32 third) {
+                        Value.Wide = wide;
+                        First = first;
+                        Second = second;
+                        Third = third;
+                    }
+                }
+                public Snapshot CreateSnapshot() {
+                    return new Snapshot(42, 1, 2, 3);
+                }
+                """), options);
+        Assert.That(typeProviderCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                typeProviderCompilation.Diagnostics));
+        var typeProviderArtifact = TrRmExecutableCompiler.EmitStandard(
+            typeProviderCompilation.Program!, typeProviderIdentity,
+            schemaIdentity, 1, [
+                new TrRmSourceTypeExport("", "Snapshot", "SnapshotKey"),
+                new TrRmSourceTypeExport("", "RawWord", "RawWordKey"),
+            ]);
+        var typeProviderInput = new TrRmStandardArtifactInput(
+            schemaIdentity, typeProviderArtifact);
+        var typeProviderReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                typeProviderInput, typeProviderIdentity, []);
+
+        var methodProviderCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                public Snapshot CreateSnapshotViaProvider() {
+                    return CreateSnapshot();
+                }
+                public Snapshot ReadSnapshot(ptr<Snapshot> source) {
+                    unsafe { return *source; }
+                }
+                """), typeProviderReference, options);
+        Assert.That(methodProviderCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                methodProviderCompilation.Diagnostics));
+        var methodProviderArtifact = TrRmExecutableCompiler.EmitStandard(
+            methodProviderCompilation.Program!, methodProviderIdentity,
+            schemaIdentity, moduleTargetRequirement: 1);
+        var methodProviderInput = new TrRmStandardArtifactInput(
+            schemaIdentity, methodProviderArtifact);
+        var methodProviderReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                methodProviderInput, methodProviderIdentity, [
+                    typeProviderInput,
+                ]);
+
+        var rootCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                public int32 Main() {
+                    mut Snapshot value = CreateSnapshotViaProvider();
+                    unsafe {
+                        ptr<Snapshot> source = &value;
+                        Snapshot captured = ReadSnapshot(source);
+                        value.Value.Wide = 99;
+                        return int32(captured.Value.Wide);
+                    }
+                }
+                """), methodProviderReference, options);
+        Assert.That(rootCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                rootCompilation.Diagnostics));
+        var rootArtifact = TrRmExecutableCompiler.EmitStandard(
+            rootCompilation.Program!, rootIdentity, schemaIdentity,
+            moduleTargetRequirement: 1);
+        var providers = new[] { methodProviderInput, typeProviderInput };
+        var rootInput = new TrRmStandardArtifactInput(schemaIdentity,
+            rootArtifact);
+        var loaded = TrRmExecutableCompiler.LoadStandard(rootInput,
+            rootIdentity, providers);
+        var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
+            rootIdentity + "-reemitted", schemaIdentity,
+            moduleTargetRequirement: 1);
+        var reemittedIdentity = rootIdentity + "-reemitted";
+        var reemittedInput = new TrRmStandardArtifactInput(schemaIdentity,
+            reemitted);
+        Assert.That(NativeModuleCompiler.ExecuteStandard(reemittedInput,
+            reemittedIdentity, providers, NativeRuntimePolicy.FailFast),
+            Is.EqualTo(42));
+        var image = NativeModuleCompiler.EmitStandardExecutable(
+            reemittedInput, reemittedIdentity, providers,
+            NativeRuntimePolicy.FailFast);
+        var directory = TestArtifactPaths.CreateDirectory(
+            "terrum-l1p-imported-jit-snapshot-");
+        try
+        {
+            await AssertNativeImageExitCodeAsync(image,
+                Path.Combine(directory, "program.exe"),
+                reemittedIdentity, 42).ConfigureAwait(true);
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
     public void L1StorageAddressRejectsInvalidElementCount()
     {
         const string moduleIdentity = "l1p-storage-address-extent";
