@@ -2845,6 +2845,12 @@ public static partial class TrRmExecutableCompiler
         var predicateTypeUses = new List<TrRmPredicateTypeUseRow>();
         var predicateTypeUseRowsByTypeSpecRef
             = new Dictionary<uint, uint>();
+        var predicateTypePatterns
+            = new List<ReadOnlyMemory<byte>>();
+        var predicateExactTypePatternRowsByTypeUseRow
+            = new Dictionary<uint, uint>();
+        var predicateReferenceTypePatternRows
+            = new Dictionary<(byte Kind, uint ExactTypePatternRow), uint>();
         var predicateReadFootprints
             = new List<TrRmPredicateReadFootprintRow>();
         var predicateReadRoots = new List<TrRmPredicateReadRootRow>();
@@ -2989,6 +2995,68 @@ public static partial class TrRmExecutableCompiler
             predicateTypeUses.Add(
                 new TrRmPredicateTypeUseRow(typeSpecRef));
             predicateTypeUseRowsByTypeSpecRef.Add(typeSpecRef, row);
+            return row;
+        }
+
+        uint ExactTypePatternRowFor(uint typeUseRow)
+        {
+            if (predicateExactTypePatternRowsByTypeUseRow.TryGetValue(
+                    typeUseRow, out var existingRow))
+            {
+                return existingRow;
+            }
+
+            var data = new byte[12];
+            data[0] = 1;
+            BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(4),
+                typeUseRow);
+            var row = checked((uint)predicateTypePatterns.Count + 1);
+            predicateTypePatterns.Add(new ReadOnlyMemory<byte>(data));
+            predicateExactTypePatternRowsByTypeUseRow.Add(typeUseRow, row);
+            return row;
+        }
+
+        uint ReferenceTypePatternRowFor(PrimitiveType type)
+        {
+            if (!CheckedReferenceTypeContract.IsValidType(type,
+                    program.CheckedReferenceTypes))
+            {
+                throw Unsupported(
+                    "A reference-pattern TypePattern has an invalid checked-reference TypeSpec.");
+            }
+
+            var reference = program.CheckedReferenceTypes[
+                CheckedReferenceTypes.Index(type)];
+            if (reference.IsGarbageCollected
+                || reference.IsInitialization || reference.IsOptional
+                || reference.IsReferentWritable
+                || !PrimitiveTypeFacts.IsBuiltInScalar(
+                    reference.ReferentType))
+            {
+                throw Unsupported(
+                    "Reference-pattern TypePatterns currently require a non-GC, non-initialization scalar referent.");
+            }
+
+            var exactTypeUseRow
+                = PredicateTypeUseRowFor(reference.ReferentType);
+            var exactTypePatternRow
+                = ExactTypePatternRowFor(exactTypeUseRow);
+            var kind = reference.IsWritable ? (byte)10 : (byte)9;
+            var key = (kind, exactTypePatternRow);
+            if (predicateReferenceTypePatternRows.TryGetValue(key,
+                    out var existingRow))
+            {
+                return existingRow;
+            }
+
+            var data = new byte[16];
+            data[0] = kind;
+            BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(8), 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(12),
+                exactTypePatternRow);
+            var row = checked((uint)predicateTypePatterns.Count + 1);
+            predicateTypePatterns.Add(new ReadOnlyMemory<byte>(data));
+            predicateReferenceTypePatternRows.Add(key, row);
             return row;
         }
 
@@ -3189,6 +3257,7 @@ public static partial class TrRmExecutableCompiler
                 or BoundIsNull
                 or BoundTypeTestPattern
                 or BoundTypedValuePattern
+                or BoundReferenceTypeTestPattern
                 or BoundContractReturnValue
                 or BoundReferenceInitializationTest or BoundIsSome
                 or BoundIsVariablePattern
@@ -3444,6 +3513,49 @@ public static partial class TrRmExecutableCompiler
                 checked((int)typedValuePatternNodeRow)));
         }
 
+        void AddReferencePatternMatchGraph(int parentNodeRow,
+            uint childOrdinal, PrimitiveType subjectType,
+            uint inputRootRow, uint typePatternRow,
+            ref int rootNodeRow)
+        {
+            var matchNodeRow = checked(predicateNodes.Count + 1);
+            predicateNodes.Add(new TrRmPredicateNodeRow(0x34,
+                checked((uint)TypeSpecRowFor(PrimitiveType.Bool)), 0, 0));
+            if (parentNodeRow == 0)
+            {
+                rootNodeRow = matchNodeRow;
+            }
+            else
+            {
+                predicateChildEdges.Add(new TrRmPredicateChildEdgeRow(
+                    parentNodeRow, childOrdinal, matchNodeRow));
+            }
+
+            var subjectNodeRow = checked((uint)predicateNodes.Count + 1);
+            var subjectOperandFirstRow = checked(
+                (uint)predicateNodeOperands.Count + 1);
+            predicateNodeOperands.Add(
+                new TrRmPredicateNodeOperandRow(1, inputRootRow));
+            predicateNodes.Add(new TrRmPredicateNodeRow(0x11,
+                checked((uint)TypeSpecRowFor(subjectType)),
+                subjectOperandFirstRow, 1));
+
+            var referencePatternNodeRow
+                = checked((uint)predicateNodes.Count + 1);
+            var patternOperandFirstRow = checked(
+                (uint)predicateNodeOperands.Count + 1);
+            predicateNodeOperands.Add(
+                new TrRmPredicateNodeOperandRow(0x0B, typePatternRow));
+            predicateNodes.Add(new TrRmPredicateNodeRow(0x48,
+                checked((uint)TypeSpecRowFor(PrimitiveType.Bool)),
+                patternOperandFirstRow, 1));
+            predicateChildEdges.Add(new TrRmPredicateChildEdgeRow(
+                matchNodeRow, 0, checked((int)subjectNodeRow)));
+            predicateChildEdges.Add(new TrRmPredicateChildEdgeRow(
+                matchNodeRow, 1,
+                checked((int)referencePatternNodeRow)));
+        }
+
         void AddConstantPatternMatchGraph(int parentNodeRow,
             uint childOrdinal, PrimitiveType subjectType,
             uint inputRootRow, BoundConstant constant,
@@ -3693,6 +3805,58 @@ public static partial class TrRmExecutableCompiler
                         PredicateTypeUseRowFor(
                             typedValuePattern.TestedType),
                         typedValueCapture.CaptureRow, ref rootNodeRow);
+                    continue;
+                }
+
+                if (frame.Expression
+                    is BoundReferenceTypeTestPattern referenceTypeTest)
+                {
+                    if (declarationPhase is not (
+                            BoundDeclarationContractPhase.Precondition
+                            or BoundDeclarationContractPhase
+                                .NormalPostcondition)
+                        || referenceTypeTest.Value
+                            is not BoundRead referenceRead
+                        || referenceRead.Variable < 0
+                        || referenceRead.Variable >= function.ParameterCount
+                        || function.Variables[referenceRead.Variable].Type
+                            != referenceRead.Type
+                        || function.Variables[referenceRead.Variable].IsOut
+                        || function.Variables[referenceRead.Variable].IsInit
+                        || function.Variables[referenceRead.Variable]
+                            .IsMutable
+                        || !CheckedReferenceTypeContract.IsValidType(
+                            referenceRead.Type,
+                            program.CheckedReferenceTypes)
+                        || !rootRowsByIdentity.TryGetValue(
+                            (2, referenceRead.Variable),
+                            out var referenceInputRootRow))
+                    {
+                        throw Unsupported(
+                            "A ReferencePattern graph requires its phase-1/2 checked-reference input root.");
+                    }
+
+                    var sourceReference
+                        = program.CheckedReferenceTypes[
+                            CheckedReferenceTypes.Index(
+                                referenceRead.Type)];
+                    if (sourceReference.IsGarbageCollected
+                        || sourceReference.IsInitialization
+                        || sourceReference.IsOptional
+                        || sourceReference.IsReferentWritable
+                        || !PrimitiveTypeFacts.IsBuiltInScalar(
+                            sourceReference.ReferentType))
+                    {
+                        throw Unsupported(
+                            "ReferencePattern graphs currently require a non-GC, non-initialization scalar descriptor.");
+                    }
+
+                    AddReferencePatternMatchGraph(frame.ParentNodeRow,
+                        frame.ChildOrdinal, referenceRead.Type,
+                        referenceInputRootRow,
+                        ReferenceTypePatternRowFor(
+                            referenceTypeTest.TestedType),
+                        ref rootNodeRow);
                     continue;
                 }
 
@@ -4398,6 +4562,53 @@ public static partial class TrRmExecutableCompiler
                             typedValuePattern.TestedType,
                             allowMutable: true);
                         _ = readRoots.Add((2, typedValueRead.Variable));
+                    }
+                    else if (expression
+                        is BoundReferenceTypeTestPattern referenceTypeTest)
+                    {
+                        if (clause.Phase is not (
+                                BoundDeclarationContractPhase.Precondition
+                                or BoundDeclarationContractPhase
+                                    .NormalPostcondition)
+                            || referenceTypeTest.Value
+                                is not BoundRead referenceRead
+                            || referenceRead.Variable < 0
+                            || referenceRead.Variable
+                                >= function.ParameterCount
+                            || function.Variables[referenceRead.Variable]
+                                .Type != referenceRead.Type
+                            || function.Variables[referenceRead.Variable]
+                                .IsOut
+                            || function.Variables[referenceRead.Variable]
+                                .IsInit
+                            || function.Variables[referenceRead.Variable]
+                                .IsMutable
+                            || !CheckedReferenceTypeContract.IsValidType(
+                                referenceRead.Type,
+                                program.CheckedReferenceTypes))
+                        {
+                            throw Unsupported(
+                                "A reference-pattern graph requires a named checked-reference input formal.");
+                        }
+
+                        var sourceReference
+                            = program.CheckedReferenceTypes[
+                                CheckedReferenceTypes.Index(
+                                    referenceRead.Type)];
+                        if (sourceReference.IsGarbageCollected
+                            || sourceReference.IsInitialization
+                            || sourceReference.IsOptional
+                            || sourceReference.IsReferentWritable
+                            || !PrimitiveTypeFacts.IsBuiltInScalar(
+                                sourceReference.ReferentType))
+                        {
+                            throw Unsupported(
+                                "Reference-pattern graphs currently require a non-GC, non-initialization scalar descriptor.");
+                        }
+
+                        _ = ReferenceTypePatternRowFor(
+                            referenceTypeTest.TestedType);
+                        _ = readRoots.Add((2, referenceRead.Variable));
                     }
                     else if (expression is BoundRead capturedRead
                         && captureRowsByVariable.TryGetValue(
@@ -6357,12 +6568,18 @@ public static partial class TrRmExecutableCompiler
             = predicateFrozenScalarValues.FrozenValueNodeCount == 0
                 ? new TrRmFrozenScalarValueTables([], 0, [], 0, [], 0)
                 : predicateFrozenScalarValues.Encode(types);
+        var predicateTypePatternBytes = predicateTypePatterns.Count == 0 ? []
+            : TrRmPredicateTypePatternTableWriter.Encode(
+                predicateTypePatterns, predicateCaptures.Count,
+                predicateFrozenScalarTables.ConstantSourceCount,
+                predicateTypeUses.Count, schema);
         var predicateOperandCounts = new TrRmPredicateTableRowCounts(
             predicateReadRoots.Count,
             predicateFrozenScalarTables.FrozenValueNodeCount,
             predicateCaptures.Count,
             predicateOperations.Count,
-            0, predicateTypeUses.Count, 0, 0, 0, 0, 0);
+            0, predicateTypeUses.Count, 0, 0, 0, 0,
+            predicateTypePatterns.Count);
         var predicateNodeOperandBytes = predicateNodeOperands.Count == 0 ? []
             : TrRmPredicateNodeOperandTableWriter.Encode(
                 predicateNodeOperands, predicateOperandCounts, schema);
@@ -6403,6 +6620,7 @@ public static partial class TrRmExecutableCompiler
         sectionCount += predicateChildEdges.Count == 0 ? 0 : 1;
         sectionCount += predicateCaptures.Count == 0 ? 0 : 1;
         sectionCount += predicateTypeUses.Count == 0 ? 0 : 1;
+        sectionCount += predicateTypePatterns.Count == 0 ? 0 : 1;
         sectionCount += predicateOperations.Count == 0 ? 0 : 1;
         sectionCount += methodParameterSurfaceRows.Count == 0 ? 0 : 1;
         sectionCount += typeDefBindingEqualityRows.Count == 0 ? 0 : 1;
@@ -6541,6 +6759,12 @@ public static partial class TrRmExecutableCompiler
                 sections.Add(new(0x004F, 0,
                     (uint)predicateTypeUses.Count,
                     predicateTypeUseBytes));
+            }
+            if (predicateTypePatterns.Count != 0)
+            {
+                sections.Add(new(0x0052, 0,
+                    (uint)predicateTypePatterns.Count,
+                    predicateTypePatternBytes));
             }
         }
         if (predicateFrozenScalarTables.FrozenValueNodeCount != 0)

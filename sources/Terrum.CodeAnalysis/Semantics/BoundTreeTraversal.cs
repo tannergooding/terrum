@@ -1903,6 +1903,11 @@ internal static class BoundTreeTraversal
             BoundTypeTestPattern typeTest => typeTest with {
                 TestedType = rewriteType(typeTest.TestedType),
             },
+            BoundReferenceTypeTestPattern referenceTypeTest =>
+                referenceTypeTest with {
+                    TestedType = rewriteType(
+                        referenceTypeTest.TestedType),
+                },
             BoundTypedValuePattern typedValueTest => typedValueTest with {
                 TestedType = rewriteType(typedValueTest.TestedType),
             },

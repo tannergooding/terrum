@@ -2172,6 +2172,9 @@ public static partial class SemanticVerifier
                 case BoundTypedValuePattern test:
                     Expression(test.Value, scope, depth + 1);
                     break;
+                case BoundReferenceTypeTestPattern test:
+                    Expression(test.Value, scope, depth + 1);
+                    break;
                 case BoundNativeFixedArrayInitialization fixedArray:
                     if (fixedArray.Elements.IsDefault)
                     {
@@ -2990,6 +2993,9 @@ public static partial class SemanticVerifier
                     Expression(test.Value, depth + 1, acquiringRoot);
                     break;
                 case BoundTypedValuePattern test:
+                    Expression(test.Value, depth + 1, acquiringRoot);
+                    break;
+                case BoundReferenceTypeTestPattern test:
                     Expression(test.Value, depth + 1, acquiringRoot);
                     break;
                 case BoundNativeFixedArrayElement fixedArrayElement:
@@ -7731,6 +7737,9 @@ public static partial class SemanticVerifier
                 CleanupExpressionCanBeProvenNonThrowing(
                     test.Value, function, program, ref remaining, depth + 1),
             BoundTypedValuePattern test =>
+                CleanupExpressionCanBeProvenNonThrowing(
+                    test.Value, function, program, ref remaining, depth + 1),
+            BoundReferenceTypeTestPattern test =>
                 CleanupExpressionCanBeProvenNonThrowing(
                     test.Value, function, program, ref remaining, depth + 1),
             _ => false,
@@ -19486,6 +19495,47 @@ public static partial class SemanticVerifier
                     ref remaining, depth + 1, failures);
                 _ = declarations.Add(typedValuePattern.Variable);
                 break;
+            case BoundReferenceTypeTestPattern referenceTypeTest:
+                if (referenceTypeTest.Value is not BoundRead
+                        referenceTypeRead
+                    || referenceTypeRead.Variable < 0
+                    || referenceTypeRead.Variable >= function.ParameterCount
+                    || function.Variables[referenceTypeRead.Variable].Type
+                        != referenceTypeRead.Type
+                    || function.Variables[referenceTypeRead.Variable].IsOut
+                    || function.Variables[referenceTypeRead.Variable].IsInit
+                    || !CheckedReferenceTypeContract.IsValidType(
+                        referenceTypeRead.Type,
+                        program.CheckedReferenceTypes)
+                    || !CheckedReferenceTypeContract.IsValidType(
+                        referenceTypeTest.TestedType,
+                        program.CheckedReferenceTypes))
+                {
+                    throw Invalid(referenceTypeTest.Span);
+                }
+
+                var sourceReferenceType = program.CheckedReferenceTypes[
+                    CheckedReferenceTypes.Index(referenceTypeRead.Type)];
+                var patternReferenceType = program.CheckedReferenceTypes[
+                    CheckedReferenceTypes.Index(
+                        referenceTypeTest.TestedType)];
+                if (sourceReferenceType.IsGarbageCollected
+                    || sourceReferenceType.IsInitialization
+                    || sourceReferenceType.IsOptional
+                    || patternReferenceType.IsGarbageCollected
+                    || patternReferenceType.IsInitialization
+                    || patternReferenceType.IsOptional
+                    || !PrimitiveTypeFacts.IsBuiltInScalar(
+                        sourceReferenceType.ReferentType)
+                    || !PrimitiveTypeFacts.IsBuiltInScalar(
+                        patternReferenceType.ReferentType))
+                {
+                    throw Invalid(referenceTypeTest.Span);
+                }
+                Expression(referenceTypeTest.Value, initialized,
+                    fieldMasks, declarations, function, program,
+                    ref remaining, depth + 1, failures);
+                break;
             case BoundIsInitialized initializationTest:
                 if (initializationTest.Type != PrimitiveType.Bool
                     || initializationTest.Variable < 0 || initializationTest.Variable >= initialized.Length
@@ -22683,7 +22733,8 @@ public static partial class SemanticVerifier
         if (expression is BoundCall or BoundIndirectCall
             or BoundNominalUpdate or BoundCoalesce
             or BoundIsNull or BoundTypeTestPattern
-            or BoundTypedValuePattern or BoundIsSome
+            or BoundTypedValuePattern or BoundReferenceTypeTestPattern
+            or BoundIsSome
             or BoundIsVariablePattern)
         {
             return false;
@@ -22704,6 +22755,7 @@ public static partial class SemanticVerifier
                 or BoundNominalUpdate or BoundCoalesce or BoundIsNull
                 or BoundTypeTestPattern
                 or BoundTypedValuePattern
+                or BoundReferenceTypeTestPattern
                 or BoundIsSome or BoundIsVariablePattern
                 or BoundIsInitialized
                 or BoundReferenceInitializationTest
@@ -35177,6 +35229,8 @@ public static partial class SemanticVerifier
                 test.Value, variable, ref remaining, depth + 1),
             BoundTypedValuePattern test => InvalidatesReservedOwner(
                 test.Value, variable, ref remaining, depth + 1),
+            BoundReferenceTypeTestPattern test => InvalidatesReservedOwner(
+                test.Value, variable, ref remaining, depth + 1),
             BoundCoalesce coalesce => InvalidatesReservedOwner(coalesce.Optional, variable, ref remaining, depth + 1)
                 || InvalidatesReservedOwner(coalesce.Fallback, variable, ref remaining, depth + 1),
             BoundIsSome pattern => InvalidatesReservedOwner(pattern.Value, variable, ref remaining, depth + 1),
@@ -37990,6 +38044,9 @@ public static partial class SemanticVerifier
             case BoundTypedValuePattern test:
                 VacateNestedOutputs(test.Value, state, ref remaining);
                 break;
+            case BoundReferenceTypeTestPattern test:
+                VacateNestedOutputs(test.Value, state, ref remaining);
+                break;
             case BoundNativeFixedArrayInitialization fixedArray:
                 foreach (var element in fixedArray.Elements)
                 {
@@ -38216,6 +38273,8 @@ public static partial class SemanticVerifier
             BoundTypedValuePattern test =>
                 (byte)(OutcomeEffectFact
                     | FlowFacts(test.Value, flowFacts, ref remaining)),
+            BoundReferenceTypeTestPattern test =>
+                FlowFacts(test.Value, flowFacts, ref remaining),
             BoundNativeFixedArrayInitialization fixedArray =>
                 FlowFacts(fixedArray.Elements, flowFacts, ref remaining),
             BoundNativeFixedArrayRepeatInitialization repeat =>
@@ -38749,6 +38808,15 @@ public static partial class SemanticVerifier
             return KnownOptionalPresence(typedValuePattern.Value,
                 initialized, ref remaining) is not bool typedPresence
                 || result == typedPresence;
+        }
+        if (expression is BoundReferenceTypeTestPattern referenceTypeTest)
+        {
+            Count(ref remaining, 0);
+            return result
+                == CheckedReferenceTypeContract.IsReferencePatternCompatible(
+                    referenceTypeTest.Value.Type,
+                    referenceTypeTest.TestedType,
+                    initialized.Program.CheckedReferenceTypes);
         }
         if (expression is BoundIsInitialized initializationTest)
         {

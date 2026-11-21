@@ -847,13 +847,17 @@ scalar TypeTest pattern `0x44` with exact `PredicateTypeUse` `0x004F` for an
 optional scalar subject, plus scalar TypedValueBind pattern `0x45` with exact
 TypeUse, role-1 capture and Copy initialization on a positive match. Native
 lowering supports both bounded forms, and ordinary source binding also lowers
-these scalar patterns for named values. Producer and emission regressions
-remain unverified under the active hold. The phase-1/2 consumer, failure maps,
+these scalar patterns for named values. The producer also emits no-capture
+scalar ReferencePattern `0x48` with PredicateTypePattern `0x0052` kind 9/10;
+NativeEmitter lowers this bounded type/access match, while role-2 capture
+remains open. Producer and emission regressions remain
+unverified under the active hold. The phase-1/2 consumer, failure maps,
 provider binding, source-free remapping/re-emission and graph execution remain
 open.
 This composition does not select the LayoutQueries source/provider/query-Body
 profile. Other phase-2 forms including checked conversions, bit
-reinterpretation, non-scalar typed/reference/tuple/union/property patterns, places,
+reinterpretation, non-scalar typed/reference/tuple/union/property patterns,
+places,
 broader cross-clause value coverage, complete
 dependency/provider replacement remapping and graph execution remain open.
 Native JIT and PE execution also cover

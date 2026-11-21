@@ -3296,6 +3296,8 @@ internal sealed partial class PeCompiler
                 return ExpressionSpills(test.Value, ref maximumArguments);
             case BoundTypedValuePattern test:
                 return ExpressionSpills(test.Value, ref maximumArguments);
+            case BoundReferenceTypeTestPattern test:
+                return ExpressionSpills(test.Value, ref maximumArguments);
             case BoundIsSome pattern:
                 return ExpressionSpills(pattern.Value, ref maximumArguments);
             case BoundIsVariablePattern pattern:
@@ -3655,6 +3657,9 @@ internal sealed partial class PeCompiler
                     VisitExpression(test.Value);
                     break;
                 case BoundTypedValuePattern test:
+                    VisitExpression(test.Value);
+                    break;
+                case BoundReferenceTypeTestPattern test:
                     VisitExpression(test.Value);
                     break;
                 case BoundIsSome pattern:
@@ -10205,6 +10210,17 @@ internal sealed partial class PeCompiler
                 {
                     _code.Bytes(0x31, 0xC0);
                 }
+                break;
+            case BoundReferenceTypeTestPattern referenceTypeTest:
+                Expression(referenceTypeTest.Value, spill);
+                _code.Byte(0xB8);
+                _code.Int32(
+                    CheckedReferenceTypeContract
+                        .IsReferencePatternCompatible(
+                            referenceTypeTest.Value.Type,
+                            referenceTypeTest.TestedType,
+                            _program.CheckedReferenceTypes)
+                        ? 1 : 0);
                 break;
             case BoundIsSome pattern when IsTaggedOptionalValueType(
                 pattern.Value.Type):

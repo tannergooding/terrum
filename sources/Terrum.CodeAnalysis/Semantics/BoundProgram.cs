@@ -2997,6 +2997,18 @@ public sealed record BoundTypedValuePattern(
         };
 }
 
+/// <summary>Matches an existing checked-reference descriptor without forming or dereferencing it.</summary>
+public sealed record BoundReferenceTypeTestPattern(
+    BoundExpression Value, PrimitiveType TestedType, TextSpan Span)
+    : BoundExpression(PrimitiveType.Bool, Span)
+{
+    internal override ImmutableArray<BoundExpression> NestedExpressions => [Value];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this with {
+            Value = rewrite(Value),
+        };
+}
+
 /// <summary>Tests an optional value and snapshots its payload into a scoped variable on success.</summary>
 public sealed record BoundIsSome(BoundExpression Value, int Variable, TextSpan Span) : BoundExpression(PrimitiveType.Bool, Span)
 {

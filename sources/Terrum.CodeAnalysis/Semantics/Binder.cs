@@ -17569,6 +17569,8 @@ internal sealed partial class Binder
             ContainsAuthorizedExpressionScopeCall(test.Value),
         BoundTypedValuePattern test =>
             ContainsAuthorizedExpressionScopeCall(test.Value),
+        BoundReferenceTypeTestPattern test =>
+            ContainsAuthorizedExpressionScopeCall(test.Value),
         BoundIsSome pattern => ContainsAuthorizedExpressionScopeCall(pattern.Value),
         BoundIsVariablePattern pattern => ContainsAuthorizedExpressionScopeCall(pattern.Value),
         _ => false,
@@ -18606,6 +18608,116 @@ internal sealed partial class Binder
                 var patternSyntax = node.Children
                     .OfType<SyntaxNode>()
                     .LastOrDefault();
+                if (patternSyntax?.Kind
+                    == SyntaxKind.SwitchReferenceTypePattern)
+                {
+                    var typeArgumentNodes = patternSyntax.Children
+                        .OfType<SyntaxNode>().ToArray();
+                    var referentSyntaxNodes = typeArgumentNodes.Length == 1
+                        ? typeArgumentNodes[0].Children
+                            .OfType<SyntaxNode>().ToArray()
+                        : Array.Empty<SyntaxNode>();
+                    if (referentSyntaxNodes.Length != 1
+                        || referentSyntaxNodes[0].Kind
+                            != SyntaxKind.TypeName)
+                    {
+                        Report("TRM3007",
+                            "This reference-pattern path requires an exact scalar referent type.",
+                            patternSyntax.Span);
+                        expression = ErrorExpression(node.Span);
+                        break;
+                    }
+
+                    var referentSyntax = referentSyntaxNodes[0];
+                    var diagnosticsBeforeReferent = DiagnosticCount;
+                    var referentType = BindType(referentSyntax,
+                        allowVoid: false);
+                    if (DiagnosticCount != diagnosticsBeforeReferent
+                        || !PrimitiveTypeFacts.IsBuiltInScalar(
+                            referentType))
+                    {
+                        if (DiagnosticCount == diagnosticsBeforeReferent)
+                        {
+                            Report("TRM3007",
+                                "This reference-pattern path requires an exact scalar referent type.",
+                                referentSyntax.Span);
+                        }
+                        expression = ErrorExpression(node.Span);
+                        break;
+                    }
+
+                    var patternTokens = patternSyntax.Children
+                        .OfType<SyntaxTokenElement>().ToArray();
+                    var isMutableBinding = patternTokens.Any(
+                        static token => token.Token.Kind
+                            == TokenKind.MutKeyword);
+                    var isWritablePattern = patternTokens.Any(
+                        static token => token.Token.Kind
+                            == TokenKind.WriteKeyword);
+                    if (patternTokens.Length == 0
+                        || patternTokens[^1].Token.Kind
+                            != TokenKind.Underscore)
+                    {
+                        Report("TRM3007",
+                            "Named reference-pattern captures require role-2 backing propagation.",
+                            patternSyntax.Span);
+                        expression = ErrorExpression(node.Span);
+                        break;
+                    }
+                    if (isMutableBinding)
+                    {
+                        Report("TRM3007",
+                            "A mutable reference pattern requires a named descriptor binding.",
+                            patternSyntax.Span);
+                        expression = ErrorExpression(node.Span);
+                        break;
+                    }
+
+                    var referencePatternType = GetCheckedReferenceType(
+                        new CheckedReferenceTypeDefinition(referentType,
+                            isWritablePattern, false, false, false),
+                        patternSyntax.Span);
+                    var subject = BindExpression(
+                        (SyntaxNode)node.Children[0], null);
+                    if (subject is not BoundRead subjectRead
+                        || !CheckedReferenceTypeContract.IsValidType(
+                            subjectRead.Type, _checkedReferenceTypes))
+                    {
+                        Report("TRM3007",
+                            "A reference pattern requires a named checked-reference descriptor.",
+                            node.Span);
+                        expression = ErrorExpression(node.Span);
+                        break;
+                    }
+
+                    var subjectReference = _checkedReferenceTypes[
+                        CheckedReferenceTypes.Index(subjectRead.Type)];
+                    if (subjectReference.IsGarbageCollected
+                        || subjectReference.IsInitialization
+                        || subjectReference.IsOptional
+                        || !PrimitiveTypeFacts.IsBuiltInScalar(
+                            subjectReference.ReferentType))
+                    {
+                        Report("TRM3007",
+                            "This reference-pattern path requires a non-optional scalar-reference descriptor.",
+                            node.Span);
+                        expression = ErrorExpression(node.Span);
+                        break;
+                    }
+
+                    var matches
+                        = CheckedReferenceTypeContract
+                            .IsReferencePatternCompatible(
+                                subjectRead.Type, referencePatternType,
+                                _checkedReferenceTypes);
+                    expression = _bindingContractPhase is not null
+                        ? new BoundReferenceTypeTestPattern(subjectRead,
+                            referencePatternType, node.Span)
+                        : new BoundConstant(matches ? 1 : 0,
+                            PrimitiveType.Bool, node.Span);
+                    break;
+                }
+
                 if (patternSyntax?.Kind == SyntaxKind.SwitchTypedBindingPattern
                     && patternSyntax.Children.OfType<SyntaxNode>()
                         .FirstOrDefault() is SyntaxNode {

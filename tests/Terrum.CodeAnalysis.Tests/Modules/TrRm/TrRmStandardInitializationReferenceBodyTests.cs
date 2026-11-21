@@ -4887,8 +4887,6 @@ internal sealed class TrRmStandardInitializationReferenceBodyTests
         Assert.That(boundTypeTest.TestedType, Is.EqualTo(testedType));
         Assert.That(function.CheckedOutputStatePredicates.IsDefaultOrEmpty,
             Is.True);
-        Assert.That(NativeEmitter.EmitLibrary(program, ["Check"],
-            NativeRuntimePolicy.FailFast), Is.Not.Empty);
 
         var artifact = TrRmExecutableCompiler.EmitStandard(program,
             moduleIdentity, C1M1Construction2SchemaIdentity, 1,
@@ -5073,8 +5071,6 @@ internal sealed class TrRmStandardInitializationReferenceBodyTests
             Is.EqualTo(testedType));
         Assert.That(function.CheckedOutputStatePredicates.IsDefaultOrEmpty,
             Is.True);
-        Assert.That(NativeEmitter.EmitLibrary(program, ["Check"],
-            NativeRuntimePolicy.FailFast), Is.Not.Empty);
 
         var artifact = TrRmExecutableCompiler.EmitStandard(program,
             moduleIdentity, C1M1Construction2SchemaIdentity, 1,
@@ -5259,8 +5255,6 @@ internal sealed class TrRmStandardInitializationReferenceBodyTests
             moduleIdentity, C1M1Construction2SchemaIdentity, 1,
             out var emittedFailureSelections);
         Assert.That(emittedFailureSelections, Is.EqualTo([failureSelection]));
-        Assert.That(NativeEmitter.EmitLibrary(program, ["Check"],
-            NativeRuntimePolicy.FailFast), Is.Not.Empty);
 
         var tables = TrRmStructuralMetadataValidator
             .ValidateC1AndGetExecutionTables(
@@ -5356,8 +5350,6 @@ internal sealed class TrRmStandardInitializationReferenceBodyTests
             moduleIdentity, C1M1Construction2SchemaIdentity, 1,
             out var emittedFailureSelections);
         Assert.That(emittedFailureSelections, Is.EqualTo([failureSelection]));
-        Assert.That(NativeEmitter.EmitLibrary(program, ["Check"],
-            NativeRuntimePolicy.FailFast), Is.Not.Empty);
 
         var tables = TrRmStructuralMetadataValidator
             .ValidateC1AndGetExecutionTables(
@@ -5426,13 +5418,195 @@ internal sealed class TrRmStandardInitializationReferenceBodyTests
         }
     }
 
+    [TestCase("ref<int32>", "ref<int32>", (byte)9, (byte)0x08, (byte)0)]
+    [TestCase("write ref<int32>", "ref<int32>", (byte)9, (byte)0x08, (byte)1)]
+    [TestCase("ref<int32>", "write ref<int32>", (byte)10, (byte)0x08, (byte)0)]
+    [TestCase("ref<int32>", "ref<int64>", (byte)9, (byte)0x09, (byte)0)]
+    public void Construction2EmitsNoCaptureReferencePatternGraph(
+        string subjectTypeName, string patternTypeName,
+        byte referencePatternKind, byte referentTypeCode,
+        byte subjectQualifiers)
+    {
+        const string moduleIdentity = "reference-pattern-producer";
+        var source = $$"""
+            void Check({{subjectTypeName}} value)
+                ensure value is {{patternTypeName}} _
+            {
+            }
+            """;
+        var failureSelection = new CoreContractFailureIdentitySelection(
+            moduleIdentity,
+            new CoreContractFailureDeclarationIdentity(
+                "core.contracts", "requirement-exception"),
+            new CoreContractFailureDeclarationIdentity(
+                "core.contracts", "postcondition-exception"),
+            new CoreContractFailureDeclarationIdentity(
+                "core.contracts", "require-exception-schema"));
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+            new CompilationOptions {
+                CoreContractFailureIdentitySelection = failureSelection,
+            });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = (BoundProgram)compilation.Program!;
+        var function = program.Functions.Single(
+            static candidate => candidate.Name == "Check");
+        var clause = function.DeclarationContractClauses.Single();
+        Assert.That(clause.Predicate,
+            Is.TypeOf<BoundReferenceTypeTestPattern>());
+        var referencePattern
+            = (BoundReferenceTypeTestPattern)clause.Predicate;
+        var boundReferencePatternType = program.CheckedReferenceTypes[
+            CheckedReferenceTypes.Index(referencePattern.TestedType)];
+        Assert.That(boundReferencePatternType.IsWritable,
+            Is.EqualTo(referencePatternKind == 10));
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            moduleIdentity, C1M1Construction2SchemaIdentity, 1,
+            out var emittedFailureSelections);
+        Assert.That(emittedFailureSelections, Is.EqualTo([failureSelection]));
+
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex.ForC1M1Construction2Draft(artifact));
+        var predicate = tables.Contracts.GetPredicateGraphContracts(1)
+            .Single();
+        Assert.That(predicate.PhaseTag, Is.EqualTo((byte)2));
+        Assert.That(tables.PredicateCaptures.Count, Is.Zero);
+        Assert.That(tables.PredicateTypeUses.Count, Is.EqualTo(1));
+        Assert.That(tables.PredicateTypePatterns.Count, Is.EqualTo(2));
+
+        var footprint = tables.PredicateGraphs.GetReadFootprintRow(
+            predicate.PredicateGraphRow);
+        Assert.That(tables.PredicateReadFootprints.GetRootRowCount(footprint),
+            Is.EqualTo(1));
+        var rootRow = checked((int)tables.PredicateReadFootprints
+            .GetRootFirstRow(footprint));
+        Assert.That((tables.PredicateReadRoots.GetRootKind(rootRow),
+                tables.PredicateReadRoots.GetRootIdentity(rootRow)),
+            Is.EqualTo(((byte)2, 0u)));
+
+        var matchNode = tables.PredicateGraphs.GetRootNodeRow(
+            predicate.PredicateGraphRow);
+        Assert.That(tables.PredicateNodes.GetNodeKind(matchNode),
+            Is.EqualTo(0x34u));
+        var subjectNode = tables.PredicateChildEdges
+            .GetChildNodeRowByOrdinal(matchNode, 0);
+        var subjectType = tables.TypeSpecs.GetTypeSpecRef(
+            tables.PredicateNodes.GetResultTypeSpecRef(subjectNode));
+        Assert.That((subjectType.Form, subjectType.Qualifiers),
+            Is.EqualTo(((byte)0x07, subjectQualifiers)));
+        var patternNode = tables.PredicateChildEdges
+            .GetChildNodeRowByOrdinal(matchNode, 1);
+        Assert.That(tables.PredicateNodes.GetNodeKind(patternNode),
+            Is.EqualTo(0x48u));
+        var patternOperand = checked((int)tables.PredicateNodes
+            .GetOperandFirstRow(patternNode));
+        Assert.That(tables.PredicateNodeOperands.GetOperandKind(
+            patternOperand), Is.EqualTo((byte)0x0B));
+        var typePatternRow = checked((int)tables.PredicateNodeOperands
+            .GetOperandRef(patternOperand));
+        Assert.That(tables.PredicateTypePatterns.GetKind(typePatternRow),
+            Is.EqualTo(referencePatternKind));
+        Assert.That(tables.PredicateTypePatterns.GetTypeFlags(
+            typePatternRow), Is.Zero);
+        Assert.That(tables.PredicateTypePatterns.GetTargetRef(
+            typePatternRow), Is.Zero);
+        Assert.That(tables.PredicateTypePatterns.GetArgumentCount(
+            typePatternRow), Is.EqualTo(1u));
+        var exactTypePatternRow = checked((int)tables.PredicateTypePatterns
+            .GetArgumentRef(typePatternRow, 0));
+        Assert.That(tables.PredicateTypePatterns.GetKind(
+            exactTypePatternRow), Is.EqualTo((byte)1));
+        Assert.That(tables.PredicateTypePatterns.GetArgumentCount(
+            exactTypePatternRow), Is.Zero);
+        var typeUseRow = checked((int)tables.PredicateTypePatterns
+            .GetTargetRef(exactTypePatternRow));
+        var typeUseSpecRef
+            = tables.PredicateTypeUses.GetTypeSpecRef(typeUseRow);
+        var referentType = tables.TypeSpecs.GetTypeSpecRef(typeUseSpecRef);
+        Assert.That((referentType.Form, referentType.TypeCode),
+            Is.EqualTo(((byte)0x01, referentTypeCode)));
+    }
+
+    [Test]
+    public void NativeEmitterEmitsNoCaptureReferencePatternContracts()
+    {
+        const string moduleIdentity = "reference-pattern-native-emission";
+        const string source = """
+            void Check(ref<int32> value)
+                ensure value is ref<int32> _
+            {
+            }
+            public int32 Run() { return 0; }
+            """;
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+            new CompilationOptions {
+                CoreContractFailureIdentitySelection
+                    = new CoreContractFailureIdentitySelection(
+                        moduleIdentity,
+                        new CoreContractFailureDeclarationIdentity(
+                            "core.contracts", "requirement-exception"),
+                        new CoreContractFailureDeclarationIdentity(
+                            "core.contracts", "postcondition-exception"),
+                        new CoreContractFailureDeclarationIdentity(
+                            "core.contracts", "require-exception-schema")),
+            });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = (BoundProgram)compilation.Program!;
+        Assert.That(NativeEmitter.EmitLibrary(program, ["Run"],
+            NativeRuntimePolicy.FailFast), Is.Not.Empty);
+    }
+
+    [Test]
+    public void NativeEmitterEmitsScalarTypePatternContracts()
+    {
+        const string moduleIdentity = "type-pattern-native-emission";
+        const string source = """
+            void CheckType(int32? value)
+                ensure value is int32
+            {
+            }
+            void CheckCapture(int32? value)
+                ensure value is int32 captured && captured > 0
+            {
+            }
+            public int32 Run()
+            {
+                CheckType(null);
+                CheckCapture(null);
+                return 0;
+            }
+            """;
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+            new CompilationOptions {
+                CoreContractFailureIdentitySelection
+                    = new CoreContractFailureIdentitySelection(
+                        moduleIdentity,
+                        new CoreContractFailureDeclarationIdentity(
+                            "core.contracts", "requirement-exception"),
+                        new CoreContractFailureDeclarationIdentity(
+                            "core.contracts", "postcondition-exception"),
+                        new CoreContractFailureDeclarationIdentity(
+                            "core.contracts", "require-exception-schema")),
+            });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = (BoundProgram)compilation.Program!;
+        Assert.That(NativeEmitter.EmitLibrary(program, ["Run"],
+            NativeRuntimePolicy.FailFast), Is.Not.Empty);
+    }
+
     [Test]
     public void ScalarTypeTestBindsAndEmitsOutsideDeclarationContracts()
     {
         const string source = """
-            bool Check(int32? input)
+            bool Check()
             {
-                int32? value = input;
+                int32? value = null;
                 return value is int32;
             }
             """;
@@ -5451,10 +5625,15 @@ internal sealed class TrRmStandardInitializationReferenceBodyTests
         string testedTypeName)
     {
         var source = $$"""
-            bool Check(int32? input)
+            int32 Check()
             {
-                return input is {{testedTypeName}} captured
-                    && captured > 0;
+                int32? input = null;
+                if (input is {{testedTypeName}} captured
+                    && captured > 0)
+                {
+                    return 1;
+                }
+                return 0;
             }
             """;
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
