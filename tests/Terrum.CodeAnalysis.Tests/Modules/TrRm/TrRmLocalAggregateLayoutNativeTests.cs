@@ -2645,12 +2645,48 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
         var artifact = TrRmExecutableCompiler.EmitStandard(
             compilation.Program!, moduleIdentity, l1pSchemaIdentity,
             moduleTargetRequirement: 1);
-        var malformed = TruncateL1pPointerLoadOperand(artifact,
-            l1pSchemaIdentity, "Read");
+        var malformed = TruncateL1pInstructionOperand(artifact,
+            l1pSchemaIdentity, "Read", 0x1B);
         Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.LoadStandard(
                     new TrRmStandardArtifactInput(l1pSchemaIdentity,
                         malformed), moduleIdentity, []));
+    }
+
+    [Test]
+    public void L1StorageAddressRejectsTruncatedOperand()
+    {
+        const string moduleIdentity = "l1p-truncated-storage-address";
+        const string l1pSchemaIdentity
+            = "trrm/1-draft-local-aggregate-layout-execution-pointer-loads-1";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            struct Snapshot {
+                public int32 Value;
+            }
+            public int32 Main() {
+                mut Snapshot snapshot;
+                unsafe {
+                    snapshot.Value = 42;
+                    Snapshot captured = *(&snapshot);
+                    return captured.Value;
+                }
+            }
+            """), new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, l1pSchemaIdentity,
+            moduleTargetRequirement: 1);
+        var malformed = TruncateL1pInstructionOperand(artifact,
+            l1pSchemaIdentity, "Main", 0xEC);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(l1pSchemaIdentity,
+                    malformed), moduleIdentity, []));
     }
 
     [Test]
@@ -3307,8 +3343,9 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
         });
     }
 
-    private static byte[] TruncateL1pPointerLoadOperand(
-        byte[] artifact, string schemaIdentity, string methodName)
+    private static byte[] TruncateL1pInstructionOperand(
+        byte[] artifact, string schemaIdentity, string methodName,
+        byte expectedOpcode)
     {
         var index = new TrRmArtifactIndex(artifact,
             TrRmArtifactSchema.LocalAggregateLayoutDraft,
@@ -3343,21 +3380,21 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
                 "The L1P test Body code is not the final variable-row payload.");
         }
 
-        var loadPosition = -1;
+        var instructionPosition = -1;
         for (var position = 0; position < body.Code.Length;)
         {
             var instructionLength
                 = TrRmRegisterBodyReader.InstructionLength(
                     body.Code[position], body.Schema,
                     usesNativePointerLoads: true);
-            if (body.Code[position] == 0x1B)
+            if (body.Code[position] == expectedOpcode)
             {
-                loadPosition = position;
+                instructionPosition = position;
                 break;
             }
             position += instructionLength;
         }
-        Assert.That(loadPosition, Is.GreaterThanOrEqualTo(0));
+        Assert.That(instructionPosition, Is.GreaterThanOrEqualTo(0));
 
         var mapCountBytes = 0;
         for (var mask = body.MapMask; mask != 0; mask >>= 1)
@@ -3370,7 +3407,7 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
             + (body.MethodCount * sizeof(uint))
             + (body.FieldCount * sizeof(uint))
             + (body.ConstantCount * 8);
-        var truncatedCodeLength = loadPosition + 1;
+        var truncatedCodeLength = instructionPosition + 1;
         BinaryPrimitives.WriteUInt32LittleEndian(
             bodyBytes.AsSpan(blockStart + 4),
             checked((uint)truncatedCodeLength));
