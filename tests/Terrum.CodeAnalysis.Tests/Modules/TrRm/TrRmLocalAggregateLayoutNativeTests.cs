@@ -2648,6 +2648,7 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
                 public mut Inner Nested;
                 public mut int32 Second;
                 public mut int32 Third;
+                public mut [int32; 3] Values;
             }
             """), new CompilationOptions {
             RuntimePolicy = BoundRuntimePolicy.FailFast,
