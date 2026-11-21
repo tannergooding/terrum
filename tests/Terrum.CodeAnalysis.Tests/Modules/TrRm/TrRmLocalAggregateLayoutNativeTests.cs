@@ -3155,6 +3155,7 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
             [Blittable] [Layout(LayoutKind.Sequential)]
             internal struct Prefix {
                 public uint8 Value;
+                public mut [int32; 1] Items;
             }
             """ : string.Empty;
         var firstFieldType = incompatible ? "uint32" : "int32";
