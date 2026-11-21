@@ -31,6 +31,9 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int GetValueDelegate();
 
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int GetPointerValueDelegate(nint source);
+
     [TestCase(false)]
     [TestCase(true)]
     public async Task StandardL1MethodProvidersUseImportedNominalArrayFieldsAsync(
@@ -962,6 +965,309 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
     }
 
     [Test]
+    public async Task L1PointerLoadReadsAnAggregateAcrossStandardRoundTripAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+
+        const string moduleIdentity = "l1p-aggregate-pointer-load";
+        const string l1pSchemaIdentity
+            = "trrm/1-draft-local-aggregate-layout-execution-pointer-loads-1";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            struct Snapshot {
+                public mut int32 First;
+                public mut int32 Second;
+                public mut int32 Third;
+            }
+            Snapshot ReadSnapshot(ptr<Snapshot> source) {
+                unsafe { return *source; }
+            }
+            public int32 Main(ptr<Snapshot> source) {
+                unsafe {
+                    Snapshot captured = ReadSnapshot(source);
+                    return captured.First;
+                }
+            }
+            """), new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program
+            ?? throw new InvalidOperationException(
+                "A successful compilation must contain a bound program.");
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            moduleIdentity, l1pSchemaIdentity, moduleTargetRequirement: 1);
+        var input = new TrRmStandardArtifactInput(l1pSchemaIdentity, artifact);
+        var loaded = TrRmExecutableCompiler.LoadStandard(input,
+            moduleIdentity, []);
+        var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
+            moduleIdentity + "-reemitted", l1pSchemaIdentity,
+            moduleTargetRequirement: 1);
+        var image = NativeModuleCompiler.EmitStandardLibrary(
+            new TrRmStandardArtifactInput(l1pSchemaIdentity, reemitted),
+            moduleIdentity + "-reemitted", [], ["Main"],
+            NativeRuntimePolicy.FailFast);
+
+        var directory = TestArtifactPaths.CreateDirectory(
+            "terrum-l1p-aggregate-pointer-load-");
+        try
+        {
+            var imagePath = Path.Combine(directory, "library.dll");
+            await File.WriteAllBytesAsync(imagePath, image)
+                .ConfigureAwait(true);
+            var library = NativeLibrary.Load(imagePath);
+            try
+            {
+                var function = Marshal.GetDelegateForFunctionPointer<
+                    GetPointerValueDelegate>(NativeLibrary.GetExport(library,
+                    "Main"));
+                var source = Marshal.AllocHGlobal(12);
+                try
+                {
+                    Marshal.WriteInt32(source, 0, 42);
+                    Marshal.WriteInt32(source, 4, 1);
+                    Marshal.WriteInt32(source, 8, 2);
+                    Assert.That(function(source), Is.EqualTo(42));
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(source);
+                }
+            }
+            finally
+            {
+                NativeLibrary.Free(library);
+            }
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
+    public void NativePointerReadSnapshotsIndirectAggregateBeforeMutation()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            struct Snapshot {
+                public mut int32 First;
+                public mut int32 Second;
+                public mut int32 Third;
+                public Snapshot(int32 first, int32 second, int32 third) {
+                    First = first;
+                    Second = second;
+                    Third = third;
+                }
+            }
+            Snapshot ReadSnapshot(ptr<Snapshot> source) {
+                unsafe { return *source; }
+            }
+            public int32 Main() {
+                Snapshot value = new Snapshot(42, 1, 2);
+                unsafe {
+                    Snapshot captured = ReadSnapshot(&value);
+                    value.First = 99;
+                    return captured.First;
+                }
+            }
+            """), new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(compilation.Program!,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(42));
+    }
+
+    [Test]
+    public async Task L1PointerLoadPreservesImportedAggregateProviderClosureAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+
+        const string l1pSchemaIdentity
+            = "trrm/1-draft-local-aggregate-layout-execution-pointer-loads-1";
+        const string rootIdentity = "l1p-imported-aggregate-root";
+        const string methodProviderIdentity
+            = "l1p-imported-aggregate-methods";
+        const string typeProviderIdentity = "l1p-imported-aggregate-types";
+        var (rootArtifact, methodProviderArtifact, expectedTypeArtifact)
+            = CreateL1pImportedAggregateMethodArtifacts(rootIdentity,
+                methodProviderIdentity, typeProviderIdentity,
+                l1pSchemaIdentity);
+        var relocatedTypeArtifact = CreateL1pTypeProviderArtifact(
+            typeProviderIdentity, l1pSchemaIdentity, relocate: true);
+        var rootInput = new TrRmStandardArtifactInput(l1pSchemaIdentity,
+            rootArtifact);
+        var methodProviderInput = new TrRmStandardArtifactInput(
+            l1pSchemaIdentity, methodProviderArtifact);
+        var typeProviderInput = new TrRmStandardArtifactInput(
+            l1pSchemaIdentity, relocatedTypeArtifact);
+        var providers = new[] { methodProviderInput, typeProviderInput };
+        var loaded = TrRmExecutableCompiler.LoadStandard(rootInput,
+            rootIdentity, providers);
+        var closure = loaded.StandardMethodProviderClosure
+            ?? throw new InvalidOperationException(
+                "The L1P root must retain its method and type provider closure.");
+        var methodEdge = closure.MethodEdges.Single();
+        Assert.That(methodEdge.ProducerIdentity,
+            Is.EqualTo(methodProviderIdentity));
+        Assert.That(methodEdge.ExportKey, Is.EqualTo("Actual"));
+        var typeProvider = closure.Modules.Single(module =>
+            module.Identity == typeProviderIdentity);
+        Assert.That(closure.TypeEdges, Has.Length.GreaterThanOrEqualTo(2));
+        Assert.That(closure.TypeEdges.All(edge =>
+            edge.ProviderArtifactIndex == typeProvider.ArtifactIndex
+            && edge.ProviderModuleRow == typeProvider.ModuleRow
+            && edge.ExpectedDefinitionId != edge.ActualDefinitionId), Is.True);
+        var methodProvider = closure.Modules.Single(module =>
+            module.Identity == methodProviderIdentity);
+        var implementation = methodProvider.Program.Functions[
+            methodEdge.Actual.FunctionIndex];
+        var pointerType = methodProvider.Program.NativePointerTypes[
+            NativePointerTypes.Index(implementation.Variables[0].Type)];
+        var importedSnapshot = methodProvider.Program.Structures[
+            (int)pointerType.PointeeType - 100];
+        Assert.That(importedSnapshot.StandardTypeOrigin!.Provider
+            .ModuleIdentity, Is.EqualTo(typeProviderIdentity));
+        Assert.That(expectedTypeArtifact, Is.Not.EqualTo(relocatedTypeArtifact));
+
+        var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
+            rootIdentity + "-reemitted", l1pSchemaIdentity,
+            moduleTargetRequirement: 1);
+        var reemittedIdentity = rootIdentity + "-reemitted";
+        var reemittedInput = new TrRmStandardArtifactInput(
+            l1pSchemaIdentity, reemitted);
+        _ = TrRmExecutableCompiler.LoadStandard(reemittedInput,
+            reemittedIdentity, providers);
+        var image = NativeModuleCompiler.EmitStandardLibrary(
+            reemittedInput, reemittedIdentity, providers, ["Main"],
+            NativeRuntimePolicy.FailFast);
+
+        var directory = TestArtifactPaths.CreateDirectory(
+            "terrum-l1p-imported-aggregate-");
+        try
+        {
+            var imagePath = Path.Combine(directory, "library.dll");
+            await File.WriteAllBytesAsync(imagePath, image)
+                .ConfigureAwait(true);
+            var library = NativeLibrary.Load(imagePath);
+            try
+            {
+                var function = Marshal.GetDelegateForFunctionPointer<
+                    GetPointerValueDelegate>(NativeLibrary.GetExport(library,
+                    "Main"));
+                var source = Marshal.AllocHGlobal(12);
+                try
+                {
+                    Marshal.WriteInt32(source, 0, 42);
+                    Marshal.WriteInt32(source, 4, 1);
+                    Marshal.WriteInt32(source, 8, 2);
+                    Assert.That(function(source), Is.EqualTo(42));
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(source);
+                }
+            }
+            finally
+            {
+                NativeLibrary.Free(library);
+            }
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
+                .ConfigureAwait(true);
+        }
+
+        var incompatibleTypeArtifact = CreateL1pTypeProviderArtifact(
+            typeProviderIdentity, l1pSchemaIdentity,
+            incompatible: true);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(rootInput, rootIdentity, [
+                methodProviderInput,
+                new TrRmStandardArtifactInput(l1pSchemaIdentity,
+                    incompatibleTypeArtifact),
+            ]));
+    }
+
+    [Test]
+    public void L1PointerLoadProfileDoesNotAliasL1OrAcceptOldProviders()
+    {
+        const string l1pSchemaIdentity
+            = "trrm/1-draft-local-aggregate-layout-execution-pointer-loads-1";
+        const string moduleIdentity = "l1p-schema-selection-root";
+        const string providerIdentity = "l1p-schema-selection-provider";
+        var commonCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("public int32 Value() { return int32(42); }"));
+        Assert.That(commonCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                commonCompilation.Diagnostics));
+        var commonArtifact = TrRmExecutableCompiler.EmitStandard(
+            commonCompilation.Program!, moduleIdentity + "-common",
+            l1pSchemaIdentity, moduleTargetRequirement: 1);
+        var commonInput = new TrRmStandardArtifactInput(l1pSchemaIdentity,
+            commonArtifact);
+        var commonLoaded = TrRmExecutableCompiler.LoadStandard(commonInput,
+            moduleIdentity + "-common", []);
+        var commonReemitted = TrRmExecutableCompiler.EmitStandard(
+            commonLoaded, moduleIdentity + "-common-reemitted",
+            l1pSchemaIdentity, moduleTargetRequirement: 1);
+        _ = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(l1pSchemaIdentity,
+                commonReemitted),
+            moduleIdentity + "-common-reemitted", []);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    commonArtifact), moduleIdentity + "-common", []));
+
+        var rootCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public int32 Read(ptr<int32> value)
+            {
+                unsafe { return *value; }
+            }
+            """));
+        Assert.That(rootCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                rootCompilation.Diagnostics));
+        var rootArtifact = TrRmExecutableCompiler.EmitStandard(
+            rootCompilation.Program!, moduleIdentity, l1pSchemaIdentity,
+            moduleTargetRequirement: 1);
+        var rootInput = new TrRmStandardArtifactInput(l1pSchemaIdentity,
+            rootArtifact);
+
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(SchemaIdentity, rootArtifact),
+                moduleIdentity, []));
+
+        var providerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("public int32 Unused() { return 1; }"));
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerCompilation.Program!, providerIdentity, SchemaIdentity,
+            moduleTargetRequirement: 1);
+        Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.LoadStandard(rootInput, moduleIdentity, [
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    providerArtifact),
+            ]));
+    }
+
+    [Test]
     public async Task StandardL1NativePlanRevalidatesTypeProviderForLibraryAsync()
     {
         Assume.That(OperatingSystem.IsWindows()
@@ -1046,6 +1352,262 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
             await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
                 .ConfigureAwait(true);
         }
+    }
+
+    private static (
+        byte[] RootArtifact, byte[] MethodProviderArtifact,
+        byte[] TypeProviderArtifact)
+        CreateL1pImportedAggregateMethodArtifacts(
+        string rootIdentity, string methodProviderIdentity,
+        string typeProviderIdentity, string schemaIdentity)
+    {
+        var typeProviderArtifact = CreateL1pTypeProviderArtifact(
+            typeProviderIdentity, schemaIdentity);
+        var typeProviderInput = new TrRmStandardArtifactInput(
+            schemaIdentity, typeProviderArtifact);
+        var typeReference = TrRmExecutableCompiler.CreateStandardReference(
+            typeProviderInput, typeProviderIdentity, [], ["SnapshotKey"]);
+        var options = new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            LayoutCoreRegistration =
+                LayoutCoreRegistrationTestData.Create(),
+        };
+        var methodProvider = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public Snapshot Actual(ptr<Snapshot> source) {
+                unsafe { return *source; }
+            }
+            """), typeReference, options);
+        Assert.That(methodProvider.HasErrors, Is.False,
+            string.Join(Environment.NewLine, methodProvider.Diagnostics));
+        var methodProviderArtifact = TrRmExecutableCompiler.EmitStandard(
+            methodProvider.Program!, methodProviderIdentity,
+            schemaIdentity, 1);
+
+        var rootCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                internal Snapshot Expected(ptr<Snapshot> source) {
+                    unsafe { return *source; }
+                }
+
+                public int32 Main(ptr<Snapshot> source) {
+                    Snapshot captured = Expected(source);
+                    return captured.First;
+                }
+                """), typeReference, options);
+        Assert.That(rootCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, rootCompilation.Diagnostics));
+        var rootArtifact = TrRmExecutableCompiler.EmitStandard(
+            rootCompilation.Program!, rootIdentity, schemaIdentity, 1);
+        rootArtifact = AddL1pMethodImportToRootArtifact(rootArtifact,
+            methodProviderIdentity, "Actual", schemaIdentity);
+        return (rootArtifact, methodProviderArtifact,
+            typeProviderArtifact);
+    }
+
+    private static byte[] CreateL1pTypeProviderArtifact(
+        string moduleIdentity, string schemaIdentity,
+        bool relocate = false, bool incompatible = false)
+    {
+        var prefix = relocate ? """
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            internal struct Prefix {
+                public uint8 Value;
+            }
+            """ : string.Empty;
+        var firstFieldType = incompatible ? "uint32" : "int32";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse($$"""
+            {{prefix}}
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Snapshot {
+                public mut {{firstFieldType}} First;
+                public mut int32 Second;
+                public mut int32 Third;
+            }
+            """), new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            LayoutCoreRegistration =
+                LayoutCoreRegistrationTestData.Create(),
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        return TrRmExecutableCompiler.EmitStandard(compilation.Program!,
+            moduleIdentity, schemaIdentity, 1, [
+                new TrRmSourceTypeExport("", "Snapshot", "SnapshotKey"),
+            ]);
+    }
+
+    private static byte[] AddL1pMethodImportToRootArtifact(
+        byte[] artifact, string methodProviderIdentity,
+        string exportKey, string schemaIdentity)
+    {
+        var index = new TrRmArtifactIndex(artifact,
+            TrRmArtifactSchema.LocalAggregateLayoutDraft,
+            resourceLedger: null, usesNativePointerLoads: true,
+            standardSchemaIdentity: schemaIdentity);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraftAndGetExecutionTables(
+                index);
+        var expectedMethodRow = 0;
+        var mainMethodRow = 0;
+        for (var methodRow = 1; methodRow <= tables.Methods.Count;
+            methodRow++)
+        {
+            switch (tables.Methods.GetName(methodRow))
+            {
+                case "Expected":
+                    expectedMethodRow = methodRow;
+                    break;
+                case "Main":
+                    mainMethodRow = methodRow;
+                    break;
+            }
+        }
+        Assert.That(expectedMethodRow, Is.GreaterThan(0));
+        Assert.That(mainMethodRow, Is.GreaterThan(0));
+        var expectedBodyRow
+            = tables.Methods.GetBodyRow(expectedMethodRow);
+        Assert.That(expectedBodyRow, Is.GreaterThan(0));
+        var importRow = tables.Imports.Count + 1;
+        var localMethodToken = 0x1600_0000u
+            | checked((uint)expectedMethodRow);
+        var importedMethodToken = 0x1C00_0000u
+            | checked((uint)importRow);
+
+        var methodRows = GetSectionBytes(index, 0x0016);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            methodRows.AsSpan(((expectedMethodRow - 1) * 28) + 12), 2);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            methodRows.AsSpan(((expectedMethodRow - 1) * 28) + 24), 0);
+
+        var bodies = new List<ReadOnlyMemory<byte>>();
+        var bodyRowByOriginal = new int[tables.Bodies.Count + 1];
+        for (var methodRow = 1; methodRow <= tables.Methods.Count;
+            methodRow++)
+        {
+            var originalBodyRow = tables.Methods.GetBodyRow(methodRow);
+            if (originalBodyRow == 0
+                || originalBodyRow == expectedBodyRow)
+            {
+                continue;
+            }
+
+            var remappedBodyRow = bodyRowByOriginal[originalBodyRow];
+            if (remappedBodyRow == 0)
+            {
+                var body = tables.Bodies.GetRegisterBody(originalBodyRow,
+                    tables.Contracts.Count);
+                var methodMap = body.MethodMap.ToArray();
+                var foundExpectedTarget = false;
+                for (var offset = 0; offset < methodMap.Length;
+                    offset += sizeof(uint))
+                {
+                    var target = BinaryPrimitives.ReadUInt32LittleEndian(
+                        methodMap.AsSpan(offset));
+                    if (target == localMethodToken)
+                    {
+                        BinaryPrimitives.WriteUInt32LittleEndian(
+                            methodMap.AsSpan(offset), importedMethodToken);
+                        foundExpectedTarget = true;
+                    }
+                }
+                if (methodRow == mainMethodRow && !foundExpectedTarget)
+                {
+                    throw new InvalidDataException(
+                        "The L1P Main Body does not retain its Expected MethodMap target.");
+                }
+
+                var blocks = new TrRmRegisterBodyBlock[body.BlockCount];
+                for (var blockIndex = 0; blockIndex < body.BlockCount;
+                    blockIndex++)
+                {
+                    var block = body.GetBlock(blockIndex);
+                    blocks[blockIndex] = new TrRmRegisterBodyBlock(
+                        BinaryPrimitives.ReadUInt32LittleEndian(block),
+                        BinaryPrimitives.ReadUInt32LittleEndian(block[4..]),
+                        BinaryPrimitives.ReadUInt16LittleEndian(block[8..]));
+                }
+                var records = new ReadOnlyMemory<byte>[body.RecordCount];
+                for (var recordIndex = 0;
+                    recordIndex < body.RecordCount; recordIndex++)
+                {
+                    records[recordIndex]
+                        = body.GetRecord(recordIndex).ToArray();
+                }
+                var encoded = TrRmRegisterBodyWriter.Encode(
+                    body.HomeMap.ToArray(), body.TypeMap.ToArray(),
+                    methodMap, body.FieldMap.ToArray(),
+                    body.ConstantMap.ToArray(), blocks, records,
+                    body.Code.ToArray(), tables.Contracts.Count,
+                    TrRmArtifactSchema.LocalAggregateLayoutDraft,
+                    usesNativePointerLoads: true);
+                bodies.Add(encoded);
+                remappedBodyRow = bodies.Count;
+                bodyRowByOriginal[originalBodyRow] = remappedBodyRow;
+            }
+
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                methodRows.AsSpan(((methodRow - 1) * 28) + 24),
+                checked((uint)remappedBodyRow));
+        }
+
+        var strings = new List<(string Text, int Encoding)>(
+            tables.Strings.Count + 2);
+        var stringRowsByText = new Dictionary<string, int>(
+            tables.Strings.Count + 2, StringComparer.Ordinal);
+        for (var row = 1; row <= tables.Strings.Count; row++)
+        {
+            var text = tables.Strings.DecodeNamespace(row);
+            strings.Add((text, 1));
+            _ = stringRowsByText.TryAdd(text, row);
+        }
+        int GetStringRow(string value)
+        {
+            if (!stringRowsByText.TryGetValue(value, out var row))
+            {
+                row = strings.Count + 1;
+                strings.Add((value, 1));
+                stringRowsByText.Add(value, row);
+            }
+            return row;
+        }
+
+        var providerIdentityRow = GetStringRow(methodProviderIdentity);
+        var exportKeyRow = GetStringRow(exportKey);
+        var moduleRefs = GetSectionBytes(index, 0x0010);
+        var moduleRefRow = tables.ModuleRefs.Count + 1;
+        Array.Resize(ref moduleRefs, checked(moduleRefs.Length + 12));
+        var moduleRefOffset = moduleRefs.Length - 12;
+        BinaryPrimitives.WriteInt32LittleEndian(
+            moduleRefs.AsSpan(moduleRefOffset), providerIdentityRow);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            moduleRefs.AsSpan(moduleRefOffset + 4), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            moduleRefs.AsSpan(moduleRefOffset + 8), 0);
+
+        var imports = GetSectionBytes(index, 0x001C);
+        Array.Resize(ref imports, checked(imports.Length + 12));
+        var importOffset = imports.Length - 12;
+        BinaryPrimitives.WriteInt32LittleEndian(
+            imports.AsSpan(importOffset), moduleRefRow);
+        BinaryPrimitives.WriteInt32LittleEndian(
+            imports.AsSpan(importOffset + 4), exportKeyRow);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            imports.AsSpan(importOffset + 8), localMethodToken);
+
+        return ReplaceSections(index, new Dictionary<ushort, TrRmSection> {
+            [0x0002] = new(0x0002, 0,
+                checked((uint)strings.Count),
+                TrRmStringTableWriter.EncodeTextRows(strings)),
+            [0x0010] = new(0x0010, 0,
+                checked((uint)moduleRefRow), moduleRefs),
+            [0x0016] = new(0x0016, 0,
+                checked((uint)tables.Methods.Count), methodRows),
+            [0x001C] = new(0x001C, 0,
+                checked((uint)importRow), imports),
+            [0x0020] = new(0x0020, 0,
+                checked((uint)bodies.Count),
+                TrRmVariableTableWriter.EncodeBodies(bodies)),
+        });
     }
 
     internal static (byte[] RootArtifact, byte[] MethodProviderArtifact,
@@ -1352,7 +1914,8 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
                     checked((uint)count), bytes.ToArray()));
         }
         return TrRmArtifactWriter.Encode(sections,
-            TrRmArtifactSchema.LocalAggregateLayoutDraft);
+            index.Schema,
+            standardSchemaIdentity: index.StandardSchemaIdentity);
     }
 
     private static async Task AssertNativeImageExitCodeAsync(byte[] image,

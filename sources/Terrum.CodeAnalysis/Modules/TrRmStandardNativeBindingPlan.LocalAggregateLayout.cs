@@ -26,14 +26,25 @@ internal sealed partial class TrRmStandardNativeBindingPlan
         bool nestedInitializationReferenceFieldDestinations = false,
         bool generalPredicateGraphsInitializationReferenceBodies = false,
         bool standardNativePointerLoads = false,
-        bool nativeParameterContracts = false)
+        bool nativeParameterContracts = false,
+        bool localAggregatePointerLoads = false)
     {
         if (initializationReferenceLocalFieldLayout
             && (generalPredicateGraphsInitializationReferenceBodies
-                || standardNativePointerLoads))
+                || standardNativePointerLoads
+                || localAggregatePointerLoads))
         {
             throw new ArgumentException(
                 "The initialization-reference native schema selections are mutually exclusive.");
+        }
+        if (localAggregatePointerLoads
+            && (generalPredicateGraphsInitializationReferenceBodies
+                || standardNativePointerLoads
+                || nativeParameterContracts))
+        {
+            throw new ArgumentException(
+                "The L1P native schema selection is mutually exclusive with other pointer-load profiles.",
+                nameof(localAggregatePointerLoads));
         }
         if (nestedInitializationReferenceFieldDestinations
             && !initializationReferenceLocalFieldLayout)
@@ -89,7 +100,8 @@ internal sealed partial class TrRmStandardNativeBindingPlan
             initializationReferenceLocalFieldLayout,
             nestedInitializationReferenceFieldDestinations,
             generalPredicateGraphsInitializationReferenceBodies,
-            standardNativePointerLoads, nativeParameterContracts).Build();
+            standardNativePointerLoads, nativeParameterContracts,
+            localAggregatePointerLoads: localAggregatePointerLoads).Build();
     }
 
     private void ValidateNestedFieldProviderClosure(
@@ -241,6 +253,7 @@ internal sealed partial class TrRmStandardNativeBindingPlan
         private readonly bool
             _generalPredicateGraphsInitializationReferenceBodies;
         private readonly bool _standardNativePointerLoads;
+        private readonly bool _localAggregatePointerLoads;
         private readonly bool _nativeParameterContracts;
         private readonly bool _construction2MethodLinking;
         private readonly ModuleOrigin _root;
@@ -274,7 +287,8 @@ internal sealed partial class TrRmStandardNativeBindingPlan
             bool generalPredicateGraphsInitializationReferenceBodies,
             bool standardNativePointerLoads,
             bool nativeParameterContracts,
-            bool construction2MethodLinking = false)
+            bool construction2MethodLinking = false,
+            bool localAggregatePointerLoads = false)
         {
             _closure = closure;
             _initializationReferenceLocalFieldLayout
@@ -284,6 +298,7 @@ internal sealed partial class TrRmStandardNativeBindingPlan
             _generalPredicateGraphsInitializationReferenceBodies
                 = generalPredicateGraphsInitializationReferenceBodies;
             _standardNativePointerLoads = standardNativePointerLoads;
+            _localAggregatePointerLoads = localAggregatePointerLoads;
             _nativeParameterContracts = nativeParameterContracts;
             _construction2MethodLinking = construction2MethodLinking;
             _root = new ModuleOrigin(closure.RootArtifactIndex,
@@ -392,7 +407,15 @@ internal sealed partial class TrRmStandardNativeBindingPlan
                 }
                 else
                 {
-                    var artifactIndex = _nativeParameterContracts
+                    var artifactIndex = _localAggregatePointerLoads
+                        ? new TrRmArtifactIndex(
+                            artifact.ArtifactSnapshot.AsSpan(),
+                            TrRmArtifactSchema.LocalAggregateLayoutDraft,
+                            resourceLedger: null,
+                            usesNativePointerLoads: true,
+                            standardSchemaIdentity:
+                                LocalAggregatePointerLoadsSchemaIdentity)
+                        : _nativeParameterContracts
                         ? _generalPredicateGraphsInitializationReferenceBodies
                             ? TrRmArtifactIndex
                                 .ForInitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft(

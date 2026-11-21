@@ -16,7 +16,9 @@ public static partial class TrRmExecutableCompiler
         BoundProgram program, string moduleIdentity,
         TrRmArtifactSchema schema = TrRmArtifactSchema.ForeignInvocationDraft,
         IReadOnlyList<TrRmSourceTypeExport>? sourceTypeExports = null,
-        TrRmA3LayoutResourceLedger? a3LayoutResourceLedger = null)
+        TrRmA3LayoutResourceLedger? a3LayoutResourceLedger = null,
+        string? standardSchemaIdentity = null,
+        bool usesNativePointerLoads = false)
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentException.ThrowIfNullOrEmpty(moduleIdentity);
@@ -87,7 +89,8 @@ public static partial class TrRmExecutableCompiler
                 && !program.Structures.IsEmpty)
         {
             return EmitForeignInvocationStorageFixedArrayCopyDeclarations(
-                program, moduleIdentity, schema, sourceTypeExports);
+                program, moduleIdentity, schema, sourceTypeExports,
+                standardSchemaIdentity);
         }
 
         if (!program.Structures.IsEmpty)
@@ -2186,9 +2189,15 @@ public static partial class TrRmExecutableCompiler
         sections.Sort(static (left, right)
             => left.Kind.CompareTo(right.Kind));
 
-        var artifact = TrRmArtifactWriter.Encode(sections,
-            schema, a3LayoutResourceLedger);
-        var artifactIndex = a3LayoutResourceLedger is not null
+        var artifact = TrRmArtifactWriter.Encode(sections, schema,
+            a3LayoutResourceLedger, standardSchemaIdentity);
+        var artifactIndex
+            = IsSelectedLocalAggregatePointerLoadsSchemaIdentity(
+                standardSchemaIdentity)
+                ? new TrRmArtifactIndex(artifact, schema,
+                    a3LayoutResourceLedger, usesNativePointerLoads: true,
+                    standardSchemaIdentity: standardSchemaIdentity)
+            : a3LayoutResourceLedger is not null
             ? new TrRmArtifactIndex(artifact, schema,
                 a3LayoutResourceLedger)
             : schema

@@ -90,7 +90,8 @@ internal static class TrRmRegisterBodyWriter
             && (schema is not (TrRmArtifactSchema.Standard
                 or TrRmArtifactSchema.GeneralPredicateGraphsDraft
                 or TrRmArtifactSchema.InitializationReferencePointerLoadNativeParameterDraft
-                or TrRmArtifactSchema.InitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft)
+                or TrRmArtifactSchema.InitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft
+                or TrRmArtifactSchema.LocalAggregateLayoutDraft)
                 || (schema.UsesGeneralPredicateGraphs()
                     && !generalPredicateGraphsInitializationReferenceBodies)))
         {

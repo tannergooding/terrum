@@ -12,9 +12,14 @@ namespace Terrum.CodeAnalysis.Modules;
 public static partial class TrRmExecutableCompiler
 {
     private static byte[] EmitLocalAggregateLayoutRegisterBodies(
-        BoundProgram program, string moduleIdentity)
+        BoundProgram program, string moduleIdentity, string schemaIdentity,
+        bool usesNativePointerLoads)
     {
-        if (program.EntryPoint < -1
+        if (!IsSelectedLocalAggregateLayoutSchemaIdentity(schemaIdentity)
+            || usesNativePointerLoads
+                != IsSelectedLocalAggregatePointerLoadsSchemaIdentity(
+                    schemaIdentity)
+            || program.EntryPoint < -1
             || (program.EntryPoint >= 0
                 && ((uint)program.EntryPoint
                         >= (uint)program.Functions.Length
@@ -25,7 +30,8 @@ public static partial class TrRmExecutableCompiler
             || program.RuntimePolicy != BoundRuntimePolicy.FailFast
             || !program.Classes.IsEmpty || !program.Buffers.IsEmpty
             || !program.NativeFunctionPointerSignatures.IsEmpty
-            || !program.NativePointerTypes.IsEmpty
+            || (!usesNativePointerLoads
+                && !program.NativePointerTypes.IsEmpty)
             || !program.NativeUtf16ZLiterals.IsEmpty
             || !program.NativeUtf8ZLiterals.IsEmpty
             || program.RequiresSourceGrant
@@ -39,6 +45,8 @@ public static partial class TrRmExecutableCompiler
                 "L1 executable Body emission requires local rootless Copy layouts and a fail-fast entry point.");
         }
 
+        var requiresPointerLoadFeatures = usesNativePointerLoads
+            && !program.NativePointerTypes.IsEmpty;
         var methodImportEdgesByFunction
             = new Dictionary<int, BoundStandardMethodProviderEdge>();
         BoundStandardMethodProviderModule? methodProviderRootModule = null;
@@ -53,9 +61,9 @@ public static partial class TrRmExecutableCompiler
                 || !StringComparer.Ordinal.Equals(
                     providerClosure.RootModuleIdentity, moduleIdentity)
                 || providerClosure.Artifacts.IsDefaultOrEmpty
-                || providerClosure.Artifacts.Any(static artifact =>
+                || providerClosure.Artifacts.Any(artifact =>
                     !StringComparer.Ordinal.Equals(artifact.SchemaIdentity,
-                        StandardLocalAggregateLayoutSchemaIdentity))
+                        schemaIdentity))
                 || rootModules.Length != 1
                 || !StringComparer.Ordinal.Equals(rootModules[0].Identity,
                     moduleIdentity))
@@ -369,13 +377,19 @@ public static partial class TrRmExecutableCompiler
                 "L1 executable entries and no-entry libraries require at least one body-bearing root MethodDef.");
         }
 
+        bool IsFunctionValueType(PrimitiveType type) =>
+            IsLocalAggregateLayoutValueType(program, type)
+            || (usesNativePointerLoads
+                && NativePointerTypes.IsType(type)
+                && NativePointerTypeContract.IsValidType(type,
+                    program.NativePointerTypes));
+
         var hasUnsupportedSignatureType = false;
         foreach (var function in program.Functions)
         {
             hasUnsupportedSignatureType |=
                 function.ReturnType != PrimitiveType.Void
-                && !IsLocalAggregateLayoutValueType(program,
-                    function.ReturnType);
+                && !IsFunctionValueType(function.ReturnType);
             for (var variableIndex = 0;
                 variableIndex < function.Variables.Length; variableIndex++)
             {
@@ -387,7 +401,7 @@ public static partial class TrRmExecutableCompiler
                 }
 
                 hasUnsupportedSignatureType |=
-                    !IsLocalAggregateLayoutValueType(program, type);
+                    !IsFunctionValueType(type);
             }
         }
         if (hasUnsupportedSignatureType)
@@ -782,6 +796,17 @@ public static partial class TrRmExecutableCompiler
                     TrRmFeatureRow.RawUnionValueCoverageCandidate);
             }
         }
+        if (requiresPointerLoadFeatures)
+        {
+            if (!featureRows.Contains(TrRmFeatureRow.NativeBoundaryContracts))
+            {
+                featureRows.Add(TrRmFeatureRow.NativeBoundaryContracts);
+            }
+            if (!featureRows.Contains(TrRmFeatureRow.RootlessNativeValues))
+            {
+                featureRows.Add(TrRmFeatureRow.RootlessNativeValues);
+            }
+        }
         if (!featureRows.Contains(TrRmFeatureRow.TypedFrozenValues))
         {
             featureRows.Add(TrRmFeatureRow.TypedFrozenValues);
@@ -849,11 +874,50 @@ public static partial class TrRmExecutableCompiler
                 continue;
             }
 
-            bodies.Add(EncodeLocalAggregateLayoutBody(program,
-                program.Functions[functionIndex], methodMapTokenByFunction,
-                importedMethodFunctions, typeSpecRefs,
-                fieldFirstByStructure, declarationTables.FixedArrayLayouts,
-                scalarValues, contractRows.Count));
+            var function = program.Functions[functionIndex];
+            byte[] body;
+            if (usesNativePointerLoads
+                && TryGetStandardNativePointerLoadRead(function, program,
+                    out var pointerLoadBody, allowAggregatePointees: true))
+            {
+                uint TypeSpecRefFor(PrimitiveType type)
+                {
+                    if (!typeSpecRefs.TryGetValue(type,
+                            out var typeSpecRef))
+                    {
+                        throw Unsupported(
+                            "An L1P Body value has no selected TypeSpec.");
+                    }
+                    return typeSpecRef;
+                }
+
+                uint MethodMapTokenForFunction(int targetFunction)
+                {
+                    if ((uint)targetFunction
+                            >= (uint)methodMapTokenByFunction.Length
+                        || methodMapTokenByFunction[targetFunction] == 0)
+                    {
+                        throw Unsupported(
+                            "An L1P Body call has no retained MethodMap target.");
+                    }
+                    return methodMapTokenByFunction[targetFunction];
+                }
+
+                body = EncodeStandardNativePointerLoadBody(function,
+                    program, pointerLoadBody, TypeSpecRefFor,
+                    MethodMapTokenForFunction,
+                    TrRmArtifactSchema.LocalAggregateLayoutDraft);
+            }
+            else
+            {
+                body = EncodeLocalAggregateLayoutBody(program, function,
+                    methodMapTokenByFunction, importedMethodFunctions,
+                    typeSpecRefs, fieldFirstByStructure,
+                    declarationTables.FixedArrayLayouts, scalarValues,
+                    contractRows.Count);
+            }
+
+            bodies.Add(body);
             bodyRowByFunction[functionIndex] = bodies.Count;
         }
         for (var methodRow = 1; methodRow <= methodRows.Count;
@@ -992,10 +1056,17 @@ public static partial class TrRmExecutableCompiler
         sections.Sort(static (left, right)
             => left.Kind.CompareTo(right.Kind));
 
+        var standardSchemaIdentity = usesNativePointerLoads
+            ? schemaIdentity : null;
         var artifact = TrRmArtifactWriter.Encode(sections,
-            TrRmArtifactSchema.LocalAggregateLayoutDraft);
-        var artifactIndex
-            = TrRmArtifactIndex.ForLocalAggregateLayoutDraft(artifact);
+            TrRmArtifactSchema.LocalAggregateLayoutDraft,
+            standardSchemaIdentity: standardSchemaIdentity);
+        var artifactIndex = usesNativePointerLoads
+            ? new TrRmArtifactIndex(artifact,
+                TrRmArtifactSchema.LocalAggregateLayoutDraft,
+                resourceLedger: null, usesNativePointerLoads: true,
+                standardSchemaIdentity: standardSchemaIdentity)
+            : TrRmArtifactIndex.ForLocalAggregateLayoutDraft(artifact);
         var validatedTables
             = TrRmStructuralMetadataValidator
                 .ValidateForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraftAndGetExecutionTables(
@@ -1119,6 +1190,55 @@ public static partial class TrRmExecutableCompiler
         if (typeSpecRefs.TryGetValue(type, out var existingTypeSpec))
         {
             return existingTypeSpec;
+        }
+        if (type == PrimitiveType.NativeRawPointer)
+        {
+            var row = typeSpecRows.Count + 1;
+            typeSpecRows.Add(
+                TrRmTypeSpecTableWriter.InlineFamily(0x8C, 0));
+            typeSpecRefs.Add(type, checked((uint)row));
+            return checked((uint)row);
+        }
+        if (NativePointerTypes.IsType(type))
+        {
+            var pointerTypeIndex = NativePointerTypes.Index(type);
+            if ((uint)pointerTypeIndex
+                >= (uint)program.NativePointerTypes.Length)
+            {
+                throw Unsupported(
+                    "An L1P signature refers to an unregistered native pointer type.");
+            }
+
+            var pointerType
+                = program.NativePointerTypes[pointerTypeIndex];
+            var qualifiers = pointerType.IsWritable ? (byte)1 : (byte)0;
+            var scalarIndex = Array.IndexOf(s_types,
+                pointerType.PointeeType);
+            ReadOnlyMemory<byte> pointerTypeSpec;
+            if (pointerType.PointeeType == PrimitiveType.Void)
+            {
+                pointerTypeSpec = TrRmTypeSpecTableWriter.InlineFamily(
+                    0x8C, 0, qualifiers);
+            }
+            else if (scalarIndex >= 0)
+            {
+                pointerTypeSpec = TrRmTypeSpecTableWriter.InlineFamily(
+                    0x8C, s_codes[scalarIndex], qualifiers);
+            }
+            else
+            {
+                var pointeeTypeSpecRef
+                    = GetLocalAggregateTypeSpecRef(program, typeSpecs,
+                        typeSpecRows, typeSpecRefs,
+                        pointerType.PointeeType);
+                pointerTypeSpec = TrRmTypeSpecTableWriter.IndexedFamily(
+                    0x8C, pointeeTypeSpecRef, qualifiers);
+            }
+
+            var row = typeSpecRows.Count + 1;
+            typeSpecRows.Add(pointerTypeSpec);
+            typeSpecRefs.Add(type, checked((uint)row));
+            return checked((uint)row);
         }
         if (NativeFixedArrayTypes.IsType(type))
         {

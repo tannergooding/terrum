@@ -3183,7 +3183,12 @@ internal sealed partial class PeCompiler
             case BoundNativePointerAddress:
                 return 0;
             case BoundNativePointerRead pointerRead:
-                return ExpressionSpills(pointerRead.Address, ref maximumArguments);
+                var pointerAddressSpills = ExpressionSpills(
+                    pointerRead.Address, ref maximumArguments);
+                return IsIndirect(pointerRead.Type)
+                    ? SpillSlotsForType(pointerRead.Type)
+                        + pointerAddressSpills
+                    : pointerAddressSpills;
             case BoundReferenceFormation formation:
                 return Math.Max(_normalBacking ? 1 : 0,
                     ExpressionSpills(formation.Place, ref maximumArguments));
@@ -3292,6 +3297,8 @@ internal sealed partial class PeCompiler
                 return ExpressionSpills(projection.Value, ref maximumArguments);
             case BoundIsNull test:
                 return ExpressionSpills(test.Value, ref maximumArguments);
+            case BoundWildcardPattern:
+                return 0;
             case BoundTypeTestPattern test:
                 return ExpressionSpills(test.Value, ref maximumArguments);
             case BoundTypedValuePattern test:
@@ -10134,6 +10141,10 @@ internal sealed partial class PeCompiler
             case BoundReadonlyProjection projection:
                 Expression(projection.Value, spill);
                 break;
+            case BoundWildcardPattern:
+                _code.Byte(0xB8);
+                _code.Int32(1);
+                break;
             case BoundIsNull test when IsTaggedOptionalValueType(
                 test.Value.Type):
                 Expression(test.Value, spill);
@@ -10192,6 +10203,13 @@ internal sealed partial class PeCompiler
                     : pattern.Value.Type == pattern.TestedType;
                 if (typedOptionalType)
                 {
+                    if (!typedValueMatches)
+                    {
+                        Expression(pattern.Value, spill);
+                        _code.Bytes(0x31, 0xC0);
+                        break;
+                    }
+
                     EmitOptionalValueVariablePattern(
                         new BoundIsVariablePattern(pattern.Value,
                             pattern.Variable, false, pattern.Span), spill);
@@ -10627,6 +10645,16 @@ internal sealed partial class PeCompiler
                 }
                 break;
             case BoundUnary unary:
+                if (unary.IsPatternComposition
+                    != (unary.PatternObservation is not null)
+                    || (unary.IsPatternComposition
+                        && (unary.Operator != TokenKind.Bang
+                            || unary.Type != PrimitiveType.Bool
+                            || unary.Operand.Type != PrimitiveType.Bool)))
+                {
+                    throw new NotSupportedException(
+                        "Native pattern negation requires one Boolean pattern and its shared observation.");
+                }
                 EnsureSupportedNativeFloatingUnary(unary.Type, unary.Operator);
                 if (unary.Type == PrimitiveType.Float128)
                 {
@@ -11100,6 +11128,19 @@ internal sealed partial class PeCompiler
                 EmitOptionalEquality(equality, spill);
                 break;
             case BoundBinary binary:
+                if (binary.IsPatternComposition
+                    != (binary.PatternObservation is not null)
+                    || (binary.IsPatternComposition
+                        && (binary.Operator is not (
+                                TokenKind.AmpersandAmpersand
+                                or TokenKind.PipePipe)
+                            || binary.Type != PrimitiveType.Bool
+                            || binary.Left.Type != PrimitiveType.Bool
+                            || binary.Right.Type != PrimitiveType.Bool)))
+                {
+                    throw new NotSupportedException(
+                        "Native pattern composition requires short-circuit Boolean operands and their shared observation.");
+                }
                 if (binary.Left.Type == PrimitiveType.TypeIdentity
                     || binary.Right.Type == PrimitiveType.TypeIdentity)
                 {

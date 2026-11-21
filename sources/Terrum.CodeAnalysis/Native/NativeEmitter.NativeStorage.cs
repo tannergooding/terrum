@@ -247,12 +247,19 @@ internal sealed partial class PeCompiler
 
     private void EmitNativePointerRead(BoundNativePointerRead read, int spill)
     {
-        Expression(read.Address, spill);
-        if (!IsIndirect(read.Type))
+        if (IsIndirect(read.Type))
         {
-            _code.LoadPointerField(0, Size(read.Type));
-            NormalizeNarrowInteger(read.Type, checkRange: false);
+            var snapshotOffset = SpillOffsetForType(spill, read.Type);
+            Expression(read.Address, spill + SpillSlotsForType(read.Type));
+            _code.AddressToRdx(snapshotOffset);
+            CopyNativeValueToPointer(read.Type);
+            _code.Address(snapshotOffset);
+            return;
         }
+
+        Expression(read.Address, spill);
+        _code.LoadPointerField(0, Size(read.Type));
+        NormalizeNarrowInteger(read.Type, checkRange: false);
     }
 
     private void EmitCheckedReferenceFormation(BoundReferenceFormation formation,

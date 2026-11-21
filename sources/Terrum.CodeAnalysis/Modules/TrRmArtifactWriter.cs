@@ -135,7 +135,10 @@ public static class TrRmArtifactWriter
         var usesNativePointerLoads = schema is
             TrRmArtifactSchema.InitializationReferencePointerLoadNativeParameterDraft
                 or TrRmArtifactSchema
-                    .InitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft;
+                    .InitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft
+            || TrRmExecutableCompiler
+                .IsSelectedLocalAggregatePointerLoadsSchemaIdentity(
+                    standardSchemaIdentity);
         _ = new TrRmArtifactIndex(result, schema, resourceLedger,
             usesNativePointerLoads, standardSchemaIdentity);
         return result;

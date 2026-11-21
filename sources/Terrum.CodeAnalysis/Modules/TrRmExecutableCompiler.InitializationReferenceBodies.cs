@@ -1356,7 +1356,8 @@ public static partial class TrRmExecutableCompiler
 
     private static bool TryGetStandardNativePointerLoadRead(
         BoundFunction function, BoundProgram program,
-        out StandardNativePointerLoadBodyDescription description)
+        out StandardNativePointerLoadBodyDescription description,
+        bool allowAggregatePointees = false)
     {
         description = default;
         if (function.IsExternal
@@ -1394,10 +1395,12 @@ public static partial class TrRmExecutableCompiler
                 var variable = function.Variables[local.Variable];
                 if (variable.IsOut || variable.IsInit
                     || variable.Type != local.Initializer.Type
-                    || !IsStandardNativePointerLoadValueType(variable.Type)
+                    || !IsStandardNativePointerLoadValueType(variable.Type,
+                        program, allowAggregatePointees)
                     || !CanEncodeStandardNativePointerLoadValue(
                         local.Initializer, function, program,
-                        initializedLocals, pointerReads, ref conversions))
+                        initializedLocals, pointerReads, ref conversions,
+                        allowAggregatePointees))
                 {
                     return false;
                 }
@@ -1420,10 +1423,12 @@ public static partial class TrRmExecutableCompiler
                 if (!variable.IsMutable || variable.IsOut || variable.IsInit
                     || variable.Type != assignment.Value.Type
                     || !IsStandardNativePointerLoadValueType(
-                        assignment.Value.Type)
+                        assignment.Value.Type, program,
+                        allowAggregatePointees)
                     || !CanEncodeStandardNativePointerLoadValue(
                         assignment.Value, function, program,
-                        initializedLocals, pointerReads, ref conversions))
+                        initializedLocals, pointerReads, ref conversions,
+                        allowAggregatePointees))
                 {
                     return false;
                 }
@@ -1436,7 +1441,7 @@ public static partial class TrRmExecutableCompiler
                 }
                 && CanEncodeStandardNativePointerLoadVoidCall(call,
                     function, program, initializedLocals, pointerReads,
-                    ref conversions))
+                    ref conversions, allowAggregatePointees))
             {
                 prefixStatements.Add(statement);
             }
@@ -1471,10 +1476,11 @@ public static partial class TrRmExecutableCompiler
         }
 
         if (returnValue.Type != function.ReturnType
-            || !IsStandardNativePointerLoadValueType(function.ReturnType)
+            || !IsStandardNativePointerLoadValueType(function.ReturnType,
+                program, allowAggregatePointees)
             || !CanEncodeStandardNativePointerLoadValue(returnValue,
                 function, program, initializedLocals, pointerReads,
-                ref conversions)
+                ref conversions, allowAggregatePointees)
             || pointerReads.Count == 0
             || pointerReads.Count > SemanticVerifier.MaximumAnalysisVisits
             || conversions > 1)
@@ -1490,7 +1496,8 @@ public static partial class TrRmExecutableCompiler
 
         var pointerTypeIndex = NativePointerTypes.Index(read.Address.Type);
         if (!read.IsUnsafeAuthorized
-            || !IsStandardNativePointerLoadPointeeType(read.Type)
+            || !IsStandardNativePointerLoadPointeeType(read.Type, program,
+                allowAggregatePointees)
             || (uint)pointerTypeIndex
                 >= (uint)program.NativePointerTypes.Length)
         {
@@ -1517,7 +1524,8 @@ public static partial class TrRmExecutableCompiler
     private static bool CanEncodeStandardNativePointerLoadVoidCall(
         BoundCall call, BoundFunction function, BoundProgram program,
         HashSet<int> initializedLocals,
-        List<BoundNativePointerRead> pointerReads, ref int conversions)
+        List<BoundNativePointerRead> pointerReads, ref int conversions,
+        bool allowAggregatePointees)
     {
         if (call.Type != PrimitiveType.Void
             || (uint)call.Function >= (uint)program.Functions.Length
@@ -1554,10 +1562,12 @@ public static partial class TrRmExecutableCompiler
                 || target.Variables[formal].Type
                     != call.Arguments[sourceArgument].Type
                 || !IsStandardNativePointerLoadValueType(
-                    target.Variables[formal].Type)
+                    target.Variables[formal].Type, program,
+                    allowAggregatePointees)
                 || !CanEncodeStandardNativePointerLoadValue(
                     call.Arguments[sourceArgument], function, program,
-                    initializedLocals, pointerReads, ref conversions))
+                    initializedLocals, pointerReads, ref conversions,
+                    allowAggregatePointees))
             {
                 return false;
             }
@@ -1572,15 +1582,54 @@ public static partial class TrRmExecutableCompiler
             || PrimitiveTypeFacts.IsInteger(type)
             || PrimitiveTypeFacts.IsCodeUnitOrRune(type);
 
+    private static bool IsStandardNativePointerLoadValueType(
+        PrimitiveType type, BoundProgram program,
+        bool allowAggregatePointees)
+        => IsStandardNativePointerLoadValueType(type,
+            program.Structures, allowAggregatePointees);
+
+    private static bool IsStandardNativePointerLoadValueType(
+        PrimitiveType type, ImmutableArray<BoundStruct> structures,
+        bool allowAggregatePointees)
+    {
+        if (IsStandardNativePointerLoadValueType(type))
+        {
+            return true;
+        }
+
+        var structureIndex = (int)type - 100;
+        return allowAggregatePointees
+            && (uint)structureIndex < (uint)structures.Length
+            && NativePointerTypeContract.IsCopyableSourcePointee(type,
+                structures, [], nativeLoweringAgreement: null,
+                fixedArrayTypes: [])
+            && ValueLayout.Size(type, structures) > 0;
+    }
+
     private static bool IsStandardNativePointerLoadPointeeType(
         PrimitiveType type)
         => type != PrimitiveType.NativeRawPointer
             && IsStandardNativePointerLoadValueType(type);
 
+    private static bool IsStandardNativePointerLoadPointeeType(
+        PrimitiveType type, BoundProgram program,
+        bool allowAggregatePointees)
+        => type != PrimitiveType.NativeRawPointer
+            && IsStandardNativePointerLoadValueType(type, program,
+                allowAggregatePointees);
+
+    private static bool IsStandardNativePointerLoadPointeeType(
+        PrimitiveType type, ImmutableArray<BoundStruct> structures,
+        bool allowAggregatePointees)
+        => type != PrimitiveType.NativeRawPointer
+            && IsStandardNativePointerLoadValueType(type, structures,
+                allowAggregatePointees);
+
     private static bool CanEncodeStandardNativePointerLoadValue(
         BoundExpression expression, BoundFunction function,
         BoundProgram program, HashSet<int> initializedLocals,
-        List<BoundNativePointerRead> pointerReads, ref int conversions)
+        List<BoundNativePointerRead> pointerReads, ref int conversions,
+        bool allowAggregatePointees)
     {
         if (expression is BoundUnsafeExpression unsafeExpression)
         {
@@ -1597,7 +1646,8 @@ public static partial class TrRmExecutableCompiler
             var variable = function.Variables[read.Variable];
             return variable.Type == read.Type && !variable.IsOut
                 && !variable.IsInit
-                && IsStandardNativePointerLoadValueType(read.Type)
+                && IsStandardNativePointerLoadValueType(read.Type,
+                    program, allowAggregatePointees)
                 && (read.Variable < function.ParameterCount
                     || initializedLocals.Contains(read.Variable));
         }
@@ -1605,7 +1655,8 @@ public static partial class TrRmExecutableCompiler
         if (expression is BoundNativePointerRead pointerRead)
         {
             if (!pointerRead.IsUnsafeAuthorized
-                || !IsStandardNativePointerLoadPointeeType(pointerRead.Type)
+                || !IsStandardNativePointerLoadPointeeType(pointerRead.Type,
+                    program, allowAggregatePointees)
                 || !NativePointerTypes.IsType(pointerRead.Address.Type))
             {
                 return false;
@@ -1634,19 +1685,20 @@ public static partial class TrRmExecutableCompiler
             pointerReads.Add(pointerRead);
             return CanEncodeStandardNativePointerLoadValue(
                 pointerRead.Address, function, program, initializedLocals,
-                pointerReads, ref conversions);
+                pointerReads, ref conversions, allowAggregatePointees);
         }
 
         if (expression is BoundCast cast)
         {
             conversions++;
             return conversions <= 1
-                && IsStandardNativePointerLoadValueType(cast.Type)
+                && IsStandardNativePointerLoadValueType(cast.Type, program,
+                    allowAggregatePointees)
                 && SemanticVerifier.IsTotalConversion(cast.Operand.Type,
                     cast.Type)
                 && CanEncodeStandardNativePointerLoadValue(cast.Operand,
                     function, program, initializedLocals, pointerReads,
-                    ref conversions);
+                    ref conversions, allowAggregatePointees);
         }
 
         if (expression is not BoundCall call
@@ -1668,7 +1720,8 @@ public static partial class TrRmExecutableCompiler
             || (target.IsExternal && target.DirectNativeImport is null
                 && target.ModuleImport is null)
             || (target.RequiresUnsafeCaller && !call.IsUnsafeAuthorized)
-            || !IsStandardNativePointerLoadValueType(target.ReturnType))
+            || !IsStandardNativePointerLoadValueType(target.ReturnType,
+                program, allowAggregatePointees))
         {
             return false;
         }
@@ -1683,10 +1736,12 @@ public static partial class TrRmExecutableCompiler
                 || target.Variables[formal].Type
                     != call.Arguments[sourceArgument].Type
                 || !IsStandardNativePointerLoadValueType(
-                    target.Variables[formal].Type)
+                    target.Variables[formal].Type, program,
+                    allowAggregatePointees)
                 || !CanEncodeStandardNativePointerLoadValue(
                     call.Arguments[sourceArgument], function, program,
-                    initializedLocals, pointerReads, ref conversions))
+                    initializedLocals, pointerReads, ref conversions,
+                    allowAggregatePointees))
             {
                 return false;
             }
@@ -1743,13 +1798,13 @@ public static partial class TrRmExecutableCompiler
         BoundFunction function,
         BoundProgram program,
         StandardNativePointerLoadBodyDescription description,
-        Func<PrimitiveType, int> typeSpecRowFor,
+        Func<PrimitiveType, uint> typeSpecRefFor,
         Func<int, uint> methodMapTokenForFunction,
         TrRmArtifactSchema schema)
     {
         var homeTypeTokens = function.Variables
             .Select(variable => GetStandardBodyTypeMapToken(
-                variable.Type, typeSpecRowFor))
+                variable.Type, typeSpecRefFor))
             .ToArray();
         var typeTokens = homeTypeTokens.ToList();
 
@@ -1797,11 +1852,11 @@ public static partial class TrRmExecutableCompiler
             if (value is not BoundCall { Type: PrimitiveType.Void })
             {
                 CollectStandardNativePointerLoadTypeMapTokens(value,
-                    typeSpecRowFor, typeTokens);
+                    typeSpecRefFor, typeTokens);
             }
         }
         CollectStandardNativePointerLoadTypeMapTokens(
-            description.ReturnValue, typeSpecRowFor, typeTokens);
+            description.ReturnValue, typeSpecRefFor, typeTokens);
         var maps = TrRmRegisterBodyMapBuilder.Create(typeTokens,
             methodTokens);
         var homeMap = EncodeStandardInitializationHomeMap(function,
@@ -1862,7 +1917,7 @@ public static partial class TrRmExecutableCompiler
             {
                 var conversionRegister = EmitValue(cast.Operand);
                 var conversionTypeMapIndex = maps.GetTypeMapIndex(
-                    GetStandardBodyTypeMapToken(cast.Type, typeSpecRowFor));
+                    GetStandardBodyTypeMapToken(cast.Type, typeSpecRefFor));
                 if (conversionTypeMapIndex > 15)
                 {
                     throw Unsupported(
@@ -2006,32 +2061,32 @@ public static partial class TrRmExecutableCompiler
     }
 
     private static void CollectStandardNativePointerLoadTypeMapTokens(
-        BoundExpression expression, Func<PrimitiveType, int> typeSpecRowFor,
+        BoundExpression expression, Func<PrimitiveType, uint> typeSpecRefFor,
         List<uint> typeTokens)
     {
         if (expression is BoundUnsafeExpression unsafeExpression)
         {
             CollectStandardNativePointerLoadTypeMapTokens(
-                unsafeExpression.Expression, typeSpecRowFor, typeTokens);
+                unsafeExpression.Expression, typeSpecRefFor, typeTokens);
         }
         else if (expression is BoundCast cast)
         {
             typeTokens.Add(GetStandardBodyTypeMapToken(cast.Type,
-                typeSpecRowFor));
+                typeSpecRefFor));
             CollectStandardNativePointerLoadTypeMapTokens(cast.Operand,
-                typeSpecRowFor, typeTokens);
+                typeSpecRefFor, typeTokens);
         }
         else if (expression is BoundNativePointerRead pointerRead)
         {
             CollectStandardNativePointerLoadTypeMapTokens(
-                pointerRead.Address, typeSpecRowFor, typeTokens);
+                pointerRead.Address, typeSpecRefFor, typeTokens);
         }
         else if (expression is BoundCall call)
         {
             foreach (var argument in call.Arguments)
             {
                 CollectStandardNativePointerLoadTypeMapTokens(argument,
-                    typeSpecRowFor, typeTokens);
+                    typeSpecRefFor, typeTokens);
             }
         }
     }
@@ -3301,6 +3356,19 @@ public static partial class TrRmExecutableCompiler
         return CreateStandardBodyTypeMapToken(checked((uint)row));
     }
 
+    private static uint GetStandardBodyTypeMapToken(
+        PrimitiveType type, Func<PrimitiveType, uint> typeSpecRefFor)
+    {
+        var typeSpecRef = typeSpecRefFor(type);
+        if (typeSpecRef == 0)
+        {
+            throw Unsupported(
+                "A Standard initialization-reference Body type has no TypeSpec reference.");
+        }
+
+        return CreateStandardBodyTypeMapToken(typeSpecRef);
+    }
+
     private static PrimitiveType GetStandardInitializationBodyType(
         TrRmRegisterBodyReader body, ushort index,
         TrRmTypeSpecTableReader typeSpecs, TrRmImportTableReader imports,
@@ -3467,6 +3535,8 @@ public static partial class TrRmExecutableCompiler
         int parameterCount,
         ImmutableArray<BoundVariable>.Builder variables,
         int[] homeVariables, byte[] homeRoles, PrimitiveType[] homeTypes,
+        ImmutableArray<BoundStruct> structures,
+        bool allowAggregatePointees,
         Dictionary<int, BoundExpression> valueByRegister,
         HashSet<int> initializedValueLocals,
         ImmutableArray<BoundStatement>.Builder statements)
@@ -3487,7 +3557,8 @@ public static partial class TrRmExecutableCompiler
             || !valueByRegister.TryGetValue(sourceRegister,
                 out var initializer)
             || initializer.Type != homeTypes[homeIndex]
-            || !IsStandardNativePointerLoadValueType(initializer.Type)
+            || !IsStandardNativePointerLoadValueType(initializer.Type,
+                structures, allowAggregatePointees)
             || (initializedValueLocals.Contains(variable)
                 && !variables[variable].IsMutable))
         {
@@ -3545,6 +3616,9 @@ public static partial class TrRmExecutableCompiler
                 "The Standard initialization-reference Body consumer requires one scalar Block and direct Homes.");
         }
 
+        var allowAggregatePointerLoads
+            = body.UsesNativePointerLoads
+                && body.Schema.UsesLocalAggregateLayout();
         var homeVariables = new int[body.HomeCount];
         var homeRoles = new byte[body.HomeCount];
         var homeTypes = new PrimitiveType[body.HomeCount];
@@ -3709,7 +3783,9 @@ public static partial class TrRmExecutableCompiler
                     DecodeStandardNativePointerLoadHomeStore(
                         body, instruction[1] >> 4, instruction[1] & 0x0F,
                         function.ParameterCount, variables, homeVariables,
-                        homeRoles, homeTypes, valueByRegister,
+                        homeRoles, homeTypes, structures,
+                        allowAggregatePointerLoads,
+                        valueByRegister,
                         initializedValueLocals, statements);
                     break;
                 }
@@ -3727,7 +3803,9 @@ public static partial class TrRmExecutableCompiler
                         BinaryPrimitives.ReadUInt16LittleEndian(
                             instruction[2..]),
                         function.ParameterCount, variables, homeVariables,
-                        homeRoles, homeTypes, valueByRegister,
+                        homeRoles, homeTypes, structures,
+                        allowAggregatePointerLoads,
+                        valueByRegister,
                         initializedValueLocals, statements);
                     break;
                 }
@@ -4007,7 +4085,8 @@ public static partial class TrRmExecutableCompiler
                                     selectorIndex, out var argument)
                                 || argument.Type != parameter.Type
                                 || !IsStandardNativePointerLoadValueType(
-                                    parameter.Type))
+                                    parameter.Type, structures,
+                                    allowAggregatePointerLoads))
                             {
                                 throw Invalid(
                                     "An F16 void CallSite has an unsupported staged input.");
@@ -4147,7 +4226,8 @@ public static partial class TrRmExecutableCompiler
                                 != (uint)pointerTarget.ParameterCount
                             || pointerTarget.ReturnType == PrimitiveType.Void
                             || !IsStandardNativePointerLoadValueType(
-                                pointerTarget.ReturnType))
+                                pointerTarget.ReturnType, structures,
+                                allowAggregatePointerLoads))
                         {
                             throw Invalid(
                                 "A pointer-load CallSite result does not match its value target.");
@@ -4173,7 +4253,8 @@ public static partial class TrRmExecutableCompiler
                                     selectorIndex, out var argument)
                                 || argument.Type != parameter.Type
                                 || !IsStandardNativePointerLoadValueType(
-                                    parameter.Type))
+                                    parameter.Type, structures,
+                                    allowAggregatePointerLoads))
                             {
                                 throw Invalid(
                                     "A pointer-load CallSite has an unsupported value input.");
@@ -4329,7 +4410,8 @@ public static partial class TrRmExecutableCompiler
                         NativePointerTypes.Index(address.Type)];
                     if (pointerType.PointeeType == PrimitiveType.Void
                         || !IsStandardNativePointerLoadPointeeType(
-                            pointerType.PointeeType))
+                            pointerType.PointeeType, structures,
+                            allowAggregatePointerLoads))
                     {
                         throw Invalid(
                             "A Standard native pointer load has an unsupported pointee type.");
@@ -4365,7 +4447,8 @@ public static partial class TrRmExecutableCompiler
                             destinationType)
                         || (body.UsesNativePointerLoads
                             && !IsStandardNativePointerLoadValueType(
-                                destinationType)))
+                                destinationType, structures,
+                                allowAggregatePointerLoads)))
                     {
                         throw Invalid(
                             "A Standard short conversion is not total for its complete types.");
@@ -4504,7 +4587,8 @@ public static partial class TrRmExecutableCompiler
                         if (pointerLoadHomeVariable < 0
                             || pointerLoadHomeVariable >= variables.Count
                             || !IsStandardNativePointerLoadValueType(
-                                homeTypes[homeIndex]))
+                                homeTypes[homeIndex], structures,
+                                allowAggregatePointerLoads))
                         {
                             throw Invalid(
                                 "A pointer-load Body reads a vacant or unsupported Home.");

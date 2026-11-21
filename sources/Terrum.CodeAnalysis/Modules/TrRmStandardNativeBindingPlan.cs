@@ -87,6 +87,8 @@ internal sealed partial class TrRmStandardNativeBindingPlan
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1";
     private const string LocalAggregateLayoutSchemaIdentity
         = "trrm/1-draft-local-aggregate-layout-execution-1";
+    private const string LocalAggregatePointerLoadsSchemaIdentity
+        = "trrm/1-draft-local-aggregate-layout-execution-pointer-loads-1";
     private const string InitializationReferenceLocalFieldLayoutSchemaIdentity
         = "trrm/1-draft-init-reference-bodies-local-field-layout-1";
     private const string InitializationReferenceNestedFieldDestinationsSchemaIdentity
@@ -260,10 +262,11 @@ internal sealed partial class TrRmStandardNativeBindingPlan
         }
 
         var includesLocalAggregateLayoutSchema
-            = _schemaIdentities.Contains(LocalAggregateLayoutSchemaIdentity,
-                StringComparer.Ordinal);
+            = _schemaIdentities.Any(IsLocalAggregateLayoutSchemaIdentity);
         var isLocalAggregateLayoutSchemaSet
             = IsExactLocalAggregateLayoutSchemaSet(_schemaIdentities);
+        var isLocalAggregatePointerLoadsSchemaSet
+            = IsExactLocalAggregatePointerLoadsSchemaSet(_schemaIdentities);
         var isConstruction2MethodLinkSchemaSet
             = _schemaIdentities.Count != 0
                 && _schemaIdentities.All(IsConstruction2MethodLinkSchemaIdentity);
@@ -271,7 +274,7 @@ internal sealed partial class TrRmStandardNativeBindingPlan
             && !isLocalAggregateLayoutSchemaSet)
         {
             throw new InvalidDataException(
-                "The L1 native operation requires exact L1 selection for every supplied artifact.");
+                "The L1 native operation requires one exact L1 or L1P selection for every supplied artifact.");
         }
         var includesInitializationReferenceLocalFieldLayoutSchema
             = _schemaIdentities.Any(
@@ -478,7 +481,9 @@ internal sealed partial class TrRmStandardNativeBindingPlan
                     "The L1 native operation cannot use F NativeImport bindings.");
             }
 
-            return (CreateLocalAggregateLayoutLoweringProgram(), []);
+            return (CreateLocalAggregateLayoutLoweringProgram(
+                localAggregatePointerLoads:
+                    isLocalAggregatePointerLoadsSchemaSet), []);
         }
         else if (!_providerDependencyBindings.IsDefaultOrEmpty)
         {
@@ -498,8 +503,14 @@ internal sealed partial class TrRmStandardNativeBindingPlan
 
             var rootSchema = GetFixedArraySchema(rootSchemaIdentity);
             _a3LayoutResourceLedger?.ConsumeWork(2);
+            var usesNativePointerLoads
+                = IsExactLocalAggregatePointerLoadsSchemaSet(
+                    _schemaIdentities);
             var rootIndex = new TrRmArtifactIndex(_artifacts[0],
-                rootSchema, _a3LayoutResourceLedger);
+                rootSchema, _a3LayoutResourceLedger,
+                usesNativePointerLoads: usesNativePointerLoads,
+                standardSchemaIdentity: usesNativePointerLoads
+                    ? rootSchemaIdentity : null);
             var rootTables = rootSchema switch {
                 TrRmArtifactSchema.LocalAggregateLayoutDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft
@@ -763,6 +774,8 @@ internal sealed partial class TrRmStandardNativeBindingPlan
             || AreEqualOrdinal(schemaIdentity,
                 LocalAggregateLayoutSchemaIdentity)
             || AreEqualOrdinal(schemaIdentity,
+                LocalAggregatePointerLoadsSchemaIdentity)
+            || AreEqualOrdinal(schemaIdentity,
                 InitializationReferenceLocalFieldLayoutSchemaIdentity)
             || AreEqualOrdinal(schemaIdentity,
                 InitializationReferenceNestedFieldDestinationsSchemaIdentity)
@@ -807,9 +820,25 @@ internal sealed partial class TrRmStandardNativeBindingPlan
     private static bool IsExactLocalAggregateLayoutSchemaSet(
         IReadOnlyList<string> schemaIdentities)
         => schemaIdentities.Count != 0
+            && (schemaIdentities.All(static schemaIdentity =>
+                    StringComparer.Ordinal.Equals(schemaIdentity,
+                        LocalAggregateLayoutSchemaIdentity))
+                || IsExactLocalAggregatePointerLoadsSchemaSet(
+                    schemaIdentities));
+
+    private static bool IsExactLocalAggregatePointerLoadsSchemaSet(
+        IReadOnlyList<string> schemaIdentities)
+        => schemaIdentities.Count != 0
             && schemaIdentities.All(static schemaIdentity =>
                 StringComparer.Ordinal.Equals(schemaIdentity,
-                    LocalAggregateLayoutSchemaIdentity));
+                    LocalAggregatePointerLoadsSchemaIdentity));
+
+    private static bool IsLocalAggregateLayoutSchemaIdentity(
+        string schemaIdentity)
+        => StringComparer.Ordinal.Equals(schemaIdentity,
+                LocalAggregateLayoutSchemaIdentity)
+            || StringComparer.Ordinal.Equals(schemaIdentity,
+                LocalAggregatePointerLoadsSchemaIdentity);
 
     private static bool IsExactInitializationReferenceLocalFieldLayoutSchemaSet(
         IReadOnlyList<string> schemaIdentities)
@@ -857,7 +886,9 @@ internal sealed partial class TrRmStandardNativeBindingPlan
             || AreEqualOrdinal(schemaIdentity,
                 ForeignInvocationStorageGenericFixedArraySchemaIdentity)
             || AreEqualOrdinal(schemaIdentity,
-                LocalAggregateLayoutSchemaIdentity);
+                LocalAggregateLayoutSchemaIdentity)
+            || AreEqualOrdinal(schemaIdentity,
+                LocalAggregatePointerLoadsSchemaIdentity);
 
     private TrRmArtifactSchema GetFixedArraySchema(string? schemaIdentity)
     {
@@ -869,6 +900,12 @@ internal sealed partial class TrRmStandardNativeBindingPlan
 
         if (AreEqualOrdinal(schemaIdentity,
                 LocalAggregateLayoutSchemaIdentity))
+        {
+            return TrRmArtifactSchema.LocalAggregateLayoutDraft;
+        }
+
+        if (AreEqualOrdinal(schemaIdentity,
+                LocalAggregatePointerLoadsSchemaIdentity))
         {
             return TrRmArtifactSchema.LocalAggregateLayoutDraft;
         }

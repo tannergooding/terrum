@@ -23,7 +23,8 @@ public static partial class TrRmExecutableCompiler
     private static byte[] EmitForeignInvocationStorageFixedArrayCopyDeclarations(
         BoundProgram program, string moduleIdentity,
         TrRmArtifactSchema schema,
-        IReadOnlyList<TrRmSourceTypeExport>? sourceTypeExports = null)
+        IReadOnlyList<TrRmSourceTypeExport>? sourceTypeExports = null,
+        string? standardSchemaIdentity = null)
     {
         if (schema is not (
             TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
@@ -167,7 +168,7 @@ public static partial class TrRmExecutableCompiler
         var exportRows = CreateA2SourceTypeExportRows(program,
             sourceTypeExports, structureTypeDefRows, GetStringRow);
         var typeImportPlan = CreateSourceTypeImportPlan(program, schema,
-            GetStringRow);
+            GetStringRow, standardSchemaIdentity);
         var importedTypeSpecRows = new Dictionary<int, int>();
 
         uint GetFieldTypeSpecRef(PrimitiveType type)
@@ -612,8 +613,15 @@ public static partial class TrRmExecutableCompiler
 
         sections.Sort(static (left, right)
             => left.Kind.CompareTo(right.Kind));
-        var artifact = TrRmArtifactWriter.Encode(sections, schema);
-        var index = schema == TrRmArtifactSchema.LocalAggregateLayoutDraft
+        var artifact = TrRmArtifactWriter.Encode(sections, schema,
+            standardSchemaIdentity: standardSchemaIdentity);
+        var index = IsSelectedLocalAggregatePointerLoadsSchemaIdentity(
+                standardSchemaIdentity)
+            ? new TrRmArtifactIndex(artifact, schema,
+                resourceLedger: null,
+                usesNativePointerLoads: true,
+                standardSchemaIdentity: standardSchemaIdentity)
+            : schema == TrRmArtifactSchema.LocalAggregateLayoutDraft
             ? TrRmArtifactIndex.ForLocalAggregateLayoutDraft(artifact)
             : schema
                 .UsesForeignInvocationStorageFixedArrayRepeatInitialization()
@@ -1117,11 +1125,13 @@ public static partial class TrRmExecutableCompiler
 
     private static SourceTypeImportPlan CreateSourceTypeImportPlan(
         BoundProgram program, TrRmArtifactSchema schema,
-        Func<string, int> getStringRow)
+        Func<string, int> getStringRow,
+        string? standardSchemaIdentity = null)
     {
         var expectedProviderSchemaIdentity = schema switch {
             TrRmArtifactSchema.LocalAggregateLayoutDraft
-                => StandardLocalAggregateLayoutSchemaIdentity,
+                => standardSchemaIdentity
+                    ?? StandardLocalAggregateLayoutSchemaIdentity,
             TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
@@ -1398,10 +1408,10 @@ public static partial class TrRmExecutableCompiler
                 if (schema == TrRmArtifactSchema.LocalAggregateLayoutDraft
                     && (!StringComparer.Ordinal.Equals(
                             expectation.UsingModule.SchemaIdentity,
-                            StandardLocalAggregateLayoutSchemaIdentity)
+                                expectedProviderSchemaIdentity)
                         || !StringComparer.Ordinal.Equals(
                             expectation.Provider.SchemaIdentity,
-                            StandardLocalAggregateLayoutSchemaIdentity)))
+                                expectedProviderSchemaIdentity)))
                 {
                     throw Unsupported(
                         "A source type Import edge does not retain the exact provider schema selected for this artifact.");

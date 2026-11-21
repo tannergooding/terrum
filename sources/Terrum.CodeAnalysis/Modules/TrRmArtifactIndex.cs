@@ -227,6 +227,10 @@ internal static class TrRmArtifactSchemaFacts
         schema is TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft
             or TrRmArtifactSchema.LocalAggregateLayoutDraft;
 
+    internal static bool UsesLocalAggregateLayout(
+        this TrRmArtifactSchema schema) =>
+        schema == TrRmArtifactSchema.LocalAggregateLayoutDraft;
+
     internal static bool UsesGeneralPredicateGraphs(this TrRmArtifactSchema schema) =>
         schema is TrRmArtifactSchema.GeneralPredicateGraphsDraft
             or TrRmArtifactSchema
@@ -528,12 +532,18 @@ public readonly ref struct TrRmArtifactIndex
                     .IsSelectedC1ClassInstanceLayoutSchemaIdentity(
                         standardSchemaIdentity)
                 && schema.UsesC1EnumClosure();
+        var isLocalAggregatePointerLoadsSchema
+            = TrRmExecutableCompiler
+                .IsSelectedLocalAggregatePointerLoadsSchemaIdentity(
+                    standardSchemaIdentity)
+                && schema == TrRmArtifactSchema.LocalAggregateLayoutDraft;
         var isTypeDefBindingEqualitySchema
             = TrRmExecutableCompiler
                 .IsSelectedTypeDefBindingEqualitySchemaIdentity(
                     standardSchemaIdentity);
         if (standardSchemaIdentity is not null
             && !isClassInstanceLayoutSchema
+            && !isLocalAggregatePointerLoadsSchema
             && (!isTypeDefBindingEqualitySchema
                 || TrRmExecutableCompiler.GetForeignInvocationSchema(
                     standardSchemaIdentity) != schema))
@@ -548,7 +558,12 @@ public readonly ref struct TrRmArtifactIndex
                 or TrRmArtifactSchema
                     .InitializationReferencePointerLoadNativeParameterDraft
                 or TrRmArtifactSchema
-                    .InitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft))
+                    .InitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft)
+            && !isLocalAggregatePointerLoadsSchema)
+        {
+            throw InvalidArtifact();
+        }
+        if (isLocalAggregatePointerLoadsSchema && !usesNativePointerLoads)
         {
             throw InvalidArtifact();
         }

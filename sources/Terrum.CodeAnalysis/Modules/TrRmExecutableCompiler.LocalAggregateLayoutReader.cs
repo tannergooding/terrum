@@ -15,6 +15,7 @@ public static partial class TrRmExecutableCompiler
 {
     private sealed record LocalAggregateLayoutTypeEnvironment(
         ImmutableArray<BoundStruct> Structures,
+        List<NativePointerTypeDefinition> NativePointerTypes,
         ImmutableArray<BoundNativeFixedArrayType> FixedArrayTypes,
         int[] StructureTypeByTypeDef,
         Dictionary<int, PrimitiveType> ArrayTypeByTypeSpecRow,
@@ -508,12 +509,14 @@ public static partial class TrRmExecutableCompiler
         {
             RuntimePolicy = BoundRuntimePolicy.FailFast,
             Structures = typeEnvironment.Structures,
+            NativePointerTypes = [.. typeEnvironment.NativePointerTypes],
             NativeFixedArrayTypes = typeEnvironment.FixedArrayTypes,
         };
-        if (!NativeFixedArrayContract.MatchesProgram(program))
+        if (!NativePointerTypeContract.IsValidTable(program)
+            || !NativeFixedArrayContract.MatchesProgram(program))
         {
             throw Invalid(
-                "The L1 executable's reconstructed fixed-array types are inconsistent.");
+                "The L1 executable's reconstructed pointer or fixed-array types are inconsistent.");
         }
 
         var hasModuleReferences = program.Functions.Any(static function =>
@@ -730,7 +733,8 @@ public static partial class TrRmExecutableCompiler
                 tables, selectedTypeDefRows, structureTypeByTypeDef));
 
         return new LocalAggregateLayoutTypeEnvironment(structures,
-            fixedArrayTypeArray, structureTypeByTypeDef,
+            nativePointerTypes, fixedArrayTypeArray,
+            structureTypeByTypeDef,
             arrayTypeByTypeSpecRow, profileRow);
     }
 
@@ -757,7 +761,7 @@ public static partial class TrRmExecutableCompiler
         uint typeSpecRef,
         LocalAggregateLayoutTypeEnvironment typeEnvironment)
     {
-        var nativePointerTypes = new List<NativePointerTypeDefinition>();
+        var nativePointerTypes = typeEnvironment.NativePointerTypes;
         var signatureIndexByAnchorMethod
             = new int[tables.Methods.Count + 1];
         Array.Fill(signatureIndexByAnchorMethod, -1);
@@ -1102,7 +1106,7 @@ public static partial class TrRmExecutableCompiler
             {
                 var opcode = code[position];
                 var length = TrRmRegisterBodyReader.InstructionLength(opcode,
-                    body.Schema);
+                    body.Schema, body.UsesNativePointerLoads);
                 if (length > code.Length - position)
                 {
                     throw Invalid("An L1 Body instruction is truncated.");
@@ -1178,6 +1182,46 @@ public static partial class TrRmExecutableCompiler
                     StoreLocalAggregateRegisterValue(state, destination,
                         ReadConstant(body, tables, state,
                             constantMapIndex));
+                    break;
+                }
+                case 0x1B:
+                {
+                    var destination = instruction[1] & 0x0F;
+                    var sourceRegister = instruction[1] >> 4;
+                    if (!body.UsesNativePointerLoads
+                        || destination >= 14 || sourceRegister >= 14
+                        || !registerValues.TryGetValue(sourceRegister,
+                            out var address)
+                        || !NativePointerTypeContract.IsValidType(
+                            address.Type, typeEnvironment.NativePointerTypes))
+                    {
+                        throw Invalid(
+                            "An L1P native pointer load has an invalid source register.");
+                    }
+
+                    var pointerType
+                        = typeEnvironment.NativePointerTypes[
+                            NativePointerTypes.Index(address.Type)];
+                    var pointeeType = pointerType.PointeeType;
+                    if (pointeeType == PrimitiveType.Void
+                        || !IsStandardNativePointerLoadPointeeType(
+                            pointeeType, typeEnvironment.Structures,
+                            allowAggregatePointees: true)
+                        || !NativePointerTypeContract.IsCopyableSourcePointee(
+                            pointeeType, typeEnvironment.Structures, [],
+                            nativeLoweringAgreement: null,
+                            fixedArrayTypes:
+                                typeEnvironment.FixedArrayTypes))
+                    {
+                        throw Invalid(
+                            "An L1P native pointer load has an unsupported pointee type.");
+                    }
+
+                    StoreLocalAggregateRegisterValue(state, destination,
+                        new BoundNativePointerRead(address, pointeeType,
+                            default) {
+                            IsUnsafeAuthorized = true,
+                        });
                     break;
                 }
                 case 0x17:
@@ -3533,7 +3577,8 @@ public static partial class TrRmExecutableCompiler
             {
                 var instructionLength
                     = TrRmRegisterBodyReader.InstructionLength(
-                        code[position], body.Schema);
+                        code[position], body.Schema,
+                        body.UsesNativePointerLoads);
                 if (instructionLength > code.Length - position)
                 {
                     throw Invalid(
@@ -3746,7 +3791,7 @@ public static partial class TrRmExecutableCompiler
 
                 var opcode = code[position];
                 var length = TrRmRegisterBodyReader.InstructionLength(
-                    opcode, body.Schema);
+                    opcode, body.Schema, body.UsesNativePointerLoads);
                 if (length > code.Length - position)
                 {
                     throw Invalid(
@@ -3765,6 +3810,12 @@ public static partial class TrRmExecutableCompiler
                     break;
                 case 0x13:
                 case 0x16:
+                    AddLocalAggregateRegisterDefinition(definitions,
+                        instruction[1] & 0x0F);
+                    break;
+                case 0x1B:
+                    AddLocalAggregateRegisterUse(uses, definitions,
+                        instruction[1] >> 4);
                     AddLocalAggregateRegisterDefinition(definitions,
                         instruction[1] & 0x0F);
                     break;

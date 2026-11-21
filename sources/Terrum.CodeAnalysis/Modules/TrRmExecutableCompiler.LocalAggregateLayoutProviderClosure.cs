@@ -117,6 +117,10 @@ public static partial class TrRmExecutableCompiler
                 || generalPredicateGraphsInitializationReferenceBodies
                 || standardNativePointerLoads
                 || nativeParameterContracts;
+        var localAggregatePointerLoads
+            = schemaIdentities.Length != 0
+                && IsSelectedLocalAggregatePointerLoadsSchemaIdentity(
+                    schemaIdentities[0]);
         if (construction2MethodLinking
             && (initializationReferenceBodyProfile
                 || schemaIdentities.Length == 0
@@ -143,6 +147,8 @@ public static partial class TrRmExecutableCompiler
                 ? nestedInitializationReferenceFieldDestinations
                     ? StandardInitReferenceBodiesNestedFieldDestinationsSchemaIdentity
                     : StandardInitReferenceBodiesLocalFieldLayoutSchemaIdentity
+            : localAggregatePointerLoads
+                ? StandardLocalAggregatePointerLoadsSchemaIdentity
                 : nativeParameterContracts
                     ? generalPredicateGraphsInitializationReferenceBodies
                         ? StandardInitReferenceBodiesGeneralPredicateGraphsPointerLoadsNativeParameterSchemaIdentity

@@ -95,6 +95,8 @@ public static partial class TrRmExecutableCompiler
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-scalar-frozen-values-copy-origin-return-coverage-repeat-initialization-1";
     private const string StandardLocalAggregateLayoutSchemaIdentity
         = "trrm/1-draft-local-aggregate-layout-execution-1";
+    private const string StandardLocalAggregatePointerLoadsSchemaIdentity
+        = "trrm/1-draft-local-aggregate-layout-execution-pointer-loads-1";
     private const string StandardForeignInvocationStorageGenericFixedArraySchemaIdentity
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1";
     private const string StandardRegisterExceptionRegionsSchemaIdentity
@@ -313,7 +315,21 @@ public static partial class TrRmExecutableCompiler
             || StringComparer.Ordinal.Equals(schemaIdentity,
                 StandardInitReferenceBodiesPointerLoadsNativeParameterSchemaIdentity)
             || StringComparer.Ordinal.Equals(schemaIdentity,
-                StandardInitReferenceBodiesGeneralPredicateGraphsPointerLoadsNativeParameterSchemaIdentity);
+                StandardInitReferenceBodiesGeneralPredicateGraphsPointerLoadsNativeParameterSchemaIdentity)
+            || StringComparer.Ordinal.Equals(schemaIdentity,
+                StandardLocalAggregatePointerLoadsSchemaIdentity);
+
+    internal static bool IsSelectedLocalAggregatePointerLoadsSchemaIdentity(
+        string? schemaIdentity)
+        => StringComparer.Ordinal.Equals(schemaIdentity,
+            StandardLocalAggregatePointerLoadsSchemaIdentity);
+
+    internal static bool IsSelectedLocalAggregateLayoutSchemaIdentity(
+        string? schemaIdentity)
+        => StringComparer.Ordinal.Equals(schemaIdentity,
+                StandardLocalAggregateLayoutSchemaIdentity)
+            || IsSelectedLocalAggregatePointerLoadsSchemaIdentity(
+                schemaIdentity);
 
     private static bool
         IsSelectedInitializationReferenceGeneralPredicateGraphsSchemaIdentity(
@@ -585,7 +601,9 @@ public static partial class TrRmExecutableCompiler
             && !StringComparer.Ordinal.Equals(schemaIdentity,
                 StandardForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationSchemaIdentity)
             && !StringComparer.Ordinal.Equals(schemaIdentity,
-                StandardLocalAggregateLayoutSchemaIdentity))
+                StandardLocalAggregateLayoutSchemaIdentity)
+            && !StringComparer.Ordinal.Equals(schemaIdentity,
+                StandardLocalAggregatePointerLoadsSchemaIdentity))
         {
             throw Unsupported(
                 "Explicit source TypeDef exports require an exact selected fixed-array schema.");
@@ -1154,6 +1172,7 @@ public static partial class TrRmExecutableCompiler
                 or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageSchemaIdentity
                 or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationSchemaIdentity
                 or StandardLocalAggregateLayoutSchemaIdentity
+                or StandardLocalAggregatePointerLoadsSchemaIdentity
                 or StandardForeignInvocationStorageGenericFixedArraySchemaIdentity)
             && moduleTargetRequirement
                 != TrRmModuleTableReader.WindowsX64NativeTargetRequirement)
@@ -1470,6 +1489,9 @@ public static partial class TrRmExecutableCompiler
             StandardLocalAggregateLayoutSchemaIdentity
                 => EmitLocalAggregateLayoutDraft(program, moduleIdentity,
                     sourceTypeExports),
+            StandardLocalAggregatePointerLoadsSchemaIdentity
+                => EmitLocalAggregatePointerLoadsDraft(program,
+                    moduleIdentity, sourceTypeExports),
             StandardForeignInvocationStorageGenericFixedArraySchemaIdentity
                 => EmitForeignInvocationDraftNativeAddressLibrary(program,
                     moduleIdentity,
@@ -5595,7 +5617,8 @@ public static partial class TrRmExecutableCompiler
                         out var pointerLoadBody))
                 {
                     bodies.Add(EncodeStandardNativePointerLoadBody(function,
-                        program, pointerLoadBody, TypeSpecRowFor,
+                        program, pointerLoadBody,
+                        type => checked((uint)TypeSpecRowFor(type)),
                         MethodMapTokenForFunction, schema));
                 }
                 else if (function.IndexedBody is TrRmScalarGraph indexedBody)

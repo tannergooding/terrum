@@ -154,6 +154,7 @@ public static partial class TrRmExecutableCompiler
                 or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageSchemaIdentity
                 or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationSchemaIdentity
                 or StandardLocalAggregateLayoutSchemaIdentity
+                or StandardLocalAggregatePointerLoadsSchemaIdentity
                 or StandardInitReferenceBodiesLocalFieldLayoutSchemaIdentity
                 or StandardInitReferenceBodiesNestedFieldDestinationsSchemaIdentity))
         {
@@ -169,6 +170,7 @@ public static partial class TrRmExecutableCompiler
                     or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageSchemaIdentity
                     or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationSchemaIdentity
                     or StandardLocalAggregateLayoutSchemaIdentity
+                    or StandardLocalAggregatePointerLoadsSchemaIdentity
                     or StandardInitReferenceBodiesLocalFieldLayoutSchemaIdentity
                     or StandardInitReferenceBodiesNestedFieldDestinationsSchemaIdentity)))
         {
@@ -7949,6 +7951,9 @@ public static partial class TrRmExecutableCompiler
                 StandardLocalAggregateLayoutSchemaIdentity)
             || StringComparer.Ordinal.Equals(
                 schemaIdentities[consumerArtifactIndex],
+                StandardLocalAggregatePointerLoadsSchemaIdentity)
+            || StringComparer.Ordinal.Equals(
+                schemaIdentities[consumerArtifactIndex],
                 StandardInitReferenceBodiesLocalFieldLayoutSchemaIdentity)
             || StringComparer.Ordinal.Equals(
                 schemaIdentities[consumerArtifactIndex],
@@ -8014,6 +8019,7 @@ public static partial class TrRmExecutableCompiler
                     or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageSchemaIdentity
                     or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationSchemaIdentity
                     or StandardLocalAggregateLayoutSchemaIdentity
+                    or StandardLocalAggregatePointerLoadsSchemaIdentity
                     or StandardInitReferenceBodiesLocalFieldLayoutSchemaIdentity
                     or StandardInitReferenceBodiesNestedFieldDestinationsSchemaIdentity
                     or StandardLayoutQueriesSchemaIdentity)

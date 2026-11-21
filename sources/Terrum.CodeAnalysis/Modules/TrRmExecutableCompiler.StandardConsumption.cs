@@ -678,14 +678,14 @@ public static partial class TrRmExecutableCompiler
                 "A B+E1 Standard operation requires exact B+E1 selections for every supplied artifact.");
         }
 
-        if (StringComparer.Ordinal.Equals(schemaIdentities[0],
-                StandardLocalAggregateLayoutSchemaIdentity)
-            && schemaIdentities.Any(static schemaIdentity =>
+        if (IsSelectedLocalAggregateLayoutSchemaIdentity(
+                schemaIdentities[0])
+            && schemaIdentities.Any(schemaIdentity =>
                 !StringComparer.Ordinal.Equals(schemaIdentity,
-                    StandardLocalAggregateLayoutSchemaIdentity)))
+                    schemaIdentities[0])))
         {
             throw Unsupported(
-                "An L1 Standard operation requires exact L1 selections for every supplied artifact.");
+                "An L1/L1P Standard operation requires the same exact schema selection for every supplied artifact.");
         }
 
         moduleValidation = ValidateStandardInputModules(artifacts,
@@ -789,6 +789,7 @@ public static partial class TrRmExecutableCompiler
             or StandardForeignInvocationStorageFixedArrayEmptyUnitScalarFrozenValuesSchemaIdentity
             or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationSchemaIdentity
             or StandardLocalAggregateLayoutSchemaIdentity
+            or StandardLocalAggregatePointerLoadsSchemaIdentity
             or StandardInitReferenceBodiesLocalFieldLayoutSchemaIdentity
             or StandardInitReferenceBodiesNestedFieldDestinationsSchemaIdentity
             or StandardForeignInvocationStorageGenericFixedArraySchemaIdentity)
@@ -870,8 +871,8 @@ public static partial class TrRmExecutableCompiler
                 : loadedProgram;
         }
 
-        if (StringComparer.Ordinal.Equals(schemaIdentities[0],
-                StandardLocalAggregateLayoutSchemaIdentity)
+        if (IsSelectedLocalAggregateLayoutSchemaIdentity(
+                schemaIdentities[0])
             && HasLocalAggregateMethodClosureWork(artifacts,
                 schemaIdentities, moduleValidation))
         {
@@ -918,8 +919,8 @@ public static partial class TrRmExecutableCompiler
         }
 
         if (tables.Imports.Count == 0 && tables.ModuleRefs.Count == 0
-            && !StringComparer.Ordinal.Equals(schemaIdentities[0],
-                StandardLocalAggregateLayoutSchemaIdentity))
+            && !IsSelectedLocalAggregateLayoutSchemaIdentity(
+                schemaIdentities[0]))
         {
             var loadedProgram = LoadForeignInvocationDraftNativeAddressLibrary(
                 artifacts[0], rootModuleRow, null, verifySemantics,
@@ -987,8 +988,8 @@ public static partial class TrRmExecutableCompiler
             {
                 var targetMethodRow = checked((int)
                     (importedDefinition & 0x00FF_FFFF));
-                if (StringComparer.Ordinal.Equals(schemaIdentities[0],
-                        StandardLocalAggregateLayoutSchemaIdentity))
+                if (IsSelectedLocalAggregateLayoutSchemaIdentity(
+                        schemaIdentities[0]))
                 {
                     throw Invalid(
                         "An L1 MethodDef Import escaped the checked semantic provider-closure path.");
@@ -1185,8 +1186,8 @@ public static partial class TrRmExecutableCompiler
         if (methodImportRows.Count == 0)
         {
             var isLocalAggregateLayout
-                = StringComparer.Ordinal.Equals(schemaIdentities[0],
-                    StandardLocalAggregateLayoutSchemaIdentity);
+                = IsSelectedLocalAggregateLayoutSchemaIdentity(
+                    schemaIdentities[0]);
             var (rootMethodStart, rootMethodEnd)
                 = tables.Modules.GetMethodDefRange(rootModuleRow);
             var loadedProgram = isLocalAggregateLayout
@@ -4035,6 +4036,7 @@ public static partial class TrRmExecutableCompiler
             or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageSchemaIdentity
             or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationSchemaIdentity
             or StandardLocalAggregateLayoutSchemaIdentity
+            or StandardLocalAggregatePointerLoadsSchemaIdentity
             or StandardForeignInvocationStorageGenericFixedArraySchemaIdentity
             or StandardLayoutQueriesSchemaIdentity
             or StandardRegisterExceptionRegionsSchemaIdentity
@@ -4106,14 +4108,15 @@ public static partial class TrRmExecutableCompiler
                 "The EN1 class instance-layout profile requires its exact successor identity for the root and every provider artifact.");
         }
 
-        if (result.Contains(StandardLocalAggregateLayoutSchemaIdentity,
-                StringComparer.Ordinal)
+        var localAggregateSchemaIdentity = result.FirstOrDefault(
+            IsSelectedLocalAggregateLayoutSchemaIdentity);
+        if (localAggregateSchemaIdentity is not null
             && result.Any(schemaIdentity =>
                 !StringComparer.Ordinal.Equals(schemaIdentity,
-                    StandardLocalAggregateLayoutSchemaIdentity)))
+                    localAggregateSchemaIdentity)))
         {
             throw Unsupported(
-                "The L1 operation requires its exact schema selection for the root and every provider artifact.");
+                "The L1/L1P operation requires its exact schema selection for the root and every provider artifact.");
         }
         if (result.Contains(
                 StandardInitReferenceBodiesLocalFieldLayoutSchemaIdentity,
@@ -4205,6 +4208,8 @@ public static partial class TrRmExecutableCompiler
                 => TrRmArtifactSchema
                     .ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft,
             StandardLocalAggregateLayoutSchemaIdentity
+                => TrRmArtifactSchema.LocalAggregateLayoutDraft,
+            StandardLocalAggregatePointerLoadsSchemaIdentity
                 => TrRmArtifactSchema.LocalAggregateLayoutDraft,
             StandardForeignInvocationStorageGenericFixedArraySchemaIdentity
                 => TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft,
@@ -4325,6 +4330,14 @@ public static partial class TrRmExecutableCompiler
         {
             return new TrRmArtifactIndex(artifact, schema, resourceLedger,
                 usesNativePointerLoads: false,
+                standardSchemaIdentity: schemaIdentity);
+        }
+
+        if (StringComparer.Ordinal.Equals(schemaIdentity,
+                StandardLocalAggregatePointerLoadsSchemaIdentity))
+        {
+            return new TrRmArtifactIndex(artifact, schema, resourceLedger,
+                usesNativePointerLoads: true,
                 standardSchemaIdentity: schemaIdentity);
         }
 
@@ -4651,9 +4664,11 @@ public static partial class TrRmExecutableCompiler
             || hasNativeOutputProviderImports;
         var includesL1MethodProviderClosure
             = schemaIdentities.Length != 0
-                && schemaIdentities.All(static schemaIdentity =>
+                && IsSelectedLocalAggregateLayoutSchemaIdentity(
+                    schemaIdentities[0])
+                && schemaIdentities.All(schemaIdentity =>
                     StringComparer.Ordinal.Equals(schemaIdentity,
-                        StandardLocalAggregateLayoutSchemaIdentity));
+                        schemaIdentities[0]));
         var includesConstruction2MethodProviderClosure
             = IsConstruction2MethodProviderClosureSchemaSet(
                 schemaIdentities);
@@ -4716,7 +4731,8 @@ public static partial class TrRmExecutableCompiler
                     or StandardForeignInvocationStorageFixedArrayEmptyUnitScalarFrozenValuesSchemaIdentity
                     or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageSchemaIdentity
                     or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationSchemaIdentity
-                    or StandardLocalAggregateLayoutSchemaIdentity;
+                    or StandardLocalAggregateLayoutSchemaIdentity
+                    or StandardLocalAggregatePointerLoadsSchemaIdentity;
                 var supportsNativeOutputCells
                     = StringComparer.Ordinal.Equals(schemaIdentities[index],
                         StandardForeignInvocationSchemaIdentity)
@@ -4733,6 +4749,8 @@ public static partial class TrRmExecutableCompiler
                     || StringComparer.Ordinal.Equals(schemaIdentities[index],
                         StandardForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationSchemaIdentity)
                     || StringComparer.Ordinal.Equals(schemaIdentities[index],
+                        StandardLocalAggregatePointerLoadsSchemaIdentity)
+                    || StringComparer.Ordinal.Equals(schemaIdentities[index],
                         StandardLocalAggregateLayoutSchemaIdentity)
                     || IsSelectedGeneralPredicateGraphsSchemaIdentity(
                         schemaIdentities[index]);
@@ -4742,7 +4760,9 @@ public static partial class TrRmExecutableCompiler
                     || StringComparer.Ordinal.Equals(schemaIdentities[index],
                         StandardForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationSchemaIdentity)
                     || StringComparer.Ordinal.Equals(schemaIdentities[index],
-                        StandardLocalAggregateLayoutSchemaIdentity);
+                        StandardLocalAggregateLayoutSchemaIdentity)
+                    || StringComparer.Ordinal.Equals(schemaIdentities[index],
+                        StandardLocalAggregatePointerLoadsSchemaIdentity);
                 var supportsRegisterExceptionRegions
                     = StringComparer.Ordinal.Equals(schemaIdentities[index],
                         StandardRegisterExceptionRegionsSchemaIdentity);
@@ -4852,6 +4872,7 @@ public static partial class TrRmExecutableCompiler
                         or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageSchemaIdentity
                         or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationSchemaIdentity
                         or StandardLocalAggregateLayoutSchemaIdentity
+                        or StandardLocalAggregatePointerLoadsSchemaIdentity
                         or StandardInitReferenceBodiesLocalFieldLayoutSchemaIdentity
                         or StandardInitReferenceBodiesNestedFieldDestinationsSchemaIdentity)
                     && methodEnd == methodStart && typeEnd > typeStart;
@@ -4967,6 +4988,7 @@ public static partial class TrRmExecutableCompiler
                     or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageSchemaIdentity
                     or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationSchemaIdentity
                     or StandardLocalAggregateLayoutSchemaIdentity
+                    or StandardLocalAggregatePointerLoadsSchemaIdentity
                     or StandardInitReferenceBodiesLocalFieldLayoutSchemaIdentity
                     or StandardInitReferenceBodiesNestedFieldDestinationsSchemaIdentity)
                 && rootMethodStart == rootMethodEnd

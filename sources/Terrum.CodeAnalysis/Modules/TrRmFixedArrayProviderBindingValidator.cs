@@ -4215,7 +4215,16 @@ internal static class TrRmFixedArrayProviderBindingValidator
             }
 
             var schema = GetFixedArraySchema(_schemaIdentities[artifactIndex]);
-            var index = _a3ResourceLedger is not null
+            var isLocalAggregatePointerLoads
+                = TrRmExecutableCompiler
+                    .IsSelectedLocalAggregatePointerLoadsSchemaIdentity(
+                        _schemaIdentities[artifactIndex]);
+            var index = isLocalAggregatePointerLoads
+                ? new TrRmArtifactIndex(_artifacts[artifactIndex], schema,
+                    _a3ResourceLedger, usesNativePointerLoads: true,
+                    standardSchemaIdentity:
+                        _schemaIdentities[artifactIndex])
+                : _a3ResourceLedger is not null
                 ? new TrRmArtifactIndex(_artifacts[artifactIndex], schema,
                     _a3ResourceLedger)
                 : schema == TrRmArtifactSchema.LocalAggregateLayoutDraft

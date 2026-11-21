@@ -13,6 +13,24 @@ public static partial class TrRmExecutableCompiler
         BoundProgram program, string moduleIdentity,
         System.Collections.Generic.IReadOnlyList<TrRmSourceTypeExport>?
             sourceTypeExports)
+        => EmitLocalAggregateLayoutProfile(program, moduleIdentity,
+            sourceTypeExports, StandardLocalAggregateLayoutSchemaIdentity,
+            usesNativePointerLoads: false);
+
+    private static byte[] EmitLocalAggregatePointerLoadsDraft(
+        BoundProgram program, string moduleIdentity,
+        System.Collections.Generic.IReadOnlyList<TrRmSourceTypeExport>?
+            sourceTypeExports)
+        => EmitLocalAggregateLayoutProfile(program, moduleIdentity,
+            sourceTypeExports,
+            StandardLocalAggregatePointerLoadsSchemaIdentity,
+            usesNativePointerLoads: true);
+
+    private static byte[] EmitLocalAggregateLayoutProfile(
+        BoundProgram program, string moduleIdentity,
+        System.Collections.Generic.IReadOnlyList<TrRmSourceTypeExport>?
+            sourceTypeExports, string schemaIdentity,
+        bool usesNativePointerLoads)
     {
         program = SelectLocalAggregateLayoutRootProgram(program,
             moduleIdentity);
@@ -20,7 +38,8 @@ public static partial class TrRmExecutableCompiler
         {
             return EmitForeignInvocationDraftNativeAddressLibrary(program,
                 moduleIdentity, TrRmArtifactSchema.LocalAggregateLayoutDraft,
-                sourceTypeExports);
+                sourceTypeExports, standardSchemaIdentity: schemaIdentity,
+                usesNativePointerLoads: usesNativePointerLoads);
         }
 
         if (program.EntryPoint < -1)
@@ -59,7 +78,7 @@ public static partial class TrRmExecutableCompiler
             SemanticVerifier.VerifyWithDirectNativeImports(normalized);
         }
         return EmitLocalAggregateLayoutRegisterBodies(normalized,
-            moduleIdentity);
+            moduleIdentity, schemaIdentity, usesNativePointerLoads);
     }
 
     private static BoundProgram SelectLocalAggregateLayoutRootProgram(
