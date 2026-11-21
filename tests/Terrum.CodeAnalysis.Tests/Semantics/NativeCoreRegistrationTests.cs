@@ -741,6 +741,14 @@ internal sealed class NativeCoreRegistrationTests
                     [Terrum.CodeAnalysis.ForwardsBacking(
                         this, nameof(source))]
                     write ptr<uint32> value);
+
+                [param(value): Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonNegative)]
+                public unsafe int32 TryReadFloat64(ptr<int32> source,
+                    [Terrum.CodeAnalysis.DependsOn(this, nameof(source))]
+                    [Terrum.CodeAnalysis.ForwardsBacking(
+                        this, nameof(source))]
+                    write ptr<float64> value);
             }
 
             int32 Invoke(ptr<void> receiver, ptr<int32> source) {
@@ -777,6 +785,17 @@ internal sealed class NativeCoreRegistrationTests
                         receiver, source, &init value);
                     if (status != 0) { return value; }
                     return status;
+                }
+            }
+
+            float64 InvokeFloat64(ptr<void> receiver, ptr<int32> source,
+                float64 fallback) {
+                init float64 value;
+                unsafe {
+                    int32 status = IProbe.TryReadFloat64(
+                        receiver, source, &init value);
+                    if (status >= 0) { return value; }
+                    return fallback;
                 }
             }
             """;
@@ -815,6 +834,17 @@ internal sealed class NativeCoreRegistrationTests
                         receiver, source, &init value);
                     if (status != 0) { return value; }
                     return status;
+                }
+            }
+
+            float64 InvokeFloat64(ptr<void> receiver, ptr<int32> source,
+                float64 fallback) {
+                init float64 value;
+                unsafe {
+                    int32 status = IProbe.TryReadFloat64(
+                        receiver, source, &init value);
+                    if (status >= 0) { return value; }
+                    return fallback;
                 }
             }
             """;
@@ -876,6 +906,13 @@ internal sealed class NativeCoreRegistrationTests
             providerTables.Methods.GetBodyRow(providerNonZeroRow),
             providerTables.Contracts.Count);
         AssertCorrelatedOutputBody(providerNonZeroBody, 13);
+        var providerFloat64Row
+            = Enumerable.Range(1, providerTables.Methods.Count).Single(row =>
+                providerTables.Methods.GetName(row) == "InvokeFloat64");
+        var providerFloat64Body = providerTables.Bodies.GetRegisterBody(
+            providerTables.Methods.GetBodyRow(providerFloat64Row),
+            providerTables.Contracts.Count);
+        AssertCorrelatedOutputBody(providerFloat64Body, 6, 3, 4, 2);
 
         var loadedProvider = TrRmExecutableCompiler.LoadStandard(
             providerInput, "provider.module", []);
@@ -887,6 +924,9 @@ internal sealed class NativeCoreRegistrationTests
             PrimitiveType.Int32);
         AssertCorrelatedOutputCall(loadedProvider, null,
             "InvokeNonZero", TokenKind.BangEquals, PrimitiveType.UInt32);
+        AssertCorrelatedOutputCall(loadedProvider, null,
+            "InvokeFloat64", TokenKind.GreaterEquals, PrimitiveType.Float64,
+            PrimitiveType.Int32);
         var reference = TrRmExecutableCompiler.CreateStandardReference(
             providerInput, "provider.module", []);
         var consumerCompilation = Compilation.CreateLibrary(
@@ -934,6 +974,13 @@ internal sealed class NativeCoreRegistrationTests
             consumerTables.Methods.GetBodyRow(consumerNonZeroRow),
             consumerTables.Contracts.Count);
         AssertCorrelatedOutputBody(consumerNonZeroBody, 13);
+        var consumerFloat64Row
+            = Enumerable.Range(1, consumerTables.Methods.Count).Single(row =>
+                consumerTables.Methods.GetName(row) == "InvokeFloat64");
+        var consumerFloat64Body = consumerTables.Bodies.GetRegisterBody(
+            consumerTables.Methods.GetBodyRow(consumerFloat64Row),
+            consumerTables.Contracts.Count);
+        AssertCorrelatedOutputBody(consumerFloat64Body, 6, 3, 4, 2);
 
         var providers = new[] { providerInput };
         var malformedIndex = new TrRmArtifactIndex(consumerArtifact,
@@ -962,6 +1009,9 @@ internal sealed class NativeCoreRegistrationTests
             PrimitiveType.Int32);
         AssertCorrelatedOutputCall(loadedConsumer, "provider.module",
             "InvokeNonZero", TokenKind.BangEquals, PrimitiveType.UInt32);
+        AssertCorrelatedOutputCall(loadedConsumer, "provider.module",
+            "InvokeFloat64", TokenKind.GreaterEquals, PrimitiveType.Float64,
+            PrimitiveType.Int32);
         var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(
             loadedConsumer, "consumer.module", schemaIdentity, 1, []);
         var reloadedConsumer = TrRmExecutableCompiler.LoadStandard(
@@ -975,19 +1025,39 @@ internal sealed class NativeCoreRegistrationTests
             PrimitiveType.Int32);
         AssertCorrelatedOutputCall(reloadedConsumer, "provider.module",
             "InvokeNonZero", TokenKind.BangEquals, PrimitiveType.UInt32);
+        AssertCorrelatedOutputCall(reloadedConsumer, "provider.module",
+            "InvokeFloat64", TokenKind.GreaterEquals, PrimitiveType.Float64,
+            PrimitiveType.Int32);
 
         static void AssertCorrelatedOutputBody(
-            TrRmRegisterBodyReader body, byte comparison)
+            TrRmRegisterBodyReader body, byte comparison,
+            ushort outputHome = 2, ushort statusHome = 3,
+            ushort complementHome = 3)
         {
             Assert.That(body.BlockCount, Is.EqualTo(3));
-            Assert.That(body.GetBlockCode(0)[19], Is.EqualTo(comparison));
+            var entryCode = body.GetBlockCode(0);
+            Assert.That(entryCode[19], Is.EqualTo(comparison));
+            Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+                entryCode[8..]), Is.EqualTo(statusHome));
+            Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+                entryCode[12..]), Is.EqualTo(statusHome));
             Assert.That(body.GetRecord(1)[5], Is.EqualTo((byte)1));
+            Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+                body.GetRecord(1)[30..]), Is.EqualTo(outputHome));
+            Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+                body.GetRecord(2)[6..]), Is.EqualTo(outputHome));
             Assert.That(body.GetRecord(3)[0], Is.EqualTo((byte)0x06));
-            Assert.That(body.GetBlockCode(0)[^4], Is.EqualTo((byte)0xE4));
+            Assert.That(entryCode[^4], Is.EqualTo((byte)0xE4));
+            Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+                body.GetBlockCode(1)[2..]), Is.EqualTo(outputHome));
+            Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+                body.GetBlockCode(2)[2..]), Is.EqualTo(complementHome));
             Assert.That(body.GetBlockCode(1).ToArray(), Is.EqualTo(
-                new byte[] { 0xD5, 0, 2, 0, 0x17, 0 }));
+                new byte[] { 0xD5, 0, (byte)outputHome,
+                    (byte)(outputHome >> 8), 0x17, 0 }));
             Assert.That(body.GetBlockCode(2).ToArray(), Is.EqualTo(
-                new byte[] { 0xD5, 0, 3, 0, 0x17, 0 }));
+                new byte[] { 0xD5, 0, (byte)complementHome,
+                    (byte)(complementHome >> 8), 0x17, 0 }));
         }
 
         static void AssertOutputReservationCallSite(
@@ -1075,11 +1145,13 @@ internal sealed class NativeCoreRegistrationTests
 
         static void AssertCorrelatedOutputCall(BoundProgram program,
             string? expectedProvider, string functionName,
-            TokenKind expectedOperator, PrimitiveType resultType)
+            TokenKind expectedOperator, PrimitiveType returnType,
+            PrimitiveType? nativeResultType = null)
         {
+            var statusType = nativeResultType ?? returnType;
             var invoke = program.Functions.Single(function =>
                 function.Name == functionName);
-            Assert.That(invoke.ReturnType, Is.EqualTo(resultType));
+            Assert.That(invoke.ReturnType, Is.EqualTo(returnType));
             BoundCall? foreignCall = null;
             Assert.That(BoundTreeTraversal.VisitExpressions(invoke.Body,
                 expression =>
@@ -1093,6 +1165,7 @@ internal sealed class NativeCoreRegistrationTests
                 }), Is.True);
             var selectedCall = foreignCall
                 ?? throw new AssertionException("Expected an FNI call.");
+            Assert.That(selectedCall.Type, Is.EqualTo(statusType));
             var foreignInterfaceCall = selectedCall.ForeignInterfaceCall
                 ?? throw new AssertionException(
                     "Expected the selected FNI call identity.");
@@ -1109,30 +1182,34 @@ internal sealed class NativeCoreRegistrationTests
                 selectedCall.Arguments[1];
             Assert.That(invoke.Variables[reservation.Variable]
                 .IsInitializationLocal, Is.True);
-            Assert.That(reservation.PointeeType, Is.EqualTo(resultType));
+            Assert.That(reservation.PointeeType, Is.EqualTo(returnType));
             var statusLocal = invoke.Body.Statements
                 .OfType<BoundLocal>().Single();
             Assert.That(statusLocal.Initializer,
                 Is.TypeOf<BoundUnsafeExpression>());
+            Assert.That(statusLocal.Initializer.Type,
+                Is.EqualTo(statusType));
             var branch = invoke.Body.Statements.OfType<BoundIf>().Single();
             Assert.That(branch.Condition, Is.TypeOf<BoundBinary>());
             var condition = (BoundBinary)branch.Condition;
             Assert.That(condition.Operator, Is.EqualTo(expectedOperator));
             Assert.That(((BoundRead)condition.Left).Variable,
                 Is.EqualTo(statusLocal.Variable));
-            Assert.That(condition.Left.Type, Is.EqualTo(resultType));
-            Assert.That(condition.Right.Type, Is.EqualTo(resultType));
+            Assert.That(condition.Left.Type, Is.EqualTo(statusType));
+            Assert.That(condition.Right.Type, Is.EqualTo(statusType));
             Assert.That(((BoundConstant)condition.Right).Value, Is.Zero);
             var successReturn = (BoundReturn)((BoundBlock)branch.Then)
                 .Statements.Single();
             Assert.That(((BoundRead)successReturn.Value!).Variable,
                 Is.EqualTo(reservation.Variable));
-            Assert.That(successReturn.Value!.Type, Is.EqualTo(resultType));
+            Assert.That(successReturn.Value!.Type, Is.EqualTo(returnType));
             var fallbackReturn = invoke.Body.Statements
                 .OfType<BoundReturn>().Last();
             Assert.That(((BoundRead)fallbackReturn.Value!).Variable,
-                Is.EqualTo(statusLocal.Variable));
-            Assert.That(fallbackReturn.Value!.Type, Is.EqualTo(resultType));
+                Is.EqualTo(invoke.ParameterCount == 3
+                    ? 2
+                    : statusLocal.Variable));
+            Assert.That(fallbackReturn.Value!.Type, Is.EqualTo(returnType));
             Assert.That(foreignInterfaceCall.Member.DeclaringInterface
                 .ModuleImport?.ProducerIdentity, Is.EqualTo(expectedProvider));
         }

@@ -1353,13 +1353,16 @@ target, and selected method's output relations. Terminal FNI
 inventing a normal return, publication or cancellation. FNI emission requires the
 NativeOutput cells Feature for selected methods with outputs, retaining its
 PublishedPredicates prerequisite. A bounded three-block result branch now
-supports `NonNegative` `int32` and `NonZero` `int32`/`uint32` status-output
-pairs, reading a scalar output only on the success edge and returning the
-status on the complement edge. Local MethodDefs and imported MethodDef
-Imports are mapped by exact member identity; regressions cover local and
-imported output reservations and conditional reads, provider load/re-emission,
-and malformed MethodMap, success-predicate, branch-target and reservation
-rejection; they remain unverified under the hold.
+supports `NonNegative` `int32` and `NonZero` `int32`/`uint32` call results,
+reading a scalar output only on the success edge. Bodies can return a
+same-typed status on the complement edge or use an explicit scalar fallback
+when the output and call-result types differ. Local MethodDefs and imported
+MethodDef Imports are mapped by exact member identity; regressions cover
+`int32`/`uint32` result predicates, a differing `float64` output with an
+explicit fallback, local/imported output reservations and conditional reads,
+provider load/re-emission, and malformed MethodMap, success-predicate,
+branch-target and reservation rejection. They remain unverified under the
+hold.
 Other result selectors/flow shapes, side-effecting argument expressions,
 defaults/constants, multiple calls, other Body control-flow shapes,
 nonreturning-call shapes beyond the terminal subset and reservation
