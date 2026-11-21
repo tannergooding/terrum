@@ -2163,6 +2163,10 @@ public static partial class SemanticVerifier
                 case BoundReadonlyProjection projection:
                     Expression(projection.Value, scope, depth + 1);
                     break;
+                case BoundWildcardPattern wildcardPattern:
+                    Expression(wildcardPattern.Observation, scope,
+                        depth + 1);
+                    break;
                 case BoundIsNull test:
                     Expression(test.Value, scope, depth + 1);
                     break;
@@ -2985,6 +2989,8 @@ public static partial class SemanticVerifier
                     break;
                 case BoundReadonlyProjection projection:
                     Expression(projection.Value, depth + 1, acquiringRoot);
+                    break;
+                case BoundWildcardPattern:
                     break;
                 case BoundIsNull test:
                     Expression(test.Value, depth + 1, acquiringRoot);
@@ -7750,6 +7756,7 @@ public static partial class SemanticVerifier
                         conditional.WhenFalse, function, program, ref remaining, depth + 1),
             BoundIsNull test => CleanupExpressionCanBeProvenNonThrowing(
                 test.Value, function, program, ref remaining, depth + 1),
+            BoundWildcardPattern => true,
             BoundTypeTestPattern test =>
                 CleanupExpressionCanBeProvenNonThrowing(
                     test.Value, function, program, ref remaining, depth + 1),
@@ -19433,6 +19440,18 @@ public static partial class SemanticVerifier
                 Expression(projection.Value, initialized, fieldMasks, declarations, function, program,
                     ref remaining, depth + 1, failures);
                 break;
+            case BoundWildcardPattern wildcardPattern:
+                if (wildcardPattern.Type != PrimitiveType.Bool
+                    || wildcardPattern.Observation is not BoundRead
+                        wildcardObservation
+                    || wildcardObservation.Variable < 0
+                    || wildcardObservation.Variable >= initialized.Length
+                    || function.Variables[wildcardObservation.Variable].Type
+                        != wildcardObservation.Type)
+                {
+                    throw Invalid(wildcardPattern.Span);
+                }
+                break;
             case BoundIsNull test:
                 if (test.Value is null || !IsSupportedOptionalType(test.Value.Type, program))
                 {
@@ -20443,6 +20462,10 @@ public static partial class SemanticVerifier
                 failures?.Add(initialized, fieldMasks);
                 break;
             case BoundUnary unary:
+                if (!IsValidPatternComposition(unary))
+                {
+                    throw Invalid(unary.Span);
+                }
                 var operandCompletes = EvaluateExpression(unary.Operand, initialized, fieldMasks,
                     declarations, function, program, ref remaining, depth + 1, failures);
                 if (unary.OverflowBehavior is not (BoundIntegerOverflowBehavior.Checked
@@ -20600,6 +20623,10 @@ public static partial class SemanticVerifier
                 break;
             case BoundBinary binary:
             {
+                if (!IsValidPatternComposition(binary))
+                {
+                    throw Invalid(binary.Span);
+                }
                 if (TryEvaluateLongLeftLogicalChain(binary, initialized, fieldMasks,
                     declarations, function, program, ref remaining, depth,
                     failures, cleanupCounterStep))
@@ -22804,7 +22831,8 @@ public static partial class SemanticVerifier
         }
         if (expression is BoundCall or BoundIndirectCall
             or BoundNominalUpdate or BoundCoalesce
-            or BoundIsNull or BoundTypeTestPattern
+            or BoundWildcardPattern or BoundIsNull
+            or BoundTypeTestPattern
             or BoundTypedValuePattern or BoundReferenceTypeTestPattern
             or BoundIsSome
             or BoundIsVariablePattern)
@@ -22825,6 +22853,7 @@ public static partial class SemanticVerifier
             if (expression is BoundUnary { Operator: TokenKind.Bang }
                 or BoundConditional or BoundCall or BoundIndirectCall
                 or BoundNominalUpdate or BoundCoalesce or BoundIsNull
+                or BoundWildcardPattern
                 or BoundTypeTestPattern
                 or BoundTypedValuePattern
                 or BoundReferenceTypeTestPattern
@@ -25232,8 +25261,34 @@ public static partial class SemanticVerifier
             }
             var invalidReturnValue = false;
             var invalidStaticFieldRead = false;
+            var invalidPatternComposition = false;
             if (!BoundTreeTraversal.VisitExpressionTree(clause.Predicate,
                     expression => {
+                        if (expression is BoundUnary unary
+                            && (!IsValidPatternComposition(unary)
+                                || (unary.IsPatternComposition
+                                    && !IsValidDeclarationPatternObservation(
+                                        unary.PatternObservation, function,
+                                        program))))
+                        {
+                            invalidPatternComposition = true;
+                        }
+                        if (expression is BoundBinary binary
+                            && (!IsValidPatternComposition(binary)
+                                || (binary.IsPatternComposition
+                                    && !IsValidDeclarationPatternObservation(
+                                        binary.PatternObservation, function,
+                                        program))))
+                        {
+                            invalidPatternComposition = true;
+                        }
+                        if (expression is BoundWildcardPattern wildcardPattern
+                            && !IsValidDeclarationPatternObservation(
+                                wildcardPattern.Observation, function,
+                                program))
+                        {
+                            invalidPatternComposition = true;
+                        }
                         if (expression is BoundContractReturnValue result
                             && (clause.Phase
                                     != BoundDeclarationContractPhase.NormalPostcondition
@@ -25273,7 +25328,8 @@ public static partial class SemanticVerifier
                             invalidStaticFieldRead = true;
                         }
                     })
-                || invalidReturnValue || invalidStaticFieldRead)
+                || invalidReturnValue || invalidStaticFieldRead
+                || invalidPatternComposition)
             {
                 return false;
             }
@@ -25328,6 +25384,109 @@ public static partial class SemanticVerifier
         }
 
         return true;
+    }
+
+    private static bool IsValidPatternComposition(BoundUnary unary)
+    {
+        if (!unary.IsPatternComposition)
+        {
+            return unary.PatternObservation is null;
+        }
+
+        return unary.Operator == TokenKind.Bang
+            && unary.Type == PrimitiveType.Bool
+            && unary.Operand.Type == PrimitiveType.Bool
+            && unary.PatternObservation is BoundRead observation
+            && IsPatternCompositionOperand(unary.Operand, observation);
+    }
+
+    private static bool IsValidDeclarationPatternObservation(
+        BoundExpression? expression, BoundFunction function,
+        BoundProgram program)
+    {
+        if (expression is not BoundRead read
+            || read.Variable < 0
+            || read.Variable >= function.ParameterCount
+            || function.Variables[read.Variable].Type != read.Type
+            || function.Variables[read.Variable].IsOut
+            || function.Variables[read.Variable].IsInit
+            || function.Variables[read.Variable].IsMutable)
+        {
+            return false;
+        }
+
+        return PrimitiveTypeFacts.IsBuiltInScalar(read.Type)
+            || (TryGetOptionalPayloadType(read.Type, program,
+                    out var payloadType)
+                && PrimitiveTypeFacts.IsBuiltInScalar(payloadType))
+            || CheckedReferenceTypeContract
+                .IsSupportedReferencePatternType(read.Type,
+                    program.CheckedReferenceTypes);
+    }
+
+    private static bool IsValidPatternComposition(BoundBinary binary)
+    {
+        if (!binary.IsPatternComposition)
+        {
+            return binary.PatternObservation is null;
+        }
+
+        return binary.Operator is (TokenKind.AmpersandAmpersand
+                or TokenKind.PipePipe)
+            && !binary.IsConstantPatternTest
+            && binary.Type == PrimitiveType.Bool
+            && binary.Left.Type == PrimitiveType.Bool
+            && binary.Right.Type == PrimitiveType.Bool
+            && binary.PatternObservation is BoundRead observation
+            && IsPatternCompositionOperand(binary.Left, observation)
+            && IsPatternCompositionOperand(binary.Right, observation);
+    }
+
+    private static bool IsPatternCompositionOperand(
+        BoundExpression expression, BoundRead observation)
+    {
+        bool IsSameObservation(BoundExpression candidate)
+            => candidate is BoundRead read
+                && read.Variable == observation.Variable
+                && read.Type == observation.Type;
+
+        return expression switch {
+            BoundUnary unary => unary.IsPatternComposition
+                && IsSameObservation(unary.PatternObservation!)
+                && IsValidPatternComposition(unary),
+            BoundBinary {
+                IsPatternComposition: true,
+                Operator: TokenKind.AmpersandAmpersand
+                    or TokenKind.PipePipe,
+            } binary => IsSameObservation(binary.PatternObservation!)
+                && IsValidPatternComposition(binary),
+            BoundBinary {
+                IsConstantPatternTest: true,
+            } constantPattern => constantPattern.Operator
+                    == TokenKind.EqualsEquals
+                && constantPattern.Left is BoundRead constantSubject
+                && IsSameObservation(constantSubject)
+                && constantPattern.Right is BoundConstant constant
+                && constant.Type == observation.Type
+                && constant.RepresentationType == observation.Type
+                && constant.Bits.IsCanonicalFor(observation.Type),
+            BoundIsNull nullTest => IsSameObservation(nullTest.Value),
+            BoundTypeTestPattern typeTest => IsSameObservation(
+                typeTest.Value),
+            BoundTypedValuePattern typedValuePattern =>
+                IsSameObservation(typedValuePattern.Value),
+            BoundReferenceTypeTestPattern referencePattern =>
+                IsSameObservation(referencePattern.Value),
+            BoundIsSome somePattern => IsSameObservation(somePattern.Value),
+            BoundIsVariablePattern variablePattern =>
+                IsSameObservation(variablePattern.Value),
+            BoundIsInitialized initializedPattern =>
+                initializedPattern.Variable == observation.Variable,
+            BoundWildcardPattern wildcardPattern =>
+                IsSameObservation(wildcardPattern.Observation),
+            BoundConstant { Type: PrimitiveType.Bool } => true,
+            _ => false,
+        };
     }
 
     private static bool IsValidCheckedOutputStatePredicates(
@@ -38486,6 +38645,7 @@ public static partial class SemanticVerifier
                 pointerWrite.Value, flowFacts, ref remaining),
             BoundIsSome test => (byte)(OutcomeEffectFact | FlowFacts(test.Value, flowFacts, ref remaining)),
             BoundIsVariablePattern or BoundIsInitialized => AllFlowFacts,
+            BoundWildcardPattern => 0,
             BoundGenericTypePropertyTest => 0,
             BoundOutArgument or BoundMove or BoundFieldMove => OutcomeEffectFact,
             BoundFieldRead field => FlowFacts(field.Receiver, flowFacts, ref remaining),
@@ -38927,6 +39087,11 @@ public static partial class SemanticVerifier
         {
             Count(ref remaining, 0);
             return result == knownResult;
+        }
+        if (expression is BoundWildcardPattern wildcardPattern)
+        {
+            Count(ref remaining, 0);
+            return wildcardPattern.Type == PrimitiveType.Bool && result;
         }
         if (expression is BoundIsNull nullTest
             && KnownOptionalPresence(nullTest.Value, initialized, ref remaining) is bool nullPresence)

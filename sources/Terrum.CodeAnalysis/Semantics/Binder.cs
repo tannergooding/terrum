@@ -15040,9 +15040,18 @@ internal sealed partial class Binder
                 }
 
                 var nested = BindSwitchPatternCondition(selector, nestedPattern);
-                var test = FoldScalarConstant(new BoundUnary(TokenKind.Bang, nested.Test,
-                    PrimitiveType.Bool, pattern.Span));
-                return new(test, false, test is BoundConstant { Type: PrimitiveType.Bool, Value: 1 });
+                var test = new BoundUnary(TokenKind.Bang, nested.Test,
+                    PrimitiveType.Bool, pattern.Span) {
+                    IsPatternComposition = true,
+                    PatternObservation = selector,
+                };
+                var isIrrefutable = FoldScalarConstant(new BoundUnary(
+                    TokenKind.Bang, nested.Test, PrimitiveType.Bool,
+                    pattern.Span)) is BoundConstant {
+                    Type: PrimitiveType.Bool,
+                    Value: 1,
+                };
+                return new(test, false, isIrrefutable);
             }
 
             case SyntaxKind.SwitchAndPattern:
@@ -15059,8 +15068,11 @@ internal sealed partial class Binder
                 var right = BindSwitchPatternCondition(selector, nestedPatterns[1]);
                 var operation = pattern.Kind == SyntaxKind.SwitchAndPattern
                     ? TokenKind.AmpersandAmpersand : TokenKind.PipePipe;
-                var test = FoldScalarConstant(new BoundBinary(operation, left.Test, right.Test,
-                    PrimitiveType.Bool, pattern.Span));
+                var test = new BoundBinary(operation, left.Test, right.Test,
+                    PrimitiveType.Bool, pattern.Span) {
+                    IsPatternComposition = true,
+                    PatternObservation = selector,
+                };
                 var isIrrefutable = pattern.Kind == SyntaxKind.SwitchAndPattern
                     ? left.IsIrrefutable && right.IsIrrefutable
                     : left.IsIrrefutable || right.IsIrrefutable;
@@ -15072,6 +15084,167 @@ internal sealed partial class Binder
                     pattern.Span);
                 return new(new BoundConstant(0, PrimitiveType.Bool, pattern.Span), false, false);
         }
+    }
+
+    private BoundExpression BindDeclarationPatternComposition(
+        SyntaxNode completePatternExpression, SyntaxNode pattern,
+        BoundExpression observation)
+    {
+        if (pattern.Kind == SyntaxKind.SwitchParenthesizedPattern)
+        {
+            var nestedPattern = pattern.Children.OfType<SyntaxNode>()
+                .FirstOrDefault();
+            if (nestedPattern is null)
+            {
+                Report("TRM3001",
+                    "A parenthesized pattern requires a nested pattern.",
+                    pattern.Span);
+                return new BoundConstant(0, PrimitiveType.Bool,
+                    pattern.Span);
+            }
+
+            return BindDeclarationPatternComposition(
+                completePatternExpression, nestedPattern, observation);
+        }
+
+        if (pattern.Kind == SyntaxKind.SwitchWildcardPattern)
+        {
+            return new BoundWildcardPattern(observation, pattern.Span);
+        }
+
+        if (pattern.Kind == SyntaxKind.SwitchNullPattern)
+        {
+            if (!TryGetRequiredOptionalType(observation.Type,
+                    out var nullPayloadType)
+                || !PrimitiveTypeFacts.IsBuiltInScalar(nullPayloadType))
+            {
+                Report("TRM3007",
+                    "A null pattern in a declaration predicate requires a scalar optional observation.",
+                    pattern.Span);
+                return ErrorExpression(pattern.Span);
+            }
+
+            return new BoundIsNull(observation, pattern.Span);
+        }
+
+        if (pattern.Kind == SyntaxKind.SwitchInferredBindingPattern)
+        {
+            var patternTokens = pattern.Children
+                .OfType<SyntaxTokenElement>().ToArray();
+            if (patternTokens.Length == 0
+                || !TryGetRequiredOptionalType(observation.Type,
+                    out var payloadType)
+                || !PrimitiveTypeFacts.IsBuiltInScalar(payloadType))
+            {
+                Report("TRM3007",
+                    "An inferred declaration pattern requires a scalar optional observation.",
+                    pattern.Span);
+                return ErrorExpression(pattern.Span);
+            }
+
+            var bindingToken = patternTokens[^1].Token;
+            var isMutable = patternTokens.Any(static token =>
+                token.Token.Kind == TokenKind.MutKeyword);
+            var includeNull = patternTokens.Any(static token =>
+                token.Token.Kind == TokenKind.Question);
+            if (bindingToken.Kind == TokenKind.Underscore)
+            {
+                if (isMutable)
+                {
+                    Report("TRM3007",
+                        "A mutable inferred pattern requires a named binding.",
+                        pattern.Span);
+                    return ErrorExpression(pattern.Span);
+                }
+
+                return new BoundWildcardPattern(observation, pattern.Span);
+            }
+
+            if (bindingToken.Kind != TokenKind.Identifier || isMutable)
+            {
+                Report("TRM3007",
+                    "This inferred declaration pattern requires an immutable named binding.",
+                    pattern.Span);
+                return ErrorExpression(pattern.Span);
+            }
+
+            var variableType = includeNull
+                ? observation.Type : payloadType;
+            var variable = AddVariable(bindingToken.Name, variableType,
+                false, bindingToken.Span);
+            return includeNull
+                ? new BoundIsVariablePattern(observation, variable,
+                    true, pattern.Span)
+                : new BoundIsSome(observation, variable, pattern.Span);
+        }
+
+        if (pattern.Kind == SyntaxKind.SwitchNotPattern)
+        {
+            var nestedPattern = pattern.Children.OfType<SyntaxNode>()
+                .FirstOrDefault();
+            if (nestedPattern is null)
+            {
+                Report("TRM3001", "A not-pattern requires a nested pattern.",
+                    pattern.Span);
+                return new BoundConstant(0, PrimitiveType.Bool,
+                    pattern.Span);
+            }
+
+            var operand = BindDeclarationPatternComposition(
+                completePatternExpression, nestedPattern, observation);
+            return new BoundUnary(TokenKind.Bang, operand,
+                PrimitiveType.Bool, pattern.Span) {
+                IsPatternComposition = true,
+                PatternObservation = observation,
+            };
+        }
+
+        if (pattern.Kind is SyntaxKind.SwitchAndPattern
+            or SyntaxKind.SwitchOrPattern)
+        {
+            var nestedPatterns = pattern.Children.OfType<SyntaxNode>()
+                .ToArray();
+            if (nestedPatterns.Length != 2)
+            {
+                Report("TRM3001",
+                    "A composed pattern requires two nested patterns.",
+                    pattern.Span);
+                return new BoundConstant(0, PrimitiveType.Bool,
+                    pattern.Span);
+            }
+
+            var left = BindDeclarationPatternComposition(
+                completePatternExpression, nestedPatterns[0], observation);
+            var right = BindDeclarationPatternComposition(
+                completePatternExpression, nestedPatterns[1], observation);
+            var operation = pattern.Kind == SyntaxKind.SwitchAndPattern
+                ? TokenKind.AmpersandAmpersand : TokenKind.PipePipe;
+            return new BoundBinary(operation, left, right,
+                PrimitiveType.Bool, pattern.Span) {
+                IsPatternComposition = true,
+                PatternObservation = observation,
+            };
+        }
+
+        var leafExpression = new SyntaxNode(
+            SyntaxKind.IsPatternExpression,
+            [completePatternExpression.Children[0],
+                completePatternExpression.Children[1], pattern],
+            completePatternExpression.Span);
+        return BindExpression(leafExpression, PrimitiveType.Bool);
+    }
+
+    private static bool IsPatternCompositionSyntax(SyntaxNode? pattern)
+    {
+        while (pattern?.Kind == SyntaxKind.SwitchParenthesizedPattern)
+        {
+            pattern = pattern.Children.OfType<SyntaxNode>()
+                .FirstOrDefault();
+        }
+
+        return pattern?.Kind is SyntaxKind.SwitchNotPattern
+            or SyntaxKind.SwitchAndPattern
+            or SyntaxKind.SwitchOrPattern;
     }
 
     private BoundExpression BindBufferCount(BoundExpression owner, TextSpan span)
@@ -18608,6 +18781,20 @@ internal sealed partial class Binder
                 var patternSyntax = node.Children
                     .OfType<SyntaxNode>()
                     .LastOrDefault();
+                if (_bindingContractPhase is not null
+                    && (IsPatternCompositionSyntax(patternSyntax)
+                        || patternSyntax?.Kind is
+                            SyntaxKind.SwitchParenthesizedPattern
+                            or SyntaxKind.SwitchWildcardPattern
+                            or SyntaxKind.SwitchNullPattern
+                            or SyntaxKind.SwitchInferredBindingPattern))
+                {
+                    var observation = BindExpression(
+                        (SyntaxNode)node.Children[0], null);
+                    expression = BindDeclarationPatternComposition(node,
+                        patternSyntax, observation);
+                    break;
+                }
                 if (patternSyntax?.Kind
                     == SyntaxKind.SwitchReferenceTypePattern)
                 {

@@ -2974,6 +2974,19 @@ public sealed record BoundIsNull(BoundExpression Value, TextSpan Span) : BoundEx
         Func<BoundExpression, BoundExpression> rewrite) => this with { Value = rewrite(Value) };
 }
 
+/// <summary>Ignores one matched position without observing or binding its payload.</summary>
+public sealed record BoundWildcardPattern(
+    BoundExpression Observation, TextSpan Span)
+    : BoundExpression(PrimitiveType.Bool, Span)
+{
+    internal override ImmutableArray<BoundExpression> NestedExpressions =>
+        [Observation];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this with {
+            Observation = rewrite(Observation),
+        };
+}
+
 /// <summary>Tests a scalar value or optional scalar value against a complete target type.</summary>
 public sealed record BoundTypeTestPattern(
     BoundExpression Value, PrimitiveType TestedType, TextSpan Span)
@@ -3133,7 +3146,7 @@ public sealed record BoundMutableFieldLoan(BoundFieldRead Place, PrimitiveType T
         };
 }
 
-/// <summary>A unary source operation with resolved arithmetic behavior.</summary>
+/// <summary>A unary source operation or pattern negation.</summary>
 /// <param name="Operator">The operator token.</param>
 /// <param name="Operand">The input.</param>
 /// <param name="Type">The result type.</param>
@@ -3142,10 +3155,17 @@ public sealed record BoundUnary(TokenKind Operator, BoundExpression Operand, Pri
     : BoundExpression(Type, Span)
 {
     internal BoundIntegerOverflowBehavior OverflowBehavior { get; init; }
+    internal bool IsPatternComposition { get; init; }
+    internal BoundExpression? PatternObservation { get; init; }
 
-    internal override ImmutableArray<BoundExpression> NestedExpressions => [Operand];
+    internal override ImmutableArray<BoundExpression> NestedExpressions =>
+        PatternObservation is null ? [Operand] : [PatternObservation, Operand];
     internal override BoundExpression RewriteNestedExpressions(
-        Func<BoundExpression, BoundExpression> rewrite) => this with { Operand = rewrite(Operand) };
+        Func<BoundExpression, BoundExpression> rewrite) => this with {
+            Operand = rewrite(Operand),
+            PatternObservation = PatternObservation is null
+                ? null : rewrite(PatternObservation),
+        };
 }
 
 /// <summary>Reads a writable integer place once and commits a resolved replacement before returning its selected value.</summary>
@@ -3184,7 +3204,7 @@ public sealed record BoundNominalUpdate(TokenKind Operator, BoundExpression Plac
         Func<BoundExpression, BoundExpression> rewrite) => this with { Place = rewrite(Place) };
 }
 
-/// <summary>A binary or short-circuit boolean operation with resolved arithmetic behavior.</summary>
+/// <summary>A binary operation or short-circuit Boolean/pattern composition.</summary>
 /// <param name="Operator">The operator token.</param>
 /// <param name="Left">The first input.</param>
 /// <param name="Right">The second input.</param>
@@ -3196,10 +3216,16 @@ public sealed record BoundBinary(TokenKind Operator, BoundExpression Left, Bound
     internal BoundIntegerOverflowBehavior OverflowBehavior { get; init; }
     // Keep source constant-pattern tests distinct from ordinary equality.
     internal bool IsConstantPatternTest { get; init; }
+    internal bool IsPatternComposition { get; init; }
+    internal BoundExpression? PatternObservation { get; init; }
 
-    internal override ImmutableArray<BoundExpression> NestedExpressions => [Left, Right];
+    internal override ImmutableArray<BoundExpression> NestedExpressions =>
+        PatternObservation is null
+            ? [Left, Right] : [PatternObservation, Left, Right];
     internal override BoundExpression RewriteNestedExpressions(
         Func<BoundExpression, BoundExpression> rewrite) => this with {
+            PatternObservation = PatternObservation is null
+                ? null : rewrite(PatternObservation),
             Left = rewrite(Left),
             Right = rewrite(Right),
         };

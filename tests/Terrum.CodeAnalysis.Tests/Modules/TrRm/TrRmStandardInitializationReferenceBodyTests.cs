@@ -5418,6 +5418,239 @@ internal sealed class TrRmStandardInitializationReferenceBodyTests
         }
     }
 
+    [Test]
+    public void Construction2EmitsSourcePatternCompositionGraphs()
+    {
+        const string moduleIdentity = "declaration-pattern-composition";
+        const string source = """
+            void Check(int32? value, int32? other)
+                require value is int32 first and (int32 second or int32 alternate)
+                ensure value is not int32 negative
+                ensure value is int32 retained and null
+                ensure value is int32 left or int64 right
+            {
+            }
+
+            void BooleanCheck(int32? value)
+                ensure value is int32 captured && captured > 0
+            {
+            }
+
+            public int32 Run() {
+                Check(null, null);
+                BooleanCheck(null);
+                return 0;
+            }
+            """;
+        var failureSelection = new CoreContractFailureIdentitySelection(
+            moduleIdentity,
+            new CoreContractFailureDeclarationIdentity(
+                "core.contracts", "requirement-exception"),
+            new CoreContractFailureDeclarationIdentity(
+                "core.contracts", "postcondition-exception"),
+            new CoreContractFailureDeclarationIdentity(
+                "core.contracts", "require-exception-schema"));
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+            new CompilationOptions {
+                CoreContractFailureIdentitySelection = failureSelection,
+            });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = (BoundProgram)compilation.Program!;
+        var check = program.Functions.Single(
+            static function => function.Name == "Check");
+        var andPattern = (BoundBinary)check.DeclarationContractClauses[0]
+            .Predicate;
+        Assert.That(andPattern.IsPatternComposition, Is.True);
+        Assert.That(andPattern.PatternObservation, Is.TypeOf<BoundRead>());
+        var patternObservation = (BoundRead)andPattern.PatternObservation!;
+        Assert.That(patternObservation.Variable, Is.Zero);
+        Assert.That(patternObservation.Type,
+            Is.EqualTo(check.Variables[patternObservation.Variable].Type));
+        var notPattern = (BoundUnary)check.DeclarationContractClauses[1]
+            .Predicate;
+        Assert.That(notPattern.IsPatternComposition, Is.True);
+        var orPattern = (BoundBinary)check.DeclarationContractClauses[3]
+            .Predicate;
+        Assert.That(orPattern.IsPatternComposition, Is.True);
+        var booleanCheck = program.Functions.Single(
+            static function => function.Name == "BooleanCheck");
+        var booleanAnd = (BoundBinary)booleanCheck
+            .DeclarationContractClauses.Single().Predicate;
+        Assert.That(booleanAnd.IsPatternComposition, Is.False);
+        Assert.That(booleanAnd.PatternObservation, Is.Null);
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            moduleIdentity, C1M1Construction2SchemaIdentity, 1, out _);
+        var artifactIndex
+            = TrRmArtifactIndex.ForC1M1Construction2Draft(artifact);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                artifactIndex);
+        var checkPredicates = tables.Contracts
+            .GetPredicateGraphContracts(1)
+            .OrderBy(static predicate => predicate.PhaseTag)
+            .ThenBy(static predicate => predicate.PhaseLocalOrdinal)
+            .ToArray();
+        Assert.That(checkPredicates.Select(static predicate =>
+                (predicate.PhaseTag, predicate.PhaseLocalOrdinal)),
+            Is.EqualTo([
+                ((byte)1, 0u),
+                ((byte)2, 0u),
+                ((byte)2, 1u),
+                ((byte)2, 2u),
+            ]));
+
+        int PatternAt(int predicateIndex, uint expectedKind)
+        {
+            var root = tables.PredicateGraphs.GetRootNodeRow(
+                checkPredicates[predicateIndex].PredicateGraphRow);
+            Assert.That(tables.PredicateNodes.GetNodeKind(root),
+                Is.EqualTo(0x34u));
+            var subject = tables.PredicateChildEdges
+                .GetChildNodeRowByOrdinal(root, 0);
+            Assert.That(tables.PredicateNodes.GetNodeKind(subject),
+                Is.EqualTo(0x10u));
+            var pattern = tables.PredicateChildEdges
+                .GetChildNodeRowByOrdinal(root, 1);
+            Assert.That(tables.PredicateNodes.GetNodeKind(pattern),
+                Is.EqualTo(expectedKind));
+            return pattern;
+        }
+
+        uint CaptureAt(int patternNode, int operandOrdinal)
+        {
+            var operand = checked((int)tables.PredicateNodes
+                .GetOperandFirstRow(patternNode)) + operandOrdinal;
+            Assert.That(tables.PredicateNodeOperands.GetOperandKind(operand),
+                Is.EqualTo((byte)3));
+            return tables.PredicateNodeOperands.GetOperandRef(operand);
+        }
+
+        var andNode = PatternAt(0, 0x4D);
+        var andLeft = tables.PredicateChildEdges
+            .GetChildNodeRowByOrdinal(andNode, 0);
+        var andRightOr = tables.PredicateChildEdges
+            .GetChildNodeRowByOrdinal(andNode, 1);
+        Assert.That(tables.PredicateNodes.GetNodeKind(andLeft),
+            Is.EqualTo(0x45u));
+        Assert.That(tables.PredicateNodes.GetNodeKind(andRightOr),
+            Is.EqualTo(0x4Eu));
+        var andRightLeft = tables.PredicateChildEdges
+            .GetChildNodeRowByOrdinal(andRightOr, 0);
+        var andRightRight = tables.PredicateChildEdges
+            .GetChildNodeRowByOrdinal(andRightOr, 1);
+        Assert.That(tables.PredicateNodes.GetNodeKind(andRightLeft),
+            Is.EqualTo(0x45u));
+        Assert.That(tables.PredicateNodes.GetNodeKind(andRightRight),
+            Is.EqualTo(0x45u));
+        Assert.That(CaptureAt(andLeft, 1), Is.EqualTo(1u));
+        Assert.That(CaptureAt(andRightLeft, 1), Is.EqualTo(2u));
+        Assert.That(CaptureAt(andRightRight, 1), Is.EqualTo(3u));
+
+        var notNode = PatternAt(1, 0x4C);
+        var negatedPattern = tables.PredicateChildEdges
+            .GetChildNodeRowByOrdinal(notNode, 0);
+        Assert.That(tables.PredicateNodes.GetNodeKind(negatedPattern),
+            Is.EqualTo(0x45u));
+        var negatedCapture = CaptureAt(negatedPattern, 1);
+        Assert.That(tables.PredicateCaptures.GetRole(
+                checked((int)negatedCapture)),
+            Is.EqualTo((byte)1));
+
+        var failingAndNode = PatternAt(2, 0x4D);
+        var completedBinding = tables.PredicateChildEdges
+            .GetChildNodeRowByOrdinal(failingAndNode, 0);
+        var failingRightPattern = tables.PredicateChildEdges
+            .GetChildNodeRowByOrdinal(failingAndNode, 1);
+        Assert.That(tables.PredicateNodes.GetNodeKind(completedBinding),
+            Is.EqualTo(0x45u));
+        Assert.That(tables.PredicateNodes.GetNodeKind(failingRightPattern),
+            Is.EqualTo(0x42u));
+        var retainedCapture = CaptureAt(completedBinding, 1);
+        Assert.That(tables.PredicateCaptures.GetOrdinal(
+                checked((int)retainedCapture)),
+            Is.EqualTo(0u));
+
+        var orNode = PatternAt(3, 0x4E);
+        var orLeft = tables.PredicateChildEdges
+            .GetChildNodeRowByOrdinal(orNode, 0);
+        var orRight = tables.PredicateChildEdges
+            .GetChildNodeRowByOrdinal(orNode, 1);
+        Assert.That(tables.PredicateNodes.GetNodeKind(orLeft),
+            Is.EqualTo(0x45u));
+        Assert.That(tables.PredicateNodes.GetNodeKind(orRight),
+            Is.EqualTo(0x45u));
+        Assert.That(CaptureAt(orLeft, 1), Is.EqualTo(6u));
+        Assert.That(CaptureAt(orRight, 1), Is.EqualTo(7u));
+
+        var directoryOffset = checked((int)
+            BinaryPrimitives.ReadUInt32LittleEndian(artifact.AsSpan(20)));
+        var captureSectionOffset = -1;
+        for (var section = 0; section < artifactIndex.SectionCount; section++)
+        {
+            var entryOffset = checked(directoryOffset + section * 16);
+            if (BinaryPrimitives.ReadUInt16LittleEndian(
+                    artifact.AsSpan(entryOffset)) != 0x003E)
+            {
+                continue;
+            }
+
+            captureSectionOffset = checked((int)
+                BinaryPrimitives.ReadUInt32LittleEndian(
+                    artifact.AsSpan(entryOffset + 8)));
+            break;
+        }
+        Assert.That(captureSectionOffset, Is.GreaterThanOrEqualTo(32));
+        var malformedCaptureTypeArtifact = (byte[])artifact.Clone();
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            malformedCaptureTypeArtifact.AsSpan(captureSectionOffset + 12),
+            tables.PredicateCaptures.GetCapturedTypeSpecRef(7));
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(
+                    TrRmArtifactIndex.ForC1M1Construction2Draft(
+                        malformedCaptureTypeArtifact)));
+
+        var booleanPredicate = tables.Contracts
+            .GetPredicateGraphContracts(2).Single();
+        var booleanRoot = tables.PredicateGraphs.GetRootNodeRow(
+            booleanPredicate.PredicateGraphRow);
+        Assert.That(tables.PredicateNodes.GetNodeKind(booleanRoot),
+            Is.EqualTo(0x27u));
+        Assert.That(tables.PredicateNodes.GetNodeKind(
+                tables.PredicateChildEdges.GetChildNodeRowByOrdinal(
+                    booleanRoot, 0)),
+            Is.EqualTo(0x34u));
+        Assert.That(NativeEmitter.EmitLibrary(program, ["Run"],
+            NativeRuntimePolicy.FailFast), Is.Not.Empty);
+
+        var malformedFunction = check with {
+            DeclarationContractClauses = [
+                check.DeclarationContractClauses[0] with {
+                    Predicate = andPattern with {
+                        PatternObservation = new BoundRead(1,
+                            andPattern.PatternObservation!.Type,
+                            andPattern.Span),
+                    },
+                },
+                .. check.DeclarationContractClauses.Skip(1),
+            ],
+        };
+        var malformedProgram = program with {
+            Functions = [
+                .. program.Functions.Select(function =>
+                    function.Name == "Check"
+                        ? malformedFunction : function),
+            ],
+        };
+        Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.EmitStandard(malformedProgram,
+                moduleIdentity, C1M1Construction2SchemaIdentity, 1,
+                out ImmutableArray<CoreContractFailureIdentitySelection> _));
+    }
+
     [TestCase("ref<int32>", "ref<int32>", (byte)9, (byte)0x08, (byte)0)]
     [TestCase("write ref<int32>", "ref<int32>", (byte)9, (byte)0x08, (byte)1)]
     [TestCase("ref<int32>", "write ref<int32>", (byte)10, (byte)0x08, (byte)0)]
