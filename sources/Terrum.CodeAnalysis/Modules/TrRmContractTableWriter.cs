@@ -94,6 +94,7 @@ public static class TrRmContractTableWriter
         int fieldPathCount = 0)
     {
         if (schema is not (TrRmArtifactSchema.ForeignInvocationDraft
+            or TrRmArtifactSchema.ForeignNativeInterfaceDraft
             or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft

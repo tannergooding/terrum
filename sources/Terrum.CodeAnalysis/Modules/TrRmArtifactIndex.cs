@@ -16,6 +16,7 @@ internal enum TrRmArtifactSchema
     DevelopmentNativeConventionsDraft,
     CopyOriginDraft,
     ForeignInvocationDraft,
+    ForeignNativeInterfaceDraft,
     ForeignInvocationStorageAddressDraft,
     ForeignInvocationStorageFixedArrayCopyDraft,
     ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft,
@@ -430,6 +431,7 @@ internal static class TrRmArtifactSchemaFacts
     internal static bool UsesForeignInvocationContracts(
         this TrRmArtifactSchema schema) =>
         schema is TrRmArtifactSchema.ForeignInvocationDraft
+            or TrRmArtifactSchema.ForeignNativeInterfaceDraft
             or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
@@ -439,6 +441,10 @@ internal static class TrRmArtifactSchemaFacts
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft
             or TrRmArtifactSchema.LocalAggregateLayoutDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft;
+
+    internal static bool UsesForeignNativeInterface(
+        this TrRmArtifactSchema schema)
+        => schema == TrRmArtifactSchema.ForeignNativeInterfaceDraft;
 
     internal static bool UsesNativeParameterContracts(
         this TrRmArtifactSchema schema) =>
@@ -584,6 +590,7 @@ public readonly ref struct TrRmArtifactIndex
             or TrRmArtifactSchema.DevelopmentNativeConventionsDraft
             or TrRmArtifactSchema.CopyOriginDraft
             or TrRmArtifactSchema.ForeignInvocationDraft
+            or TrRmArtifactSchema.ForeignNativeInterfaceDraft
             or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
@@ -807,6 +814,12 @@ public readonly ref struct TrRmArtifactIndex
             throw InvalidArtifact();
         }
 
+        if (schema.UsesForeignNativeInterface()
+            && sectionCounts[0x004C] == 0)
+        {
+            throw InvalidArtifact();
+        }
+
         ConsumeWork();
         var featureCount = (int)sectionCounts[0x0004];
         if (featureCount != 0)
@@ -946,6 +959,10 @@ public readonly ref struct TrRmArtifactIndex
 
     internal static TrRmArtifactIndex ForForeignInvocationDraft(ReadOnlySpan<byte> artifact)
         => new(artifact, TrRmArtifactSchema.ForeignInvocationDraft);
+
+    internal static TrRmArtifactIndex ForForeignNativeInterfaceDraft(
+        ReadOnlySpan<byte> artifact)
+        => new(artifact, TrRmArtifactSchema.ForeignNativeInterfaceDraft);
 
     internal static TrRmArtifactIndex
         ForForeignInvocationStorageAddressDraft(ReadOnlySpan<byte> artifact)
@@ -1432,6 +1449,7 @@ public readonly ref struct TrRmArtifactIndex
         TrRmArtifactSchema schema, string? standardSchemaIdentity)
         => !schema.IsDevelopmentProfile()
             ? kind is >= 0x0001 and <= 0x004B
+                || kind == 0x004C && schema.UsesForeignNativeInterface()
                 || kind == 0x0067
                     && TrRmExecutableCompiler
                         .IsSelectedTypeDefBindingEqualitySchemaIdentity(
@@ -1524,6 +1542,7 @@ public readonly ref struct TrRmArtifactIndex
             0x0048 => 8,
             0x0049 => 16,
             0x004A => 4,
+            0x004C when schema.UsesForeignNativeInterface() => 12,
             0x004D => schema.UsesGeneralPredicateGraphs() ? 4 : -1,
             0x004E => schema.UsesGeneralPredicateGraphs() ? 0 : -1,
             0x004F => schema.UsesGeneralPredicateGraphs() ? 4 : -1,

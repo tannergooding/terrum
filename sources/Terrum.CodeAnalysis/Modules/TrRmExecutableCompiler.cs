@@ -79,6 +79,8 @@ public static partial class TrRmExecutableCompiler
         = "trrm/1-draft-nominal-enums-1";
     private const string StandardForeignInvocationSchemaIdentity
         = "trrm/1-draft-foreign-invocation-contracts-1";
+    private const string StandardForeignNativeInterfaceSchemaIdentity
+        = "trrm/1-draft-foreign-native-interface-contracts-1";
     private const string StandardForeignInvocationStorageAddressSchemaIdentity
         = "trrm/1-draft-foreign-invocation-storage-addresses-1";
     private const string StandardForeignInvocationStorageFixedArraySchemaIdentity

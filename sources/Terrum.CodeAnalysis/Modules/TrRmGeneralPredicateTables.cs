@@ -156,6 +156,7 @@ internal readonly ref struct TrRmPredicateNodeTableReader
             || schema is not (TrRmArtifactSchema.Standard
                 or TrRmArtifactSchema.CopyOriginDraft
                 or TrRmArtifactSchema.ForeignInvocationDraft
+                or TrRmArtifactSchema.ForeignNativeInterfaceDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
@@ -328,6 +329,7 @@ internal readonly ref struct TrRmPredicateNodeOperandTableReader
             || schema is not (TrRmArtifactSchema.Standard
                 or TrRmArtifactSchema.CopyOriginDraft
                 or TrRmArtifactSchema.ForeignInvocationDraft
+                or TrRmArtifactSchema.ForeignNativeInterfaceDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
@@ -492,6 +494,7 @@ internal readonly ref struct TrRmPredicateReadRootTableReader
             || schema is not (TrRmArtifactSchema.Standard
                 or TrRmArtifactSchema.CopyOriginDraft
                 or TrRmArtifactSchema.ForeignInvocationDraft
+                or TrRmArtifactSchema.ForeignNativeInterfaceDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft

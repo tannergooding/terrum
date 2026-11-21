@@ -92,6 +92,14 @@ internal static class TrRmNativeImportTypeContract
         return false;
     }
 
+    internal static bool IsNativeOutputCellType(TrRmTypeSpecTableReader types,
+        uint typeSpecRef, TrRmLayoutTableReader layouts,
+        TrRmTypeDefTableReader typeDefs, TrRmImportTableReader imports)
+        => TryGetWritableOutputPointee(types, typeSpecRef, out _)
+            || TryGetBlittableAggregateParameterTypeDef(types, typeSpecRef,
+                layouts, true, typeDefs, imports, out _)
+            || IsNativeOutputCellType(types, typeSpecRef, layouts);
+
     internal static bool TryGetNativeOutputCellPointeeTypeSpecRef(
         TrRmTypeSpecTableReader types, uint typeSpecRef,
         out uint pointeeTypeSpecRef)

@@ -109,6 +109,39 @@ internal sealed class TrRmArtifactIndexTests
     }
 
     [Test]
+    public void ForeignNativeInterfaceSectionRequiresItsExactDraftProfile()
+    {
+        var minimal = MinimalArtifact();
+        var moduleBytes = minimal.AsSpan(64, 48).ToArray();
+        var strings = TrRmStringTableWriter.EncodeNames([("A", 0)]);
+        var sections = new TrRmSection[]
+        {
+            new(0x0001, 0, 1, moduleBytes),
+            new(0x0002, 0, 1, strings),
+            new(0x004C, 0, 1, new byte[12]),
+        };
+        var artifact = TrRmArtifactWriter.Encode(sections,
+            TrRmArtifactSchema.ForeignNativeInterfaceDraft);
+        var index = TrRmArtifactIndex.ForForeignNativeInterfaceDraft(artifact);
+
+        Assert.That(index.TryGetSection(0x004C, out var rows, out var count), Is.True);
+        Assert.That(rows.Length, Is.EqualTo(12));
+        Assert.That(count, Is.EqualTo(1));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            new TrRmArtifactIndex(artifact));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmArtifactIndex.ForForeignInvocationDraft(artifact));
+
+        var withoutForeignInterfaces = TrRmArtifactWriter.Encode([
+            new TrRmSection(0x0001, 0, 1, moduleBytes),
+            new TrRmSection(0x0002, 0, 1, strings),
+        ]);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmArtifactIndex.ForForeignNativeInterfaceDraft(
+                withoutForeignInterfaces));
+    }
+
+    [Test]
     public void FindsSectionsAtDirectoryBoundariesAndRejectsMissingKinds()
     {
         var artifact = TrRmArtifactWriter.Encode([

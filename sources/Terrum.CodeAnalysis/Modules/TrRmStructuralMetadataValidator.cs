@@ -4,6 +4,7 @@ using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
+using Terrum.CodeAnalysis.Semantics;
 
 namespace Terrum.CodeAnalysis.Modules;
 
@@ -34,6 +35,7 @@ public static class TrRmStructuralMetadataValidator
             TrRmWitnessAssociatedConstTableReader witnessAssociatedConsts,
             TrRmInterfaceBaseTableReader interfaceBases,
             TrRmInterfaceMethodTableReader interfaceMethods,
+            TrRmForeignNativeInterfaceTableReader foreignNativeInterfaces,
             TrRmInterfaceConstDefTableReader interfaceConstDefs,
             TrRmAssociatedConstDefTableReader associatedConstDefs,
             TrRmImmutableDataTableReader immutableData,
@@ -120,6 +122,7 @@ public static class TrRmStructuralMetadataValidator
             WitnessAssociatedConsts = witnessAssociatedConsts;
             InterfaceBases = interfaceBases;
             InterfaceMethods = interfaceMethods;
+            ForeignNativeInterfaces = foreignNativeInterfaces;
             InterfaceConstDefs = interfaceConstDefs;
             AssociatedConstDefs = associatedConstDefs;
             ImmutableData = immutableData;
@@ -218,6 +221,7 @@ public static class TrRmStructuralMetadataValidator
         internal TrRmWitnessAssociatedConstTableReader WitnessAssociatedConsts { get; }
         internal TrRmInterfaceBaseTableReader InterfaceBases { get; }
         internal TrRmInterfaceMethodTableReader InterfaceMethods { get; }
+        internal TrRmForeignNativeInterfaceTableReader ForeignNativeInterfaces { get; }
         internal TrRmInterfaceConstDefTableReader InterfaceConstDefs { get; }
         internal TrRmAssociatedConstDefTableReader AssociatedConstDefs { get; }
         internal TrRmImmutableDataTableReader ImmutableData { get; }
@@ -295,6 +299,7 @@ public static class TrRmStructuralMetadataValidator
                     or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
                     or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft
                     or TrRmArtifactSchema.ForeignInvocationDraft
+                    or TrRmArtifactSchema.ForeignNativeInterfaceDraft
                     or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
                     or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
                     or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
@@ -965,6 +970,12 @@ public static class TrRmStructuralMetadataValidator
             foreignInvocationDraft: true);
 
     internal static ValidatedExecutionTables
+        ValidateForeignNativeInterfaceDraftAndGetExecutionTables(
+        TrRmArtifactIndex index)
+        => ValidateCore(index, BodyInspection.None, developmentProfile: false,
+            foreignInvocationDraft: true, foreignNativeInterfaceDraft: true);
+
+    internal static ValidatedExecutionTables
         ValidateForeignInvocationStorageAddressDraftAndGetExecutionTables(
         TrRmArtifactIndex index)
         => ValidateCore(index, BodyInspection.None, developmentProfile: false,
@@ -1360,6 +1371,7 @@ public static class TrRmStructuralMetadataValidator
     private static ValidatedExecutionTables ValidateCore(TrRmArtifactIndex index,
         BodyInspection inspection, bool developmentProfile,
         bool copyOriginDraft = false, bool foreignInvocationDraft = false,
+        bool foreignNativeInterfaceDraft = false,
         bool developmentFunctionPointerEffectsDraft = false,
         bool developmentNativeConventionsDraft = false,
         bool nominalEnumsDraft = false, bool scalarFrozenValuesDraft = false,
@@ -1430,6 +1442,8 @@ public static class TrRmStructuralMetadataValidator
                     ? TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
                 : foreignInvocationStorageAddressDraft
                     ? TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
+                : foreignNativeInterfaceDraft
+                    ? TrRmArtifactSchema.ForeignNativeInterfaceDraft
                 : foreignInvocationDraft
                     ? TrRmArtifactSchema.ForeignInvocationDraft
                     : nominalEnumsDraft
@@ -1469,7 +1483,8 @@ public static class TrRmStructuralMetadataValidator
             |= foreignInvocationStorageFixedArrayEmptyUnitInitializationDraft;
         foreignInvocationStorageFixedArrayDraft
             |= foreignInvocationStorageFixedArrayEmptyInitializationDraft;
-        foreignInvocationDraft |= foreignInvocationStorageAddressDraft
+        foreignInvocationDraft |= foreignNativeInterfaceDraft
+            || foreignInvocationStorageAddressDraft
             || foreignInvocationStorageFixedArrayDraft
             || foreignInvocationStorageFixedArrayGenericDraft;
         developmentProfile |= developmentFunctionPointerEffectsDraft;
@@ -1598,6 +1613,8 @@ public static class TrRmStructuralMetadataValidator
         _ = index.TryGetSection(0x004A, out var targetLayoutDependencyFieldBytes,
             out var targetLayoutDependencyFieldCount);
         _ = index.TryGetSection(0x004B, out var fieldPathBytes, out var fieldPathCount);
+        _ = index.TryGetSection(0x004C, out var foreignNativeInterfaceBytes,
+            out var foreignNativeInterfaceCount);
         _ = index.TryGetSection(0x0015, out var layoutBytes, out var layoutCount);
         _ = index.TryGetSection(0x0023, out var layoutFieldBytes, out var layoutFieldCount);
         _ = index.TryGetSection(0x0012, out var fixedArrayLayoutBytes,
@@ -1877,6 +1894,8 @@ public static class TrRmStructuralMetadataValidator
         var witnessAssociatedConsts = default(TrRmWitnessAssociatedConstTableReader);
         var interfaceBases = default(TrRmInterfaceBaseTableReader);
         var interfaceMethods = default(TrRmInterfaceMethodTableReader);
+        var foreignNativeInterfaces
+            = default(TrRmForeignNativeInterfaceTableReader);
         var interfaceConstDefs = default(TrRmInterfaceConstDefTableReader);
         var associatedConstDefs = default(TrRmAssociatedConstDefTableReader);
         var immutableData = default(TrRmImmutableDataTableReader);
@@ -2018,6 +2037,14 @@ public static class TrRmStructuralMetadataValidator
             interfaceMethods = new TrRmInterfaceMethodTableReader(interfaceMethodBytes,
                 interfaceMethodCount, interfaces, methods, signatures,
                 selectedA3LayoutResourceLedger);
+            if (index.Schema.UsesForeignNativeInterface())
+            {
+                foreignNativeInterfaces
+                    = new TrRmForeignNativeInterfaceTableReader(
+                        foreignNativeInterfaceBytes,
+                        foreignNativeInterfaceCount, interfaces,
+                        targetProfiles, index.Schema);
+            }
             interfaceConstDefs = new TrRmInterfaceConstDefTableReader(interfaceConstBytes,
                 interfaceConstCount, strings, typeSpecs, interfaces,
                 constantSourceCount, selectedA3LayoutResourceLedger);
@@ -2576,8 +2603,9 @@ public static class TrRmStructuralMetadataValidator
         {
             ValidateForeignInvocationContractOwners(contracts, imports,
                 standardNativeImports, nativeFunctionPointerAnchors, methods);
-            ValidateStandardNativeOutputCellImports(contracts,
-                standardNativeImports, nativeFunctionPointerAnchors, methods);
+            ValidateStandardNativeOutputDeclarations(contracts,
+                standardNativeImports, nativeFunctionPointerAnchors, methods,
+                foreignNativeInterfaces, interfaceMethods);
         }
         else if (selectedSchema.UsesNativeParameterContracts())
         {
@@ -2616,6 +2644,14 @@ public static class TrRmStructuralMetadataValidator
             {
                 ValidateStandardNativeImportFeatureAssignments(standardNativeImports,
                     features, modules, methods, types, fields, index.Schema);
+                ValidateForeignNativeInterfaceDeclarations(
+                    foreignNativeInterfaces, interfaces, types,
+                    interfaceMethods, methods, signatures, parameters,
+                    typeSpecs, contracts, layouts, imports, features, modules,
+                    standardNativeImports, nativeExports,
+                    nativeFunctionPointerAnchors, nativeCallables,
+                    nativeFunctionPointerSignatures, nativeVTables,
+                    index.Schema);
             }
         }
         var sourceFiles = sourceFileCount == 0 ? default
@@ -2715,7 +2751,7 @@ public static class TrRmStructuralMetadataValidator
             constraints,
             interfaces, associatedTypeDefs, interfaceWitnesses, witnessMembers,
             witnessAssociatedTypes, witnessAssociatedConsts,
-            interfaceBases, interfaceMethods,
+            interfaceBases, interfaceMethods, foreignNativeInterfaces,
             interfaceConstDefs, associatedConstDefs, immutableData, associatedRelations,
             typeDefBindingEqualities, unionCaseDefs, unionCaseFields,
             builderRegistrations, textTargets,
@@ -3791,6 +3827,207 @@ public static class TrRmStructuralMetadataValidator
         return false;
     }
 
+    private static void ValidateForeignNativeInterfaceDeclarations(
+        TrRmForeignNativeInterfaceTableReader foreignNativeInterfaces,
+        TrRmInterfaceDefTableReader interfaces,
+        TrRmTypeDefTableReader typeDefs,
+        TrRmInterfaceMethodTableReader interfaceMethods,
+        TrRmMethodDefTableReader methods,
+        TrRmMethodSigTableReader signatures,
+        TrRmParamTableReader parameters,
+        TrRmTypeSpecTableReader typeSpecs,
+        TrRmContractTableReader contracts,
+        TrRmLayoutTableReader layouts,
+        TrRmImportTableReader imports,
+        TrRmFeatureTableReader features,
+        TrRmModuleTableReader modules,
+        TrRmNativeImportTableReader nativeImports,
+        TrRmNativeExportTableReader nativeExports,
+        TrRmNativeFunctionPointerAnchorTableReader anchors,
+        TrRmNativeCallableTableReader nativeCallables,
+        TrRmNativeFunctionPointerSignatureTableReader nativeFunctionPointerSignatures,
+        TrRmNativeVTableTableReader nativeVTables,
+        TrRmArtifactSchema schema)
+    {
+        if (schema.UsesForeignNativeInterface()
+            != (foreignNativeInterfaces.Count != 0))
+        {
+            throw InvalidMetadata();
+        }
+
+        for (var row = 1; row <= foreignNativeInterfaces.Count; row++)
+        {
+            var interfaceDef = checked((int)
+                foreignNativeInterfaces.GetOwnerInterfaceDef(row));
+            var ownerTypeDef = interfaces.GetOwnerTypeDef(interfaceDef);
+            var (fieldStart, fieldEnd) = typeDefs.GetFieldRange(ownerTypeDef);
+            var (_, genericCount) = typeDefs.GetGenericRange(ownerTypeDef);
+            var (_, layoutCount) = typeDefs.GetLayoutRange(ownerTypeDef);
+            var (_, typeContractCount) = typeDefs.GetContractRange(ownerTypeDef);
+            var (baseFirst, baseCount) = interfaces.GetBaseRange(interfaceDef);
+            var (_, methodCount) = interfaces.GetMethodRange(interfaceDef);
+            var (associatedTypeFirst, associatedTypeCount)
+                = interfaces.GetAssociatedTypeRange(interfaceDef);
+            var (associatedConstFirst, associatedConstCount)
+                = interfaces.GetAssociatedConstRange(interfaceDef);
+            var (interfaceConstFirst, interfaceConstCount)
+                = interfaces.GetInterfaceConstRange(interfaceDef);
+            if (interfaces.GetSelfGenericParam(interfaceDef) != 0
+                || baseFirst != 0 || baseCount != 0 || methodCount == 0
+                || associatedTypeFirst != 0 || associatedTypeCount != 0
+                || associatedConstFirst != 0 || associatedConstCount != 0
+                || interfaceConstFirst != 0 || interfaceConstCount != 0
+                || fieldStart != fieldEnd || genericCount != 0
+                || layoutCount != 0 || typeContractCount != 0)
+            {
+                throw InvalidMetadata();
+            }
+
+            for (var methodDef = 1; methodDef <= methods.Count; methodDef++)
+            {
+                if (methods.GetOwnerType(methodDef) == ownerTypeDef
+                    && interfaceMethods.GetOwnerInterfaceDefForMethod(methodDef)
+                        != interfaceDef)
+                {
+                    throw InvalidMetadata();
+                }
+            }
+
+            var ownerModule = typeDefs.GetOwnerModule(ownerTypeDef);
+            if (modules.GetRequirements(ownerModule).TargetRequirement
+                    != TrRmModuleTableReader.WindowsX64NativeTargetRequirement
+                || !TrRmFeatureManifestValidator.Requires(features, modules,
+                    ownerModule,
+                    TrRmFeatureTableReader.NativeInterfaceCallsFeatureId,
+                    schema))
+            {
+                throw InvalidMetadata();
+            }
+
+            var (methodFirst, count) = interfaces.GetMethodRange(interfaceDef);
+            for (var ordinal = 0; ordinal < count; ordinal++)
+            {
+                var methodDef = interfaceMethods.GetMethodDefRow(
+                    methodFirst + ordinal);
+                var signature = methods.GetSignature(methodDef);
+                var receiverTypeSpec = signatures.GetReceiverTypeSpec(signature);
+                var receiverType = typeSpecs.GetTypeSpecBytes(receiverTypeSpec);
+                if (methods.GetOwnerType(methodDef) != ownerTypeDef
+                    || methods.GetBodyRow(methodDef) != 0
+                    || (methods.GetFlags(methodDef) & 3) != 2
+                    || !contracts.HasNativeCallableContract(methodDef)
+                    || !TrRmDevelopmentNativeConventions.TryDecodeConvention(
+                        contracts.GetNativeCallableConvention(methodDef),
+                        role: 2, out var convention)
+                    || convention is not (NativeCallingConvention.Unmanaged
+                        or NativeCallingConvention.Cdecl
+                        or NativeCallingConvention.Stdcall)
+                    || (contracts.GetEffectsMask(methodDef) & 4) == 0
+                    || contracts.HasNativeAbi(methodDef)
+                    || !contracts.GetNativeParameters(methodDef).IsDefaultOrEmpty
+                    || nativeImports.HasImportForMethod(methodDef)
+                    || nativeExports.HasExportForMethod(methodDef)
+                    || anchors.IsAnchorMethodDef(methodDef)
+                    || nativeCallables.HasCallableEntryForMethod(methodDef)
+                    || nativeFunctionPointerSignatures.HasSignatureForMethod(methodDef)
+                    || nativeVTables.HasVTableForMethod(methodDef)
+                    || signatures.GetGenericCount(signature) != 0
+                    || receiverType.Length != 4 || receiverType[0] != 1
+                    || receiverType[1] is not (0 or 1)
+                    || receiverType[2] != 0x8C || receiverType[3] != 0
+                    || !TrRmNativeImportTypeContract
+                        .TryGetDirectNativeImportResultType(typeSpecs,
+                            signatures.GetResultTypeSpec(signature),
+                            out var resultType))
+                {
+                    throw InvalidMetadata();
+                }
+
+                var (parameterFirst, parameterCount)
+                    = signatures.GetParamRange(signature);
+                for (var parameter = 0; parameter < parameterCount; parameter++)
+                {
+                    var parameterRow = parameterFirst + parameter;
+                    if (parameters.GetMode(parameterRow) != 0
+                        || parameters.GetFlags(parameterRow) != 0
+                        || !TrRmNativeImportTypeContract.IsNativeAbiValueType(
+                            typeSpecs, parameters.GetTypeSpec(parameterRow)))
+                    {
+                        throw InvalidMetadata();
+                    }
+                }
+
+                var (contractFirst, contractCount)
+                    = methods.GetContractRange(methodDef);
+                var nativeOutputOrdinals = new HashSet<int>();
+                for (var contractOffset = 0;
+                    contractOffset < contractCount; contractOffset++)
+                {
+                    var contract = contracts.GetRow(contractFirst
+                        + contractOffset);
+                    var kind = BinaryPrimitives.ReadUInt16LittleEndian(
+                        contract[4..]);
+                    if (kind is not (1 or 2 or 4 or 0x0B or 0x0C or 0x12))
+                    {
+                        throw InvalidMetadata();
+                    }
+
+                    if (kind == 0x12)
+                    {
+                        var outputOrdinal = Read(contract, 8);
+                        if (outputOrdinal >= (uint)parameterCount
+                            || !nativeOutputOrdinals.Add(
+                                checked((int)outputOrdinal)))
+                        {
+                            throw InvalidMetadata();
+                        }
+                    }
+                }
+
+                var outputStateOrdinals = new HashSet<int>();
+                foreach (var outputState in contracts.GetOutputStateContracts(
+                             methodDef))
+                {
+                    var outputOrdinal = outputState.ParameterOrdinal;
+                    if (!nativeOutputOrdinals.Contains(outputOrdinal)
+                        || !contracts.IsNativeOutputCellParameter(methodDef,
+                            outputOrdinal))
+                    {
+                        throw InvalidMetadata();
+                    }
+
+                    _ = outputStateOrdinals.Add(outputOrdinal);
+                    var outputParameterRow = parameterFirst + outputOrdinal;
+                    if (parameters.GetMode(outputParameterRow) != 0
+                        || parameters.GetFlags(outputParameterRow) != 0
+                        || !TrRmNativeImportTypeContract.IsNativeOutputCellType(
+                            typeSpecs,
+                            parameters.GetTypeSpec(outputParameterRow),
+                            layouts, typeDefs, imports))
+                    {
+                        throw InvalidMetadata();
+                    }
+                }
+
+                if (!nativeOutputOrdinals.SetEquals(outputStateOrdinals)
+                    || (nativeOutputOrdinals.Count != 0
+                        && (resultType is not (PrimitiveType.Int32
+                                or PrimitiveType.UInt32)
+                            || !TrRmFeatureManifestValidator.Requires(
+                                features, modules, ownerModule,
+                                TrRmFeatureTableReader.NativeOutputCellsCandidateFeatureId,
+                                schema)
+                            || !TrRmFeatureManifestValidator.Requires(
+                                features, modules, ownerModule,
+                                TrRmFeatureTableReader.PublishedPredicatesFeatureId,
+                                schema))))
+                {
+                    throw InvalidMetadata();
+                }
+            }
+        }
+    }
+
     private static void ValidateStandardNativeImportFeatureAssignments(
         TrRmNativeImportTableReader nativeImports, TrRmFeatureTableReader features,
         TrRmModuleTableReader modules, TrRmMethodDefTableReader methods,
@@ -4117,11 +4354,13 @@ public static class TrRmStructuralMetadataValidator
         }
     }
 
-    private static void ValidateStandardNativeOutputCellImports(
+    private static void ValidateStandardNativeOutputDeclarations(
         TrRmContractTableReader contracts,
         TrRmNativeImportTableReader nativeImports,
         TrRmNativeFunctionPointerAnchorTableReader anchors,
-        TrRmMethodDefTableReader methods)
+        TrRmMethodDefTableReader methods,
+        TrRmForeignNativeInterfaceTableReader foreignNativeInterfaces,
+        TrRmInterfaceMethodTableReader interfaceMethods)
     {
         for (var method = 1; method <= methods.Count; method++)
         {
@@ -4130,12 +4369,32 @@ public static class TrRmStructuralMetadataValidator
                 if (contracts.IsNativeOutputCellParameter(method,
                         outputState.ParameterOrdinal)
                     && !nativeImports.HasImportForMethod(method)
-                    && !anchors.IsAnchorMethodDef(method))
+                    && !anchors.IsAnchorMethodDef(method)
+                    && !IsForeignNativeInterfaceMethod(method,
+                        foreignNativeInterfaces, interfaceMethods))
                 {
                     throw InvalidMetadata();
                 }
             }
         }
+    }
+
+    private static bool IsForeignNativeInterfaceMethod(int methodDef,
+        TrRmForeignNativeInterfaceTableReader foreignNativeInterfaces,
+        TrRmInterfaceMethodTableReader interfaceMethods)
+    {
+        var interfaceDef
+            = interfaceMethods.GetOwnerInterfaceDefForMethod(methodDef);
+        for (var row = 1; row <= foreignNativeInterfaces.Count; row++)
+        {
+            if (foreignNativeInterfaces.GetOwnerInterfaceDef(row)
+                == (uint)interfaceDef)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool HasNativeFunctionPointerType(int method,

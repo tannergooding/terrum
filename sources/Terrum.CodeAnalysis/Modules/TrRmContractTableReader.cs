@@ -183,6 +183,7 @@ public readonly ref struct TrRmContractTableReader
                 or TrRmArtifactSchema.DevelopmentNativeConventionsDraft
                 or TrRmArtifactSchema.CopyOriginDraft
                 or TrRmArtifactSchema.ForeignInvocationDraft
+                or TrRmArtifactSchema.ForeignNativeInterfaceDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
@@ -908,8 +909,7 @@ public readonly ref struct TrRmContractTableReader
                         throw InvalidContract();
                     }
                     var parameterTypeSpec = parameters.GetTypeSpec(outputFirst + (int)outputOrdinal);
-                    if (!TrRmNativeImportTypeContract.TryGetWritableOutputPointee(
-                        typeSpecs, parameterTypeSpec, out _))
+                    if (!IsNativeOutputCellType(typeSpecs, parameterTypeSpec))
                     {
                         throw InvalidContract();
                     }

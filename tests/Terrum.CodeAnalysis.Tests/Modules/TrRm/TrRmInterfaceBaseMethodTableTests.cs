@@ -44,6 +44,109 @@ internal sealed class TrRmInterfaceBaseMethodTableTests
     }
 
     [Test]
+    public void ForeignNativeInterfaceRowsValidateReferencesOffsetsAndUniqueness()
+    {
+        var fixture = CreateFixture();
+        var readers = CreateReaders(fixture);
+        var targetProfileBytes = TrRmTargetProfileTableWriter.Encode([
+            new TrRmTargetProfileRow(
+                TrRmTargetProfileTableReader.WindowsX64NativeProfileId,
+                TrRmTargetProfileTableReader.WindowsX64NativeProfileRuleRevision),
+        ]);
+        var targetProfiles = new TrRmTargetProfileTableReader(
+            targetProfileBytes, 1, TrRmArtifactSchema.ForeignNativeInterfaceDraft);
+        var bytes = TrRmForeignNativeInterfaceTableWriter.Encode([
+            new TrRmForeignNativeInterfaceRow(1, 1, 16),
+        ], readers.Interfaces, targetProfiles);
+        var rows = new TrRmForeignNativeInterfaceTableReader(bytes, 1,
+            readers.Interfaces, targetProfiles);
+
+        Assert.That(bytes.Length, Is.EqualTo(12));
+        Assert.That(rows.GetOwnerInterfaceDef(1), Is.EqualTo(1u));
+        Assert.That(rows.GetTargetProfile(1), Is.EqualTo(1u));
+        Assert.That(rows.GetVTableByteOffset(1), Is.EqualTo(16u));
+        var maximumOffsetBytes = TrRmForeignNativeInterfaceTableWriter.Encode([
+            new TrRmForeignNativeInterfaceRow(1, 1, 0xFFFF_FFF8),
+        ], readers.Interfaces, targetProfiles);
+        var maximumOffsetRows = new TrRmForeignNativeInterfaceTableReader(
+            maximumOffsetBytes, 1, readers.Interfaces, targetProfiles);
+        Assert.That(maximumOffsetRows.GetVTableByteOffset(1),
+            Is.EqualTo(0xFFFF_FFF8u));
+        AssertForeignNativeInterfaceRowsRejected(fixture,
+            new TrRmForeignNativeInterfaceRow(0, 1, 0));
+        AssertForeignNativeInterfaceRowsRejected(fixture,
+            new TrRmForeignNativeInterfaceRow(0x0100_0001, 1, 0));
+        AssertForeignNativeInterfaceRowsRejected(fixture,
+            new TrRmForeignNativeInterfaceRow(2, 1, 0));
+        AssertForeignNativeInterfaceRowsRejected(fixture,
+            new TrRmForeignNativeInterfaceRow(1, 0, 0));
+        AssertForeignNativeInterfaceRowsRejected(fixture,
+            new TrRmForeignNativeInterfaceRow(1, 2, 0));
+        AssertForeignNativeInterfaceRowsRejected(fixture,
+            new TrRmForeignNativeInterfaceRow(1, 1, 4));
+        AssertForeignNativeInterfaceRowsRejected(fixture,
+            new TrRmForeignNativeInterfaceRow(1, 1, 0xFFFF_FFFF));
+        AssertForeignNativeInterfaceRowsRejected(fixture,
+            new TrRmForeignNativeInterfaceRow(1, 1, 0),
+            new TrRmForeignNativeInterfaceRow(1, 1, 8));
+    }
+
+    [Test]
+    public void ForeignNativeInterfaceWriterOrdersRowsByOwner()
+    {
+        var stringBytes = TrRmStringTableWriter.EncodeNames([
+            ("Module", 0), ("First", 0), ("Second", 0),
+        ]);
+        var strings = new TrRmStringTableReader(stringBytes, 3);
+        var moduleBytes = TrRmModuleTableWriter.Encode([
+            new TrRmModuleRow(1, 1, 0, 0, 0, 1, 0, 0),
+        ], strings, 0, 2, 0, 0);
+        var modules = new TrRmModuleTableReader(moduleBytes, 1, strings,
+            0, 2, 0, 0);
+        var typeDefBytes = TrRmTypeDefTableWriter.Encode([
+            new TrRmTypeDefRow(1, 2, 12, 0, 0, 0, 0, 0, 0, 0, 0),
+            new TrRmTypeDefRow(1, 3, 12, 0, 0, 0, 0, 0, 0, 0, 0),
+        ], strings, modules, 0, 0, 0, 0);
+        var typeDefs = new TrRmTypeDefTableReader(typeDefBytes, 2,
+            strings, modules, 0, 0, 0, 0);
+        var typeSpecBytes = TrRmTypeSpecTableWriter.Encode([], 2, 0, 0, 0);
+        var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes, 0,
+            2, 0, 0, 0);
+        var signatureBytes = TrRmMethodSigTableWriter.Encode([], typeSpecs, 0, 0);
+        var signatures = new TrRmMethodSigTableReader(
+            signatureBytes, 0, typeSpecs, 0, 0);
+        var methods = new TrRmMethodDefTableReader([], 0, strings, modules,
+            typeDefs, signatures, 0, 0);
+        var genericParams = new TrRmGenericParamTableReader([], 0, strings,
+            typeDefs, methods, signatures, typeSpecs, 0);
+        var interfaceDefBytes = TrRmInterfaceDefTableWriter.Encode([
+            new TrRmInterfaceDefRow(1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+            new TrRmInterfaceDefRow(2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+        ], typeDefs, genericParams, 0, 0, 0, 0, 0);
+        var interfaces = new TrRmInterfaceDefTableReader(interfaceDefBytes,
+            2, typeDefs, genericParams, 0, 0, 0, 0, 0);
+        var targetProfileBytes = TrRmTargetProfileTableWriter.Encode([
+            new TrRmTargetProfileRow(
+                TrRmTargetProfileTableReader.WindowsX64NativeProfileId,
+                TrRmTargetProfileTableReader.WindowsX64NativeProfileRuleRevision),
+        ]);
+        var targetProfiles = new TrRmTargetProfileTableReader(
+            targetProfileBytes, 1, TrRmArtifactSchema.ForeignNativeInterfaceDraft);
+
+        var bytes = TrRmForeignNativeInterfaceTableWriter.Encode([
+            new TrRmForeignNativeInterfaceRow(2, 1, 16),
+            new TrRmForeignNativeInterfaceRow(1, 1, 0),
+        ], interfaces, targetProfiles);
+        var rows = new TrRmForeignNativeInterfaceTableReader(bytes, 2,
+            interfaces, targetProfiles);
+
+        Assert.That(rows.GetOwnerInterfaceDef(1), Is.EqualTo(1u));
+        Assert.That(rows.GetVTableByteOffset(1), Is.Zero);
+        Assert.That(rows.GetOwnerInterfaceDef(2), Is.EqualTo(2u));
+        Assert.That(rows.GetVTableByteOffset(2), Is.EqualTo(16u));
+    }
+
+    [Test]
     public void RejectsMalformedBaseReferencesAndOrdinalsInArtifacts()
     {
         var fixture = CreateFixture();
@@ -204,6 +307,28 @@ internal sealed class TrRmInterfaceBaseMethodTableTests
             fixture.InterfaceDefs, 1, types, genericParams,
             1, 1, 0, 0, 0);
         return new Readers(typeSpecs, signatures, methods, interfaces);
+    }
+
+    private static void AssertForeignNativeInterfaceRowsRejected(
+        Fixture fixture, params TrRmForeignNativeInterfaceRow[] rows)
+    {
+        _ = Assert.Throws<InvalidDataException>(() =>
+            EncodeForeignNativeInterfaceRows(fixture, rows));
+    }
+
+    private static byte[] EncodeForeignNativeInterfaceRows(Fixture fixture,
+        TrRmForeignNativeInterfaceRow[] rows)
+    {
+        var readers = CreateReaders(fixture);
+        var targetProfileBytes = TrRmTargetProfileTableWriter.Encode([
+            new TrRmTargetProfileRow(
+                TrRmTargetProfileTableReader.WindowsX64NativeProfileId,
+                TrRmTargetProfileTableReader.WindowsX64NativeProfileRuleRevision),
+        ]);
+        var targetProfiles = new TrRmTargetProfileTableReader(
+            targetProfileBytes, 1, TrRmArtifactSchema.ForeignNativeInterfaceDraft);
+        return TrRmForeignNativeInterfaceTableWriter.Encode(rows,
+            readers.Interfaces, targetProfiles);
     }
 
     private static byte[] CreateArtifact(Fixture fixture,
