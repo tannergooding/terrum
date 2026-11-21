@@ -6051,8 +6051,7 @@ public static partial class TrRmExecutableCompiler
                 {
                     if (member.NativeCallableConvention
                             is not NativeCallingConvention convention
-                        || member.NativeOutputContracts
-                            .IsDefaultOrEmpty == false)
+                        || !member.NativeOutputContracts.IsDefaultOrEmpty)
                     {
                         throw Unsupported(
                             "F+I member contracts require a normalized convention and currently exclude NativeOutput.");
