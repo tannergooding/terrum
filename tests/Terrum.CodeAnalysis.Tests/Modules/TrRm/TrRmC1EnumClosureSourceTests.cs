@@ -5307,7 +5307,7 @@ internal sealed class TrRmC1EnumClosureSourceTests
         const uint targetRequirement
             = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
 
-        byte[] CreateStructProviderArtifact(string moduleIdentity,
+        TrRmStandardArtifactInput CreateInnerProviderInput(
             bool includePrefix, string innerValueType)
         {
             var prefixText = includePrefix
@@ -5316,7 +5316,6 @@ internal sealed class TrRmC1EnumClosureSourceTests
             var tree = SyntaxTree.Parse($$"""
                 {{prefixText}}
                 public struct Inner { public {{innerValueType}} Value; }
-                public struct Leaf { public Inner Child; }
                 """);
             var compilation = Compilation.CreateLibrary(tree);
             Assert.That(compilation.HasErrors, Is.False,
@@ -5341,27 +5340,46 @@ internal sealed class TrRmC1EnumClosureSourceTests
                         "field.inner.value"),
                 ],
             });
-            exports.Add(new TrRmSourceTypeExport(string.Empty, "Leaf",
-                "type.leaf") {
-                FieldExports = [
-                    new TrRmSourceFieldExport("Child",
-                        "field.leaf.child"),
-                ],
-            });
-
-            return TrRmExecutableCompiler.EmitStandard(program,
-                moduleIdentity, schemaIdentity, targetRequirement, exports,
+            var artifact = TrRmExecutableCompiler.EmitStandard(program,
+                "InnerProvider", schemaIdentity, targetRequirement, exports,
                 Array.Empty<TrRmSourceGenericMethodExport>(),
                 Array.Empty<TrRmSourceClassExport>());
+            return new TrRmStandardArtifactInput(schemaIdentity, artifact);
         }
 
-        var providerArtifact = CreateStructProviderArtifact(
-            "StructProvider", includePrefix: false, "int32");
-        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
-            providerArtifact);
+        TrRmStandardArtifactInput CreateLeafProviderInput(
+            TrRmStandardArtifactInput innerProviderInput)
+        {
+            var innerReference
+                = TrRmExecutableCompiler.CreateStandardReference(
+                    innerProviderInput, "InnerProvider", [], ["type.inner"],
+                    ["field.inner.value"]);
+            var tree = SyntaxTree.Parse(
+                "public struct Leaf { public Inner Child; }");
+            var compilation = Compilation.CreateLibrary(tree, innerReference);
+            Assert.That(compilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            var program = (BoundProgram)compilation.Program!;
+            var artifact = TrRmExecutableCompiler.EmitStandard(program,
+                "LeafProvider", schemaIdentity, targetRequirement, [
+                    new TrRmSourceTypeExport(string.Empty, "Leaf",
+                        "type.leaf") {
+                        FieldExports = [
+                            new TrRmSourceFieldExport("Child",
+                                "field.leaf.child"),
+                        ],
+                    },
+                ], Array.Empty<TrRmSourceGenericMethodExport>(),
+                Array.Empty<TrRmSourceClassExport>());
+            return new TrRmStandardArtifactInput(schemaIdentity, artifact);
+        }
+
+        var innerProviderInput = CreateInnerProviderInput(
+            includePrefix: false, "int32");
+        var leafProviderInput = CreateLeafProviderInput(innerProviderInput);
         var providerReference = TrRmExecutableCompiler.CreateStandardReference(
-            providerInput, "StructProvider", [], ["type.leaf"],
-            ["field.leaf.child"]);
+            leafProviderInput, "LeafProvider", [innerProviderInput],
+            ["type.leaf"], ["field.leaf.child"]);
 
         var classTree = SyntaxTree.Parse("""
             public class Box {
@@ -5386,10 +5404,42 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 new TrRmSourceClassExport(classProgram, classIndex,
                     classDeclaration.Span, "type.box", []),
             ]);
+        var classTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                classArtifact,
+                TrRmExecutableCompiler.GetForeignInvocationSchema(
+                    schemaIdentity),
+                standardSchemaIdentity: schemaIdentity));
+        var leafTypeDefRow = Enumerable.Range(1,
+                classTables.TypeDefs.Count)
+            .Single(row => classTables.TypeDefs.GetName(row) == "Leaf");
+        var innerTypeDefRow = Enumerable.Range(1,
+                classTables.TypeDefs.Count)
+            .Single(row => classTables.TypeDefs.GetName(row) == "Inner");
+        var (leafFieldStart, leafFieldEnd)
+            = classTables.TypeDefs.GetFieldRange(leafTypeDefRow);
+        var childFieldRow = Enumerable.Range(leafFieldStart,
+                leafFieldEnd - leafFieldStart)
+            .Single(row => classTables.Fields.GetName(row) == "Child");
+        var childTypeSpec
+            = classTables.Fields.GetTypeSpecRef(childFieldRow);
+        Assert.That(classTables.TypeSpecs.GetTypeSpecRef(childTypeSpec).Form,
+            Is.EqualTo((byte)0x03));
+        Assert.That(classTables.TypeSpecs.GetNominalTypeDefRow(
+                childTypeSpec, classTables.TypeDefs, classTables.Imports),
+            Is.EqualTo(innerTypeDefRow));
+        var (innerFieldStart, innerFieldEnd)
+            = classTables.TypeDefs.GetFieldRange(innerTypeDefRow);
+        var innerValueFieldRow = Enumerable.Range(innerFieldStart,
+                innerFieldEnd - innerFieldStart)
+            .Single(row => classTables.Fields.GetName(row) == "Value");
+        Assert.That(classTables.Fields.GetTypeSpecRef(innerValueFieldRow),
+            Is.EqualTo(0xF200_0008u));
         var classInput = new TrRmStandardArtifactInput(schemaIdentity,
             classArtifact);
         var classReference = TrRmExecutableCompiler.CreateStandardReference(
-            classInput, "ClassProvider", [providerInput], ["type.box"]);
+            classInput, "ClassProvider",
+            [leafProviderInput, innerProviderInput], ["type.box"]);
         var leafStructure = classReference.Structures.Single(
             static structure => structure.Name == "Leaf");
         Assert.That(leafStructure.Fields.Select(
@@ -5402,7 +5452,7 @@ internal sealed class TrRmC1EnumClosureSourceTests
             Is.EqualTo(PrimitiveType.Int32));
         var innerReference
             = TrRmExecutableCompiler.CreateStandardReference(
-                providerInput, "StructProvider", [], ["type.inner"],
+                innerProviderInput, "InnerProvider", [], ["type.inner"],
                 ["field.inner.value"]);
 
         var composed = TrRmExecutableCompiler.CreateStandardReferenceSet([
@@ -5425,24 +5475,23 @@ internal sealed class TrRmC1EnumClosureSourceTests
             Is.True);
         Assert.That(equalityEndpoints.Any(endpoint =>
                 endpoint.ImportRow == 0
-                && endpoint.OwnerModule.ModuleIdentity == "StructProvider"),
+                && endpoint.OwnerModule.ModuleIdentity == "InnerProvider"),
             Is.True);
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
             "public void Use(Box box, Inner inner) {}"), composed);
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
 
-        var relocatedProviderArtifact = CreateStructProviderArtifact(
-            "StructProvider", includePrefix: true, "int32");
-        var relocatedProviderInput = new TrRmStandardArtifactInput(
-            schemaIdentity, relocatedProviderArtifact);
+        var relocatedInnerProviderInput = CreateInnerProviderInput(
+            includePrefix: true, "int32");
         var relocatedClassReference
             = TrRmExecutableCompiler.CreateStandardReference(
-                classInput, "ClassProvider", [relocatedProviderInput],
-                ["type.box"]);
+                classInput, "ClassProvider", [
+                    leafProviderInput, relocatedInnerProviderInput,
+                ], ["type.box"]);
         var relocatedInnerReference
             = TrRmExecutableCompiler.CreateStandardReference(
-                relocatedProviderInput, "StructProvider", [],
+                relocatedInnerProviderInput, "InnerProvider", [],
                 ["type.inner"], ["field.inner.value"]);
         var relocated = TrRmExecutableCompiler.CreateStandardReferenceSet([
             relocatedClassReference, relocatedInnerReference,
@@ -5456,13 +5505,13 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 && endpoint.OwnerModule.ModuleIdentity == "ClassProvider"),
             Is.True);
 
-        var incompatibleProviderArtifact = CreateStructProviderArtifact(
-            "StructProvider", includePrefix: false, "int64");
-        var incompatibleProviderInput = new TrRmStandardArtifactInput(
-            schemaIdentity, incompatibleProviderArtifact);
+        var incompatibleProviderInput = CreateInnerProviderInput(
+            includePrefix: false, "int64");
         Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.CreateStandardReference(classInput,
-                "ClassProvider", [incompatibleProviderInput], ["type.box"]));
+                "ClassProvider", [
+                    leafProviderInput, incompatibleProviderInput,
+                ], ["type.box"]));
     }
 
     [TestCase(
@@ -5631,8 +5680,7 @@ internal sealed class TrRmC1EnumClosureSourceTests
             = TrRmExecutableCompiler.CreateStandardReference(
                 relocatedProviderInput, "StructProvider", [],
                 ["type.inner"], ["field.inner.value"]);
-        var relocated = Compose(relocatedProviderInput,
-            relocatedInnerReference);
+        var relocated = Compose(relocatedProviderInput, relocatedInnerReference);
         var relocatedDefinition
             = relocated.GenericNominalTypeDefinitions.Single(
                 static definition => definition.Name == "Inner");
