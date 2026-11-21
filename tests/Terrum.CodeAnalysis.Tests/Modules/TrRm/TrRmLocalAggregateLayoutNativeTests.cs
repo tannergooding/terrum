@@ -1396,8 +1396,7 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
             public int32 Main() {
                 mut [int32; 3] values = [4, 5, 6];
                 unsafe {
-                    ptr<int32> source = &values[1];
-                    int32 captured = *source;
+                    int32 captured = *(&values[1]);
                     values[1] = 99;
                     return captured;
                 }
