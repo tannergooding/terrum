@@ -1168,8 +1168,12 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
                     Fifth = fifth;
                 }
             }
+            unsafe ptr<Snapshot> GetSnapshotAddress(
+                ptr<Snapshot> source) {
+                return source;
+            }
             Snapshot ReadSnapshot(ptr<Snapshot> source) {
-                unsafe { return *source; }
+                unsafe { return *GetSnapshotAddress(source); }
             }
             int32 Capture(int32 selector) {
                 mut Snapshot value = new Snapshot(42, 1, 2, 3, 4);
