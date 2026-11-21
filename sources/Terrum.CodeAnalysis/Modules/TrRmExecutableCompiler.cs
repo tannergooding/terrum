@@ -393,16 +393,17 @@ public static partial class TrRmExecutableCompiler
         => EmitStandardCore(program, moduleIdentity, schemaIdentity,
             moduleTargetRequirement, null);
 
-    /// <summary>Emits the exact B+I+G profile and returns its accompanying Core contract-failure selections.</summary>
+    /// <summary>Emits an exact supported contract-predicate profile and returns its Core contract-failure selections.</summary>
     /// <param name="program">The checked program to serialize.</param>
     /// <param name="moduleIdentity">The output Module identity.</param>
-    /// <param name="schemaIdentity">The exact B+I+G schema identity.</param>
+    /// <param name="schemaIdentity">The exact B+I+G or no-label Construction-2 schema identity.</param>
     /// <param name="moduleTargetRequirement">The selected Module target requirement.</param>
     /// <param name="coreContractFailureIdentitySelections">The nonserialized Core failure selections retained by the program.</param>
     /// <returns>The complete validated TRRM artifact.</returns>
+    /// <remarks>This returns Core role selections only; phase-specific failure-construction maps remain separate and are not produced here.</remarks>
     /// <exception cref="ArgumentNullException">The program is null.</exception>
     /// <exception cref="ArgumentException">The selection table is invalid.</exception>
-    /// <exception cref="NotSupportedException">The selected schema is not the exact B+I+G composition.</exception>
+    /// <exception cref="NotSupportedException">The selected schema or retained contract context is unsupported.</exception>
     public static byte[] EmitStandard(BoundProgram program,
         string moduleIdentity, string schemaIdentity,
         uint moduleTargetRequirement,
@@ -410,11 +411,21 @@ public static partial class TrRmExecutableCompiler
             coreContractFailureIdentitySelections)
     {
         ArgumentNullException.ThrowIfNull(program);
-        if (!IsSelectedInitializationReferenceGeneralPredicateGraphsSchemaIdentity(
-                schemaIdentity))
+        ArgumentException.ThrowIfNullOrEmpty(moduleIdentity);
+        ArgumentException.ThrowIfNullOrEmpty(schemaIdentity);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(
+            moduleTargetRequirement,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var isInitializationReferenceGeneralPredicateGraphs
+            = IsSelectedInitializationReferenceGeneralPredicateGraphsSchemaIdentity(
+                schemaIdentity);
+        var isNoLabelConstruction2 = StringComparer.Ordinal.Equals(
+            schemaIdentity, StandardC1M1Construction2SchemaIdentity);
+        if (!isInitializationReferenceGeneralPredicateGraphs
+            && !isNoLabelConstruction2)
         {
             throw Unsupported(
-                "Core contract-failure selections are transported only with the exact B+I+G profile.");
+                "Core contract-failure selections require the exact B+I+G or no-label Construction-2 profile.");
         }
         if (!CoreContractFailureIdentitySelectionContract.IsValidTable(
                 program.CoreContractFailureIdentitySelections))
@@ -424,8 +435,20 @@ public static partial class TrRmExecutableCompiler
                 nameof(program));
         }
 
-        var artifact = EmitStandardCore(program, moduleIdentity,
-            schemaIdentity, moduleTargetRequirement, null);
+        byte[] artifact;
+        if (isNoLabelConstruction2)
+        {
+            ValidateConstruction2DeclarationContractFailureContexts(
+                program, moduleIdentity);
+            artifact = EmitC1M1Construction2(program, moduleIdentity,
+                moduleTargetRequirement, null, null,
+                hasCoreContractFailureIdentityTransport: true);
+        }
+        else
+        {
+            artifact = EmitStandardCore(program, moduleIdentity,
+                schemaIdentity, moduleTargetRequirement, null);
+        }
         coreContractFailureIdentitySelections
             = program.CoreContractFailureIdentitySelections.IsDefault
                 ? [] : program.CoreContractFailureIdentitySelections;
@@ -1605,8 +1628,17 @@ public static partial class TrRmExecutableCompiler
         TrRmArtifactSchema schema
             = TrRmArtifactSchema.C1M1Construction2Draft,
         SourceClassExports? sourceClassExports = null,
-        string? standardSchemaIdentity = null)
+        string? standardSchemaIdentity = null,
+        bool hasCoreContractFailureIdentityTransport = false)
     {
+        if (!hasCoreContractFailureIdentityTransport
+            && program.Functions.Any(static function =>
+                !function.DeclarationContractClauses.IsDefaultOrEmpty))
+        {
+            throw Unsupported(
+                "Construction-2 declaration predicates require the context-returning emission route.");
+        }
+
         var hasContextualTypeViews
             = program.StandardQuerySourceAssociation
                 is BoundStandardQuerySourceAssociation association
@@ -1659,7 +1691,9 @@ public static partial class TrRmExecutableCompiler
                 return EmitDevelopment(program, moduleIdentity, schema,
                     moduleTargetRequirement, sourceTypeExports,
                     standardInitializationReferenceBodies: true,
-                    standardSchemaIdentity: standardSchemaIdentity);
+                    standardSchemaIdentity: standardSchemaIdentity,
+                    hasCoreContractFailureIdentityTransport:
+                        hasCoreContractFailureIdentityTransport);
             }
 
             if (schema.UsesClassParameterDefaults()
@@ -1737,7 +1771,9 @@ public static partial class TrRmExecutableCompiler
             return EmitDevelopment(program, moduleIdentity, schema,
                 moduleTargetRequirement,
                 standardInitializationReferenceBodies: true,
-                standardSchemaIdentity: standardSchemaIdentity);
+                standardSchemaIdentity: standardSchemaIdentity,
+                hasCoreContractFailureIdentityTransport:
+                    hasCoreContractFailureIdentityTransport);
         }
 
         if (supportsL1)
@@ -1753,7 +1789,9 @@ public static partial class TrRmExecutableCompiler
             schema,
             moduleTargetRequirement,
             standardInitializationReferenceBodies: true,
-            standardSchemaIdentity: standardSchemaIdentity);
+            standardSchemaIdentity: standardSchemaIdentity,
+            hasCoreContractFailureIdentityTransport:
+                hasCoreContractFailureIdentityTransport);
     }
 
     internal static byte[] EmitDevelopmentFunctionPointerEffectsDraft(
@@ -1818,6 +1856,96 @@ public static partial class TrRmExecutableCompiler
         }
     }
 
+    private static void ValidateConstruction2DeclarationContractFailureContexts(
+        BoundProgram program, string moduleIdentity)
+    {
+        var failureSelections
+            = program.CoreContractFailureIdentitySelections;
+        foreach (var function in program.Functions)
+        {
+            if (function.DeclarationContractClauses.IsDefaultOrEmpty)
+            {
+                continue;
+            }
+
+            if (function.IsExternal || function.ModuleImport is not null)
+            {
+                throw Unsupported(
+                    "Construction-2 declaration predicate emission does not yet retain bodyless or imported failure-plan correspondence.");
+            }
+
+            var preconditionOrdinal = 0u;
+            var postconditionOrdinal = 0u;
+            var hasPostcondition = false;
+            foreach (var clause in function.DeclarationContractClauses)
+            {
+                if (clause.ExplicitFailureType is PrimitiveType)
+                {
+                    throw Unsupported(
+                        "Construction-2 phase-1 ExplicitType clauses require the selected precondition failure-binding map.");
+                }
+
+                switch (clause.Phase)
+                {
+                    case BoundDeclarationContractPhase.Precondition:
+                        if (hasPostcondition
+                            || clause.PhaseLocalOrdinal
+                                != preconditionOrdinal++)
+                        {
+                            throw Unsupported(
+                                "Construction-2 precondition graph ordinals must retain their contiguous source order.");
+                        }
+                        break;
+                    case BoundDeclarationContractPhase.NormalPostcondition:
+                        hasPostcondition = true;
+                        if (clause.PhaseLocalOrdinal
+                            != postconditionOrdinal++)
+                        {
+                            throw Unsupported(
+                                "Construction-2 postcondition graph ordinals must retain their contiguous source order.");
+                        }
+                        break;
+                    default:
+                        throw Unsupported(
+                            "Construction-2 declaration predicate emission received an unknown phase.");
+                }
+
+                if (clause.UsingModuleIdentity is not string usingModuleIdentity
+                    || !StringComparer.Ordinal.Equals(usingModuleIdentity,
+                        moduleIdentity)
+                    || clause.SelectedFailureClass is not
+                        CoreContractFailureDeclarationIdentity
+                            selectedFailureClass)
+                {
+                    throw Unsupported(
+                        "Construction-2 declaration failure context must retain its exact originating Module and selected Core class.");
+                }
+
+                if (failureSelections.IsDefaultOrEmpty)
+                {
+                    throw Unsupported(
+                        "Construction-2 declaration failure context lacks its nonserialized Core role selection.");
+                }
+
+                var selection = failureSelections
+                    .FirstOrDefault(candidate =>
+                        StringComparer.Ordinal.Equals(
+                            candidate.UsingModuleIdentity,
+                            usingModuleIdentity));
+                var expectedFailureClass = clause.Phase
+                    == BoundDeclarationContractPhase.Precondition
+                        ? selection?.RequirementExceptionClass
+                        : selection?.PostconditionExceptionClass;
+                if (selection is null
+                    || expectedFailureClass != selectedFailureClass)
+                {
+                    throw Unsupported(
+                        "Construction-2 declaration failure context does not match the selected Core role for its originating Module.");
+                }
+            }
+        }
+    }
+
     private static byte[] EmitDevelopment(BoundProgram program, string moduleIdentity,
         TrRmArtifactSchema schema,
         uint moduleTargetRequirement
@@ -1826,7 +1954,8 @@ public static partial class TrRmExecutableCompiler
         bool standardInitializationReferenceBodies = false,
         bool standardNativePointerLoads = false,
         bool allowGenericMethodNominalTypeTables = false,
-        string? standardSchemaIdentity = null)
+        string? standardSchemaIdentity = null,
+        bool hasCoreContractFailureIdentityTransport = false)
     {
         ArgumentNullException.ThrowIfNull(program);
         if (BoundEnumTypes.HasStandardDeclarations(
@@ -1935,16 +2064,27 @@ public static partial class TrRmExecutableCompiler
             throw Unsupported(
                 "The selected TRRM schema does not yet retain imported generic MethodDef specialization origins.");
         }
+        var emitsConstruction2DeclarationPredicateGraphs
+            = hasCoreContractFailureIdentityTransport
+                && standardInitializationReferenceBodies
+                && generalPredicateGraphsInitializationReferenceBodies
+                && schema == TrRmArtifactSchema.C1M1Construction2Draft;
         if (program.Functions.Any(function =>
             function.DeclarationContractClauses.IsDefault
                 || (!function.DeclarationContractClauses.IsEmpty
                     && (!standardInitializationReferenceBodies
-                        || !SemanticVerifier
-                            .HasOnlyUnconditionalInitializationOutputContracts(
-                                function, program)))))
+                        || (!emitsConstruction2DeclarationPredicateGraphs
+                            && !SemanticVerifier
+                                .HasOnlyUnconditionalInitializationOutputContracts(
+                                    function, program))))))
         {
             throw Unsupported(
                 "The selected TRRM schema does not retain these declaration contract clauses.");
+        }
+        if (emitsConstruction2DeclarationPredicateGraphs)
+        {
+            ValidateConstruction2DeclarationContractFailureContexts(
+                program, moduleIdentity);
         }
         if (!generalPredicateGraphsInitializationReferenceBodies
             && program.Functions.Any(static function =>
@@ -2998,6 +3138,356 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
+        BoundExpression[] GetGeneralPredicateChildren(
+            BoundExpression expression)
+        {
+            if (expression is BoundRead or BoundConstant
+                or BoundIsInitialized
+                or BoundContractReturnValue
+                or BoundReferenceInitializationTest)
+            {
+                return [];
+            }
+
+            return expression switch {
+                BoundUnary {
+                    Operator: TokenKind.Bang,
+                    Type: PrimitiveType.Bool,
+                    Operand.Type: PrimitiveType.Bool,
+                } unary => [unary.Operand],
+                BoundUnary unary when
+                    TryGetGeneralPredicateUnaryOperation(unary,
+                        out _, out _) => [unary.Operand],
+                BoundCast cast when
+                    TryGetGeneralPredicateConversion(cast,
+                        out _, out _) => [cast.Operand],
+                BoundBinary {
+                    Type: PrimitiveType.Bool,
+                    Operator: TokenKind.AmpersandAmpersand
+                        or TokenKind.PipePipe
+                        or TokenKind.Ampersand
+                        or TokenKind.Pipe
+                        or TokenKind.Caret,
+                    Left.Type: PrimitiveType.Bool,
+                    Right.Type: PrimitiveType.Bool,
+                } binary => [binary.Left, binary.Right],
+                BoundBinary binary when
+                    TryGetGeneralPredicateBinaryOperation(binary,
+                        out _, out _) => [
+                            binary.Left,
+                            binary.Right,
+                        ],
+                BoundConditional conditional when
+                    conditional.Condition.Type == PrimitiveType.Bool
+                    && conditional.WhenTrue.Type
+                        == conditional.WhenFalse.Type
+                    && conditional.Type == conditional.WhenTrue.Type
+                    && PrimitiveTypeFacts.IsBuiltInScalar(
+                        conditional.Type) => [
+                    conditional.Condition,
+                    conditional.WhenTrue,
+                    conditional.WhenFalse,
+                ],
+                _ => throw Unsupported(
+                    $"General predicate expression '{expression.GetType().Name}' is outside the current graph producer subset."),
+            };
+        }
+
+        void AddInitializedMatchGraph(
+            int parentNodeRow, uint childOrdinal,
+            PrimitiveType subjectType, uint readRootRow,
+            ref int rootNodeRow)
+        {
+            var matchNodeRow = checked(predicateNodes.Count + 1);
+            predicateNodes.Add(new TrRmPredicateNodeRow(0x34,
+                checked((uint)TypeSpecRowFor(PrimitiveType.Bool)), 0, 0));
+            if (parentNodeRow == 0)
+            {
+                rootNodeRow = matchNodeRow;
+            }
+            else
+            {
+                predicateChildEdges.Add(new TrRmPredicateChildEdgeRow(
+                    parentNodeRow, childOrdinal, matchNodeRow));
+            }
+
+            var subjectNodeRow = checked((uint)predicateNodes.Count + 1);
+            var subjectOperandFirstRow = checked(
+                (uint)predicateNodeOperands.Count + 1);
+            predicateNodeOperands.Add(
+                new TrRmPredicateNodeOperandRow(1, readRootRow));
+            predicateNodes.Add(new TrRmPredicateNodeRow(0x10,
+                checked((uint)TypeSpecRowFor(subjectType)),
+                subjectOperandFirstRow, 1));
+
+            var initializedPatternNodeRow
+                = checked((uint)predicateNodes.Count + 1);
+            predicateNodes.Add(new TrRmPredicateNodeRow(0x41,
+                checked((uint)TypeSpecRowFor(PrimitiveType.Bool)), 0, 0));
+            predicateChildEdges.Add(new TrRmPredicateChildEdgeRow(
+                matchNodeRow, 0, checked((int)subjectNodeRow)));
+            predicateChildEdges.Add(new TrRmPredicateChildEdgeRow(
+                matchNodeRow, 1,
+                checked((int)initializedPatternNodeRow)));
+        }
+
+        int BuildGeneralPredicateNode(
+            BoundFunction function, BoundExpression expression,
+            Dictionary<(byte Kind, int Identity), uint>
+                rootRowsByIdentity,
+            BoundDeclarationContractPhase? declarationPhase)
+        {
+            var stack = new Stack<(BoundExpression Expression,
+                int ParentNodeRow, uint ChildOrdinal, bool PostOrder,
+                int NodeRow, uint NodeKind,
+                uint OperandFirstRow, uint OperandCount)>();
+            stack.Push((expression, 0, 0, false, 0, 0, 0, 0));
+            var rootNodeRow = 0;
+            while (stack.Count != 0)
+            {
+                var frame = stack.Pop();
+                if (frame.PostOrder)
+                {
+                    predicateNodes[frame.NodeRow - 1]
+                        = new TrRmPredicateNodeRow(
+                            frame.NodeKind,
+                            checked((uint)TypeSpecRowFor(
+                                frame.Expression.Type)),
+                            frame.OperandFirstRow,
+                            frame.OperandCount);
+                    continue;
+                }
+
+                if (frame.Expression is BoundIsInitialized initialized)
+                {
+                    if (declarationPhase
+                            != BoundDeclarationContractPhase
+                                .NormalPostcondition
+                        || initialized.Variable < 0
+                        || initialized.Variable >= function.ParameterCount
+                        || function.Variables[initialized.Variable].IsOut
+                        || function.Variables[initialized.Variable].IsInit
+                        || function.Variables[initialized.Variable].IsMutable
+                        || !PrimitiveTypeFacts.IsBuiltInScalar(
+                            function.Variables[initialized.Variable].Type)
+                        || !rootRowsByIdentity.TryGetValue(
+                            (2, initialized.Variable),
+                            out var valueReadRootRow))
+                    {
+                        throw Unsupported(
+                            "An Initialized pattern graph requires a scalar input formal in a phase-2 clause.");
+                    }
+
+                    AddInitializedMatchGraph(frame.ParentNodeRow,
+                        frame.ChildOrdinal,
+                        function.Variables[initialized.Variable].Type,
+                        valueReadRootRow, ref rootNodeRow);
+                    continue;
+                }
+
+                if (frame.Expression
+                    is BoundReferenceInitializationTest
+                        referenceInitializationTest)
+                {
+                    if (declarationPhase
+                            != BoundDeclarationContractPhase
+                                .NormalPostcondition
+                        || referenceInitializationTest.Descriptor
+                            is not BoundRead descriptor
+                        || descriptor.Variable < 0
+                        || descriptor.Variable >= function.ParameterCount
+                        || function.Variables[descriptor.Variable].Type
+                            != descriptor.Type
+                        || !IsStandardInitializationReferenceParameter(
+                            function.Variables[descriptor.Variable], program)
+                        || !TryGetStandardInitializationReferenceReferentType(
+                            descriptor.Type, program.CheckedReferenceTypes,
+                            out var referentType)
+                        || !PrimitiveTypeFacts.IsBuiltInScalar(referentType)
+                        || !rootRowsByIdentity.TryGetValue(
+                            (4, descriptor.Variable),
+                            out var outputReadRootRow))
+                    {
+                        throw Unsupported(
+                            "An Initialized pattern graph requires a scalar logical output in a phase-2 clause.");
+                    }
+
+                    AddInitializedMatchGraph(frame.ParentNodeRow,
+                        frame.ChildOrdinal, referentType,
+                        outputReadRootRow,
+                        ref rootNodeRow);
+                    continue;
+                }
+
+                var children = GetGeneralPredicateChildren(
+                    frame.Expression);
+                var nodeKind = frame.Expression switch {
+                    BoundRead => 0x11u,
+                    BoundContractReturnValue => 0x11u,
+                    BoundConstant => 0x14u,
+                    BoundUnary {
+                        Operator: TokenKind.Bang,
+                    } => 0x23u,
+                    BoundUnary unary when
+                        TryGetGeneralPredicateUnaryOperation(unary,
+                            out _, out _) => 0x20u,
+                    BoundCast cast when
+                        TryGetGeneralPredicateConversion(cast,
+                            out _, out _) => 0x22u,
+                    BoundConditional => 0x29u,
+                    BoundBinary {
+                        Type: PrimitiveType.Bool,
+                        Left.Type: PrimitiveType.Bool,
+                        Right.Type: PrimitiveType.Bool,
+                        Operator: TokenKind.Ampersand
+                            or TokenKind.Pipe or TokenKind.Caret,
+                    } binary => binary.Operator switch {
+                        TokenKind.Ampersand => 0x24u,
+                        TokenKind.Pipe => 0x25u,
+                        TokenKind.Caret => 0x26u,
+                        _ => 0u,
+                    },
+                    BoundBinary {
+                        Type: PrimitiveType.Bool,
+                        Left.Type: PrimitiveType.Bool,
+                        Right.Type: PrimitiveType.Bool,
+                        Operator: TokenKind.AmpersandAmpersand
+                            or TokenKind.PipePipe,
+                    } binary => binary.Operator switch {
+                        TokenKind.AmpersandAmpersand => 0x27u,
+                        TokenKind.PipePipe => 0x28u,
+                        _ => 0u,
+                    },
+                    BoundBinary binary when
+                        TryGetGeneralPredicateBinaryOperation(binary,
+                            out _, out _) => 0x21u,
+                    _ => 0u,
+                };
+                if (nodeKind == 0)
+                {
+                    throw Unsupported(
+                        "A GeneralPredicateGraphsDraft clause has an unsupported operation.");
+                }
+
+                var nodeRow = checked(predicateNodes.Count + 1);
+                predicateNodes.Add(default);
+                if (frame.ParentNodeRow == 0)
+                {
+                    rootNodeRow = nodeRow;
+                }
+                else
+                {
+                    predicateChildEdges.Add(
+                        new TrRmPredicateChildEdgeRow(
+                            frame.ParentNodeRow,
+                            frame.ChildOrdinal, nodeRow));
+                }
+
+                if (frame.Expression is BoundRead read)
+                {
+                    var operandFirstRow = checked((uint)(
+                        predicateNodeOperands.Count + 1));
+                    predicateNodeOperands.Add(
+                        new TrRmPredicateNodeOperandRow(1,
+                            rootRowsByIdentity[(2, read.Variable)]));
+                    predicateNodes[nodeRow - 1]
+                        = new TrRmPredicateNodeRow(nodeKind,
+                            checked((uint)TypeSpecRowFor(read.Type)),
+                            operandFirstRow, 1);
+                    continue;
+                }
+                if (frame.Expression is BoundContractReturnValue result)
+                {
+                    var operandFirstRow = checked((uint)(
+                        predicateNodeOperands.Count + 1));
+                    predicateNodeOperands.Add(
+                        new TrRmPredicateNodeOperandRow(1,
+                            rootRowsByIdentity[(5, 0)]));
+                    predicateNodes[nodeRow - 1]
+                        = new TrRmPredicateNodeRow(nodeKind,
+                            checked((uint)TypeSpecRowFor(result.Type)),
+                            operandFirstRow, 1);
+                    continue;
+                }
+                if (frame.Expression is BoundConstant constant)
+                {
+                    var operandFirstRow = checked((uint)(
+                        predicateNodeOperands.Count + 1));
+                    var frozenValue
+                        = predicateFrozenScalarValues
+                            .AddFrozenValueNode(constant);
+                    predicateNodeOperands.Add(
+                        new TrRmPredicateNodeOperandRow(2,
+                            frozenValue.FrozenValueNodeRow));
+                    predicateNodes[nodeRow - 1]
+                        = new TrRmPredicateNodeRow(nodeKind,
+                            checked((uint)TypeSpecRowFor(constant.Type)),
+                            operandFirstRow, 1);
+                    continue;
+                }
+
+                var nodeOperandFirstRow = 0u;
+                var nodeOperandCount = 0u;
+                if (frame.Expression is BoundUnary unary
+                    && TryGetGeneralPredicateUnaryOperation(unary,
+                        out var unaryOperationCode, out var unaryPolicy))
+                {
+                    var operationRow = checked(
+                        (uint)predicateOperations.Count + 1);
+                    predicateOperations.Add(
+                        new TrRmPredicateOperationRow(
+                            unaryOperationCode, unaryPolicy));
+                    nodeOperandFirstRow = checked((uint)(
+                        predicateNodeOperands.Count + 1));
+                    predicateNodeOperands.Add(
+                        new TrRmPredicateNodeOperandRow(4, operationRow));
+                    nodeOperandCount = 1;
+                }
+                else if (frame.Expression is BoundCast cast
+                    && TryGetGeneralPredicateConversion(cast,
+                        out var conversionOperationCode,
+                        out var conversionPolicy))
+                {
+                    var operationRow = checked(
+                        (uint)predicateOperations.Count + 1);
+                    predicateOperations.Add(
+                        new TrRmPredicateOperationRow(
+                            conversionOperationCode, conversionPolicy));
+                    nodeOperandFirstRow = checked((uint)(
+                        predicateNodeOperands.Count + 1));
+                    predicateNodeOperands.Add(
+                        new TrRmPredicateNodeOperandRow(4, operationRow));
+                    nodeOperandCount = 1;
+                }
+                else if (frame.Expression is BoundBinary binary
+                    && TryGetGeneralPredicateBinaryOperation(binary,
+                        out var operationCode, out var policy))
+                {
+                    var operationRow = checked(
+                        (uint)predicateOperations.Count + 1);
+                    predicateOperations.Add(
+                        new TrRmPredicateOperationRow(operationCode,
+                            policy));
+                    nodeOperandFirstRow = checked((uint)(
+                        predicateNodeOperands.Count + 1));
+                    predicateNodeOperands.Add(
+                        new TrRmPredicateNodeOperandRow(4, operationRow));
+                    nodeOperandCount = 1;
+                }
+
+                stack.Push((frame.Expression, frame.ParentNodeRow,
+                    frame.ChildOrdinal, true, nodeRow, nodeKind,
+                    nodeOperandFirstRow, nodeOperandCount));
+                for (var child = children.Length - 1; child >= 0; child--)
+                {
+                    stack.Push((children[child], nodeRow,
+                        checked((uint)child), false, 0, 0, 0, 0));
+                }
+            }
+
+            return rootNodeRow;
+        }
+
         void AddGeneralInitializationOutputStateContracts(
             BoundFunction function, uint owner,
             ImmutableArray<BoundOutputStatePredicate> predicates,
@@ -3050,7 +3540,7 @@ public static partial class TrRmExecutableCompiler
                 while (pendingExpressions.Count != 0)
                 {
                     var expression = pendingExpressions.Pop();
-                    var children = GetChildren(expression);
+                    var children = GetGeneralPredicateChildren(expression);
                     if (expression is BoundRead read)
                     {
                         if (read.Variable < 0
@@ -3104,7 +3594,8 @@ public static partial class TrRmExecutableCompiler
                 predicateReadFootprints.Add(
                     new TrRmPredicateReadFootprintRow(firstRootRow,
                         readRoots.Count, 0, 0));
-                var graphRootNode = BuildNode(predicate);
+                var graphRootNode = BuildGeneralPredicateNode(function,
+                    predicate, rootRowsByIdentity, null);
                 predicateGraphs.Add(new TrRmPredicateGraphRow(
                     graphRootNode, footprintRow));
 
@@ -3136,260 +3627,166 @@ public static partial class TrRmExecutableCompiler
                     contracts.Add(new TrRmContractRow(owner, 0x0002,
                         outputPayload));
                 }
+            }
+        }
 
-                BoundExpression[] GetChildren(BoundExpression expression)
+        void AddGeneralDeclarationContractGraphs(
+            BoundFunction function, uint owner)
+        {
+            if (!emitsConstruction2DeclarationPredicateGraphs)
+            {
+                throw Unsupported(
+                    "Phase-1/2 predicate graphs require the exact no-label Construction-2 profile and its failure-identity output.");
+            }
+
+            foreach (var clause in function.DeclarationContractClauses)
+            {
+                if (clause.Predicate.Type != PrimitiveType.Bool)
                 {
-                    if (expression is BoundRead or BoundConstant
-                        or BoundContractReturnValue)
-                    {
-                        return [];
-                    }
-
-                    return expression switch {
-                        BoundUnary {
-                            Operator: TokenKind.Bang,
-                            Type: PrimitiveType.Bool,
-                            Operand.Type: PrimitiveType.Bool,
-                        } unary => [unary.Operand],
-                        BoundUnary unary when
-                            TryGetGeneralPredicateUnaryOperation(unary,
-                                out _, out _) => [unary.Operand],
-                        BoundCast cast when
-                            TryGetGeneralPredicateConversion(cast,
-                                out _, out _) => [cast.Operand],
-                        BoundBinary {
-                            Type: PrimitiveType.Bool,
-                            Operator: TokenKind.AmpersandAmpersand
-                                or TokenKind.PipePipe
-                                or TokenKind.Ampersand
-                                or TokenKind.Pipe
-                                or TokenKind.Caret,
-                            Left.Type: PrimitiveType.Bool,
-                            Right.Type: PrimitiveType.Bool,
-                        } binary => [binary.Left, binary.Right],
-                        BoundBinary binary when
-                            TryGetGeneralPredicateBinaryOperation(binary,
-                                out _, out _) => [
-                                    binary.Left,
-                                    binary.Right,
-                                ],
-                        BoundConditional conditional when
-                            conditional.Condition.Type
-                                == PrimitiveType.Bool
-                            && conditional.WhenTrue.Type
-                                == conditional.WhenFalse.Type
-                            && conditional.Type
-                                == conditional.WhenTrue.Type
-                            && PrimitiveTypeFacts.IsBuiltInScalar(
-                                conditional.Type) => [
-                            conditional.Condition,
-                            conditional.WhenTrue,
-                            conditional.WhenFalse,
-                        ],
-                        _ => throw Unsupported(
-                            $"General OutputState selector expression '{expression.GetType().Name}' is outside the current graph producer subset."),
-                    };
+                    throw Unsupported(
+                        "A declaration predicate graph must have a Boolean root.");
                 }
 
-                int BuildNode(BoundExpression expression)
+                var graphRow = checked(predicateGraphs.Count + 1);
+                var footprintRow
+                    = checked(predicateReadFootprints.Count + 1);
+                var readRoots = new SortedSet<(byte Kind, int Identity)>();
+                var pendingExpressions = new Stack<BoundExpression>();
+                pendingExpressions.Push(clause.Predicate);
+                while (pendingExpressions.Count != 0)
                 {
-                    var stack = new Stack<(BoundExpression Expression,
-                        int ParentNodeRow, uint ChildOrdinal, bool PostOrder,
-                        int NodeRow, uint NodeKind,
-                        uint OperandFirstRow, uint OperandCount)>();
-                    stack.Push((expression, 0, 0, false, 0, 0, 0, 0));
-                    var rootNodeRow = 0;
-                    while (stack.Count != 0)
+                    var expression = pendingExpressions.Pop();
+                    var children = GetGeneralPredicateChildren(expression);
+                    if (expression is BoundRead read)
                     {
-                        var frame = stack.Pop();
-                        if (frame.PostOrder)
-                        {
-                            predicateNodes[frame.NodeRow - 1]
-                                = new TrRmPredicateNodeRow(
-                                    frame.NodeKind,
-                                    checked((uint)TypeSpecRowFor(
-                                        frame.Expression.Type)),
-                                    frame.OperandFirstRow,
-                                    frame.OperandCount);
-                            continue;
-                        }
-
-                        var children = GetChildren(frame.Expression);
-                        var nodeKind = frame.Expression switch {
-                            BoundRead => 0x11u,
-                            BoundContractReturnValue => 0x11u,
-                            BoundConstant => 0x14u,
-                            BoundUnary {
-                                Operator: TokenKind.Bang,
-                            } => 0x23u,
-                            BoundUnary unary when
-                                TryGetGeneralPredicateUnaryOperation(unary,
-                                    out _, out _) => 0x20u,
-                            BoundCast cast when
-                                TryGetGeneralPredicateConversion(cast,
-                                    out _, out _) => 0x22u,
-                            BoundConditional => 0x29u,
-                            BoundBinary {
-                                Type: PrimitiveType.Bool,
-                                Left.Type: PrimitiveType.Bool,
-                                Right.Type: PrimitiveType.Bool,
-                                Operator: TokenKind.Ampersand
-                                    or TokenKind.Pipe or TokenKind.Caret,
-                            } binary => binary.Operator switch {
-                                TokenKind.Ampersand => 0x24u,
-                                TokenKind.Pipe => 0x25u,
-                                TokenKind.Caret => 0x26u,
-                                _ => 0u,
-                            },
-                            BoundBinary {
-                                Type: PrimitiveType.Bool,
-                                Left.Type: PrimitiveType.Bool,
-                                Right.Type: PrimitiveType.Bool,
-                                Operator: TokenKind.AmpersandAmpersand
-                                    or TokenKind.PipePipe,
-                            } binary => binary.Operator switch {
-                                TokenKind.AmpersandAmpersand => 0x27u,
-                                TokenKind.PipePipe => 0x28u,
-                                _ => 0u,
-                            },
-                            BoundBinary binary when
-                                TryGetGeneralPredicateBinaryOperation(
-                                    binary, out _, out _) => 0x21u,
-                            _ => 0u,
-                        };
-                        if (nodeKind == 0)
+                        if (read.Variable < 0
+                            || read.Variable >= function.ParameterCount
+                            || function.Variables[read.Variable].IsOut
+                            || function.Variables[read.Variable].IsInit
+                            || function.Variables[read.Variable].IsMutable
+                            || function.Variables[read.Variable].Type
+                                != read.Type
+                            || !PrimitiveTypeFacts.IsBuiltInScalar(
+                                read.Type))
                         {
                             throw Unsupported(
-                                "The GeneralPredicateGraphsDraft selector has an unsupported Boolean operation.");
+                                "A declaration predicate graph must read only immutable scalar input formals.");
                         }
 
-                        var nodeRow = checked(predicateNodes.Count + 1);
-                        predicateNodes.Add(default);
-                        if (frame.ParentNodeRow == 0)
+                        _ = readRoots.Add((2, read.Variable));
+                    }
+                    else if (expression is BoundIsInitialized initialized)
+                    {
+                        if (clause.Phase
+                                != BoundDeclarationContractPhase
+                                    .NormalPostcondition
+                            || initialized.Variable < 0
+                            || initialized.Variable
+                                >= function.ParameterCount
+                            || function.Variables[initialized.Variable].IsOut
+                            || function.Variables[initialized.Variable].IsInit
+                            || function.Variables[initialized.Variable]
+                                .IsMutable
+                            || !PrimitiveTypeFacts.IsBuiltInScalar(
+                                function.Variables[initialized.Variable].Type))
                         {
-                            rootNodeRow = nodeRow;
-                        }
-                        else
-                        {
-                            predicateChildEdges.Add(
-                                new TrRmPredicateChildEdgeRow(
-                                    frame.ParentNodeRow,
-                                    frame.ChildOrdinal, nodeRow));
-                        }
-
-                        if (frame.Expression is BoundRead read)
-                        {
-                            var operandFirstRow = checked((uint)(
-                                predicateNodeOperands.Count + 1));
-                            predicateNodeOperands.Add(
-                                new TrRmPredicateNodeOperandRow(1,
-                                    rootRowsByIdentity[(2, read.Variable)]));
-                            predicateNodes[nodeRow - 1]
-                                = new TrRmPredicateNodeRow(nodeKind,
-                                    checked((uint)TypeSpecRowFor(read.Type)),
-                                    operandFirstRow, 1);
-                            continue;
-                        }
-                        if (frame.Expression
-                            is BoundContractReturnValue result)
-                        {
-                            var operandFirstRow = checked((uint)(
-                                predicateNodeOperands.Count + 1));
-                            predicateNodeOperands.Add(
-                                new TrRmPredicateNodeOperandRow(1,
-                                    rootRowsByIdentity[(5, 0)]));
-                            predicateNodes[nodeRow - 1]
-                                = new TrRmPredicateNodeRow(nodeKind,
-                                    checked((uint)TypeSpecRowFor(
-                                        result.Type)),
-                                    operandFirstRow, 1);
-                            continue;
-                        }
-                        if (frame.Expression is BoundConstant constant)
-                        {
-                            var operandFirstRow = checked((uint)(
-                                predicateNodeOperands.Count + 1));
-                            var frozenValue
-                                = predicateFrozenScalarValues
-                                    .AddFrozenValueNode(constant);
-                            predicateNodeOperands.Add(
-                                new TrRmPredicateNodeOperandRow(2,
-                                    frozenValue.FrozenValueNodeRow));
-                            predicateNodes[nodeRow - 1]
-                                = new TrRmPredicateNodeRow(nodeKind,
-                                    checked((uint)TypeSpecRowFor(
-                                        constant.Type)),
-                                    operandFirstRow, 1);
-                            continue;
+                            throw Unsupported(
+                                "A phase-2 Initialized pattern requires a scalar input formal.");
                         }
 
-                        var nodeOperandFirstRow = 0u;
-                        var nodeOperandCount = 0u;
-                        if (frame.Expression is BoundUnary unary
-                            && TryGetGeneralPredicateUnaryOperation(unary,
-                                out var unaryOperationCode,
-                                out var unaryPolicy))
+                        _ = readRoots.Add((2, initialized.Variable));
+                    }
+                    else if (expression
+                        is BoundContractReturnValue result)
+                    {
+                        if (clause.Phase
+                                != BoundDeclarationContractPhase
+                                    .NormalPostcondition
+                            || result.Type != function.ReturnType
+                            || !PrimitiveTypeFacts.IsBuiltInScalar(
+                                result.Type))
                         {
-                            var operationRow = checked(
-                                (uint)predicateOperations.Count + 1);
-                            predicateOperations.Add(
-                                new TrRmPredicateOperationRow(
-                                    unaryOperationCode, unaryPolicy));
-                            nodeOperandFirstRow = checked((uint)(
-                                predicateNodeOperands.Count + 1));
-                            predicateNodeOperands.Add(
-                                new TrRmPredicateNodeOperandRow(4,
-                                    operationRow));
-                            nodeOperandCount = 1;
-                        }
-                        else if (frame.Expression is BoundCast cast
-                            && TryGetGeneralPredicateConversion(cast,
-                                out var conversionOperationCode,
-                                out var conversionPolicy))
-                        {
-                            var operationRow = checked(
-                                (uint)predicateOperations.Count + 1);
-                            predicateOperations.Add(
-                                new TrRmPredicateOperationRow(
-                                    conversionOperationCode,
-                                    conversionPolicy));
-                            nodeOperandFirstRow = checked((uint)(
-                                predicateNodeOperands.Count + 1));
-                            predicateNodeOperands.Add(
-                                new TrRmPredicateNodeOperandRow(4,
-                                    operationRow));
-                            nodeOperandCount = 1;
-                        }
-                        else if (frame.Expression is BoundBinary binary
-                            && TryGetGeneralPredicateBinaryOperation(binary,
-                                out var operationCode, out var policy))
-                        {
-                            var operationRow = checked(
-                                (uint)predicateOperations.Count + 1);
-                            predicateOperations.Add(
-                                new TrRmPredicateOperationRow(
-                                    operationCode, policy));
-                            nodeOperandFirstRow = checked((uint)(
-                                predicateNodeOperands.Count + 1));
-                            predicateNodeOperands.Add(
-                                new TrRmPredicateNodeOperandRow(4,
-                                    operationRow));
-                            nodeOperandCount = 1;
+                            throw Unsupported(
+                                "A declaration predicate graph has an unsupported saved-result observation.");
                         }
 
-                        stack.Push((frame.Expression, frame.ParentNodeRow,
-                            frame.ChildOrdinal, true, nodeRow, nodeKind,
-                            nodeOperandFirstRow, nodeOperandCount));
-                        for (var child = children.Length - 1; child >= 0;
-                            child--)
+                        _ = readRoots.Add((5, 0));
+                    }
+                    else if (expression
+                        is BoundReferenceInitializationTest initialized)
+                    {
+                        if (clause.Phase
+                                != BoundDeclarationContractPhase
+                                    .NormalPostcondition
+                            || initialized.Descriptor
+                                is not BoundRead descriptor
+                            || descriptor.Variable < 0
+                            || descriptor.Variable
+                                >= function.ParameterCount
+                            || function.Variables[descriptor.Variable].Type
+                                != descriptor.Type
+                            || !IsStandardInitializationReferenceParameter(
+                                function.Variables[descriptor.Variable],
+                                program)
+                            || !TryGetStandardInitializationReferenceReferentType(
+                                descriptor.Type,
+                                program.CheckedReferenceTypes,
+                                out var referentType)
+                            || !PrimitiveTypeFacts.IsBuiltInScalar(
+                                referentType))
                         {
-                            stack.Push((children[child], nodeRow,
-                                checked((uint)child), false, 0, 0, 0, 0));
+                            throw Unsupported(
+                                "A phase-2 Initialized pattern requires a scalar logical output formal.");
                         }
+
+                        _ = readRoots.Add((4, descriptor.Variable));
+                    }
+                    else if (expression is BoundConstant constant
+                        && !PrimitiveTypeFacts.IsBuiltInScalar(
+                            constant.Type))
+                    {
+                        throw Unsupported(
+                            "A declaration predicate graph has an unsupported non-scalar literal.");
                     }
 
-                    return rootNodeRow;
+                    for (var child = children.Length - 1; child >= 0;
+                        child--)
+                    {
+                        pendingExpressions.Push(children[child]);
+                    }
                 }
+
+                var firstRootRow = readRoots.Count == 0
+                    ? 0 : checked(predicateReadRoots.Count + 1);
+                var rootRowsByIdentity = new Dictionary<
+                    (byte Kind, int Identity), uint>(readRoots.Count);
+                foreach (var root in readRoots)
+                {
+                    var rootRow = checked((uint)(
+                        predicateReadRoots.Count + 1));
+                    predicateReadRoots.Add(new TrRmPredicateReadRootRow(
+                        root.Kind, checked((uint)root.Identity)));
+                    rootRowsByIdentity.Add(root, rootRow);
+                }
+
+                predicateReadFootprints.Add(
+                    new TrRmPredicateReadFootprintRow(firstRootRow,
+                        readRoots.Count, 0, 0));
+                var graphRootNode = BuildGeneralPredicateNode(function,
+                    clause.Predicate, rootRowsByIdentity, clause.Phase);
+                predicateGraphs.Add(new TrRmPredicateGraphRow(
+                    graphRootNode, footprintRow));
+
+                var predicatePayload = new byte[12];
+                predicatePayload[0] = (byte)clause.Phase;
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    predicatePayload.AsSpan(4),
+                    clause.PhaseLocalOrdinal);
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    predicatePayload.AsSpan(8),
+                    checked((uint)graphRow));
+                contracts.Add(new TrRmContractRow(owner, 0x0B,
+                    predicatePayload));
             }
         }
 
@@ -4281,11 +4678,18 @@ public static partial class TrRmExecutableCompiler
                 || function.NativeFunctionPointerType is not null || hasNativeVTable
                 || !standardOutputSelectors.IsEmpty
                 || !generalOutputStatePredicates.IsEmpty
+                || !function.DeclarationContractClauses.IsEmpty
                     ? contracts.Count + 1 : 0;
             if (effectMask != 0)
             {
                 contracts.Add(new TrRmContractRow(0x1600_0000u | (uint)(index + 1), 1,
                     s_effectPayloads[effectMask]));
+            }
+            if (emitsConstruction2DeclarationPredicateGraphs
+                && !function.DeclarationContractClauses.IsEmpty)
+            {
+                AddGeneralDeclarationContractGraphs(function,
+                    0x1600_0000u | checked((uint)(index + 1)));
             }
             if (function.DirectNativeImport is DirectNativeImport nativeImport)
             {
