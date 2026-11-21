@@ -1594,6 +1594,76 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
     }
 
     [Test]
+    public async Task L1PointerReadEvaluatesPointerProducingCallOnceAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+
+        const string moduleIdentity = "l1p-pointer-producing-call";
+        const string l1pSchemaIdentity
+            = "trrm/1-draft-local-aggregate-layout-execution-pointer-loads-1";
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            struct Snapshot {
+                public mut int32 Value;
+                public Snapshot(int32 value) { Value = value; }
+            }
+            unsafe ptr<Snapshot> SelectSnapshot(
+                ptr<Snapshot> first, ptr<Snapshot> second, int32 selection) {
+                if (selection == 0) { return first; }
+                return second;
+            }
+            public int32 Main() {
+                mut Snapshot first = new Snapshot(42);
+                mut Snapshot second = new Snapshot(99);
+                mut int32 selection = 0;
+                unsafe {
+                    Snapshot captured = *SelectSnapshot(
+                        &first, &second, selection++);
+                    if (selection != 1) { return -1; }
+                    return captured.Value;
+                }
+            }
+            """), new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, l1pSchemaIdentity,
+            moduleTargetRequirement: 1);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(l1pSchemaIdentity, artifact),
+            moduleIdentity, []);
+        var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
+            moduleIdentity + "-reemitted", l1pSchemaIdentity,
+            moduleTargetRequirement: 1);
+        var reemittedIdentity = moduleIdentity + "-reemitted";
+        var reemittedInput = new TrRmStandardArtifactInput(
+            l1pSchemaIdentity, reemitted);
+        Assert.That(NativeModuleCompiler.ExecuteStandard(reemittedInput,
+            reemittedIdentity, [], NativeRuntimePolicy.FailFast),
+            Is.EqualTo(42));
+        var image = NativeModuleCompiler.EmitStandardExecutable(
+            reemittedInput, reemittedIdentity, [],
+            NativeRuntimePolicy.FailFast);
+        var directory = TestArtifactPaths.CreateDirectory(
+            "terrum-l1p-pointer-producing-call-");
+        try
+        {
+            await AssertNativeImageExitCodeAsync(image,
+                Path.Combine(directory, "program.exe"),
+                reemittedIdentity, 42).ConfigureAwait(true);
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
     public async Task L1PointerLoadLinksImportedAggregateThroughStandardJitAndAotAsync()
     {
         Assume.That(OperatingSystem.IsWindows()
