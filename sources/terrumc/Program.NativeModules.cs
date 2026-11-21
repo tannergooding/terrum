@@ -14,8 +14,8 @@ namespace Terrum.Tools;
 
 internal static partial class Program
 {
-    private const string NativeModuleUsage = "Usage: terrumc compile-native producer <source> <identity> --export <name> [--export <name>] [--source <source>] -o <producer.trmn> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] [--corelib] [--json]; "
-        + "terrumc compile-native consumer <source> <producer.trmn> [--source <source>] -o <consumer.trmn> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] [--json]; "
+    private const string NativeModuleUsage = "Usage: terrumc compile-native producer <source> <identity> --export <name> [--export <name>] [--source <source>] -o <producer.trmn> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] [--private-schema <exact-schema-identity>] [--corelib] [--json]; "
+        + "terrumc compile-native consumer <source> <producer.trmn> [--source <source>] -o <consumer.trmn> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] [--private-schema <exact-schema-identity>] [--json]; "
         + "terrumc validate-native <consumer.trmn> <producer.trmn> [--json]; "
         + "terrumc run-native <consumer.trmn> <producer.trmn> --runtime <fail-fast|checked-exceptions> [--json]";
 
@@ -34,10 +34,24 @@ internal static partial class Program
             {
                 if (!TryReadModuleOptions(args, count, out var paths, out var exports, out var output,
                     out var runtimePolicy, out var sourceArithmeticProfile, out var coreLibrary,
-                    out _, out _))
+                    out _, out _, out var privateSchemaIdentity))
                 {
                     WriteInputError(json, "TRM2000", NativeModuleUsage);
                     return 2;
+                }
+                if (privateSchemaIdentity is not null)
+                {
+                    try
+                    {
+                        _ = ModuleCompiler.GetPrivateSchemaFormatVersion(
+                            privateSchemaIdentity);
+                    }
+                    catch (ModuleContractException exception)
+                    {
+                        WriteInputError(json, "TRM2000",
+                            exception.Message);
+                        return 2;
+                    }
                 }
                 var producer = args[1] == "producer";
                 var outputPath = Path.GetFullPath(output);
@@ -49,14 +63,20 @@ internal static partial class Program
                 }
                 var snapshots = ReadModuleSources(paths);
                 var reference = producer ? null : ReadModuleFile(args[3], 16 * 1024 * 1024);
+                var declarations = reference is null ? null
+                    : privateSchemaIdentity is null
+                        ? NativeModuleCompiler.CreateReference(reference)
+                        : NativeModuleCompiler.CreateReferenceWithSchema(
+                            reference, privateSchemaIdentity);
                 var options = new CompilationOptions {
                     SourceArithmeticProfile = sourceArithmeticProfile,
                     RuntimePolicy = (BoundRuntimePolicy)runtimePolicy,
                 };
                 var compilation = coreLibrary
                     ? Compilation.CreateCoreLibrary(snapshots, options)
-                    : reference is null ? Compilation.CreateLibrary(snapshots, options)
-                    : Compilation.Create(snapshots, NativeModuleCompiler.CreateReference(reference), options);
+                    : declarations is null
+                        ? Compilation.CreateLibrary(snapshots, options)
+                        : Compilation.Create(snapshots, declarations, options);
                 if (compilation.HasErrors)
                 {
                     WriteCompilationResult(args[0], compilation, compilation.SourceDiagnostics, false, null, null, json,
@@ -68,8 +88,18 @@ internal static partial class Program
                     throw new InvalidOperationException("A successful compilation must contain a bound program.");
                 }
                 var bytes = reference is null
-                    ? NativeModuleCompiler.CreateProducer(program, exports, args[3], runtimePolicy)
-                    : NativeModuleCompiler.CreateConsumer(program, reference, runtimePolicy);
+                    ? privateSchemaIdentity is null
+                        ? NativeModuleCompiler.CreateProducer(program, exports,
+                            args[3], runtimePolicy)
+                        : NativeModuleCompiler.CreateProducerWithSchema(
+                            program, exports, args[3], privateSchemaIdentity,
+                            runtimePolicy)
+                    : privateSchemaIdentity is null
+                        ? NativeModuleCompiler.CreateConsumer(program,
+                            reference, runtimePolicy)
+                        : NativeModuleCompiler.CreateConsumerWithSchema(
+                            program, reference, privateSchemaIdentity,
+                            runtimePolicy);
                 var info = NativeModuleCompiler.Inspect(bytes);
                 WriteArtifact(outputPath, bytes);
                 if (json)

@@ -164,6 +164,23 @@ public static partial class ModuleCompiler
         return ReadProviderContractSnapshot(producerBytes).GetReference();
     }
 
+    /// <summary>Reads producer declarations under one exact selected private schema.</summary>
+    /// <param name="producerBytes">The selected producer artifact.</param>
+    /// <param name="schemaIdentity">The exact private schema identity.</param>
+    /// <returns>The validated producer declarations and value layouts.</returns>
+    public static CompilationReference CreateReferenceWithSchema(
+        byte[] producerBytes, string schemaIdentity)
+    {
+        var formatVersion = GetPrivateSchemaFormatVersion(schemaIdentity);
+        var snapshot = ReadProviderContractSnapshot(producerBytes);
+        if (snapshot.ParsedModule.FormatVersion != formatVersion)
+        {
+            throw new ModuleContractException(
+                "The explicitly selected private schema does not match the producer revision.");
+        }
+        return snapshot.GetReference();
+    }
+
     private static CompilationReference CreateReference(Module producer) =>
         CreateReference(producer, out _);
 
@@ -2573,6 +2590,7 @@ public static partial class ModuleCompiler
         var consumer = Read(consumerBytes, expectedConsumer: true);
         var producer = Read(producerBytes, expectedConsumer: false);
         ValidateProducer(producer);
+        ValidatePrivateSchemaComposition(consumer, producer);
         if (consumer.RuntimePolicy != producer.RuntimePolicy)
         {
             throw new ModuleContractException("Consumer and producer checked-failure policies differ.");
@@ -2592,6 +2610,8 @@ public static partial class ModuleCompiler
     internal static BoundProgram Link(ConsumerContractSnapshot consumer, ProviderContractSnapshot producer)
     {
         producer.Validate();
+        ValidatePrivateSchemaComposition(consumer.ParsedModule,
+            producer.ParsedModule);
         if (consumer.RuntimePolicy != producer.RuntimePolicy)
         {
             throw new ModuleContractException("Consumer and producer checked-failure policies differ.");
@@ -2606,6 +2626,21 @@ public static partial class ModuleCompiler
         }
         return Link(consumer.ParsedModule, producer.ParsedModule,
             producer.GetReference(), allowPrivateVTableSlotChanges: false);
+    }
+
+    private static void ValidatePrivateSchemaComposition(Module consumer,
+        Module producer)
+    {
+        var foreignInterfacePrivateVersion
+            = GetPrivateSchemaFormatVersion(
+                ForeignInterfacePrivateSchemaIdentity);
+        if ((consumer.FormatVersion == foreignInterfacePrivateVersion
+                || producer.FormatVersion == foreignInterfacePrivateVersion)
+            && consumer.FormatVersion != producer.FormatVersion)
+        {
+            throw new ModuleContractException(
+                "PF111 consumers and providers must use the exact same private schema revision.");
+        }
     }
 
     private static BoundProgram Link(Module consumer, Module producer,

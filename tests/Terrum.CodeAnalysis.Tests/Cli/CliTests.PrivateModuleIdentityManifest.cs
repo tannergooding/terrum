@@ -1,6 +1,7 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using System.Buffers.Binary;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
@@ -155,6 +156,150 @@ internal sealed partial class CliTests
         {
             await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
                 .ConfigureAwait(false);
+        }
+    }
+
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
+    public async Task CompileModulePrivateSchemaSelectionPreservesRevisionBoundariesAsync(
+        string policy)
+    {
+        const string schemaIdentity
+            = "terrum/private-semantic-111-foreign-native-interfaces-1";
+        const string providerSource
+            = "public int32 Read(int32 value) { return value + 1; }";
+        const string consumerSource
+            = "public int32 Main() { return Read(41); }";
+        var directory = TestArtifactPaths.CreateDirectory(
+            "terrum-private-schema-selection-");
+        var providerSourcePath = Path.Combine(directory, "provider.terrum");
+        var consumerSourcePath = Path.Combine(directory, "consumer.terrum");
+        var selectedProducerPath = Path.Combine(directory,
+            "selected-producer.trm");
+        var defaultProducerPath = Path.Combine(directory,
+            "default-producer.trm");
+        var selectedConsumerPath = Path.Combine(directory,
+            "selected-consumer.trm");
+        var rejectedConsumerPath = Path.Combine(directory,
+            "rejected-consumer.trm");
+        var invalidSchemaOutputPath = Path.Combine(directory,
+            "invalid-schema.trm");
+        byte[] retained = [0xA5, 0x5A];
+        try
+        {
+            await File.WriteAllTextAsync(providerSourcePath, providerSource,
+                new UTF8Encoding(false)).ConfigureAwait(true);
+            await File.WriteAllTextAsync(consumerSourcePath, consumerSource,
+                new UTF8Encoding(false)).ConfigureAwait(true);
+
+            var (selectedExit, selectedOutput, selectedError)
+                = await RunAsync([], "compile-module", "producer",
+                    providerSourcePath, "Read", "-o", selectedProducerPath,
+                    "--runtime", policy, "--private-schema", schemaIdentity,
+                    "--json").ConfigureAwait(true);
+            Assert.That(selectedExit, Is.Zero,
+                selectedOutput + selectedError);
+            Assert.That(selectedError, Is.Empty);
+            var selectedProducer
+                = await File.ReadAllBytesAsync(selectedProducerPath)
+                    .ConfigureAwait(true);
+            Assert.That(BinaryPrimitives.ReadInt32LittleEndian(
+                selectedProducer.AsSpan(sizeof(int), sizeof(int))),
+                Is.EqualTo(111));
+
+            var (defaultExit, defaultOutput, defaultError) = await RunAsync(
+                [], "compile-module", "producer", providerSourcePath, "Read",
+                "-o", defaultProducerPath, "--runtime", policy, "--json")
+                .ConfigureAwait(true);
+            Assert.That(defaultExit, Is.Zero,
+                defaultOutput + defaultError);
+            var defaultProducer
+                = await File.ReadAllBytesAsync(defaultProducerPath)
+                    .ConfigureAwait(true);
+            Assert.That(BinaryPrimitives.ReadInt32LittleEndian(
+                defaultProducer.AsSpan(sizeof(int), sizeof(int))),
+                Is.AnyOf(104, 106));
+
+            var (consumerExit, consumerOutput, consumerError)
+                = await RunAsync([], "compile-module", "consumer",
+                    consumerSourcePath, selectedProducerPath, "-o",
+                    selectedConsumerPath, "--runtime", policy,
+                    "--private-schema", schemaIdentity, "--json")
+                    .ConfigureAwait(true);
+            Assert.That(consumerExit, Is.Zero,
+                consumerOutput + consumerError);
+            Assert.That(consumerError, Is.Empty);
+            var selectedConsumer
+                = await File.ReadAllBytesAsync(selectedConsumerPath)
+                    .ConfigureAwait(true);
+            Assert.That(BinaryPrimitives.ReadInt32LittleEndian(
+                selectedConsumer.AsSpan(sizeof(int), sizeof(int))),
+                Is.EqualTo(111));
+
+            var (runExit, _, runError) = await RunAsync([],
+                "run-module", selectedConsumerPath, selectedProducerPath,
+                "--runtime", policy).ConfigureAwait(true);
+            Assert.That(runExit, Is.EqualTo(42), runError);
+            Assert.That(runError, Is.Empty);
+
+            await File.WriteAllBytesAsync(rejectedConsumerPath, retained)
+                .ConfigureAwait(true);
+            var (implicitExit, implicitOutput, implicitError)
+                = await RunAsync([], "compile-module", "consumer",
+                    consumerSourcePath, selectedProducerPath, "-o",
+                    rejectedConsumerPath, "--runtime", policy, "--json")
+                    .ConfigureAwait(true);
+            Assert.That(implicitExit, Is.EqualTo(1),
+                $"{implicitOutput}{Environment.NewLine}{implicitError}");
+            Assert.That(implicitError, Is.Empty);
+            using (var document = JsonDocument.Parse(implicitOutput))
+            {
+                Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM5002"));
+            }
+            Assert.That(await File.ReadAllBytesAsync(rejectedConsumerPath)
+                .ConfigureAwait(true), Is.EqualTo(retained));
+
+            var (mismatchExit, mismatchOutput, mismatchError)
+                = await RunAsync([], "compile-module", "consumer",
+                    consumerSourcePath, defaultProducerPath, "-o",
+                    rejectedConsumerPath, "--runtime", policy,
+                    "--private-schema", schemaIdentity, "--json")
+                    .ConfigureAwait(true);
+            Assert.That(mismatchExit, Is.EqualTo(1),
+                $"{mismatchOutput}{Environment.NewLine}{mismatchError}");
+            Assert.That(mismatchError, Is.Empty);
+            using (var document = JsonDocument.Parse(mismatchOutput))
+            {
+                Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM5002"));
+            }
+            Assert.That(await File.ReadAllBytesAsync(rejectedConsumerPath)
+                .ConfigureAwait(true), Is.EqualTo(retained));
+
+            await File.WriteAllBytesAsync(invalidSchemaOutputPath, retained)
+                .ConfigureAwait(true);
+            var (invalidExit, invalidOutput, invalidError) = await RunAsync(
+                [], "compile-module", "producer", providerSourcePath, "Read",
+                "-o", invalidSchemaOutputPath, "--runtime", policy,
+                "--private-schema",
+                "terrum/private-semantic-111-foreign-native-interfaces",
+                "--json").ConfigureAwait(true);
+            Assert.That(invalidExit, Is.EqualTo(2),
+                $"{invalidOutput}{Environment.NewLine}{invalidError}");
+            Assert.That(invalidError, Is.Empty);
+            using (var document = JsonDocument.Parse(invalidOutput))
+            {
+                Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM2000"));
+            }
+            Assert.That(await File.ReadAllBytesAsync(invalidSchemaOutputPath)
+                .ConfigureAwait(true), Is.EqualTo(retained));
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
+                .ConfigureAwait(true);
         }
     }
 

@@ -130,6 +130,7 @@ internal sealed class PrivateRevision106BodyTests
         const string providerSource = """
             public struct Cell {
                 public int32 Value;
+                public Cell(int32 value) { Value = value; }
             }
 
             public int32 Read(Cell value) { return value.Value; }
@@ -160,9 +161,9 @@ internal sealed class PrivateRevision106BodyTests
         Assert.That(referenceCell.DeclaredCopyEvidence,
             Is.EqualTo(sourceCell.DeclaredCopyEvidence == true));
 
-        var consumerCompilation = Compilation.CreateLibrary(
+        var consumerCompilation = Compilation.Create(
             SyntaxTree.Parse("""
-                public int32 Use(Cell value) { return Read(value); }
+                int32 Main() { return Read(new Cell(41)); }
                 """), reference);
         Assert.That(consumerCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine,
@@ -218,6 +219,141 @@ internal sealed class PrivateRevision106BodyTests
         _ = Assert.Throws<ModuleContractException>(() =>
             ModuleCompiler.CreateReferenceSetWithSchema([first, legacySecond],
                 schemaIdentity));
+    }
+
+    [Test]
+    public void PF111NativePackageSetAndGraphSelectorsPreserveExactRevision()
+    {
+        const string schemaIdentity
+            = "terrum/private-semantic-111-foreign-native-interfaces-1";
+        const NativeRuntimePolicy runtimePolicy = NativeRuntimePolicy.FailFast;
+        var firstCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "public int32 Read(int32 value) { return value + 1; }"));
+        Assert.That(firstCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, firstCompilation.Diagnostics));
+        var firstProgram = firstCompilation.Program
+            ?? throw new AssertionException("Expected the first provider.");
+        var firstPackage = NativeModuleCompiler.CreateProducerWithSchema(
+            firstProgram, ["Read"], "PF111First", schemaIdentity,
+            runtimePolicy);
+        var firstReference = NativeModuleCompiler.CreateReferenceWithSchema(
+            firstPackage, schemaIdentity);
+        var directConsumerCompilation = Compilation.Create(
+            SyntaxTree.Parse("int32 Main() { return Read(41); }"),
+            firstReference);
+        Assert.That(directConsumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                directConsumerCompilation.Diagnostics));
+        var directConsumerProgram = directConsumerCompilation.Program
+            ?? throw new AssertionException(
+                "Expected the direct native consumer.");
+        _ = Assert.Throws<ModuleContractException>(() =>
+            NativeModuleCompiler.CreateConsumer(directConsumerProgram,
+                firstPackage, runtimePolicy));
+        var directConsumer = NativeModuleCompiler.CreateConsumerWithSchema(
+            directConsumerProgram, firstPackage, schemaIdentity,
+            runtimePolicy);
+        NativeModuleCompiler.Validate(directConsumer, firstPackage);
+
+        var secondCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "public int32 Double(int32 value) { return value * 2; }"));
+        Assert.That(secondCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, secondCompilation.Diagnostics));
+        var secondPackage = NativeModuleCompiler.CreateProducerWithSchema(
+            secondCompilation.Program
+                ?? throw new AssertionException("Expected the second provider."),
+            ["Double"], "PF111Second", schemaIdentity, runtimePolicy);
+        var referenceSet = NativeModuleCompiler.CreateReferenceSetWithSchema(
+            [firstPackage, secondPackage], schemaIdentity);
+        var artifactReferenceSet = NativeModuleCompiler.CreateReferenceSet(
+            [firstPackage, secondPackage]);
+        Assert.That(artifactReferenceSet.Functions.Select(
+                static function => function.Name).OrderBy(static name => name,
+                StringComparer.Ordinal),
+            Is.EqualTo(new[] { "Double", "Read" }));
+        Assert.That(referenceSet.Functions.Select(static function =>
+                function.Name).OrderBy(static name => name,
+                StringComparer.Ordinal),
+            Is.EqualTo(new[] { "Double", "Read" }));
+        var legacySecondPackage = NativeModuleCompiler.CreateProducer(
+            secondCompilation.Program
+                ?? throw new AssertionException("Expected the second provider."),
+            ["Double"], "PF111Legacy", runtimePolicy);
+        _ = Assert.Throws<ModuleContractException>(() =>
+            NativeModuleCompiler.CreateReferenceSet(
+                [firstPackage, legacySecondPackage]));
+        _ = Assert.Throws<ModuleContractException>(() =>
+            NativeModuleCompiler.CreateReferenceSetWithSchema(
+                [firstPackage, legacySecondPackage], schemaIdentity));
+        var setConsumerCompilation = Compilation.Create(SyntaxTree.Parse(
+            "int32 Main() { return Read(Double(20)); }"), referenceSet);
+        Assert.That(setConsumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                setConsumerCompilation.Diagnostics));
+        var setConsumerProgram = setConsumerCompilation.Program
+            ?? throw new AssertionException(
+                "Expected a set consumer program.");
+        var setConsumer = NativeModuleCompiler.CreateConsumerSetWithSchema(
+            setConsumerProgram,
+            [firstPackage, secondPackage], schemaIdentity, runtimePolicy);
+        _ = Assert.Throws<ModuleContractException>(() =>
+            NativeModuleCompiler.CreateConsumerSet(
+                setConsumerProgram,
+                [firstPackage, secondPackage], runtimePolicy));
+        _ = Assert.Throws<ModuleContractException>(() =>
+            NativeModuleCompiler.CreateConsumerSetWithSchema(
+                setConsumerProgram, [firstPackage, legacySecondPackage],
+                schemaIdentity, runtimePolicy));
+        NativeModuleCompiler.ValidateConsumerSet(setConsumer,
+            [firstPackage, secondPackage]);
+
+        var graphProducerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(
+                "public int32 Use(int32 value) { return Read(value); }"),
+            firstReference);
+        Assert.That(graphProducerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                graphProducerCompilation.Diagnostics));
+        var graphProducerProgram = graphProducerCompilation.Program
+            ?? throw new AssertionException("Expected a graph producer.");
+        _ = Assert.Throws<ModuleContractException>(() =>
+            NativeModuleCompiler.CreateGraphProducer(graphProducerProgram,
+                ["Use"], "PF111GraphUnselected", [firstPackage],
+                runtimePolicy));
+        var graphProducer = NativeModuleCompiler
+            .CreateGraphProducerWithSchema(
+                graphProducerProgram, ["Use"], "PF111Graph",
+                [firstPackage], schemaIdentity, runtimePolicy);
+        _ = Assert.Throws<ModuleContractException>(() =>
+            NativeModuleCompiler.CreateGraphReferenceWithSchema(
+                [graphProducer, firstPackage, legacySecondPackage],
+                schemaIdentity));
+        var graphReference = NativeModuleCompiler
+            .CreateGraphReferenceWithSchema(
+                [graphProducer, firstPackage], schemaIdentity);
+        var artifactGraphReference = NativeModuleCompiler.CreateGraphReference(
+            [graphProducer, firstPackage]);
+        Assert.That(artifactGraphReference.Functions.Select(
+                static function => function.Name).OrderBy(static name => name,
+                StringComparer.Ordinal),
+            Is.EqualTo(new[] { "Read", "Use" }));
+        var graphConsumerCompilation = Compilation.Create(
+            SyntaxTree.Parse("int32 Main() { return Use(41); }"),
+            graphReference);
+        Assert.That(graphConsumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                graphConsumerCompilation.Diagnostics));
+        var graphConsumerProgram = graphConsumerCompilation.Program
+            ?? throw new AssertionException("Expected a graph consumer.");
+        _ = Assert.Throws<ModuleContractException>(() =>
+            NativeModuleCompiler.CreateGraphConsumer(graphConsumerProgram,
+                [graphProducer, firstPackage], runtimePolicy));
+        var graphConsumer = NativeModuleCompiler
+            .CreateGraphConsumerWithSchema(
+                graphConsumerProgram, [graphProducer, firstPackage],
+                schemaIdentity, runtimePolicy);
+        NativeModuleCompiler.ValidateGraph(graphConsumer,
+            [graphProducer, firstPackage]);
     }
 
     [Test]

@@ -315,6 +315,24 @@ combinations fail before output replacement. The option is rejected by other
 commands and does not extend
 `terrum.cli/1`.
 
+## Provisional private semantic schema selection
+
+The private `compile-module producer`/`consumer` and `compile-native
+producer`/`consumer` routes accept one exact
+`--private-schema <schema-identity>` selector under the provisional,
+unapproved [PF111 candidate](../proposals/private-foreign-native-interface-persistence.md).
+Its current candidate identity is
+`terrum/private-semantic-111-foreign-native-interfaces-1`; it selects the
+inner private Contract revision, not the native package's outer version.
+Selected consumers validate that the positional producer uses the same
+revision before exposing its declarations. Omitting the option preserves
+legacy default selection and never upgrades a PF111 consumer implicitly.
+Artifact-only `link-module`, `run-module`, `validate-native` and `run-native`
+do not accept the selector; they dispatch through the embedded revision.
+The selector and revision dispatch do not establish complete private FNI
+owner, member, call, or runtime support; those implementation paths remain in
+progress.
+
 ## Provisional normal-backing agreement selection
 
 The source `analyze`, `build`, `build-native-import` and `jit` commands accept

@@ -1085,14 +1085,43 @@ public static partial class ModuleCompiler
     internal static byte[] CreateConsumerSet(BoundProgram program,
         IReadOnlyList<byte[]> producers, PrivateModuleIdentityInputs? identityInputs)
     {
-        var reference = CreateReferenceSet(producers);
+        var modules = ReadSet(producers);
+        if (modules.Any(static module =>
+                module.FormatVersion
+                    == ForeignInterfacePrivateVersion))
+        {
+            throw new ModuleContractException(
+                "PF111 consumer sets require an explicit private schema selection.");
+        }
+        var reference = CreateReferenceSet(modules);
         return CreateConsumerAgainstReference(program, reference,
             allowManagedParticipant: true, identityInputs: identityInputs);
     }
 
+    internal static byte[] CreateConsumerSetWithSchema(
+        BoundProgram program, IReadOnlyList<byte[]> producers,
+        string schemaIdentity,
+        PrivateModuleIdentityInputs? identityInputs = null)
+    {
+        var selectedFormatVersion
+            = GetPrivateSchemaFormatVersion(schemaIdentity);
+        var modules = ReadSet(producers);
+        if (modules.Any(module =>
+                module.FormatVersion != selectedFormatVersion))
+        {
+            throw new ModuleContractException(
+                "A private set provider does not match the explicitly selected schema.");
+        }
+        var reference = CreateReferenceSet(modules);
+        return CreateConsumerAgainstReference(program, reference,
+            allowManagedParticipant: true, identityInputs: identityInputs,
+            selectedFormatVersion: selectedFormatVersion);
+    }
+
     internal static byte[] CreateConsumerAgainstReference(BoundProgram program, CompilationReference reference,
         bool allowManagedParticipant = false,
-        PrivateModuleIdentityInputs? identityInputs = null)
+        PrivateModuleIdentityInputs? identityInputs = null,
+        int? selectedFormatVersion = null)
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentNullException.ThrowIfNull(reference);
@@ -1382,7 +1411,7 @@ public static partial class ModuleCompiler
             NominalTypeOrigins = BuildPrivateNominalTypeOrigins(sourceProgram,
                 module, identityInputs),
         };
-        var result = Write(module, program);
+        var result = Write(module, program, selectedFormatVersion);
         ValidateConsumerAgainstReference(result, reference);
         return result;
     }

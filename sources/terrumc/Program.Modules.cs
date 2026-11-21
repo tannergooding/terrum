@@ -17,8 +17,8 @@ namespace Terrum.Tools;
 
 internal static partial class Program
 {
-    private const string ModuleUsage = "Usage: terrumc compile-module producer <source> <export> [--source <source>] [--export <export>] -o <artifact.trm> [--runtime <fail-fast|checked-exceptions>] [--arithmetic-profile <development|release>] [--layout-core-manifest <path>] [--private-identity-manifest <path>] [--corelib] [--json]; "
-        + "terrumc compile-module consumer <source> <producer.trm> [--source <source>] -o <artifact.trm> [--runtime <fail-fast|checked-exceptions>] [--arithmetic-profile <development|release>] [--layout-core-manifest <path>] [--private-identity-manifest <path>] [--json]; "
+    private const string ModuleUsage = "Usage: terrumc compile-module producer <source> <export> [--source <source>] [--export <export>] -o <artifact.trm> [--runtime <fail-fast|checked-exceptions>] [--arithmetic-profile <development|release>] [--layout-core-manifest <path>] [--private-identity-manifest <path>] [--private-schema <exact-schema-identity>] [--corelib] [--json]; "
+        + "terrumc compile-module consumer <source> <producer.trm> [--source <source>] -o <artifact.trm> [--runtime <fail-fast|checked-exceptions>] [--arithmetic-profile <development|release>] [--layout-core-manifest <path>] [--private-identity-manifest <path>] [--private-schema <exact-schema-identity>] [--json]; "
         + "terrumc link-module <consumer.trm> <producer.trm> -o <output.exe> --runtime <fail-fast|checked-exceptions> [--json]; "
         + "terrumc run-module <consumer.trm> <producer.trm> --runtime <fail-fast|checked-exceptions> [--json]";
 
@@ -43,13 +43,15 @@ internal static partial class Program
             var sourceArithmeticProfile = SourceArithmeticProfile.Development;
             LayoutCoreRegistrationSet? layoutCoreRegistration = null;
             LoadedLayoutCoreManifest? layoutCoreManifest = null;
+            string? privateSchemaIdentity = null;
             if (count >= 6 && args[0] == "compile-module"
                 && (args[1] is "producer" or "consumer"))
             {
                 if (!TryReadModuleOptions(args, count, out var paths, out var exports, out output,
                     out selectedPolicy, out sourceArithmeticProfile, out var coreLibrary,
                     out var layoutCoreManifestPath,
-                    out var privateIdentityManifestPath))
+                    out var privateIdentityManifestPath,
+                    out privateSchemaIdentity))
                 {
                     WriteInputError(json, "TRM2000", ModuleUsage);
                     return 2;
@@ -104,6 +106,20 @@ internal static partial class Program
                     {
                         WriteInputError(json, "TRM2002",
                             $"Could not validate private identity manifest path identity: {exception.Message}");
+                        return 2;
+                    }
+                }
+                if (privateSchemaIdentity is not null)
+                {
+                    try
+                    {
+                        _ = ModuleCompiler.GetPrivateSchemaFormatVersion(
+                            privateSchemaIdentity);
+                    }
+                    catch (ModuleContractException exception)
+                    {
+                        WriteInputError(json, "TRM2000",
+                            exception.Message);
                         return 2;
                     }
                 }
@@ -201,7 +217,11 @@ internal static partial class Program
                         "The producer artifact does not match the captured private identity manifest snapshot.");
                     return 2;
                 }
-                var declarations = reference is null ? null : ModuleCompiler.CreateReference(reference);
+                var declarations = reference is null ? null
+                    : privateSchemaIdentity is null
+                        ? ModuleCompiler.CreateReference(reference)
+                        : ModuleCompiler.CreateReferenceWithSchema(reference,
+                            privateSchemaIdentity);
                 var options = new CompilationOptions {
                     SourceArithmeticProfile = sourceArithmeticProfile,
                     RuntimePolicy = (BoundRuntimePolicy)selectedPolicy,
@@ -243,12 +263,21 @@ internal static partial class Program
                     }
                 }
                 result = args[1] switch {
+                    "producer" when privateSchemaIdentity is not null
+                        => ModuleCompiler.CreateProducerWithSchema(program,
+                            exports, privateSchemaIdentity, identityInputs),
                     "producer" when identityInputs is null
                         => ModuleCompiler.CreateProducer(program, exports),
                     "producer" => ModuleCompiler.CreateProducer(program,
                         exports, identityInputs
                             ?? throw new InvalidOperationException(
                                 "Producer identity inputs are missing.")),
+                    "consumer" when privateSchemaIdentity is not null
+                        => ModuleCompiler.CreateConsumerWithSchema(program,
+                            reference
+                                ?? throw new InvalidOperationException(
+                                    "Consumer reference is missing."),
+                            privateSchemaIdentity, identityInputs),
                     "consumer" when identityInputs is null
                         => ModuleCompiler.CreateConsumer(program,
                             reference ?? throw new InvalidOperationException("Consumer reference is missing.")),
@@ -321,7 +350,8 @@ internal static partial class Program
         out List<string> exports, out string output, out NativeRuntimePolicy runtimePolicy,
         out SourceArithmeticProfile sourceArithmeticProfile, out bool coreLibrary,
         out string? layoutCoreManifestPath,
-        out string? privateIdentityManifestPath)
+        out string? privateIdentityManifestPath,
+        out string? privateSchemaIdentity)
     {
         sources = [args[2]];
         var native = args[0] == "compile-native";
@@ -332,6 +362,7 @@ internal static partial class Program
         coreLibrary = false;
         layoutCoreManifestPath = null;
         privateIdentityManifestPath = null;
+        privateSchemaIdentity = null;
         var hasOutput = false;
         var hasRuntime = false;
         var hasArithmeticProfile = false;
@@ -394,6 +425,13 @@ internal static partial class Program
                     {
                         return false;
                     }
+                    break;
+                case "--private-schema" when (args[0] is "compile-module"
+                        or "compile-native")
+                    && privateSchemaIdentity is null
+                    && value.Length != 0 && value != "-"
+                    && !value.StartsWith('-', StringComparison.Ordinal):
+                    privateSchemaIdentity = value;
                     break;
                 default:
                     return false;

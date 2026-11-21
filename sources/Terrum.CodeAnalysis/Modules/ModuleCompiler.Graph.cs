@@ -704,7 +704,8 @@ public static partial class ModuleCompiler
     /// <summary>Stores a verified DLL implementation with symbolic imports and no fabricated entry point.</summary>
     internal static byte[] CreateGraphLibrary(BoundProgram program, IReadOnlyList<string> exports,
         CompilationReference dependencies,
-        PrivateModuleIdentityInputs? identityInputs = null)
+        PrivateModuleIdentityInputs? identityInputs = null,
+        int? selectedFormatVersion = null)
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentNullException.ThrowIfNull(exports);
@@ -1014,10 +1015,17 @@ public static partial class ModuleCompiler
         };
         ValidatePrivateNominalImportsAgainstReference(module,
             dependencies);
-        var contract = Write(module, program);
+        var contract = Write(module, program, selectedFormatVersion);
         ValidateGraphLibrary(contract, exports, dependencies, allowImportedCleanup: true);
         return contract;
     }
+
+    internal static byte[] CreateGraphLibraryWithSchema(
+        BoundProgram program, IReadOnlyList<string> exports,
+        CompilationReference dependencies, string schemaIdentity,
+        PrivateModuleIdentityInputs? identityInputs = null)
+        => CreateGraphLibrary(program, exports, dependencies, identityInputs,
+            GetPrivateSchemaFormatVersion(schemaIdentity));
 
     /// <summary>Reads exported declarations from a graph library, not its implementation bodies.</summary>
     internal static CompilationReference CreateGraphReference(byte[] contract, IReadOnlyList<string> exports,

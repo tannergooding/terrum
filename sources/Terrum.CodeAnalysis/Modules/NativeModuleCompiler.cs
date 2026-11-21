@@ -45,7 +45,7 @@ public static partial class NativeModuleCompiler
     public static byte[] CreateProducer(BoundProgram program, IReadOnlyList<string> exports, string identity,
         NativeRuntimePolicy runtimePolicy) =>
         CreateProducerCore(program, exports, identity, runtimePolicy,
-            identityInputs: null);
+            identityInputs: null, privateSchemaIdentity: null);
 
     /// <summary>Creates a native producer with explicit nominal declaration identities.</summary>
     /// <param name="program">The verified producer program snapshot.</param>
@@ -61,18 +61,41 @@ public static partial class NativeModuleCompiler
     {
         ArgumentNullException.ThrowIfNull(identityInputs);
         return CreateProducerCore(program, exports, identity,
-            runtimePolicy, identityInputs);
+            runtimePolicy, identityInputs, privateSchemaIdentity: null);
+    }
+
+    /// <summary>Creates a native producer under one exact selected private schema.</summary>
+    /// <param name="program">The verified producer program snapshot.</param>
+    /// <param name="exports">The declarations exported by the package.</param>
+    /// <param name="identity">The producer's logical Module identity.</param>
+    /// <param name="schemaIdentity">The exact private schema identity.</param>
+    /// <param name="runtimePolicy">The selected runtime policy.</param>
+    /// <param name="identityInputs">Optional nominal identities captured for <paramref name="program"/>.</param>
+    /// <returns>The package containing the semantic contract and native DLL.</returns>
+    public static byte[] CreateProducerWithSchema(BoundProgram program,
+        IReadOnlyList<string> exports, string identity, string schemaIdentity,
+        NativeRuntimePolicy runtimePolicy,
+        PrivateModuleIdentityInputs? identityInputs = null)
+    {
+        return CreateProducerCore(program, exports, identity, runtimePolicy,
+            identityInputs, schemaIdentity);
     }
 
     private static byte[] CreateProducerCore(BoundProgram program,
         IReadOnlyList<string> exports, string identity,
         NativeRuntimePolicy runtimePolicy,
-        PrivateModuleIdentityInputs? identityInputs)
+        PrivateModuleIdentityInputs? identityInputs,
+        string? privateSchemaIdentity)
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentNullException.ThrowIfNull(exports);
         CheckIdentity(identity);
         CheckPolicy(runtimePolicy);
+        if (privateSchemaIdentity is not null)
+        {
+            _ = ModuleCompiler.GetPrivateSchemaFormatVersion(
+                privateSchemaIdentity);
+        }
         if (program.Functions.Any(static function => function.IsExternal
                 && function.IsModuleReference && function.DirectNativeImport is not null))
         {
@@ -80,10 +103,13 @@ public static partial class NativeModuleCompiler
                 "Direct native module imports require explicit native module dependencies.");
         }
         var names = exports.ToArray();
-        var contract = identityInputs is null
-            ? ModuleCompiler.CreateProducer(program, names)
-            : ModuleCompiler.CreateProducer(program, names,
-                identityInputs);
+        var contract = privateSchemaIdentity is string selectedSchema
+            ? ModuleCompiler.CreateProducerWithSchema(program, names,
+                selectedSchema, identityInputs)
+            : identityInputs is null
+                ? ModuleCompiler.CreateProducer(program, names)
+                : ModuleCompiler.CreateProducer(program, names,
+                    identityInputs);
         var image = program.Functions.Any(static function => function.DirectNativeImport is not null)
             ? NativeEmitter.EmitLibraryWithNativeImports(program, names, runtimePolicy,
                 containCheckedExceptionsAtExports: false)
@@ -100,11 +126,25 @@ public static partial class NativeModuleCompiler
         return ValidateProducer(package);
     }
 
+    /// <summary>Exposes producer declarations under an exact private schema selection.</summary>
+    /// <param name="producer">The selected producer package.</param>
+    /// <param name="schemaIdentity">The exact private schema identity.</param>
+    /// <returns>The validated producer declarations.</returns>
+    public static CompilationReference CreateReferenceWithSchema(
+        byte[] producer, string schemaIdentity)
+    {
+        _ = ModuleCompiler.GetPrivateSchemaFormatVersion(schemaIdentity);
+        var package = Read(producer);
+        _ = ModuleCompiler.CreateReferenceWithSchema(package.Contract,
+            schemaIdentity);
+        return ValidateProducer(package);
+    }
+
     /// <summary>Stores a verified semantic consumer and a native EXE bound by name to one producer DLL.</summary>
     public static byte[] CreateConsumer(BoundProgram program, byte[] producer,
         NativeRuntimePolicy runtimePolicy) =>
         CreateConsumerCore(program, producer, runtimePolicy,
-            identityInputs: null);
+            identityInputs: null, privateSchemaIdentity: null);
 
     /// <summary>Creates a native consumer with explicit nominal declaration identities.</summary>
     /// <param name="program">The verified consumer program snapshot.</param>
@@ -118,14 +158,36 @@ public static partial class NativeModuleCompiler
     {
         ArgumentNullException.ThrowIfNull(identityInputs);
         return CreateConsumerCore(program, producer, runtimePolicy,
-            identityInputs);
+            identityInputs, privateSchemaIdentity: null);
+    }
+
+    /// <summary>Creates a native consumer under the provider's exact private schema.</summary>
+    /// <param name="program">The verified consumer program snapshot.</param>
+    /// <param name="producer">The selected native producer package.</param>
+    /// <param name="schemaIdentity">The exact private schema identity.</param>
+    /// <param name="runtimePolicy">The selected runtime policy.</param>
+    /// <param name="identityInputs">Optional nominal identities captured for <paramref name="program"/>.</param>
+    /// <returns>The package containing the consumer executable and dependency identity.</returns>
+    public static byte[] CreateConsumerWithSchema(BoundProgram program,
+        byte[] producer, string schemaIdentity,
+        NativeRuntimePolicy runtimePolicy,
+        PrivateModuleIdentityInputs? identityInputs = null)
+    {
+        return CreateConsumerCore(program, producer, runtimePolicy,
+            identityInputs, schemaIdentity);
     }
 
     private static byte[] CreateConsumerCore(BoundProgram program,
         byte[] producer, NativeRuntimePolicy runtimePolicy,
-        PrivateModuleIdentityInputs? identityInputs)
+        PrivateModuleIdentityInputs? identityInputs,
+        string? privateSchemaIdentity)
     {
         ArgumentNullException.ThrowIfNull(program);
+        if (privateSchemaIdentity is not null)
+        {
+            _ = ModuleCompiler.GetPrivateSchemaFormatVersion(
+                privateSchemaIdentity);
+        }
         if (identityInputs is not null && !identityInputs.IsFor(program))
         {
             throw new ArgumentException(
@@ -144,10 +206,13 @@ public static partial class NativeModuleCompiler
         {
             identityInputs = identityInputs.Rebind(sourceProgram, program);
         }
-        var contract = identityInputs is null
-            ? ModuleCompiler.CreateConsumer(program, package.Contract)
-            : ModuleCompiler.CreateConsumer(program, package.Contract,
-                identityInputs);
+        var contract = privateSchemaIdentity is string selectedSchema
+            ? ModuleCompiler.CreateConsumerWithSchema(program,
+                package.Contract, selectedSchema, identityInputs)
+            : identityInputs is null
+                ? ModuleCompiler.CreateConsumer(program, package.Contract)
+                : ModuleCompiler.CreateConsumer(program, package.Contract,
+                    identityInputs);
         var contractSnapshot = ModuleCompiler.ReadConsumerContractSnapshot(contract);
         var directImportExpectations = CreateDirectImportExpectations(
             program, contractSnapshot.ParsedModule.Structures);

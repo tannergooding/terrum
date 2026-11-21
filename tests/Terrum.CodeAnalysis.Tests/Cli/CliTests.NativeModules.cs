@@ -8,6 +8,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using NUnit.Framework;
 
+using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
@@ -196,6 +197,158 @@ internal sealed partial class CliTests
             File.Delete(consumerSource);
             File.Delete(producer);
             File.Delete(consumer);
+        }
+    }
+
+    [Test]
+    public async Task NativePrivateSchemaSelectionIsExactAndRequiredForPF111Async()
+    {
+        const string schemaIdentity
+            = "terrum/private-semantic-111-foreign-native-interfaces-1";
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"terrum-native-private-schema-{Guid.NewGuid():N}");
+        var producerSource = prefix + ".producer.terrum";
+        var consumerSource = prefix + ".consumer.terrum";
+        var legacyProducer = prefix + ".legacy.trmn";
+        var selectedProducer = prefix + ".selected.trmn";
+        var selectedConsumer = prefix + ".consumer.trmn";
+        var wrongSchemaOutput = prefix + ".wrong-schema.trmn";
+        var duplicateSchemaOutput = prefix + ".duplicate-schema.trmn";
+        var missingSchemaOutput = prefix + ".missing-schema.trmn";
+        byte[] preserved = [0x71, 0x72, 0x73];
+        try
+        {
+            await File.WriteAllTextAsync(producerSource,
+                "public int32 Read(int32 value) { return value + 1; }")
+                .ConfigureAwait(false);
+            await File.WriteAllTextAsync(consumerSource,
+                "int32 Main() { return Read(41); }").ConfigureAwait(false);
+
+            var (legacyExit, legacyOutput, legacyError) = await RunAsync([],
+                "compile-native", "producer", producerSource,
+                "LegacyProvider", "--export", "Read", "-o", legacyProducer,
+                "--runtime", "fail-fast", "--json").ConfigureAwait(false);
+            Assert.That(legacyExit, Is.Zero, legacyOutput + legacyError);
+            Assert.That(legacyError, Is.Empty);
+            var legacyBytes = await File.ReadAllBytesAsync(legacyProducer)
+                .ConfigureAwait(false);
+            _ = Assert.Throws<ModuleContractException>(() =>
+                NativeModuleCompiler.CreateReferenceWithSchema(legacyBytes,
+                    schemaIdentity));
+
+            await File.WriteAllBytesAsync(wrongSchemaOutput, preserved)
+                .ConfigureAwait(false);
+            const string wrongCaseSchemaIdentity
+                = "terrum/private-semantic-111-Foreign-native-interfaces-1";
+            var (wrongExit, wrongOutput, _) = await RunAsync([],
+                "compile-native", "producer", producerSource,
+                "WrongSchemaProvider", "--export", "Read", "-o",
+                wrongSchemaOutput, "--runtime", "fail-fast",
+                "--private-schema", wrongCaseSchemaIdentity, "--json")
+                .ConfigureAwait(false);
+            Assert.That(wrongExit, Is.EqualTo(2), wrongOutput);
+            using (var wrongResult = JsonDocument.Parse(wrongOutput))
+            {
+                Assert.That(wrongResult.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM2000"));
+            }
+            Assert.That(await File.ReadAllBytesAsync(wrongSchemaOutput)
+                .ConfigureAwait(false), Is.EqualTo(preserved));
+
+            var (selectedExit, selectedOutput, selectedError) =
+                await RunAsync([], "compile-native", "producer",
+                    producerSource, "SelectedProvider", "--export", "Read",
+                    "-o", selectedProducer, "--runtime", "fail-fast",
+                    "--private-schema", schemaIdentity, "--json")
+                    .ConfigureAwait(false);
+            Assert.That(selectedExit, Is.Zero,
+                selectedOutput + selectedError);
+            Assert.That(selectedError, Is.Empty);
+            var selectedBytes = await File.ReadAllBytesAsync(selectedProducer)
+                .ConfigureAwait(false);
+            _ = NativeModuleCompiler.CreateReferenceWithSchema(selectedBytes,
+                schemaIdentity);
+
+            var (consumerExit, consumerOutput, consumerError) =
+                await RunAsync([], "compile-native", "consumer",
+                    consumerSource, selectedProducer, "-o", selectedConsumer,
+                    "--runtime", "fail-fast", "--private-schema",
+                    schemaIdentity, "--json").ConfigureAwait(false);
+            Assert.That(consumerExit, Is.Zero,
+                consumerOutput + consumerError);
+            Assert.That(consumerError, Is.Empty);
+            NativeModuleCompiler.Validate(
+                await File.ReadAllBytesAsync(selectedConsumer)
+                    .ConfigureAwait(false),
+                selectedBytes);
+
+            await File.WriteAllBytesAsync(missingSchemaOutput, preserved)
+                .ConfigureAwait(false);
+            var (missingExit, missingOutput, _) = await RunAsync([],
+                "compile-native", "consumer", consumerSource,
+                selectedProducer, "-o", missingSchemaOutput, "--runtime",
+                "fail-fast", "--json").ConfigureAwait(false);
+            Assert.That(missingExit, Is.EqualTo(1), missingOutput);
+            using (var missingResult = JsonDocument.Parse(missingOutput))
+            {
+                Assert.That(missingResult.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM5002"));
+            }
+            Assert.That(await File.ReadAllBytesAsync(missingSchemaOutput)
+                .ConfigureAwait(false), Is.EqualTo(preserved));
+
+            var (mismatchExit, mismatchOutput, _) = await RunAsync([],
+                "compile-native", "consumer", consumerSource, legacyProducer,
+                "-o", missingSchemaOutput, "--runtime", "fail-fast",
+                "--private-schema", schemaIdentity, "--json")
+                .ConfigureAwait(false);
+            Assert.That(mismatchExit, Is.EqualTo(1), mismatchOutput);
+            using (var mismatchResult = JsonDocument.Parse(mismatchOutput))
+            {
+                Assert.That(mismatchResult.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM5002"));
+            }
+            Assert.That(await File.ReadAllBytesAsync(missingSchemaOutput)
+                .ConfigureAwait(false), Is.EqualTo(preserved));
+
+            var (duplicateExit, duplicateOutput, _) = await RunAsync([],
+                "compile-native", "producer", producerSource,
+                "DuplicateSchemaProvider", "--export", "Read", "-o",
+                duplicateSchemaOutput, "--runtime", "fail-fast",
+                "--private-schema", schemaIdentity, "--private-schema",
+                schemaIdentity, "--json").ConfigureAwait(false);
+            Assert.That(duplicateExit, Is.EqualTo(2), duplicateOutput);
+            Assert.That(File.Exists(duplicateSchemaOutput), Is.False);
+
+            var absentValueOutput = prefix + ".absent-value.trmn";
+            var (absentValueExit, absentValueText, _) = await RunAsync([],
+                "compile-native", "producer", producerSource,
+                "MissingSchemaValueProvider", "--export", "Read", "-o",
+                absentValueOutput, "--runtime", "fail-fast",
+                "--private-schema", "--json").ConfigureAwait(false);
+            Assert.That(absentValueExit, Is.EqualTo(2), absentValueText);
+            Assert.That(File.Exists(absentValueOutput), Is.False);
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(producerSource)
+                .ConfigureAwait(false);
+            await TestFileCleanup.DeleteWithRetryAsync(consumerSource)
+                .ConfigureAwait(false);
+            await TestFileCleanup.DeleteWithRetryAsync(legacyProducer)
+                .ConfigureAwait(false);
+            await TestFileCleanup.DeleteWithRetryAsync(selectedProducer)
+                .ConfigureAwait(false);
+            await TestFileCleanup.DeleteWithRetryAsync(selectedConsumer)
+                .ConfigureAwait(false);
+            await TestFileCleanup.DeleteWithRetryAsync(wrongSchemaOutput)
+                .ConfigureAwait(false);
+            await TestFileCleanup.DeleteWithRetryAsync(duplicateSchemaOutput)
+                .ConfigureAwait(false);
+            await TestFileCleanup.DeleteWithRetryAsync(missingSchemaOutput)
+                .ConfigureAwait(false);
+            await TestFileCleanup.DeleteWithRetryAsync(
+                prefix + ".absent-value.trmn").ConfigureAwait(false);
         }
     }
 

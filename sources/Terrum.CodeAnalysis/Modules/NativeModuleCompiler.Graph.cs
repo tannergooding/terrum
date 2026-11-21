@@ -22,15 +22,82 @@ public sealed record NativeGraphInfo(string? Identity, bool IsConsumer, NativeRu
 
 public static partial class NativeModuleCompiler
 {
+    private static void ValidateGraphPrivateSchemaSet(
+        IReadOnlyList<GraphPackage> providers, int? expectedFormatVersion,
+        bool requireExplicitSelection)
+    {
+        var foreignInterfacePrivateVersion
+            = ModuleCompiler.GetPrivateSchemaFormatVersion(
+                ModuleCompiler.ForeignInterfacePrivateSchemaIdentity);
+        var hasForeignInterfacePrivateModule = false;
+        var hasOtherPrivateModule = false;
+        foreach (var provider in providers)
+        {
+            var formatVersion = provider.ContractSnapshot?.ParsedModule
+                    .FormatVersion
+                ?? ModuleCompiler.ReadProviderContractSnapshot(
+                    provider.Contract).ParsedModule.FormatVersion;
+            if (expectedFormatVersion is int expected
+                && formatVersion != expected)
+            {
+                throw new ModuleContractException(
+                    "A graph provider does not match the explicitly selected private schema.");
+            }
+
+            if (formatVersion == foreignInterfacePrivateVersion)
+            {
+                hasForeignInterfacePrivateModule = true;
+            }
+            else
+            {
+                hasOtherPrivateModule = true;
+            }
+        }
+
+        if (hasForeignInterfacePrivateModule && hasOtherPrivateModule)
+        {
+            throw new ModuleContractException(
+                "PF111 graph providers cannot mix revision 111 with revision 104 or 106.");
+        }
+        if (requireExplicitSelection
+            && hasForeignInterfacePrivateModule)
+        {
+            throw new ModuleContractException(
+                "PF111 graph creation requires an explicit private schema selection.");
+        }
+    }
+
     /// <summary>Binds source against independently persisted direct leaf or graph DLL declarations.</summary>
-    public static CompilationReference CreateGraphReference(IReadOnlyList<byte[]> dependencies) =>
-        GraphReference(ReadGraphProviders(dependencies));
+    public static CompilationReference CreateGraphReference(
+        IReadOnlyList<byte[]> dependencies)
+    {
+        var providers = ReadGraphProviders(dependencies);
+        ValidateGraphPrivateSchemaSet(providers, expectedFormatVersion: null,
+            requireExplicitSelection: false);
+        return GraphReference(providers);
+    }
+
+    /// <summary>Binds graph declarations under one exact private schema selection.</summary>
+    /// <param name="dependencies">The selected provider packages.</param>
+    /// <param name="schemaIdentity">The exact private schema identity.</param>
+    /// <returns>The combined graph declarations and retained provider identities.</returns>
+    public static CompilationReference CreateGraphReferenceWithSchema(
+        IReadOnlyList<byte[]> dependencies, string schemaIdentity)
+    {
+        var formatVersion
+            = ModuleCompiler.GetPrivateSchemaFormatVersion(schemaIdentity);
+        var providers = ReadGraphProviders(dependencies);
+        ValidateGraphPrivateSchemaSet(providers, formatVersion,
+            requireExplicitSelection: false);
+        return GraphReference(providers);
+    }
 
     /// <summary>Produces one DLL with real exported implementations and explicit imports of selected DLLs.</summary>
     public static byte[] CreateGraphProducer(BoundProgram program, IReadOnlyList<string> exports, string identity,
         IReadOnlyList<byte[]> dependencies, NativeRuntimePolicy runtimePolicy) =>
         CreateGraphProducerCore(program, exports, identity, dependencies,
-            runtimePolicy, identityInputs: null);
+            runtimePolicy, identityInputs: null,
+            privateSchemaIdentity: null);
 
     /// <summary>Creates a graph producer with explicit nominal declaration identities.</summary>
     /// <param name="program">The verified producer program snapshot.</param>
@@ -47,13 +114,34 @@ public static partial class NativeModuleCompiler
     {
         ArgumentNullException.ThrowIfNull(identityInputs);
         return CreateGraphProducerCore(program, exports, identity,
-            dependencies, runtimePolicy, identityInputs);
+            dependencies, runtimePolicy, identityInputs,
+            privateSchemaIdentity: null);
+    }
+
+    /// <summary>Produces a graph DLL under one exact selected private schema.</summary>
+    /// <param name="program">The verified producer program snapshot.</param>
+    /// <param name="exports">The declarations exported by the package.</param>
+    /// <param name="identity">The producer's logical Module identity.</param>
+    /// <param name="dependencies">The selected provider packages.</param>
+    /// <param name="schemaIdentity">The exact private schema identity.</param>
+    /// <param name="runtimePolicy">The selected runtime policy.</param>
+    /// <param name="identityInputs">Optional nominal identities captured for <paramref name="program"/>.</param>
+    /// <returns>The graph package containing the semantic contract and native DLL.</returns>
+    public static byte[] CreateGraphProducerWithSchema(
+        BoundProgram program, IReadOnlyList<string> exports, string identity,
+        IReadOnlyList<byte[]> dependencies, string schemaIdentity,
+        NativeRuntimePolicy runtimePolicy,
+        PrivateModuleIdentityInputs? identityInputs = null)
+    {
+        return CreateGraphProducerCore(program, exports, identity,
+            dependencies, runtimePolicy, identityInputs, schemaIdentity);
     }
 
     private static byte[] CreateGraphProducerCore(BoundProgram program,
         IReadOnlyList<string> exports, string identity,
         IReadOnlyList<byte[]> dependencies, NativeRuntimePolicy runtimePolicy,
-        PrivateModuleIdentityInputs? identityInputs)
+        PrivateModuleIdentityInputs? identityInputs,
+        string? privateSchemaIdentity)
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentNullException.ThrowIfNull(exports);
@@ -66,7 +154,12 @@ public static partial class NativeModuleCompiler
         var sourceProgram = program;
         CheckIdentity(identity);
         CheckPolicy(runtimePolicy);
+        int? selectedFormatVersion = privateSchemaIdentity is null ? null
+            : ModuleCompiler.GetPrivateSchemaFormatVersion(
+                privateSchemaIdentity);
         var providers = ReadGraphProviders(dependencies);
+        ValidateGraphPrivateSchemaSet(providers, selectedFormatVersion,
+            requireExplicitSelection: selectedFormatVersion is null);
         var importProviders = providers.Select(static provider =>
             (provider.Identity!, provider.Policy,
                 provider.ValidatedReference
@@ -89,8 +182,11 @@ public static partial class NativeModuleCompiler
             throw new ModuleContractException("Graph producer identity or runtime policy conflicts with a dependency.");
         }
         var reference = GraphReference(providers);
-        var contract = ModuleCompiler.CreateGraphLibrary(program, exports,
-            reference, identityInputs);
+        var contract = privateSchemaIdentity is string selectedSchema
+            ? ModuleCompiler.CreateGraphLibraryWithSchema(program, exports,
+                reference, selectedSchema, identityInputs)
+            : ModuleCompiler.CreateGraphLibrary(program, exports,
+                reference, identityInputs);
         var sortedExports = new string[exports.Count];
         for (var i = 0; i < sortedExports.Length; i++)
         {
@@ -139,7 +235,7 @@ public static partial class NativeModuleCompiler
     public static byte[] CreateGraphConsumer(BoundProgram program, IReadOnlyList<byte[]> dependencies,
         NativeRuntimePolicy runtimePolicy) =>
         CreateGraphConsumerCore(program, dependencies, runtimePolicy,
-            identityInputs: null);
+            identityInputs: null, privateSchemaIdentity: null);
 
     /// <summary>Creates a graph consumer with explicit nominal declaration identities.</summary>
     /// <param name="program">The verified consumer program snapshot.</param>
@@ -153,12 +249,29 @@ public static partial class NativeModuleCompiler
     {
         ArgumentNullException.ThrowIfNull(identityInputs);
         return CreateGraphConsumerCore(program, dependencies, runtimePolicy,
-            identityInputs);
+            identityInputs, privateSchemaIdentity: null);
+    }
+
+    /// <summary>Creates a graph consumer under one exact selected private schema.</summary>
+    /// <param name="program">The verified consumer program snapshot.</param>
+    /// <param name="dependencies">The selected provider packages.</param>
+    /// <param name="schemaIdentity">The exact private schema identity.</param>
+    /// <param name="runtimePolicy">The selected runtime policy.</param>
+    /// <param name="identityInputs">Optional nominal identities captured for <paramref name="program"/>.</param>
+    /// <returns>The graph package containing the executable and dependency identities.</returns>
+    public static byte[] CreateGraphConsumerWithSchema(
+        BoundProgram program, IReadOnlyList<byte[]> dependencies,
+        string schemaIdentity, NativeRuntimePolicy runtimePolicy,
+        PrivateModuleIdentityInputs? identityInputs = null)
+    {
+        return CreateGraphConsumerCore(program, dependencies, runtimePolicy,
+            identityInputs, schemaIdentity);
     }
 
     private static byte[] CreateGraphConsumerCore(BoundProgram program,
         IReadOnlyList<byte[]> dependencies, NativeRuntimePolicy runtimePolicy,
-        PrivateModuleIdentityInputs? identityInputs)
+        PrivateModuleIdentityInputs? identityInputs,
+        string? privateSchemaIdentity)
     {
         ArgumentNullException.ThrowIfNull(program);
         if (identityInputs is not null && !identityInputs.IsFor(program))
@@ -169,7 +282,12 @@ public static partial class NativeModuleCompiler
         }
         var sourceProgram = program;
         CheckPolicy(runtimePolicy);
+        int? selectedFormatVersion = privateSchemaIdentity is null ? null
+            : ModuleCompiler.GetPrivateSchemaFormatVersion(
+                privateSchemaIdentity);
         var providers = ReadGraphProviders(dependencies);
+        ValidateGraphPrivateSchemaSet(providers, selectedFormatVersion,
+            requireExplicitSelection: selectedFormatVersion is null);
         var importProviders = providers.Select(static provider =>
             (provider.Identity!, provider.Policy,
                 provider.ValidatedReference
@@ -184,8 +302,10 @@ public static partial class NativeModuleCompiler
         {
             throw new ModuleContractException("Graph consumer and dependency runtime policies differ.");
         }
-        var contract = ModuleCompiler.CreateConsumerAgainstReference(program, GraphReference(providers),
-            allowManagedParticipant: true, identityInputs: identityInputs);
+        var contract = ModuleCompiler.CreateConsumerAgainstReference(program,
+            GraphReference(providers), allowManagedParticipant: true,
+            identityInputs: identityInputs,
+            selectedFormatVersion: selectedFormatVersion);
         var contractSnapshot = ModuleCompiler.ReadGraphConsumerContract(contract);
         var directImportExpectations = CreateDirectImportExpectations(
             program, contractSnapshot.ParsedModule.Structures);
@@ -326,6 +446,11 @@ public static partial class NativeModuleCompiler
         {
             throw new ModuleContractException("Native graph root or runtime policy is invalid.");
         }
+        var graphModules = new GraphPackage[providers.Length + 1];
+        graphModules[0] = consumer;
+        Array.Copy(providers, 0, graphModules, 1, providers.Length);
+        ValidateGraphPrivateSchemaSet(graphModules,
+            expectedFormatVersion: null, requireExplicitSelection: false);
         var byIdentity = new Dictionary<string, GraphPackage>(providers.Length,
             StringComparer.OrdinalIgnoreCase);
         foreach (var provider in providers)

@@ -36,11 +36,25 @@ public static partial class NativeModuleCompiler
         return CreateReferenceSet(packages);
     }
 
+    /// <summary>Combines declarations under one exact selected private schema.</summary>
+    /// <param name="producers">The selected producer packages.</param>
+    /// <param name="schemaIdentity">The exact private schema identity.</param>
+    /// <returns>The combined declarations and retained provider identities.</returns>
+    public static CompilationReference CreateReferenceSetWithSchema(
+        IReadOnlyList<byte[]> producers, string schemaIdentity)
+    {
+        var formatVersion
+            = ModuleCompiler.GetPrivateSchemaFormatVersion(schemaIdentity);
+        var packages = ReadProviders(producers);
+        ValidatePrivateSchemaSet(packages, formatVersion);
+        return CreateReferenceSet(packages);
+    }
+
     /// <summary>Emits the consumer once, binding its imports to checked producer identities.</summary>
     public static byte[] CreateConsumerSet(BoundProgram program, IReadOnlyList<byte[]> producers,
         NativeRuntimePolicy runtimePolicy) =>
         CreateConsumerSetCore(program, producers, runtimePolicy,
-            identityInputs: null);
+            identityInputs: null, privateSchemaIdentity: null);
 
     /// <summary>Creates a set consumer with explicit nominal declaration identities.</summary>
     /// <param name="program">The verified consumer program snapshot.</param>
@@ -54,12 +68,29 @@ public static partial class NativeModuleCompiler
     {
         ArgumentNullException.ThrowIfNull(identityInputs);
         return CreateConsumerSetCore(program, producers, runtimePolicy,
-            identityInputs);
+            identityInputs, privateSchemaIdentity: null);
+    }
+
+    /// <summary>Creates a native consumer set under one exact private schema.</summary>
+    /// <param name="program">The verified consumer program snapshot.</param>
+    /// <param name="producers">The selected producer packages.</param>
+    /// <param name="schemaIdentity">The exact private schema identity.</param>
+    /// <param name="runtimePolicy">The selected runtime policy.</param>
+    /// <param name="identityInputs">Optional nominal identities captured for <paramref name="program"/>.</param>
+    /// <returns>The package containing the consumer executable and provider set.</returns>
+    public static byte[] CreateConsumerSetWithSchema(BoundProgram program,
+        IReadOnlyList<byte[]> producers, string schemaIdentity,
+        NativeRuntimePolicy runtimePolicy,
+        PrivateModuleIdentityInputs? identityInputs = null)
+    {
+        return CreateConsumerSetCore(program, producers, runtimePolicy,
+            identityInputs, schemaIdentity);
     }
 
     private static byte[] CreateConsumerSetCore(BoundProgram program,
         IReadOnlyList<byte[]> producers, NativeRuntimePolicy runtimePolicy,
-        PrivateModuleIdentityInputs? identityInputs)
+        PrivateModuleIdentityInputs? identityInputs,
+        string? privateSchemaIdentity)
     {
         ArgumentNullException.ThrowIfNull(program);
         if (identityInputs is not null && !identityInputs.IsFor(program))
@@ -70,7 +101,22 @@ public static partial class NativeModuleCompiler
         }
         var sourceProgram = program;
         CheckPolicy(runtimePolicy);
+        int? selectedFormatVersion = privateSchemaIdentity is null ? null
+            : ModuleCompiler.GetPrivateSchemaFormatVersion(
+                privateSchemaIdentity);
         var providers = ReadProviders(producers);
+        ValidatePrivateSchemaSet(providers, selectedFormatVersion);
+        var foreignInterfacePrivateVersion
+            = ModuleCompiler.GetPrivateSchemaFormatVersion(
+                ModuleCompiler.ForeignInterfacePrivateSchemaIdentity);
+        if (selectedFormatVersion is null
+            && providers.Any(provider =>
+                provider.Package.ProviderSnapshot?.ParsedModule.FormatVersion
+                    == foreignInterfacePrivateVersion))
+        {
+            throw new ModuleContractException(
+                "PF111 consumer sets require an explicit private schema selection.");
+        }
         if (program.RuntimePolicy != (BoundRuntimePolicy)runtimePolicy)
         {
             throw new ModuleContractException("Consumer and selected native runtime policies differ.");
@@ -83,8 +129,10 @@ public static partial class NativeModuleCompiler
             identityInputs = identityInputs.Rebind(sourceProgram, program);
         }
         var referenceSet = CreateReferenceSet(providers);
-        var semantic = ModuleCompiler.CreateConsumerAgainstReference(program, referenceSet,
-            allowManagedParticipant: true, identityInputs: identityInputs);
+        var semantic = ModuleCompiler.CreateConsumerAgainstReference(program,
+            referenceSet, allowManagedParticipant: true,
+            identityInputs: identityInputs,
+            selectedFormatVersion: selectedFormatVersion);
         var contractSnapshot = ModuleCompiler.ReadConsumerContractSnapshot(semantic);
         var directImportExpectations = CreateDirectImportExpectations(
             program, contractSnapshot.ParsedModule.Structures);
@@ -285,6 +333,23 @@ public static partial class NativeModuleCompiler
         if (set.Dependencies.Length != providers.Length || set.Policy != providers[0].Package.Policy)
         {
             throw new ModuleContractException("Missing, extra or policy-incompatible native dependency.");
+        }
+        var foreignInterfacePrivateVersion
+            = ModuleCompiler.GetPrivateSchemaFormatVersion(
+                ModuleCompiler.ForeignInterfacePrivateSchemaIdentity);
+        var consumerFormatVersion
+            = set.ContractSnapshot.ParsedModule.FormatVersion;
+        if ((consumerFormatVersion == foreignInterfacePrivateVersion
+                || providers.Any(provider =>
+                    provider.Package.ProviderSnapshot?.ParsedModule
+                        .FormatVersion == foreignInterfacePrivateVersion))
+            && (consumerFormatVersion != foreignInterfacePrivateVersion
+                || providers.Any(provider =>
+                    provider.Package.ProviderSnapshot?.ParsedModule
+                        .FormatVersion != foreignInterfacePrivateVersion)))
+        {
+            throw new ModuleContractException(
+                "PF111 native consumer sets and providers must all use revision 111.");
         }
         var providerExports = new HashSet<string>[providers.Length];
         for (var i = 0; i < providers.Length; i++)
@@ -495,12 +560,52 @@ public static partial class NativeModuleCompiler
 
     private static CompilationReference CreateReferenceSet(ValidatedProvider[] providers)
     {
+        ValidatePrivateSchemaSet(providers, expectedFormatVersion: null);
         var references = new CompilationReference[providers.Length];
         for (var i = 0; i < references.Length; i++)
         {
             references[i] = providers[i].Reference;
         }
         return ModuleCompiler.CreateReferenceSetFromReferences(references);
+    }
+
+    private static void ValidatePrivateSchemaSet(
+        IReadOnlyList<ValidatedProvider> providers,
+        int? expectedFormatVersion)
+    {
+        var foreignInterfacePrivateVersion
+            = ModuleCompiler.GetPrivateSchemaFormatVersion(
+                ModuleCompiler.ForeignInterfacePrivateSchemaIdentity);
+        var hasForeignInterfacePrivateModule = false;
+        var hasOtherPrivateModule = false;
+        foreach (var provider in providers)
+        {
+            var formatVersion = provider.Package.ProviderSnapshot
+                ?.ParsedModule.FormatVersion
+                ?? throw new ModuleFormatException(
+                    "Native provider private contract snapshot is missing.");
+            if (expectedFormatVersion is int expected
+                && formatVersion != expected)
+            {
+                throw new ModuleContractException(
+                    "A native provider does not match the explicitly selected private schema.");
+            }
+
+            if (formatVersion == foreignInterfacePrivateVersion)
+            {
+                hasForeignInterfacePrivateModule = true;
+            }
+            else
+            {
+                hasOtherPrivateModule = true;
+            }
+        }
+
+        if (hasForeignInterfacePrivateModule && hasOtherPrivateModule)
+        {
+            throw new ModuleContractException(
+                "PF111 native provider sets cannot mix revision 111 with revision 104 or 106.");
+        }
     }
 
     private static SetPackage ReadSet(byte[] artifact)

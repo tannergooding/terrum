@@ -63,6 +63,7 @@ These are source observations, not validation results:
 | [`BoundProgram.cs`](../../sources/Terrum.CodeAnalysis/Semantics/BoundProgram.cs), [`ForeignNativeInterfaceContract.cs`](../../sources/Terrum.CodeAnalysis/Semantics/ForeignNativeInterfaceContract.cs) | Checked interfaces/members, separate receiver, convention and output facts exist in memory. `BoundStruct.DeclaredCopyEvidence` is nullable; private struct records do not explicitly persist it. |
 | [`PrivateModuleIdentityInputs.cs`](../../sources/Terrum.CodeAnalysis/Modules/PrivateModuleIdentityInputs.cs), [`private origins`](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.PrivateNominalOrigins.cs) | Nominal using/provider identities and complete original type views exist. Inputs assign structs/classes/enums, not foreign owners and complete member keys. |
 | [`Foreign emitter`](../../sources/Terrum.CodeAnalysis/Native/NativeEmitter.ForeignNativeInterface.cs), [module inventory](../implementation/modules.md) | Source dispatch has a receiver-aware lowering route. That does not restore erased private declarations or establish private source-free execution. |
+| [`Program.NativeModules.cs`](../../sources/terrumc/Program.NativeModules.cs), [`Program.Modules.cs`](../../sources/terrumc/Program.Modules.cs), [`NativeModuleCompiler.cs`](../../sources/Terrum.CodeAnalysis/Modules/NativeModuleCompiler.cs) | `compile-native producer|consumer` calls the default native creation APIs, which serialize an inner ModuleCompiler Contract. The shared parser currently scopes `--private-schema` to `compile-module`. Native `WithSchema` APIs forward selection to that same inner codec; outer version 3 is not an exemption from selecting it. |
 
 ## Exact selection and backward behavior
 
@@ -84,8 +85,9 @@ families; the focused existing-directory extension is sufficient here.
 Reuse the candidate exact-selection API/CLI shape from
 [private schema selection](private-class-cleanup-persistence.md#host-schema-selection):
 `CreateProducerWithSchema`, `CreateConsumerWithSchema` and corresponding
-reference/set/graph/native creation routes carry `schemaIdentity`; private
-`compile-module` uses `--private-schema <exact-identity>`. This reuse selects
+reference/set/graph/native creation routes carry `schemaIdentity`;
+**both `compile-module producer|consumer` and `compile-native producer|consumer`**
+use `--private-schema <exact-identity>`. This reuse selects
 the interface shape, **not CC110's schema or class changes**. Existing overloads
 and default commands retain their current behavior and never auto-select PF111
 from an attribute, output, nominal input or profile label.
@@ -101,6 +103,48 @@ Existing exact 104/106 routes remain independent; they acquire no nonempty FNI
 support, new Copy byte or alternate tag-5 prefix. Regenerate from checked inputs.
 Header patching, empty counts, checksums and native-profile strings are not
 conversion or proof of provenance.
+
+### CLI option boundary
+
+Select the same paired option **`--private-schema <exact-schema-identity>`** on
+those four source-to-artifact routes. For PF111 the value is exactly
+`terrum/private-semantic-111-foreign-native-interfaces-1`, case-sensitive;
+`PF111`, numeric `111`, aliases and case variants are not accepted spellings.
+It may occur once among the ordinary options after the positional arguments,
+before a final `--json` when used. Missing/empty values, duplicates even with
+equal values, unknown selections and use on an unselected command are input
+errors, not ignored options.
+
+| Route | Required PF111 selection |
+|---|---|
+| `compile-module producer|consumer` | Existing ModuleCompiler exact-selection path; the selected producer and destination must agree. |
+| `compile-native producer` | Call `NativeModuleCompiler.CreateProducerWithSchema` with the same immutable selection for the inner semantic Contract and its native creation context. Output remains outer-v3 `.trmn`. |
+| `compile-native consumer` | Check the positional producer `.trmn` through `NativeModuleCompiler.CreateReferenceWithSchema` before exposing declarations to source binding; then call `CreateConsumerWithSchema` with that same selection for the expected provider and destination Contract. |
+
+An explicit selection must not disappear between option parsing, reference
+creation and serialization or fall through to the default API. Reject a wrong
+inner producer revision/schema or unsupported required content before affected
+binding/emission; write no partial artifact or replacement output on failure.
+The native command still selects its runtime policy and real image/export
+requirements independently. The private-schema option supplies no nominal
+keys, Core registrations, executing receiver provider or new ABI, and selects
+no new identity/Core manifest schema or extension to those manifests' option
+scope.
+
+**Absent option:** preserve the existing legacy creation/default-selection
+behavior on each route, including supported 104/106 inputs; do not select PF111
+from source facts or an outer header. Source compilation of a consumer against
+a PF111 producer requires the explicit option, rather than upgrading its
+destination implicitly. Explicit PF111 ordinary-only production still writes
+111 and all mandatory fields.
+
+This amendment adds no `--private-schema` option to artifact-only
+`link-module`, `run-module`, `validate-native` or `run-native`. Those routes
+retain supported exact inner-revision dispatch and existing outer/runtime
+checks; they do not rewrite or select a new output schema. It adds no flag to
+Standard TRRM or unrelated commands. Native outer version 3 continues to select
+container framing only, so it cannot justify omitting selection from
+`compile-native`'s inner Contract creation.
 
 ## Exact private records
 
@@ -490,6 +534,7 @@ API/sample-specific compiler recognizer is needed.
 | Aggregate consumption | Nested nominal Copy-positive cells, small and larger-than-16-byte values, packed/over-aligned layout, complete reads/copies and non-inlined helper returns. Reject missing positive/nested Copy, mismatched T/layout, unique/Cleanup/rootful/unsupported inline closure; copying a pointer cell never classifies its pointee as initialized. |
 | Servicing/remapping | Compatible physical interface/function/type/pointer-table relocation, set/diamond graph and source-free re-emission; preserve all original expectation views. Reject removed/reordered/split member identities, another owner with equal slots/signature, convention/access/offset/selector/dependency changes, and a provider lacking actual Copy evidence. Changed labels/defaults preserve completed old calls and original surface. |
 | Native composition | Mixed providers with real unrelated code exports plus semantic-only FNI edges; TNPK/TNSP/TNGP AOT and graph root-only JIT retain metadata without abstract PE/IAT thunks. Reject unjustified empty edges and incompatible inner contracts before affected image use. Capture actual supervised process results, not just emission. |
+| CLI selection | Exercise producer and consumer modes of both `compile-module` and `compile-native`, including ordinary-only PF111 artifacts. Confirm explicit input/destination selection reaches the reference and creation APIs; reject missing values, duplicate/wrong-case/unknown selections, wrong producer inner schema and unsupported option scopes without output. Preserve flag-absent legacy behavior; reject flag-absent compilation against PF111 rather than infer it. |
 | Isolation and limits | Unchanged exact 104/106 ordinary routes; explicit PF111 ordinary-only writes still use 111/new mandatory fields. Reject old FNI framing, wrong schema/header and unselected G108S/CH109/CC110/Standard composites without fallback. Check formal/argument/table limits and wide offset arithmetic independently of runtime allocation. |
 
 **Remaining decision:** formal adoption of the single PF111 identity/revision
