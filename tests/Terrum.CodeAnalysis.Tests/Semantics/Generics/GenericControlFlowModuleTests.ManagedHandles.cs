@@ -251,6 +251,10 @@ internal sealed partial class GenericControlFlowModuleTests
                 if (input is mut write ref<int64> incompatible) {
                     return 100;
                 }
+                ref<int32> readOnly = ref storage;
+                if (readOnly is mut write ref<int32> incompatibleAccess) {
+                    return 200;
+                }
                 if (input is mut write ref<int32> writable) {
                     *writable = int32(42);
                 }
