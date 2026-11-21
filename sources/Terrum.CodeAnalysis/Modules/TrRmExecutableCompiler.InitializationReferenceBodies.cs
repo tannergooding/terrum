@@ -1452,7 +1452,16 @@ public static partial class TrRmExecutableCompiler
         }
 
         BoundExpression? callExpression;
-        if (function.ReturnType == PrimitiveType.Void)
+        var terminalExpressionCall = statements.Length != 0
+            && statements[^1] is BoundExpressionStatement;
+        var prefixStatementCount = 0;
+        if (terminalExpressionCall)
+        {
+            callExpression
+                = ((BoundExpressionStatement)statements[^1]).Expression;
+            prefixStatementCount = statements.Length - 1;
+        }
+        else if (function.ReturnType == PrimitiveType.Void)
         {
             if (statements.Length < 2
                 || statements[^2] is not
@@ -1462,15 +1471,8 @@ public static partial class TrRmExecutableCompiler
                 return false;
             }
 
-            for (var index = 0; index < statements.Length - 2; index++)
-            {
-                if (!TryAddStagedLocal(statements[index]))
-                {
-                    return false;
-                }
-            }
-
             callExpression = callStatement.Expression;
+            prefixStatementCount = statements.Length - 2;
         }
         else
         {
@@ -1480,27 +1482,34 @@ public static partial class TrRmExecutableCompiler
                 return false;
             }
 
-            for (var index = 0; index < statements.Length - 1; index++)
+            callExpression = returned.Value;
+            prefixStatementCount = statements.Length - 1;
+        }
+
+        for (var index = 0; index < prefixStatementCount; index++)
+        {
+            if (statements[index] is BoundVacantLocal vacant)
             {
-                if (statements[index] is BoundVacantLocal vacant)
+                if (function.ReturnType == PrimitiveType.Void
+                    && !terminalExpressionCall)
                 {
-                    if (vacant.Variable < function.ParameterCount
-                        || (uint)vacant.Variable
-                            >= (uint)function.Variables.Length
-                        || !function.Variables[vacant.Variable]
-                            .IsInitializationLocal
-                        || !vacantLocals.Add(vacant.Variable))
-                    {
-                        return false;
-                    }
+                    return false;
                 }
-                else if (!TryAddStagedLocal(statements[index]))
+
+                if (vacant.Variable < function.ParameterCount
+                    || (uint)vacant.Variable
+                        >= (uint)function.Variables.Length
+                    || !function.Variables[vacant.Variable]
+                        .IsInitializationLocal
+                    || !vacantLocals.Add(vacant.Variable))
                 {
                     return false;
                 }
             }
-
-            callExpression = returned.Value;
+            else if (!TryAddStagedLocal(statements[index]))
+            {
+                return false;
+            }
         }
 
         if (callExpression is BoundUnsafeExpression unsafeExpression)
@@ -1513,11 +1522,13 @@ public static partial class TrRmExecutableCompiler
             || boundCall.ForeignInterfaceCall is not
                 BoundForeignInterfaceCall foreignCall
             || !boundCall.IsUnsafeAuthorized
-            || foreignCall.DoesNotReturn
-            || boundCall.Type != function.ReturnType
             || !ForeignNativeInterfaceContract.TryCreateCallTarget(
                 foreignCall, program, out var target)
-            || target.ReturnType != function.ReturnType
+            || target.ReturnType != boundCall.Type
+            || terminalExpressionCall != foreignCall.DoesNotReturn
+            || (terminalExpressionCall && !function.DoesNotReturn)
+            || (!terminalExpressionCall
+                && target.ReturnType != function.ReturnType)
             || target.ParameterCount != boundCall.Arguments.Length
             || boundCall.Arguments.IsDefault
             || foreignCall.Receiver is not BoundRead receiver
@@ -1700,7 +1711,9 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
-        var hasResult = call.Type != PrimitiveType.Void;
+        var doesNotReturn = foreignCall.DoesNotReturn;
+        var hasResult = !doesNotReturn
+            && call.Type != PrimitiveType.Void;
         var callSite = TrRmRegisterBodyRecordWriter.EncodeCallSite(1,
             hasResult ? (byte)1 : (byte)0,
             maps.GetMethodMapIndex(methodMapToken), 0, inputs, [],
@@ -1744,8 +1757,11 @@ public static partial class TrRmExecutableCompiler
 
         code.Add(0x90);
         code.Add(1);
-        code.Add(hasResult ? (byte)0x17 : (byte)0x18);
-        code.Add(0);
+        if (!doesNotReturn)
+        {
+            code.Add(hasResult ? (byte)0x17 : (byte)0x18);
+            code.Add(0);
+        }
         return TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
             maps.MethodMap, default, default,
             [new TrRmRegisterBodyBlock(0, (uint)code.Count, 0)],
@@ -4142,6 +4158,7 @@ public static partial class TrRmExecutableCompiler
         var conversions = 0;
         var returns = 0;
         var foreignInterfaceCalls = 0;
+        var foreignInterfaceNonReturningCalls = 0;
         var foreignInterfaceOutputReservations = 0;
         var forwardedInitializationReference = false;
         var nativeOutputReservationsByRecord
@@ -4607,14 +4624,14 @@ public static partial class TrRmExecutableCompiler
                                     BoundInterfaceType resultBoundType
                                 || resultBoundType.Kind
                                     != BoundInterfaceTypeKind.Primitive
-                                || function.ReturnType
-                                    != resultBoundType.PrimitiveType
+                                || (!member.DoesNotReturn
+                                    && function.ReturnType
+                                        != resultBoundType.PrimitiveType)
                                 || foreignTarget.Definition
                                     .ForeignNativeInterface is not
                                     BoundForeignNativeInterfaceLayout layout
                                 || member.NativeCallableConvention is not
                                     NativeCallingConvention convention
-                                || member.DoesNotReturn
                                 || inputCount
                                     != (uint)(member.Parameters.Length + 1))
                             {
@@ -4623,14 +4640,17 @@ public static partial class TrRmExecutableCompiler
                             }
 
                             var resultType = resultBoundType.PrimitiveType;
-                            var hasValueResult
-                                = resultType != PrimitiveType.Void;
+                            var hasValueResult = !member.DoesNotReturn
+                                && resultType != PrimitiveType.Void;
                             if ((hasValueResult
                                     && (resultKind != 1 || resultIndex >= 14))
                                 || (!hasValueResult
-                                    && (resultKind != 0 || resultIndex != 0
-                                        || !member.NativeOutputContracts
-                                            .IsEmpty)))
+                                    && (resultKind != 0 || resultIndex != 0))
+                                || (member.DoesNotReturn
+                                    && !function.DoesNotReturn)
+                                || (!member.DoesNotReturn
+                                    && resultType == PrimitiveType.Void
+                                    && !member.NativeOutputContracts.IsEmpty))
                             {
                                 throw Unsupported(
                                     "The Standard F+I Body CallSite result does not match its return form.");
@@ -4884,6 +4904,10 @@ public static partial class TrRmExecutableCompiler
 
                             calls++;
                             foreignInterfaceCalls++;
+                            if (member.DoesNotReturn)
+                            {
+                                foreignInterfaceNonReturningCalls++;
+                            }
                             foreignInterfaceOutputReservations = checked(
                                 foreignInterfaceOutputReservations
                                 + member.NativeOutputContracts.Length);
@@ -5551,6 +5575,7 @@ public static partial class TrRmExecutableCompiler
                 && stores == 0 && calls == 1 && foreignInterfaceCalls == 1
                 && pointerLoads == 0 && initializedLocals.Count == 0
                 && foreignInterfaceOutputReservations == 0
+                && foreignInterfaceNonReturningCalls == 0
                 && variables.Count == function.ParameterCount
                     + initializedValueLocals.Count;
         var valueCall = function.ReturnType != PrimitiveType.Void
@@ -5560,11 +5585,21 @@ public static partial class TrRmExecutableCompiler
             = function.ReturnType != PrimitiveType.Void
                 && stores == 0 && calls == 1 && foreignInterfaceCalls == 1
                 && pointerLoads == 0
+                && foreignInterfaceNonReturningCalls == 0
                 && initializedLocals.Count
                     == foreignInterfaceOutputReservations
                 && variables.Count == function.ParameterCount
                     + foreignInterfaceOutputReservations
                     + initializedValueLocals.Count;
+        var foreignInterfaceTerminalCall = function.DoesNotReturn
+            && stores == 0 && calls == 1 && foreignInterfaceCalls == 1
+            && foreignInterfaceNonReturningCalls == 1
+            && pointerLoads == 0
+            && initializedLocals.Count
+                == foreignInterfaceOutputReservations
+            && variables.Count == function.ParameterCount
+                + foreignInterfaceOutputReservations
+                + initializedValueLocals.Count;
         var pointerLoadCallCount = 0;
         var pointerLoadExpressionCount = 0;
         foreach (var statement in statements)
@@ -5606,8 +5641,8 @@ public static partial class TrRmExecutableCompiler
                     );
         var simpleInitializationBody = voidStore || voidForwardingCall
             || voidInitializationCall || foreignInterfaceVoidCall || valueCall
-            || foreignInterfaceValueCall;
-        if (returns != 1
+            || foreignInterfaceValueCall || foreignInterfaceTerminalCall;
+        if (returns != (foreignInterfaceTerminalCall ? 0 : 1)
             || !(simpleInitializationBody || valuePointerLoad))
         {
             throw Unsupported(

@@ -1348,7 +1348,9 @@ reserve distinct local `init` Homes for each NativeOutput formal; source-use 6
 and reservation records use the receiver-first flattened ordinal
 (`formal n` maps to input `n+1`). Source-free decoding restores the
 `BoundNativeOutputReservation`, unsafe assertion, exact MethodDef/Import
-target, and selected method's output relations. FNI emission requires the
+target, and selected method's output relations. Terminal FNI
+`DoesNotReturn` calls preserve their output contracts and reservations without
+inventing a normal return, publication or cancellation. FNI emission requires the
 NativeOutput cells Feature for selected methods with outputs, retaining its
 PublishedPredicates prerequisite. Local MethodDefs and imported MethodDef
 Imports are mapped by exact member identity; regressions cover local and
@@ -1356,7 +1358,8 @@ imported output reservations, provider load/re-emission and malformed
 MethodMap target rejection, but remain unverified under the hold. Reading
 output locals under result-correlated flow, side-effecting argument expressions,
 defaults/constants, multiple calls, other Body control-flow shapes,
-nonreturning calls and reservation cancellation remain open. Supervised native
+other nonreturning-call shapes and reservation cancellation remain open.
+Supervised native
 execution, private persistence, CLI transport and dependent runtime work
 remain open. NativeParameter is not admitted on these methods or anchors, and
 neither FNI proposal is approved. General aggregate output Bodies and

@@ -8134,12 +8134,6 @@ public static partial class TrRmExecutableCompiler
 
         if (!member.NativeOutputContracts.IsDefaultOrEmpty)
         {
-            if (member.DoesNotReturn)
-            {
-                throw Unsupported(
-                    "F+I NativeOutput requires a normal completion outcome.");
-            }
-
             var selectors = new SortedSet<byte>();
             foreach (var output in member.NativeOutputContracts)
             {
