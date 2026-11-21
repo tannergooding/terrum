@@ -1625,10 +1625,12 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
                     malformed), moduleIdentity, []));
     }
 
-    [TestCase(1)]
-    [TestCase(2)]
-    public void L1StorageAddressRejectsOutOfRangePointerTypeMapIndex(
-        byte sourceKind)
+    [TestCase(1, true)]
+    [TestCase(2, true)]
+    [TestCase(1, false)]
+    [TestCase(2, false)]
+    public void L1StorageAddressRejectsInvalidPointerTypeMapEntry(
+        byte sourceKind, bool outOfRangeTypeMapIndex)
     {
         const string moduleIdentity = "l1p-storage-address-type-map";
         const string l1pSchemaIdentity
@@ -1658,8 +1660,13 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
         var artifact = TrRmExecutableCompiler.EmitStandard(
             compilation.Program!, moduleIdentity, l1pSchemaIdentity,
             moduleTargetRequirement: 1);
+        var invalidTypeMapIndex = outOfRangeTypeMapIndex
+            ? ushort.MaxValue
+            : FindL1pNonPointerTypeMapIndex(artifact,
+                l1pSchemaIdentity, "Main");
         var malformed = MutateL1pStorageAddressTypeMapIndex(artifact,
-            l1pSchemaIdentity, "Main", sourceKind);
+            l1pSchemaIdentity, "Main", sourceKind,
+            invalidTypeMapIndex);
         Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.LoadStandard(
                 new TrRmStandardArtifactInput(l1pSchemaIdentity,
@@ -2866,13 +2873,13 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
 
     private static byte[] MutateL1pStorageAddressTypeMapIndex(
         byte[] artifact, string schemaIdentity, string methodName,
-        byte sourceKind)
+        byte sourceKind, ushort invalidTypeMapIndex)
         => MutateL1pStorageAddressRecord(artifact, schemaIdentity,
             methodName, sourceKind,
-            static (bodyBytes, recordStart) =>
+            (bodyBytes, recordStart) =>
                 BinaryPrimitives.WriteUInt16LittleEndian(
                     bodyBytes.AsSpan(recordStart + 10),
-                    ushort.MaxValue));
+                    invalidTypeMapIndex));
 
     private static byte[] MutateL1pStorageAddressSourceRegister(
         byte[] artifact, string schemaIdentity, string methodName,
@@ -2882,6 +2889,47 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
             (bodyBytes, recordStart) =>
                 BinaryPrimitives.WriteUInt16LittleEndian(
                     bodyBytes.AsSpan(recordStart + 6), invalidRegister));
+
+    private static ushort FindL1pNonPointerTypeMapIndex(
+        byte[] artifact, string schemaIdentity, string methodName)
+    {
+        var index = new TrRmArtifactIndex(artifact,
+            TrRmArtifactSchema.LocalAggregateLayoutDraft,
+            resourceLedger: null, usesNativePointerLoads: true,
+            standardSchemaIdentity: schemaIdentity);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraftAndGetExecutionTables(
+                index);
+        var methodRow = 0;
+        for (var candidate = 1;
+            candidate <= tables.Methods.Count; candidate++)
+        {
+            if (tables.Methods.GetName(candidate) == methodName)
+            {
+                methodRow = candidate;
+                break;
+            }
+        }
+        Assert.That(methodRow, Is.GreaterThan(0));
+        var bodyRow = tables.Methods.GetBodyRow(methodRow);
+        Assert.That(bodyRow, Is.GreaterThan(0));
+        var body = tables.Bodies.GetRegisterBody(bodyRow,
+            tables.Contracts.Count);
+        for (var typeMapIndex = 0;
+            typeMapIndex < body.TypeCount; typeMapIndex++)
+        {
+            var typeSpecRef = BinaryPrimitives.ReadUInt32LittleEndian(
+                body.TypeMap[(typeMapIndex * sizeof(uint))..]);
+            if (!tables.TypeSpecs.TryGetNativePointerPointeeTypeSpecRef(
+                    typeSpecRef, out _))
+            {
+                return checked((ushort)typeMapIndex);
+            }
+        }
+
+        throw new InvalidDataException(
+            "The L1P test Body has no non-pointer TypeMap entry.");
+    }
 
     private static byte[] MutateL1pStorageAddressRecord(
         byte[] artifact, string schemaIdentity, string methodName,
