@@ -3205,6 +3205,10 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
                 LayoutCoreRegistrationTestData.Create(),
         };
         var methodProvider = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            internal int32 Padding(int32 value) {
+                if (value == 0) { return 1; }
+                return 2;
+            }
             public int32 Actual(ptr<Snapshot> source) {
                 unsafe {
                     Snapshot captured = *source;
