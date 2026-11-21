@@ -1757,6 +1757,8 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
         var typeProvider = closure.Modules.Single(module =>
             module.Identity == typeProviderIdentity);
         Assert.That(closure.TypeEdges, Has.Length.GreaterThanOrEqualTo(2));
+        Assert.That(closure.TypeEdges.Any(edge =>
+            edge.ExportKey == "RawWordKey"), Is.True);
         Assert.That(closure.TypeEdges.All(edge =>
             edge.ProviderArtifactIndex == typeProvider.ArtifactIndex
             && edge.ProviderModuleRow == typeProvider.ModuleRow
@@ -1771,6 +1773,7 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
             (int)pointerType.PointeeType - 100];
         Assert.That(importedSnapshot.StandardTypeOrigin!.Provider
             .ModuleIdentity, Is.EqualTo(typeProviderIdentity));
+        Assert.That(importedSnapshot.Size, Is.GreaterThan(16));
         Assert.That(expectedTypeArtifact, Is.Not.EqualTo(relocatedTypeArtifact));
 
         var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
@@ -1798,12 +1801,18 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
                 var function = Marshal.GetDelegateForFunctionPointer<
                     GetPointerValueDelegate>(NativeLibrary.GetExport(library,
                     "Main"));
-                var source = Marshal.AllocHGlobal(12);
+                var source = Marshal.AllocHGlobal(24);
                 try
                 {
-                    Marshal.WriteInt32(source, 0, 42);
-                    Marshal.WriteInt32(source, 4, 1);
+                    for (var index = 0; index < 24; index++)
+                    {
+                        Marshal.WriteByte(source, index, 0);
+                    }
+                    Marshal.WriteInt64(source, 0, 40);
                     Marshal.WriteInt32(source, 8, 2);
+                    Marshal.WriteInt32(source, 12, 1);
+                    Marshal.WriteInt32(source, 16, 2);
+                    Marshal.WriteInt32(source, 20, 3);
                     Assert.That(function(source), Is.EqualTo(42));
                 }
                 finally
@@ -1999,7 +2008,7 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
             schemaIdentity, typeProviderArtifact);
         var typeReference = TrRmExecutableCompiler.CreateStandardReference(
             typeProviderInput, typeProviderIdentity, [],
-            ["SnapshotKey", "InnerKey"]);
+            ["SnapshotKey", "InnerKey", "RawWordKey"]);
         var options = new CompilationOptions {
             RuntimePolicy = BoundRuntimePolicy.FailFast,
             LayoutCoreRegistration =
@@ -2007,12 +2016,17 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
         };
         var methodProvider = Compilation.CreateLibrary(SyntaxTree.Parse("""
             public int32 Actual(ptr<Snapshot> source) {
-                unsafe { return (*source).Nested.First; }
+                unsafe {
+                    Snapshot captured = *source;
+                    return int32(captured.Value.Wide)
+                        + captured.Nested.First;
+                }
             }
             internal int32 ActualLocal(ptr<Snapshot> source) {
                 unsafe {
                     Snapshot captured = *source;
-                    return captured.Nested.First;
+                    return int32(captured.Value.Wide)
+                        + captured.Nested.First;
                 }
             }
             """), typeReference, options);
@@ -2027,7 +2041,8 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
                 internal int32 Expected(ptr<Snapshot> source) {
                     unsafe {
                         Snapshot captured = *source;
-                        return captured.Nested.First;
+                        return int32(captured.Value.Wide)
+                            + captured.Nested.First;
                     }
                 }
 
@@ -2058,12 +2073,18 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
         var firstFieldType = incompatible ? "uint32" : "int32";
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse($$"""
             {{prefix}}
+            [Blittable] [Layout(LayoutKind.Union)]
+            public struct RawWord {
+                public mut uint32 Narrow;
+                public mut uint64 Wide;
+            }
             [Blittable] [Layout(LayoutKind.Sequential)]
             public struct Inner {
                 public mut {{firstFieldType}} First;
             }
             [Blittable] [Layout(LayoutKind.Sequential)]
             public struct Snapshot {
+                public mut RawWord Value;
                 public mut Inner Nested;
                 public mut int32 Second;
                 public mut int32 Third;
@@ -2079,6 +2100,7 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
             moduleIdentity, schemaIdentity, 1, [
                 new TrRmSourceTypeExport("", "Snapshot", "SnapshotKey"),
                 new TrRmSourceTypeExport("", "Inner", "InnerKey"),
+                new TrRmSourceTypeExport("", "RawWord", "RawWordKey"),
             ]);
     }
 
