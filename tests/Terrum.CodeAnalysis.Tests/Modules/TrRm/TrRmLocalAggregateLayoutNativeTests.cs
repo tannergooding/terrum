@@ -1527,7 +1527,31 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
         Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.LoadStandard(
                 new TrRmStandardArtifactInput(l1pSchemaIdentity,
-                    malformed), moduleIdentity, []));
+                malformed), moduleIdentity, []));
+    }
+
+    [Test]
+    public void L1PointerLoadRejectsTruncatedOperand()
+    {
+        const string moduleIdentity = "l1p-truncated-pointer-load";
+        const string l1pSchemaIdentity
+            = "trrm/1-draft-local-aggregate-layout-execution-pointer-loads-1";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public int32 Read(ptr<int32> source) {
+                    unsafe { return *source; }
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, l1pSchemaIdentity,
+            moduleTargetRequirement: 1);
+        var malformed = TruncateL1pPointerLoadOperand(artifact,
+            l1pSchemaIdentity, "Read");
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                    new TrRmStandardArtifactInput(l1pSchemaIdentity,
+                        malformed), moduleIdentity, []));
     }
 
     [Test]
@@ -2060,6 +2084,94 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
         {
             bodyRows[row - 1] = row == bodyRow
                 ? bodyBytes
+                : bodyIndex.GetRow(row).ToArray();
+        }
+
+        return ReplaceSections(index, new Dictionary<ushort, TrRmSection> {
+            [0x0020] = new(0x0020, 0,
+                checked((uint)bodyRows.Length),
+                TrRmVariableTableWriter.EncodeBodies(bodyRows)),
+        });
+    }
+
+    private static byte[] TruncateL1pPointerLoadOperand(
+        byte[] artifact, string schemaIdentity, string methodName)
+    {
+        var index = new TrRmArtifactIndex(artifact,
+            TrRmArtifactSchema.LocalAggregateLayoutDraft,
+            resourceLedger: null, usesNativePointerLoads: true,
+            standardSchemaIdentity: schemaIdentity);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraftAndGetExecutionTables(
+                index);
+        var methodRow = 0;
+        for (var candidate = 1;
+            candidate <= tables.Methods.Count; candidate++)
+        {
+            if (tables.Methods.GetName(candidate) == methodName)
+            {
+                methodRow = candidate;
+                break;
+            }
+        }
+        Assert.That(methodRow, Is.GreaterThan(0));
+        var bodyRow = tables.Methods.GetBodyRow(methodRow);
+        Assert.That(bodyRow, Is.GreaterThan(0));
+        var bodyIndex = new TrRmVariableTableIndex(
+            GetSectionBytes(index, 0x0020), tables.Bodies.Count, 1, 1);
+        var body = tables.Bodies.GetRegisterBody(bodyRow,
+            tables.Contracts.Count);
+        Assert.That(body.BlockCount, Is.EqualTo(1));
+        var bodyBytes = bodyIndex.GetRow(bodyRow).ToArray();
+        var codeOffset = bodyBytes.Length - body.Code.Length;
+        if (!bodyBytes.AsSpan(codeOffset).SequenceEqual(body.Code))
+        {
+            throw new InvalidDataException(
+                "The L1P test Body code is not the final variable-row payload.");
+        }
+
+        var loadPosition = -1;
+        for (var position = 0; position < body.Code.Length;)
+        {
+            var instructionLength
+                = TrRmRegisterBodyReader.InstructionLength(
+                    body.Code[position], body.Schema,
+                    usesNativePointerLoads: true);
+            if (body.Code[position] == 0x1B)
+            {
+                loadPosition = position;
+                break;
+            }
+            position += instructionLength;
+        }
+        Assert.That(loadPosition, Is.GreaterThanOrEqualTo(0));
+
+        var mapCountBytes = 0;
+        for (var mask = body.MapMask; mask != 0; mask >>= 1)
+        {
+            mapCountBytes += mask & 1;
+        }
+        var mapStart = 5 + (mapCountBytes * sizeof(uint));
+        var blockStart = mapStart + (body.HomeCount * 8)
+            + (body.TypeCount * sizeof(uint))
+            + (body.MethodCount * sizeof(uint))
+            + (body.FieldCount * sizeof(uint))
+            + (body.ConstantCount * 8);
+        var truncatedCodeLength = loadPosition + 1;
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            bodyBytes.AsSpan(blockStart + 4),
+            checked((uint)truncatedCodeLength));
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            bodyBytes.AsSpan(5 + (mapCountBytes * sizeof(uint)) + 8),
+            checked((uint)truncatedCodeLength));
+        var truncatedBody = bodyBytes.AsSpan(0,
+            codeOffset + truncatedCodeLength).ToArray();
+
+        var bodyRows = new ReadOnlyMemory<byte>[tables.Bodies.Count];
+        for (var row = 1; row <= bodyRows.Length; row++)
+        {
+            bodyRows[row - 1] = row == bodyRow
+                ? truncatedBody
                 : bodyIndex.GetRow(row).ToArray();
         }
 
