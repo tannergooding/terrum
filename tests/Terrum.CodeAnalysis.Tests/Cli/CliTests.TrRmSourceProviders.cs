@@ -70,6 +70,8 @@ internal sealed partial class CliTests
             $"source-provider-cli-second-provider-{Guid.NewGuid():N}.trrm");
         var providerSelections = Path.Combine(TestArtifactPaths.DirectoryPath,
             $"source-provider-cli-inputs-{Guid.NewGuid():N}.json");
+        var consumerExports = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"source-provider-cli-consumer-exports-{Guid.NewGuid():N}.json");
         var consumerLayout = Path.Combine(TestArtifactPaths.DirectoryPath,
             $"source-provider-cli-consumer-layout-{Guid.NewGuid():N}.json");
         var consumerArtifact = Path.Combine(TestArtifactPaths.DirectoryPath,
@@ -170,17 +172,71 @@ internal sealed partial class CliTests
             await File.WriteAllTextAsync(consumerLayout,
                 CreateLayoutCoreManifest(consumerIdentity),
                 new UTF8Encoding(false)).ConfigureAwait(true);
+            var consumerExportConfiguration = JsonSerializer.Serialize(new {
+                schemaVersion = 1,
+                exports = new[] {
+                    new {
+                        @namespace = "",
+                        name = "Wrapper",
+                        exportKey = "type.wrapper",
+                        fieldExports = new[] {
+                            new {
+                                name = "Inner",
+                                exportKey = "field.wrapper.inner",
+                            },
+                            new {
+                                name = "Extra",
+                                exportKey = "field.wrapper.extra",
+                            },
+                        },
+                    },
+                },
+            });
+            await File.WriteAllTextAsync(consumerExports,
+                consumerExportConfiguration, new UTF8Encoding(false))
+                .ConfigureAwait(true);
             var (compileExit, compileOutput, compileError)
                 = await RunAsync(Encoding.UTF8.GetBytes(consumerSource),
                     "compile-trrm", "-", "--identity", consumerIdentity,
                     "--trrm-schema", schemaIdentity,
                     "--trrm-source-providers", providerSelections,
+                    "--trrm-source-type-exports", consumerExports,
                     "--layout-core-manifest", consumerLayout,
                     "-o", consumerArtifact, "--runtime", "fail-fast",
                     "--json").ConfigureAwait(false);
             Assert.That(compileExit, Is.Zero,
                 $"{compileOutput}{Environment.NewLine}{compileError}");
             Assert.That(compileError, Is.Empty);
+            var consumerInput = new TrRmStandardArtifactInput(schemaIdentity,
+                await File.ReadAllBytesAsync(consumerArtifact)
+                    .ConfigureAwait(true));
+            var consumerReference =
+                TrRmExecutableCompiler.CreateStandardReference(
+                    consumerInput, consumerIdentity, [
+                        new TrRmStandardArtifactInput(schemaIdentity,
+                            await File.ReadAllBytesAsync(providerArtifact)
+                                .ConfigureAwait(true)),
+                        new TrRmStandardArtifactInput(schemaIdentity,
+                            await File.ReadAllBytesAsync(secondProviderArtifact)
+                                .ConfigureAwait(true)),
+                    ], ["type.wrapper"], [
+                        "field.wrapper.inner",
+                        "field.wrapper.extra",
+                    ]);
+            Assert.That(consumerReference, Is.Not.Null);
+            var downstreamCompilation = Compilation.CreateLibrary(
+                SyntaxTree.Parse("""
+                    public int32 Read(Wrapper wrapper) {
+                        return wrapper.Inner.Value;
+                    }
+                    """), consumerReference, new CompilationOptions {
+                    RuntimePolicy = BoundRuntimePolicy.FailFast,
+                    LayoutCoreRegistration =
+                        LayoutCoreRegistrationTestData.Create(),
+                });
+            Assert.That(downstreamCompilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine,
+                    downstreamCompilation.Diagnostics));
 
             var (runExit, runOutput, runError) = await RunAsync([],
                 "run-trrm", consumerArtifact, "--runtime", "fail-fast",
@@ -260,6 +316,8 @@ internal sealed partial class CliTests
             await TestFileCleanup.DeleteWithRetryAsync(secondProviderArtifact)
                 .ConfigureAwait(true);
             await TestFileCleanup.DeleteWithRetryAsync(providerSelections)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(consumerExports)
                 .ConfigureAwait(true);
             await TestFileCleanup.DeleteWithRetryAsync(consumerLayout)
                 .ConfigureAwait(true);
