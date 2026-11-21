@@ -1431,6 +1431,76 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
             "A pointer load must not copy a unique aggregate.");
         Assert.That(compilation.Diagnostics.Any(static diagnostic =>
             diagnostic.Code == "TRM3023"), Is.True);
+
+        var missingUnsafe = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public int32 Read(ptr<int32> source) {
+                return *source;
+            }
+            """));
+        Assert.That(missingUnsafe.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3028"), Is.True);
+    }
+
+    [Test]
+    public void L1PointerLoadRequiresRootlessNativeValuesFeature()
+    {
+        const string moduleIdentity = "l1p-feature-closure";
+        const string l1pSchemaIdentity
+            = "trrm/1-draft-local-aggregate-layout-execution-pointer-loads-1";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public int32 Read(ptr<int32> source) {
+                unsafe { return *source; }
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, l1pSchemaIdentity,
+            moduleTargetRequirement: 1);
+        var index = new TrRmArtifactIndex(artifact,
+            TrRmArtifactSchema.LocalAggregateLayoutDraft,
+            resourceLedger: null, usesNativePointerLoads: true,
+            standardSchemaIdentity: l1pSchemaIdentity);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraftAndGetExecutionTables(
+                index);
+        var (featureFirst, featureCount)
+            = tables.Modules.GetFeatureRange(1);
+        var retainedFeatures
+            = new List<TrRmFeatureRow>(featureCount);
+        for (var featureRow = featureFirst;
+            featureRow < featureFirst + featureCount; featureRow++)
+        {
+            var feature = tables.Features.GetFeature(featureRow);
+            if (feature.FeatureId
+                != TrRmFeatureTableReader.RootlessNativeValuesFeatureId)
+            {
+                retainedFeatures.Add(feature);
+            }
+        }
+        Assert.That(retainedFeatures.All(static feature =>
+            feature.FeatureId
+                != TrRmFeatureTableReader.RootlessNativeValuesFeatureId),
+            Is.True);
+
+        var modules = GetSectionBytes(index, 0x0001);
+        BinaryPrimitives.WriteInt32LittleEndian(modules.AsSpan(24),
+            retainedFeatures.Count == 0 ? 0 : 1);
+        BinaryPrimitives.WriteInt32LittleEndian(modules.AsSpan(28),
+            retainedFeatures.Count);
+        var malformed = ReplaceSections(index,
+            new Dictionary<ushort, TrRmSection> {
+                [0x0001] = new(0x0001, 0, 1, modules),
+                [0x0004] = new(0x0004, 0,
+                    checked((uint)retainedFeatures.Count),
+                    TrRmFeatureTableWriter.Encode(retainedFeatures,
+                        TrRmArtifactSchema.LocalAggregateLayoutDraft)),
+            });
+
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(l1pSchemaIdentity,
+                    malformed), moduleIdentity, []));
     }
 
     [Test]
@@ -1453,10 +1523,20 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
             typeProviderIdentity, l1pSchemaIdentity, relocate: true);
         var rootInput = new TrRmStandardArtifactInput(l1pSchemaIdentity,
             rootArtifact);
-        var methodProviderInput = new TrRmStandardArtifactInput(
+        var sourceMethodProviderInput = new TrRmStandardArtifactInput(
             l1pSchemaIdentity, methodProviderArtifact);
         var typeProviderInput = new TrRmStandardArtifactInput(
             l1pSchemaIdentity, relocatedTypeArtifact);
+        var loadedMethodProvider = TrRmExecutableCompiler.LoadStandard(
+            sourceMethodProviderInput, methodProviderIdentity, [
+                typeProviderInput,
+            ]);
+        var reemittedMethodProvider
+            = TrRmExecutableCompiler.EmitStandard(loadedMethodProvider,
+                methodProviderIdentity, l1pSchemaIdentity,
+                moduleTargetRequirement: 1);
+        var methodProviderInput = new TrRmStandardArtifactInput(
+            l1pSchemaIdentity, reemittedMethodProvider);
         var providers = new[] { methodProviderInput, typeProviderInput };
         var loaded = TrRmExecutableCompiler.LoadStandard(rootInput,
             rootIdentity, providers);
