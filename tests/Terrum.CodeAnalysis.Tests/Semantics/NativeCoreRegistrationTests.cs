@@ -757,6 +757,30 @@ internal sealed class NativeCoreRegistrationTests
                     [Terrum.CodeAnalysis.ForwardsBacking(
                         this, nameof(source))]
                     write ptr<uint8> value);
+
+                [param(value): Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonNegative)]
+                public unsafe int32 TryReadBool(ptr<int32> source,
+                    [Terrum.CodeAnalysis.DependsOn(this, nameof(source))]
+                    [Terrum.CodeAnalysis.ForwardsBacking(
+                        this, nameof(source))]
+                    write ptr<bool> value);
+
+                [param(value): Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonNegative)]
+                public unsafe int32 TryReadInt64(ptr<int32> source,
+                    [Terrum.CodeAnalysis.DependsOn(this, nameof(source))]
+                    [Terrum.CodeAnalysis.ForwardsBacking(
+                        this, nameof(source))]
+                    write ptr<int64> value);
+
+                [param(value): Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonNegative)]
+                public unsafe int32 TryReadFloat32(ptr<int32> source,
+                    [Terrum.CodeAnalysis.DependsOn(this, nameof(source))]
+                    [Terrum.CodeAnalysis.ForwardsBacking(
+                        this, nameof(source))]
+                    write ptr<float32> value);
             }
 
             int32 Invoke(ptr<void> receiver, ptr<int32> source) {
@@ -869,6 +893,39 @@ internal sealed class NativeCoreRegistrationTests
                     int32 status = IProbe.TryReadUInt8(
                         receiver, source, &init value);
                     if (status != 0) { return value; }
+                    return fallback;
+                }
+            }
+
+            bool InvokeBool(ptr<void> receiver, ptr<int32> source,
+                bool fallback) {
+                init bool value;
+                unsafe {
+                    int32 status = IProbe.TryReadBool(
+                        receiver, source, &init value);
+                    if (status >= 0) { return value; }
+                    return fallback;
+                }
+            }
+
+            int64 InvokeInt64(ptr<void> receiver, ptr<int32> source,
+                int64 fallback) {
+                init int64 value;
+                unsafe {
+                    int32 status = IProbe.TryReadInt64(
+                        receiver, source, &init value);
+                    if (status >= 0) { return value; }
+                    return fallback;
+                }
+            }
+
+            float32 InvokeFloat32(ptr<void> receiver, ptr<int32> source,
+                float32 fallback) {
+                init float32 value;
+                unsafe {
+                    int32 status = IProbe.TryReadFloat32(
+                        receiver, source, &init value);
+                    if (status >= 0) { return value; }
                     return fallback;
                 }
             }
@@ -984,6 +1041,39 @@ internal sealed class NativeCoreRegistrationTests
                     int32 status = IProbe.TryReadUInt8(
                         receiver, source, &init value);
                     if (status != 0) { return value; }
+                    return fallback;
+                }
+            }
+
+            bool InvokeBool(ptr<void> receiver, ptr<int32> source,
+                bool fallback) {
+                init bool value;
+                unsafe {
+                    int32 status = IProbe.TryReadBool(
+                        receiver, source, &init value);
+                    if (status >= 0) { return value; }
+                    return fallback;
+                }
+            }
+
+            int64 InvokeInt64(ptr<void> receiver, ptr<int32> source,
+                int64 fallback) {
+                init int64 value;
+                unsafe {
+                    int32 status = IProbe.TryReadInt64(
+                        receiver, source, &init value);
+                    if (status >= 0) { return value; }
+                    return fallback;
+                }
+            }
+
+            float32 InvokeFloat32(ptr<void> receiver, ptr<int32> source,
+                float32 fallback) {
+                init float32 value;
+                unsafe {
+                    int32 status = IProbe.TryReadFloat32(
+                        receiver, source, &init value);
+                    if (status >= 0) { return value; }
                     return fallback;
                 }
             }
@@ -1113,6 +1203,27 @@ internal sealed class NativeCoreRegistrationTests
             providerTables.Methods.GetBodyRow(providerUInt8Row),
             providerTables.Contracts.Count);
         AssertCorrelatedOutputBody(providerUInt8Body, 13, 3, 4, 2);
+        var providerBoolRow
+            = Enumerable.Range(1, providerTables.Methods.Count).Single(row =>
+                providerTables.Methods.GetName(row) == "InvokeBool");
+        var providerBoolBody = providerTables.Bodies.GetRegisterBody(
+            providerTables.Methods.GetBodyRow(providerBoolRow),
+            providerTables.Contracts.Count);
+        AssertCorrelatedOutputBody(providerBoolBody, 6, 3, 4, 2);
+        var providerInt64Row
+            = Enumerable.Range(1, providerTables.Methods.Count).Single(row =>
+                providerTables.Methods.GetName(row) == "InvokeInt64");
+        var providerInt64Body = providerTables.Bodies.GetRegisterBody(
+            providerTables.Methods.GetBodyRow(providerInt64Row),
+            providerTables.Contracts.Count);
+        AssertCorrelatedOutputBody(providerInt64Body, 6, 3, 4, 2);
+        var providerFloat32Row
+            = Enumerable.Range(1, providerTables.Methods.Count).Single(row =>
+                providerTables.Methods.GetName(row) == "InvokeFloat32");
+        var providerFloat32Body = providerTables.Bodies.GetRegisterBody(
+            providerTables.Methods.GetBodyRow(providerFloat32Row),
+            providerTables.Contracts.Count);
+        AssertCorrelatedOutputBody(providerFloat32Body, 6, 3, 4, 2);
 
         var loadedProvider = TrRmExecutableCompiler.LoadStandard(
             providerInput, "provider.module", []);
@@ -1145,6 +1256,15 @@ internal sealed class NativeCoreRegistrationTests
             successOnTrue: false);
         AssertCorrelatedOutputCall(loadedProvider, null,
             "InvokeUInt8", TokenKind.BangEquals, PrimitiveType.UInt8,
+            PrimitiveType.Int32);
+        AssertCorrelatedOutputCall(loadedProvider, null,
+            "InvokeBool", TokenKind.GreaterEquals, PrimitiveType.Bool,
+            PrimitiveType.Int32);
+        AssertCorrelatedOutputCall(loadedProvider, null,
+            "InvokeInt64", TokenKind.GreaterEquals, PrimitiveType.Int64,
+            PrimitiveType.Int32);
+        AssertCorrelatedOutputCall(loadedProvider, null,
+            "InvokeFloat32", TokenKind.GreaterEquals, PrimitiveType.Float32,
             PrimitiveType.Int32);
         var reference = TrRmExecutableCompiler.CreateStandardReference(
             providerInput, "provider.module", []);
@@ -1260,6 +1380,27 @@ internal sealed class NativeCoreRegistrationTests
             consumerTables.Methods.GetBodyRow(consumerUInt8Row),
             consumerTables.Contracts.Count);
         AssertCorrelatedOutputBody(consumerUInt8Body, 13, 3, 4, 2);
+        var consumerBoolRow
+            = Enumerable.Range(1, consumerTables.Methods.Count).Single(row =>
+                consumerTables.Methods.GetName(row) == "InvokeBool");
+        var consumerBoolBody = consumerTables.Bodies.GetRegisterBody(
+            consumerTables.Methods.GetBodyRow(consumerBoolRow),
+            consumerTables.Contracts.Count);
+        AssertCorrelatedOutputBody(consumerBoolBody, 6, 3, 4, 2);
+        var consumerInt64Row
+            = Enumerable.Range(1, consumerTables.Methods.Count).Single(row =>
+                consumerTables.Methods.GetName(row) == "InvokeInt64");
+        var consumerInt64Body = consumerTables.Bodies.GetRegisterBody(
+            consumerTables.Methods.GetBodyRow(consumerInt64Row),
+            consumerTables.Contracts.Count);
+        AssertCorrelatedOutputBody(consumerInt64Body, 6, 3, 4, 2);
+        var consumerFloat32Row
+            = Enumerable.Range(1, consumerTables.Methods.Count).Single(row =>
+                consumerTables.Methods.GetName(row) == "InvokeFloat32");
+        var consumerFloat32Body = consumerTables.Bodies.GetRegisterBody(
+            consumerTables.Methods.GetBodyRow(consumerFloat32Row),
+            consumerTables.Contracts.Count);
+        AssertCorrelatedOutputBody(consumerFloat32Body, 6, 3, 4, 2);
 
         var providers = new[] { providerInput };
         var malformedIndex = new TrRmArtifactIndex(consumerArtifact,
@@ -1310,6 +1451,15 @@ internal sealed class NativeCoreRegistrationTests
         AssertCorrelatedOutputCall(loadedConsumer, "provider.module",
             "InvokeUInt8", TokenKind.BangEquals, PrimitiveType.UInt8,
             PrimitiveType.Int32);
+        AssertCorrelatedOutputCall(loadedConsumer, "provider.module",
+            "InvokeBool", TokenKind.GreaterEquals, PrimitiveType.Bool,
+            PrimitiveType.Int32);
+        AssertCorrelatedOutputCall(loadedConsumer, "provider.module",
+            "InvokeInt64", TokenKind.GreaterEquals, PrimitiveType.Int64,
+            PrimitiveType.Int32);
+        AssertCorrelatedOutputCall(loadedConsumer, "provider.module",
+            "InvokeFloat32", TokenKind.GreaterEquals, PrimitiveType.Float32,
+            PrimitiveType.Int32);
         var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(
             loadedConsumer, "consumer.module", schemaIdentity, 1, []);
         var reloadedConsumer = TrRmExecutableCompiler.LoadStandard(
@@ -1344,6 +1494,15 @@ internal sealed class NativeCoreRegistrationTests
             successOnTrue: false);
         AssertCorrelatedOutputCall(reloadedConsumer, "provider.module",
             "InvokeUInt8", TokenKind.BangEquals, PrimitiveType.UInt8,
+            PrimitiveType.Int32);
+        AssertCorrelatedOutputCall(reloadedConsumer, "provider.module",
+            "InvokeBool", TokenKind.GreaterEquals, PrimitiveType.Bool,
+            PrimitiveType.Int32);
+        AssertCorrelatedOutputCall(reloadedConsumer, "provider.module",
+            "InvokeInt64", TokenKind.GreaterEquals, PrimitiveType.Int64,
+            PrimitiveType.Int32);
+        AssertCorrelatedOutputCall(reloadedConsumer, "provider.module",
+            "InvokeFloat32", TokenKind.GreaterEquals, PrimitiveType.Float32,
             PrimitiveType.Int32);
 
         static void AssertCorrelatedOutputBody(
