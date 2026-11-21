@@ -442,7 +442,10 @@ internal sealed class TrRmNativeParameterAggregateBackingTests
     }
 
     [Test]
-    public async Task StandardA2NativeOutputUsesCopyStructFieldArrayBackingAsync()
+    [TestCase(false, "&backing.Values[0]", 1)]
+    [TestCase(true, "&backing.Data.Values[0]", 2)]
+    public async Task StandardA2NativeOutputUsesCopyStructFieldArrayBackingAsync(
+        bool nestedField, string fieldArrayAddress, int expectedFieldDepth)
     {
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
@@ -450,16 +453,30 @@ internal sealed class TrRmNativeParameterAggregateBackingTests
         const string schemaIdentity
             = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
         const string moduleIdentity = "a2-native-output-field-array-backing";
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var holderDeclaration = nestedField
+            ? """
+                [Blittable] [Layout(LayoutKind.Sequential)]
+                public struct Nested {
+                    public mut [int32; 3] Values;
+                }
+                [Blittable] [Layout(LayoutKind.Sequential)]
+                public struct Holder {
+                    public mut Nested Data;
+                }
+                """
+            : """
+                [Blittable] [Layout(LayoutKind.Sequential)]
+                public struct Holder {
+                    public mut [int32; 3] Values;
+                }
+                """;
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse($$"""
             [Blittable] [Layout(LayoutKind.Sequential)]
             public struct Pair {
                 public int32 First;
                 public int32 Second;
             }
-            [Blittable] [Layout(LayoutKind.Sequential)]
-            public struct Holder {
-                public mut [int32; 3] Values;
-            }
+            {{holderDeclaration}}
             [param(buffer): DependsOn(nameof(baseAddress))]
             [Terrum.Interop.NativeImport("kernel32.dll",
                 "ReadProcessMemory")]
@@ -479,7 +496,7 @@ internal sealed class TrRmNativeParameterAggregateBackingTests
                 init mut Pair buffer;
                 unsafe {
                     return ReadProcessMemory(process,
-                        &backing.Values[0], &init buffer,
+                        {{fieldArrayAddress}}, &init buffer,
                         bytesToRead, bytesRead);
                 }
             }
@@ -511,6 +528,14 @@ internal sealed class TrRmNativeParameterAggregateBackingTests
             storageAddress.CarrierType), Is.True);
         Assert.That(storageAddress.FieldPlace!.Type,
             Is.EqualTo(storageAddress.CarrierType));
+        var fieldDepth = 0;
+        var fieldPlace = storageAddress.FieldPlace;
+        while (fieldPlace is BoundFieldRead fieldRead)
+        {
+            fieldDepth++;
+            fieldPlace = fieldRead.Receiver;
+        }
+        Assert.That(fieldDepth, Is.EqualTo(expectedFieldDepth));
         Assert.That(storageAddress.ElementCount, Is.EqualTo(3UL));
         Assert.That(storageAddress.ElementStride, Is.EqualTo(4UL));
         Assert.That(storageAddress.ByteExtent, Is.EqualTo(12UL));
