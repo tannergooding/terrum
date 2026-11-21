@@ -1157,6 +1157,130 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
     }
 
     [Test]
+    public async Task L1PointerLoadCapturesOverAlignedAggregateWithArrayChildrenAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+
+        const string moduleIdentity = "l1p-overaligned-array-snapshot";
+        const string l1pSchemaIdentity
+            = "trrm/1-draft-local-aggregate-layout-execution-pointer-loads-1";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Blittable]
+            [Layout(LayoutKind.Sequential, Alignment: 32)]
+            struct Inner {
+                public mut [int32; 8] Items;
+            }
+            [Blittable]
+            [Layout(LayoutKind.Sequential, Alignment: 8192)]
+            struct Snapshot {
+                public mut Inner Nested;
+            }
+            public int32 Main(ptr<Snapshot> source) {
+                unsafe {
+                    Snapshot captured = *source;
+                    return captured.Nested.Items[7];
+                }
+            }
+            """), new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, l1pSchemaIdentity,
+            moduleTargetRequirement: 1);
+        var input = new TrRmStandardArtifactInput(l1pSchemaIdentity,
+            artifact);
+        var loaded = TrRmExecutableCompiler.LoadStandard(input,
+            moduleIdentity, []);
+        var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
+            moduleIdentity + "-reemitted", l1pSchemaIdentity,
+            moduleTargetRequirement: 1);
+        var reemittedIdentity = moduleIdentity + "-reemitted";
+        var image = NativeModuleCompiler.EmitStandardLibrary(
+            new TrRmStandardArtifactInput(l1pSchemaIdentity, reemitted),
+            reemittedIdentity, [], ["Main"],
+            NativeRuntimePolicy.FailFast);
+
+        var directory = TestArtifactPaths.CreateDirectory(
+            "terrum-l1p-overaligned-array-");
+        try
+        {
+            var imagePath = Path.Combine(directory, "library.dll");
+            await File.WriteAllBytesAsync(imagePath, image)
+                .ConfigureAwait(true);
+            var library = NativeLibrary.Load(imagePath);
+            try
+            {
+                var function = Marshal.GetDelegateForFunctionPointer<
+                    GetPointerValueDelegate>(NativeLibrary.GetExport(library,
+                    "Main"));
+                const nuint alignment = 8192;
+                var allocation = Marshal.AllocHGlobal(
+                    checked((nint)(alignment * 2 - 1)));
+                try
+                {
+                    var rawAddress = (nuint)allocation;
+                    var source = checked((nint)((rawAddress + alignment - 1)
+                        & ~(alignment - 1)));
+                    Assert.That((nuint)source % alignment, Is.Zero);
+                    for (var index = 0; index < 8; index++)
+                    {
+                        Marshal.WriteInt32(source, index * sizeof(int),
+                            index == 7 ? 42 : index + 1);
+                    }
+
+                    Assert.That(function(source), Is.EqualTo(42));
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(allocation);
+                }
+            }
+            finally
+            {
+                NativeLibrary.Free(library);
+            }
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [TestCase(14, true)]
+    [TestCase(15, true)]
+    [TestCase(14, false)]
+    [TestCase(15, false)]
+    public void L1PointerLoadRejectsReservedRegisters(int invalidRegister,
+        bool invalidDestination)
+    {
+        const string moduleIdentity = "l1p-reserved-register";
+        const string l1pSchemaIdentity
+            = "trrm/1-draft-local-aggregate-layout-execution-pointer-loads-1";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public int32 Read(ptr<int32> source) {
+                unsafe { return *source; }
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, l1pSchemaIdentity,
+            moduleTargetRequirement: 1);
+        var malformed = MutateL1pPointerLoadRegister(artifact,
+            l1pSchemaIdentity, "Read", invalidRegister,
+            invalidDestination);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(l1pSchemaIdentity,
+                    malformed), moduleIdentity, []));
+    }
+
+    [Test]
     public async Task L1PointerLoadPreservesImportedAggregateProviderClosureAsync()
     {
         Assume.That(OperatingSystem.IsWindows()
@@ -1516,6 +1640,83 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
                 new TrRmSourceTypeExport("", "Snapshot", "SnapshotKey"),
                 new TrRmSourceTypeExport("", "Inner", "InnerKey"),
             ]);
+    }
+
+    private static byte[] MutateL1pPointerLoadRegister(
+        byte[] artifact, string schemaIdentity, string methodName,
+        int invalidRegister, bool invalidDestination)
+    {
+        var index = new TrRmArtifactIndex(artifact,
+            TrRmArtifactSchema.LocalAggregateLayoutDraft,
+            resourceLedger: null, usesNativePointerLoads: true,
+            standardSchemaIdentity: schemaIdentity);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraftAndGetExecutionTables(
+                index);
+        var methodRow = 0;
+        for (var candidate = 1;
+            candidate <= tables.Methods.Count; candidate++)
+        {
+            if (tables.Methods.GetName(candidate) == methodName)
+            {
+                methodRow = candidate;
+                break;
+            }
+        }
+        Assert.That(methodRow, Is.GreaterThan(0));
+        var bodyRow = tables.Methods.GetBodyRow(methodRow);
+        Assert.That(bodyRow, Is.GreaterThan(0));
+        var bodyIndex = new TrRmVariableTableIndex(
+            GetSectionBytes(index, 0x0020), tables.Bodies.Count, 1, 1);
+        var body = tables.Bodies.GetRegisterBody(bodyRow,
+            tables.Contracts.Count);
+        var bodyBytes = bodyIndex.GetRow(bodyRow).ToArray();
+        var codeOffset = bodyBytes.Length - body.Code.Length;
+        if (!bodyBytes.AsSpan(codeOffset).SequenceEqual(body.Code))
+        {
+            throw new InvalidDataException(
+                "The L1P test Body code is not the final variable-row payload.");
+        }
+
+        var foundLoad = false;
+        for (var position = 0; position < body.Code.Length;)
+        {
+            var instructionLength
+                = TrRmRegisterBodyReader.InstructionLength(
+                    body.Code[position], body.Schema,
+                    usesNativePointerLoads: true);
+            if (body.Code[position] == 0x1B)
+            {
+                var operandOffset = codeOffset + position + 1;
+                var operand = bodyBytes[operandOffset];
+                bodyBytes[operandOffset] = invalidDestination
+                    ? (byte)((operand & 0xF0) | invalidRegister)
+                    : (byte)((operand & 0x0F)
+                        | (invalidRegister << 4));
+                foundLoad = true;
+                break;
+            }
+            position += instructionLength;
+        }
+        if (!foundLoad)
+        {
+            throw new InvalidDataException(
+                "The L1P test method has no typed pointer-load instruction.");
+        }
+
+        var bodyRows = new ReadOnlyMemory<byte>[tables.Bodies.Count];
+        for (var row = 1; row <= bodyRows.Length; row++)
+        {
+            bodyRows[row - 1] = row == bodyRow
+                ? bodyBytes
+                : bodyIndex.GetRow(row).ToArray();
+        }
+
+        return ReplaceSections(index, new Dictionary<ushort, TrRmSection> {
+            [0x0020] = new(0x0020, 0,
+                checked((uint)bodyRows.Length),
+                TrRmVariableTableWriter.EncodeBodies(bodyRows)),
+        });
     }
 
     private static byte[] AddL1pMethodImportToRootArtifact(
