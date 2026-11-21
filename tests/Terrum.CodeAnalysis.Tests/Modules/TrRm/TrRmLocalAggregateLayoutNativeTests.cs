@@ -1157,17 +1157,22 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
                 public mut int32 First;
                 public mut int32 Second;
                 public mut int32 Third;
-                public Snapshot(int32 first, int32 second, int32 third) {
+                public mut int32 Fourth;
+                public mut int32 Fifth;
+                public Snapshot(int32 first, int32 second, int32 third,
+                    int32 fourth, int32 fifth) {
                     First = first;
                     Second = second;
                     Third = third;
+                    Fourth = fourth;
+                    Fifth = fifth;
                 }
             }
             Snapshot ReadSnapshot(ptr<Snapshot> source) {
                 unsafe { return *source; }
             }
             public int32 Main() {
-                mut Snapshot value = new Snapshot(42, 1, 2);
+                mut Snapshot value = new Snapshot(42, 1, 2, 3, 4);
                 unsafe {
                     ptr<Snapshot> source = &value;
                     Snapshot captured = ReadSnapshot(source);
