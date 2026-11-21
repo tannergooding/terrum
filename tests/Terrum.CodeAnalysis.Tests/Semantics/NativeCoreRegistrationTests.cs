@@ -761,9 +761,14 @@ internal sealed class NativeCoreRegistrationTests
             new TrRmStandardArtifactInput(schemaIdentity, artifact),
             "provider.module", []);
         Assert.That(reference.Structures, Has.Length.EqualTo(1));
+        Assert.That(reference.Structures.Single().StandardTypeOrigin
+            ?.ExportKeys.ToArray(), Is.EqualTo(new[] { "provider/Point" }));
         Assert.That(reference.Structures.Single().Fields.Select(
                 static field => field.Name),
             Is.EqualTo(new[] { "X", "Y" }));
+        Assert.That(reference.Structures.Single().Fields.Select(
+                static field => field.StandardFieldOrigin?.ExportKeys.Single()),
+            Is.EqualTo(new[] { "provider/Point.X", "provider/Point.Y" }));
         var caller = Compilation.CreateLibrary(SyntaxTree.Parse("""
             int32 Invoke(ptr<void> receiver, ptr<Point> point) {
                 unsafe { return IProbe.Read(receiver, point); }

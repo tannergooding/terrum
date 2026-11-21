@@ -62,8 +62,104 @@ public static partial class TrRmExecutableCompiler
             imports: tables.Imports,
             includedTypeDefRows: includedTypeDefRows,
             allowDuplicateImportedViews: true);
+        var structuresWithOrigins = structures.ToBuilder();
+        var structureExportKeys = tables.Exports
+            .GetExportsForModule(moduleRow)
+            .Where(static export => (export.Definition >> 24) == 0x13)
+            .GroupBy(static export => export.Definition)
+            .ToDictionary(static group => group.Key,
+                static group => group.Select(
+                        static export => export.ExportKey)
+                    .OrderBy(static key => key, StringComparer.Ordinal)
+                    .ToImmutableArray());
+        var fieldExportKeys = tables.Exports
+            .GetExportsForModule(moduleRow)
+            .Where(static export => (export.Definition >> 24) == 0x14)
+            .GroupBy(static export => export.Definition)
+            .ToDictionary(static group => group.Key,
+                static group => group.Select(
+                        static export => export.ExportKey)
+                    .OrderBy(static key => key, StringComparer.Ordinal)
+                    .ToImmutableArray());
+        BoundSourceTypeProviderSnapshot? structureProviderSnapshot = null;
+        foreach (var typeDefRow in includedTypeDefRows)
+        {
+            var definitionId = 0x1300_0000u
+                | checked((uint)typeDefRow);
+            if (!structureExportKeys.TryGetValue(definitionId,
+                    out var exportKeys)
+                || exportKeys.IsEmpty)
+            {
+                continue;
+            }
+
+            var structureIndex = structureTypeByTypeDef[typeDefRow];
+            var structure = structuresWithOrigins[structureIndex];
+            var providerSnapshot = structureProviderSnapshot
+                ??= CreateA2SourceTypeProviderSnapshot(tables,
+                    context.Artifacts[artifactIndex],
+                    context.SchemaIdentity, moduleRow);
+            var fields = structure.Fields.ToBuilder();
+            var (fieldStart, fieldEnd)
+                = tables.TypeDefs.GetFieldRange(typeDefRow);
+            var layoutRow = tables.Layouts.GetLayoutForProfile(typeDefRow,
+                TrRmTargetProfileTableReader.WindowsX64NativeProfileId,
+                TrRmTargetProfileTableReader
+                    .WindowsX64NativeProfileRuleRevision);
+            var (firstLayoutField, layoutFieldCount)
+                = tables.Layouts.GetLayoutFieldRange(layoutRow);
+            if (layoutFieldCount != fields.Count
+                || fieldEnd - fieldStart != fields.Count)
+            {
+                throw Invalid(
+                    "A ForeignNativeInterface aggregate layout has inconsistent field ranges.");
+            }
+
+            for (var fieldOrdinal = 0; fieldOrdinal < fields.Count;
+                fieldOrdinal++)
+            {
+                var fieldRow = tables.LayoutFields.GetFieldDef(
+                    firstLayoutField + fieldOrdinal);
+                var fieldDefinitionId = 0x1400_0000u
+                    | checked((uint)fieldRow);
+                if (!fieldExportKeys.TryGetValue(fieldDefinitionId,
+                        out var fieldKeys)
+                    || fieldKeys.IsEmpty)
+                {
+                    continue;
+                }
+
+                var field = fields[fieldOrdinal];
+                var expectedField = field with {
+                    StandardFieldOrigin = null,
+                };
+                fields[fieldOrdinal] = field with {
+                    StandardFieldOrigin = new BoundStandardFieldOrigin(
+                        providerSnapshot, fieldDefinitionId, fieldKeys, true,
+                        expectedField),
+                };
+            }
+
+            var expectedDeclaration = structure with {
+                Fields = [.. fields.Select(static field => field with {
+                    StandardFieldOrigin = null,
+                })],
+                StandardLayoutOnly = false,
+                StandardTypeOrigin = null,
+            };
+            structuresWithOrigins[structureIndex] = structure with {
+                Fields = fields.ToImmutable(),
+                StandardTypeOrigin = new BoundStandardTypeOrigin(
+                    providerSnapshot, definitionId, exportKeys, true,
+                    ReferenceRoot: providerSnapshot,
+                    ExpectedDeclaration: expectedDeclaration),
+                StandardLayoutOnly = false,
+            };
+        }
+
         context.ForeignNativeInterfaceStructures.Clear();
-        context.ForeignNativeInterfaceStructures.AddRange(structures);
+        context.ForeignNativeInterfaceStructures.AddRange(
+            structuresWithOrigins);
         ReadForeignNativeInterfaceFunctionPointerAnchors(tables, context,
             moduleRow, pointerTypeIndexes, signatureIndexByAnchorMethod,
             signatureIndexByAnchorTypeSpec, structureTypeByTypeDef);
