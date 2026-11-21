@@ -1206,7 +1206,9 @@ public static partial class TrRmExecutableCompiler
                     if (pointeeType == PrimitiveType.Void
                         || !IsStandardNativePointerLoadPointeeType(
                             pointeeType, typeEnvironment.Structures,
-                            allowAggregatePointees: true)
+                            allowAggregatePointees: true,
+                            fixedArrayTypes:
+                                typeEnvironment.FixedArrayTypes)
                         || !NativePointerTypeContract.IsCopyableSourcePointee(
                             pointeeType, typeEnvironment.Structures, [],
                             nativeLoweringAgreement: null,

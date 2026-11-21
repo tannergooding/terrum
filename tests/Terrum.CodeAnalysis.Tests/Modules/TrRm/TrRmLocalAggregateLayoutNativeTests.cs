@@ -1281,6 +1281,27 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
     }
 
     [Test]
+    public void SourceRejectsL1PointerLoadOfUniqueAggregate()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            unique struct UniqueSnapshot {
+                    public mut int32 First;
+            }
+            public int32 Read(ptr<UniqueSnapshot> source) {
+                    unsafe { return (*source).First; }
+            }
+            """), new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+        });
+        Assert.That(compilation.HasErrors, Is.True,
+            "A pointer load must not copy a unique aggregate.");
+        Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3023"), Is.True);
+    }
+
+    [Test]
     public async Task L1PointerLoadPreservesImportedAggregateProviderClosureAsync()
     {
         Assume.That(OperatingSystem.IsWindows()

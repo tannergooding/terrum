@@ -1585,12 +1585,13 @@ public static partial class TrRmExecutableCompiler
     private static bool IsStandardNativePointerLoadValueType(
         PrimitiveType type, BoundProgram program,
         bool allowAggregatePointees)
-        => IsStandardNativePointerLoadValueType(type,
-            program.Structures, allowAggregatePointees);
+        => IsStandardNativePointerLoadValueType(type, program.Structures,
+            allowAggregatePointees, program.NativeFixedArrayTypes);
 
     private static bool IsStandardNativePointerLoadValueType(
         PrimitiveType type, ImmutableArray<BoundStruct> structures,
-        bool allowAggregatePointees)
+        bool allowAggregatePointees,
+        ImmutableArray<BoundNativeFixedArrayType> fixedArrayTypes = default)
     {
         if (IsStandardNativePointerLoadValueType(type))
         {
@@ -1602,8 +1603,9 @@ public static partial class TrRmExecutableCompiler
             && (uint)structureIndex < (uint)structures.Length
             && NativePointerTypeContract.IsCopyableSourcePointee(type,
                 structures, [], nativeLoweringAgreement: null,
-                fixedArrayTypes: [])
-            && ValueLayout.Size(type, structures) > 0;
+                fixedArrayTypes: fixedArrayTypes)
+            && ValueLayout.Size(type, structures,
+                fixedArrayTypes: fixedArrayTypes) > 0;
     }
 
     private static bool IsStandardNativePointerLoadPointeeType(
@@ -1620,10 +1622,11 @@ public static partial class TrRmExecutableCompiler
 
     private static bool IsStandardNativePointerLoadPointeeType(
         PrimitiveType type, ImmutableArray<BoundStruct> structures,
-        bool allowAggregatePointees)
+        bool allowAggregatePointees,
+        ImmutableArray<BoundNativeFixedArrayType> fixedArrayTypes = default)
         => type != PrimitiveType.NativeRawPointer
             && IsStandardNativePointerLoadValueType(type, structures,
-                allowAggregatePointees);
+                allowAggregatePointees, fixedArrayTypes);
 
     private static bool CanEncodeStandardNativePointerLoadValue(
         BoundExpression expression, BoundFunction function,
