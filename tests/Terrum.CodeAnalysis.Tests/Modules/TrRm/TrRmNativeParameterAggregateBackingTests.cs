@@ -55,6 +55,10 @@ internal sealed class TrRmNativeParameterAggregateBackingTests
         nuint bytesToRead, nint bytesRead);
 
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int ComputedIndexProbeDelegate(nint process,
+        int firstIndex, int secondIndex, nuint bytesToRead, nint bytesRead);
+
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int ArrayUpdateProbeDelegate(nint process,
         int initialIndex, nuint bytesToRead, nint bytesRead);
 
@@ -940,6 +944,115 @@ internal sealed class TrRmNativeParameterAggregateBackingTests
                     ArrayUpdateProbeDelegate>(NativeLibrary.GetExport(
                     library, "Probe"));
                 Assert.That(function(new IntPtr(-1), 1, 4, bytesRead),
+                    Is.EqualTo(1));
+                Assert.That(Marshal.ReadInt64(bytesRead), Is.EqualTo(4));
+            }
+            finally
+            {
+                if (bytesRead != 0)
+                {
+                    Marshal.FreeHGlobal(bytesRead);
+                }
+                NativeLibrary.Free(library);
+            }
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
+    public async Task StandardA2NativeOutputUsesComputedArrayIndexAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
+        const string moduleIdentity = "a2-native-output-computed-array-index";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [param(buffer): DependsOn(nameof(baseAddress))]
+            [Terrum.Interop.NativeImport("kernel32.dll",
+                "ReadProcessMemory")]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(5, Write, NoEscape, 1)]
+            extern unsafe int32 ReadProcessMemory(
+                ptr<void> process, ptr<int32> baseAddress,
+                [Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                write ptr<int32> buffer, nuint bytesToRead,
+                write ptr<nuint> bytesRead);
+
+            public unsafe int32 Probe(ptr<void> process,
+                int32 firstIndex, int32 secondIndex, nuint bytesToRead,
+                write ptr<nuint> bytesRead) {
+                mut [int32; 3] source = [0, 0, 0];
+                int32 selectedIndex = firstIndex + secondIndex;
+                init mut int32 buffer;
+                unsafe {
+                    return ReadProcessMemory(process,
+                        &source[selectedIndex], &init buffer,
+                        bytesToRead, bytesRead);
+                }
+            }
+            """), NativeOutputCoreRegistrationTests
+                .CreateRegisteredCompilationOptions());
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity,
+            moduleTargetRequirement: 1);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            moduleIdentity, []);
+        var caller = loaded.Functions.Single(static function =>
+            function.Name == "Probe");
+        BoundNativeStorageAddress? arrayBacking = null;
+        Assert.That(BoundTreeTraversal.VisitExpressions(caller.Body,
+            expression =>
+            {
+                if (expression is BoundNativeStorageAddress address
+                    && NativeFixedArrayTypes.IsType(address.CarrierType))
+                {
+                    arrayBacking = address;
+                }
+            }), Is.True);
+        Assert.That(arrayBacking, Is.Not.Null);
+        var indexRead = arrayBacking!.Index as BoundRead;
+        Assert.That(indexRead, Is.Not.Null);
+        Assert.That(caller.Body.Statements.OfType<BoundLocal>().Single(
+            local => local.Variable == indexRead!.Variable).Initializer,
+            Is.TypeOf<BoundBinary>());
+
+        var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
+            moduleIdentity, schemaIdentity, moduleTargetRequirement: 1);
+        Assert.That(reemitted, Is.EqualTo(artifact));
+        var reemittedInput = new TrRmStandardArtifactInput(schemaIdentity,
+            reemitted);
+        _ = TrRmExecutableCompiler.LoadStandard(reemittedInput,
+            moduleIdentity, []);
+        var image = NativeModuleCompiler.EmitStandardLibrary(
+            reemittedInput, moduleIdentity, [], ["Probe"],
+            NativeRuntimePolicy.FailFast);
+        var directory = TestArtifactPaths.CreateDirectory(
+            "terrum-a2-native-output-computed-index-");
+        try
+        {
+            var imagePath = Path.Combine(directory, "library.dll");
+            await File.WriteAllBytesAsync(imagePath, image)
+                .ConfigureAwait(true);
+            var library = NativeLibrary.Load(imagePath);
+            nint bytesRead = 0;
+            try
+            {
+                bytesRead = Marshal.AllocHGlobal(sizeof(long));
+                Marshal.WriteInt64(bytesRead, 0);
+                var function = Marshal.GetDelegateForFunctionPointer<
+                    ComputedIndexProbeDelegate>(
+                    NativeLibrary.GetExport(library, "Probe"));
+                Assert.That(function(new IntPtr(-1), 1, 0, 4, bytesRead),
                     Is.EqualTo(1));
                 Assert.That(Marshal.ReadInt64(bytesRead), Is.EqualTo(4));
             }
