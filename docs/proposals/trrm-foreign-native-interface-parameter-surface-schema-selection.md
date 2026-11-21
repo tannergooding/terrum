@@ -33,7 +33,10 @@ but select only foreign-member ownership, not their general profile/owner sets.
 A sparse default table would need another assignment and association; adding
 fields to shared Param would conflate declaration views. Widening F+I in place
 is permissible before release, but does not preserve the requested distinct
-selection. Composing all of G1/C1 would admit unrelated contracts.
+selection. Composing all of G1/C1 would admit unrelated contracts. The base
+F+I profile admits only zero-formal foreign methods; any explicit formal
+requires this parameter-surface identity, even when it has no default and all
+observed calls are positional.
 
 ## One exact provisional agreement
 

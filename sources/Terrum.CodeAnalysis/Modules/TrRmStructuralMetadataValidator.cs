@@ -3912,6 +3912,8 @@ public static class TrRmStructuralMetadataValidator
                 var signature = methods.GetSignature(methodDef);
                 var receiverTypeSpec = signatures.GetReceiverTypeSpec(signature);
                 var receiverType = typeSpecs.GetTypeSpecBytes(receiverTypeSpec);
+                var (parameterFirst, parameterCount)
+                    = signatures.GetParamRange(signature);
                 if (methods.GetOwnerType(methodDef) != ownerTypeDef
                     || methods.GetBodyRow(methodDef) != 0
                     || (methods.GetFlags(methodDef) & 3) != 2
@@ -3935,6 +3937,7 @@ public static class TrRmStructuralMetadataValidator
                     || receiverType.Length != 4 || receiverType[0] != 1
                     || receiverType[1] is not (0 or 1)
                     || receiverType[2] != 0x8C || receiverType[3] != 0
+                    || parameterCount != 0
                     || !TrRmNativeImportTypeContract
                         .TryGetDirectNativeImportResultType(typeSpecs,
                             signatures.GetResultTypeSpec(signature),
@@ -3943,8 +3946,6 @@ public static class TrRmStructuralMetadataValidator
                     throw InvalidMetadata();
                 }
 
-                var (parameterFirst, parameterCount)
-                    = signatures.GetParamRange(signature);
                 for (var parameter = 0; parameter < parameterCount; parameter++)
                 {
                     var parameterRow = parameterFirst + parameter;

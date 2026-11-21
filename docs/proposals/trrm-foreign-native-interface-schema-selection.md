@@ -62,6 +62,13 @@ That source/Core prerequisite adds no separate wire identity, inherited
 convention sentinel or duplicate convention table. Normalized readers need
 not reconstruct source attributes to consume the clause.
 
+F+I does not select the parameter-name/default surface. Every retained FNI
+MethodSig in this profile therefore has zero explicit Params; parameterized
+FNI members require the separate F+I+SF1+PS1 selection in
+[Foreign-native-interface parameter surface selection](trrm-foreign-native-interface-parameter-surface-schema-selection.md).
+Do not treat absent labels/defaults as positional-only declarations or retry a
+different profile.
+
 Otherwise preserve F's catalog and applicability. This defines no F+S,
 fixed-array A2/A3, L1/L1P, CopyOrigin, general-graph or RootPin composite.
 Private interface/convention revisions and native wrappers are not included.
