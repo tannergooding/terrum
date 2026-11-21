@@ -101,6 +101,12 @@ prerequisite has already been met.
    rewriter work plus exact selected-target evidence; assignment does not
    establish dynamic-layout or private-layout replacement support. The
    [CG-005 gate](implementation/conformance-gaps.md#cg-005) tracks that work.
+   The separate unapproved
+   [L1+P aggregate composition](proposals/standard-trrm-local-aggregate-pointer-load-composition.md)
+   is provisionally actionable for implementation only; it depends on both
+   the L1 aggregate-layout and typed-pointer-load routes, preserves their
+   exact schema identities, and does not widen either predecessor. Its
+   source-free provider, snapshot, JIT/AOT and runtime acceptance remains open.
 6. **General separate compilation — binding contracts.** Implement the
    selected source call/inference algorithm, including accepted generic
    member-call postfix forms, witness/default resolution and qualified

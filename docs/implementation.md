@@ -104,6 +104,19 @@ selects exact B+I+P+F16 and B+I+G+P+F16 successors. Their distinct selectors,
 admitting the rest of F. Source-free provider re-emission and native execution
 cover both successors. Broader nominal type remapping, pointer provenance/CFG,
 and remaining dependency/runtime routes remain open.
+The separate unapproved
+[L1P composition proposal](proposals/standard-trrm-local-aggregate-pointer-load-composition.md)
+selects the exact local-aggregate-plus-pointer-load identity without changing
+L1 or B+I+P/G+P. Producer, source-free Body decoding, aggregate TypeSpec
+reconstruction, provider closure and Standard AOT lowering have an
+implementation slice; the general L1 Body emitter now carries typed reads
+outside the straight-line subset. Regressions cover local/imported nested
+aggregates, provider relocation/replacement, nested pointer cells, 8192-aligned
+array-bearing values, floating-bit payloads, local raw-Union coverage and
+direct source-level snapshot execution. These cases remain unverified under
+the active hold. Standard JIT snapshot ordering,
+broader CFG/call staging, complete row/provider remapping and replacement
+permutations remain open.
 The provisional C1 and C1M1 identities now route the same bounded init-Body
 subset through exact producer, structural validation, loading and re-emission.
 Their combined Feature catalog accepts the G and G1 requirements together;
