@@ -251,6 +251,9 @@ internal sealed partial class GenericControlFlowModuleTests
                 if (input is mut write ref<int64> incompatible) {
                     return 100;
                 }
+                if (input is mut write ref<int32> writable) {
+                    *writable = int32(42);
+                }
                 if (input is mut ref<int32> captured) {
                     return *captured;
                 }
@@ -273,14 +276,16 @@ internal sealed partial class GenericControlFlowModuleTests
             .ConfigureAwait(true), Is.EqualTo(42));
     }
 
-    [TestCase(NativeRuntimePolicy.FailFast)]
-    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast, "mut ref<int32>")]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions, "mut ref<int32>")]
+    [TestCase(NativeRuntimePolicy.FailFast, "mut write ref<int32>")]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions, "mut write ref<int32>")]
     public async Task ReferencePatternContractCapturesPreserveBackingAtRuntimeAsync(
-        NativeRuntimePolicy policy)
+        NativeRuntimePolicy policy, string patternTypeName)
     {
-        const string source = """
+        var source = $$"""
             int32 Read(write ref<int32> value)
-                ensure value is mut ref<int32> captured
+                ensure value is {{patternTypeName}} captured
                     && *captured == int32(42)
             {
                 return 42;
