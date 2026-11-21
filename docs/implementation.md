@@ -1327,8 +1327,10 @@ compares the retained layout and field contract, and uses the selected
 provider's structure identity in the FNI ABI view. This bounded
 producer/consumer slice supports scalar, raw-pointer and inline-struct fields;
 nested inline-struct provider TypeDefs, compatible provider TypeDef-row
-relocation, incompatible-layout replacement and source-free re-emission
-regressions are added but unverified under the active hold.
+relocation, a two-provider nested aggregate chain, missing/duplicate/misselected
+and requirement-mismatched Import rejection, incompatible-layout replacement
+and source-free re-emission regressions are added but unverified under the
+active hold.
 Typed-pointer/function-pointer aggregate fields and full
 Import/Export/PS1/Contract/graph row remapping remain open. FNI call
 lowering now stages the receiver before source-order arguments, maps explicit

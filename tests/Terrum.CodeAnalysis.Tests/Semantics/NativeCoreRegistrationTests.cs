@@ -1079,6 +1079,381 @@ internal sealed class NativeCoreRegistrationTests
     }
 
     [Test]
+    public void StandardForeignNativeInterfaceBindsNestedAggregateProviderChain()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-native-interface-parameter-surface-1";
+        const string leafSource = """
+            using Terrum.Interop;
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Leaf {
+                public int32 Value;
+            }
+            [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+            [ForeignNativeInterface(VTableByteOffset: uint32(0))]
+            public interface ILeaf {
+                public unsafe int32 Read(ptr<Leaf> leaf);
+            }
+            """;
+        const string middleSource = """
+            using Terrum.Interop;
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Middle {
+                public Leaf Child;
+            }
+            [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+            [ForeignNativeInterface(VTableByteOffset: uint32(8))]
+            public interface IMiddle {
+                public unsafe int32 Read(ptr<Middle> middle);
+            }
+            """;
+        var registration = CreateRegistration(
+            includeForeignNativeInterface: true);
+        var options = new CompilationOptions {
+            NativeCoreRegistration = registration,
+            LayoutCoreRegistration = CreateLayoutRegistration(registration),
+        };
+        var schema
+            = TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft;
+
+        byte[] EmitProvider(string moduleIdentity, string source,
+            TrRmSourceTypeExport structureExport, string interfaceName,
+            string interfaceExportKey)
+        {
+            var compilation = Compilation.CreateLibrary(
+                SyntaxTree.Parse(source), options);
+            Assert.That(compilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            var program = compilation.Program
+                ?? throw new AssertionException(
+                    "Expected a bound FNI aggregate provider.");
+            var members = program.Interfaces.Single(
+                definition => StringComparer.Ordinal.Equals(
+                    definition.QualifiedName, interfaceName)).Members;
+            var interfaceExport = new TrRmSourceTypeExport("",
+                interfaceName, interfaceExportKey) {
+                GenericArity = 0,
+                InterfaceMethodExports = [.. members.Select(member =>
+                    new TrRmSourceInterfaceMethodExport(
+                        member.SourceInputOrdinal,
+                        member.SourceDeclarationSpan,
+                        $"{interfaceExportKey}.{member.Name}"))],
+            };
+            return TrRmExecutableCompiler.EmitStandard(program,
+                moduleIdentity, schemaIdentity, 1, [
+                    structureExport,
+                    interfaceExport,
+                ]);
+        }
+
+        var leafArtifact = EmitProvider("leaf.module", leafSource,
+            new TrRmSourceTypeExport("", "Leaf", "leaf/Leaf") {
+                FieldExports = [
+                    new TrRmSourceFieldExport("Value", "leaf/Leaf.Value"),
+                ],
+            }, "ILeaf", "leaf/ILeaf");
+        var leafReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, leafArtifact),
+            "leaf.module", []);
+        var middleCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(middleSource), leafReference, options);
+        Assert.That(middleCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                middleCompilation.Diagnostics));
+        var middleProgram = middleCompilation.Program
+            ?? throw new AssertionException(
+                "Expected a bound middle FNI provider.");
+        var middleMember = middleProgram.Interfaces.Single(
+            static definition => definition.QualifiedName == "IMiddle")
+            .Members.Single();
+        var middleArtifact = TrRmExecutableCompiler.EmitStandard(
+            middleProgram, "middle.module", schemaIdentity, 1, [
+                new TrRmSourceTypeExport("", "Middle",
+                    "middle/Middle") {
+                    FieldExports = [
+                        new TrRmSourceFieldExport("Child",
+                            "middle/Middle.Child"),
+                    ],
+                },
+                new TrRmSourceTypeExport("", "IMiddle",
+                    "middle/IMiddle") {
+                    GenericArity = 0,
+                    InterfaceMethodExports = [
+                        new TrRmSourceInterfaceMethodExport(
+                            middleMember.SourceInputOrdinal,
+                            middleMember.SourceDeclarationSpan,
+                            "middle/IMiddle.Read"),
+                    ],
+                },
+            ]);
+        var middleTables = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
+                middleArtifact, schema));
+        var nestedLeafImport = Enumerable.Range(1,
+                middleTables.Imports.Count)
+            .Single(importRow => {
+                var definitionId = middleTables.Imports
+                    .GetExpectedDefinitionForImportRow(importRow);
+                return (definitionId >> 24) == 0x13
+                    && middleTables.TypeDefs.GetKind(checked((int)(
+                        definitionId & 0x00FF_FFFF))) == 1
+                    && middleTables.Imports.GetBindingForImportRow(
+                        importRow).ExportKey == "leaf/Leaf";
+            });
+        var leafModuleRef = middleTables.Imports
+            .GetModuleRefForImportRow(nestedLeafImport);
+        Assert.That(middleTables.ModuleRefs.GetProducerIdentity(
+                leafModuleRef),
+            Is.EqualTo("leaf.module"));
+
+        var middleReference = TrRmExecutableCompiler
+            .CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    middleArtifact), "middle.module", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        leafArtifact),
+                ]);
+        var consumerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                int32 Invoke(ptr<void> receiver, ptr<Middle> middle) {
+                    unsafe { return IMiddle.Read(receiver, middle); }
+                }
+                """), middleReference);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumerProgram = consumerCompilation.Program
+            ?? throw new AssertionException(
+                "Expected a bound nested aggregate consumer.");
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            consumerProgram, "consumer.module", schemaIdentity, 1, []);
+        var consumerTables = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
+                consumerArtifact, schema));
+        var structureImportKeys = Enumerable.Range(1,
+                consumerTables.Imports.Count)
+            .Where(importRow => {
+                var definitionId = consumerTables.Imports
+                    .GetExpectedDefinitionForImportRow(importRow);
+                return (definitionId >> 24) == 0x13
+                    && consumerTables.TypeDefs.GetKind(checked((int)(
+                        definitionId & 0x00FF_FFFF))) == 1;
+            })
+            .Select(importRow => consumerTables.Imports
+                .GetBindingForImportRow(importRow).ExportKey)
+            .OrderBy(static exportKey => exportKey, StringComparer.Ordinal);
+        Assert.That(structureImportKeys,
+            Is.EqualTo(new[] { "leaf/Leaf", "middle/Middle" }));
+
+        int GetStructureImportRow(string exportKey)
+            => Enumerable.Range(1, consumerTables.Imports.Count)
+                .Single(importRow => {
+                    var definitionId = consumerTables.Imports
+                        .GetExpectedDefinitionForImportRow(importRow);
+                    return (definitionId >> 24) == 0x13
+                        && consumerTables.TypeDefs.GetKind(checked((int)(
+                            definitionId & 0x00FF_FFFF))) == 1
+                        && consumerTables.Imports.GetBindingForImportRow(
+                            importRow).ExportKey == exportKey;
+                });
+
+        byte[] RewriteSection(byte[] source, ushort sectionKind,
+            byte[] replacement, int replacementCount)
+        {
+            var sourceIndex = new TrRmArtifactIndex(source, schema);
+            var sections = new List<TrRmSection>(
+                sourceIndex.SectionCount);
+            var replaced = false;
+            for (var sectionIndex = 0;
+                sectionIndex < sourceIndex.SectionCount;
+                sectionIndex++)
+            {
+                sourceIndex.GetSection(sectionIndex, out var kind,
+                    out var flags, out var bytes, out var recordCount);
+                if (kind == sectionKind)
+                {
+                    sections.Add(new TrRmSection(kind, flags,
+                        checked((uint)replacementCount), replacement));
+                    replaced = true;
+                }
+                else
+                {
+                    sections.Add(new TrRmSection(kind, flags,
+                        checked((uint)recordCount), bytes.ToArray()));
+                }
+            }
+
+            if (!replaced)
+            {
+                throw new AssertionException(
+                    $"Expected section 0x{sectionKind:X4}.");
+            }
+
+            return TrRmArtifactWriter.Encode(sections, schema);
+        }
+
+        var consumerIndex = new TrRmArtifactIndex(consumerArtifact,
+            schema);
+        Assert.That(consumerIndex.TryGetSection(0x001C,
+                out var importBytes, out var importCount), Is.True);
+        var leafImportRow = GetStructureImportRow("leaf/Leaf");
+        var middleImportRow = GetStructureImportRow("middle/Middle");
+        var leafImportOffset = checked((leafImportRow - 1) * 12);
+        var middleImportOffset = checked((middleImportRow - 1) * 12);
+        var importBytesArray = importBytes.ToArray();
+
+        var missingImportBytes = new byte[importBytesArray.Length - 12];
+        importBytesArray.AsSpan(0, leafImportOffset).CopyTo(
+            missingImportBytes);
+        importBytesArray.AsSpan(leafImportOffset + 12).CopyTo(
+            missingImportBytes.AsSpan(leafImportOffset));
+        var missingLeafImportArtifact = RewriteSection(consumerArtifact,
+            0x001C, missingImportBytes, importCount - 1);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    missingLeafImportArtifact), "consumer.module", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        middleArtifact),
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        leafArtifact),
+                ]));
+
+        var duplicateImportBytes
+            = new byte[importBytesArray.Length + 12];
+        importBytesArray.CopyTo(duplicateImportBytes, 0);
+        importBytesArray.AsSpan(leafImportOffset, 12).CopyTo(
+            duplicateImportBytes.AsSpan(importBytesArray.Length));
+        var duplicateLeafImportArtifact = RewriteSection(consumerArtifact,
+            0x001C, duplicateImportBytes, importCount + 1);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    duplicateLeafImportArtifact), "consumer.module", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        middleArtifact),
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        leafArtifact),
+                ]));
+
+        var wrongLeafExportKeyBytes = importBytesArray.ToArray();
+        var middleExportKeyStringRow = BinaryPrimitives
+            .ReadInt32LittleEndian(wrongLeafExportKeyBytes.AsSpan(
+                middleImportOffset + 4, 4));
+        BinaryPrimitives.WriteInt32LittleEndian(
+            wrongLeafExportKeyBytes.AsSpan(leafImportOffset + 4, 4),
+            middleExportKeyStringRow);
+        var wrongLeafExportKeyArtifact = RewriteSection(consumerArtifact,
+            0x001C, wrongLeafExportKeyBytes, importCount);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    wrongLeafExportKeyArtifact), "consumer.module", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        middleArtifact),
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        leafArtifact),
+                ]));
+
+        Assert.That(consumerIndex.TryGetSection(0x0010,
+                out var moduleRefBytes, out var moduleRefCount), Is.True);
+        var leafModuleRef = consumerTables.Imports
+            .GetModuleRefForImportRow(leafImportRow);
+        var wrongLeafRequirements = moduleRefBytes.ToArray();
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            wrongLeafRequirements.AsSpan((leafModuleRef - 1) * 12 + 4, 4),
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement + 1);
+        var wrongLeafRequirementsArtifact = RewriteSection(consumerArtifact,
+            0x0010, wrongLeafRequirements, moduleRefCount);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    wrongLeafRequirementsArtifact), "consumer.module", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        middleArtifact),
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        leafArtifact),
+                ]));
+
+        var reboundReference = TrRmExecutableCompiler
+            .CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    consumerArtifact), "consumer.module", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        middleArtifact),
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        leafArtifact),
+                ]);
+        var reboundCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                int32 Invoke(ptr<void> receiver, ptr<Middle> middle) {
+                    unsafe { return IMiddle.Read(receiver, middle); }
+                }
+                """), reboundReference);
+        Assert.That(reboundCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                reboundCompilation.Diagnostics));
+        var reboundImage = NativeEmitter.EmitLibrary(
+            reboundCompilation.Program
+                ?? throw new AssertionException(
+                    "Expected a rebound nested aggregate consumer."),
+            ["Invoke"], NativeRuntimePolicy.FailFast);
+        Assert.That(reboundImage[..2], Is.EqualTo(new byte[] {
+            (byte)'M', (byte)'Z',
+        }));
+
+        var reemissionCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(""), reboundReference);
+        Assert.That(reemissionCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                reemissionCompilation.Diagnostics));
+        var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(
+            reemissionCompilation.Program
+                ?? throw new AssertionException(
+                    "Expected a source-free nested aggregate forwarder."),
+            "forwarder.module", schemaIdentity, 1, []);
+        var reloadedReference = TrRmExecutableCompiler
+            .CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    reemittedArtifact), "forwarder.module", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        middleArtifact),
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        leafArtifact),
+                ]);
+        Assert.That(reloadedReference.Interfaces.Any(
+            static definition => definition.QualifiedName == "IMiddle"),
+            Is.True);
+        var reloadedCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                int32 Invoke(ptr<void> receiver, ptr<Middle> middle) {
+                    unsafe { return IMiddle.Read(receiver, middle); }
+                }
+                """), reloadedReference);
+        Assert.That(reloadedCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                reloadedCompilation.Diagnostics));
+
+        var incompatibleLeafArtifact = EmitProvider("leaf.module",
+            leafSource.Replace("public int32 Value;",
+                "public int64 Value;", StringComparison.Ordinal),
+            new TrRmSourceTypeExport("", "Leaf", "leaf/Leaf") {
+                FieldExports = [
+                    new TrRmSourceFieldExport("Value", "leaf/Leaf.Value"),
+                ],
+            }, "ILeaf", "leaf/ILeaf");
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    consumerArtifact), "consumer.module", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        middleArtifact),
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        incompatibleLeafArtifact),
+                ]));
+    }
+
+    [Test]
     public void StandardForeignNativeInterfaceParameterProducerRetainsDefaultSurface()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
