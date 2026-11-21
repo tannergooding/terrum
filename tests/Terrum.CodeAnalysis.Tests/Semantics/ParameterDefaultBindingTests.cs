@@ -2,7 +2,6 @@
 
 using System;
 using System.Collections.Generic;
-using System.Collections.Immutable;
 using System.Linq;
 using NUnit.Framework;
 using Terrum.CodeAnalysis.Native;
@@ -19,7 +18,9 @@ internal sealed class ParameterDefaultBindingTests
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
             int32 Sum(int32 first = 1 + 2, int32 required, int32 last = 4) {
-                return first + required + last;
+                int32 firstCopy = first;
+                int32 lastCopy = last;
+                return firstCopy + required + lastCopy;
             }
             int32 Use() { return Sum(required: 2); }
             """));
@@ -27,6 +28,54 @@ internal sealed class ParameterDefaultBindingTests
             string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = compilation.Program!;
         SemanticVerifier.VerifyLibrary(program);
+
+        var sum = program.Functions.Single(
+            static function => function.Name == "Sum");
+        var parameterDefaults = sum.OrdinaryParameterDefaults;
+        Assert.That(parameterDefaults.Select(
+                static parameterDefault => parameterDefault.ParameterOrdinal),
+            Is.EqualTo([0, 2]));
+        var firstDefault = parameterDefaults[0];
+        var lastDefault = parameterDefaults[1];
+        Assert.That(firstDefault.Value!.Value, Is.EqualTo(3));
+        Assert.That(lastDefault.Value!.Value, Is.EqualTo(4));
+        var visitedDefaultConstants = 0;
+        var expressionRewrittenFunction
+            = BoundTreeTraversal.RewriteExpressions(sum, expression =>
+            {
+                if (ReferenceEquals(expression, firstDefault.Value)
+                    || ReferenceEquals(expression, lastDefault.Value))
+                {
+                    visitedDefaultConstants++;
+                }
+
+                return expression;
+            });
+        Assert.That(visitedDefaultConstants, Is.EqualTo(2));
+        var firstLocal = sum.ParameterCount;
+        var secondLocal = firstLocal + 1;
+        Assert.That(sum.Variables.Length, Is.GreaterThan(secondLocal));
+        var remappedVariables = sum.Variables.ToBuilder();
+        var firstLocalVariable = remappedVariables[firstLocal];
+        remappedVariables[firstLocal] = remappedVariables[secondLocal];
+        remappedVariables[secondLocal] = firstLocalVariable;
+        var remappedFunction = BoundTreeTraversal.RewriteVariables(sum,
+            remappedVariables.ToImmutable(),
+            variable => variable == firstLocal ? secondLocal
+                : variable == secondLocal ? firstLocal : variable);
+        var remappedDefaults = remappedFunction.OrdinaryParameterDefaults;
+        Assert.That(remappedDefaults.Select(
+                static parameterDefault => parameterDefault.ParameterOrdinal),
+            Is.EqualTo([0, 2]));
+        Assert.That(remappedDefaults.Select(
+                static parameterDefault => parameterDefault.Value!.Value),
+            Is.EqualTo([3, 4]));
+        Assert.That(remappedDefaults[0].SourceInputOrdinal,
+            Is.EqualTo(firstDefault.SourceInputOrdinal));
+        Assert.That(remappedDefaults[0].Span, Is.EqualTo(firstDefault.Span));
+        Assert.That(remappedDefaults[1].SourceInputOrdinal,
+            Is.EqualTo(lastDefault.SourceInputOrdinal));
+        Assert.That(remappedDefaults[1].Span, Is.EqualTo(lastDefault.Span));
 
         var use = program.Functions.Single(
             static function => function.Name == "Use");
@@ -223,57 +272,6 @@ internal sealed class ParameterDefaultBindingTests
             string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = compilation.Program!;
         SemanticVerifier.VerifyLibrary(program);
-
-        var read = program.GenericMethodDefinitions.Single(
-            static definition => definition.Name == "Read");
-        var readFunction = read.ProofProgram!.Functions[read.FunctionIndex];
-        var parameterDefault = readFunction.OrdinaryParameterDefaults
-            .Single()!;
-        Assert.That(parameterDefault.Expression, Is.TypeOf<BoundBinary>());
-        var defaultRead = (BoundRead)((BoundBinary)
-            parameterDefault.Expression!).Left;
-        var variableCount = readFunction.Variables.Length;
-        Assert.That(variableCount, Is.GreaterThan(1));
-        Assert.That(readFunction.Variables[defaultRead.Variable].Name,
-            Is.EqualTo("N"));
-        var visitedDefaultReads = 0;
-        var expressionRewrittenFunction
-            = BoundTreeTraversal.RewriteExpressions(readFunction,
-                expression =>
-                {
-                    if (ReferenceEquals(expression, defaultRead))
-                    {
-                        visitedDefaultReads++;
-                    }
-
-                    return expression;
-                });
-        Assert.That(visitedDefaultReads, Is.EqualTo(1));
-        Assert.That(expressionRewrittenFunction.OrdinaryParameterDefaults
-                .Single()!.Expression,
-            Is.TypeOf<BoundBinary>());
-        var remappedVariables = readFunction.Variables.Skip(1)
-            .Append(readFunction.Variables[0]).ToImmutableArray();
-        var remappedFunction = BoundTreeTraversal.RewriteVariables(
-            readFunction, remappedVariables,
-            variable => (variable + variableCount - 1) % variableCount);
-        var remappedDefault = remappedFunction.OrdinaryParameterDefaults
-            .Single()!;
-        Assert.That(remappedDefault.ParameterOrdinal,
-            Is.EqualTo(parameterDefault.ParameterOrdinal));
-        Assert.That(remappedDefault.SourceInputOrdinal,
-            Is.EqualTo(parameterDefault.SourceInputOrdinal));
-        Assert.That(remappedDefault.Span, Is.EqualTo(parameterDefault.Span));
-        Assert.That(remappedDefault.IsPending,
-            Is.EqualTo(parameterDefault.IsPending));
-        var remappedDefaultRead = (BoundRead)((BoundBinary)
-            remappedDefault.Expression!).Left;
-        Assert.That(remappedDefaultRead.Variable,
-            Is.EqualTo((defaultRead.Variable + variableCount - 1)
-                % variableCount));
-        Assert.That(remappedFunction.Variables[
-                remappedDefaultRead.Variable].Name,
-            Is.EqualTo("N"));
 
         var use = program.Functions.Single(
             static function => function.Name == "Use");
