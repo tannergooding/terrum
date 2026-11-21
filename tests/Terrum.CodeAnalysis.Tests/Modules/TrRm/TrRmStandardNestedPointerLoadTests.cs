@@ -164,6 +164,144 @@ internal sealed class TrRmStandardNestedPointerLoadTests
         }
     }
 
+    [TestCase(PointerLoadsSchemaIdentity)]
+    [TestCase(GeneralPredicateGraphsPointerLoadsSchemaIdentity)]
+    public void NestedPointerLoadProviderSurvivesReemission(
+        string schemaIdentity)
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string providerIdentity = "nested-pointer-load-provider";
+        const string consumerIdentity = "nested-pointer-load-consumer";
+        const string reemittedConsumerIdentity
+            = "nested-pointer-load-consumer-reemitted";
+        var providerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                public unsafe ptr<ptr<int32>> ReadOuter(
+                    ptr<ptr<ptr<int32>>> outerCell)
+                {
+                    unsafe { return *outerCell; }
+                }
+                """));
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerCompilation.Program!, providerIdentity, schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            providerArtifact);
+        var providerReference = TrRmExecutableCompiler
+            .CreateStandardReference(providerInput, providerIdentity, []);
+
+        var consumerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                public unsafe int32 ReadNested(
+                    ptr<ptr<ptr<int32>>> outerCell)
+                {
+                    unsafe { return *(*ReadOuter(outerCell)); }
+                }
+                """), providerReference);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            consumerCompilation.Program!, consumerIdentity, schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var consumerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            consumerArtifact);
+        var loadedConsumer = TrRmExecutableCompiler.LoadStandard(
+            consumerInput, consumerIdentity, [providerInput]);
+        var reemittedConsumer = TrRmExecutableCompiler.EmitStandard(
+            loadedConsumer, reemittedConsumerIdentity, schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var loadedProvider = TrRmExecutableCompiler.LoadStandard(
+            providerInput, providerIdentity, []);
+        var reemittedProvider = TrRmExecutableCompiler.EmitStandard(
+            loadedProvider, providerIdentity, schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var reloadedConsumer = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                reemittedConsumer),
+            reemittedConsumerIdentity, [
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    reemittedProvider),
+            ]);
+        var call = AssertNestedPointerCall(reloadedConsumer);
+        Assert.That(reloadedConsumer.Functions[call.Function].Name,
+            Is.EqualTo("ReadOuter"));
+
+        var incompatibleProviderCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                public unsafe ptr<int32> ReadOuter(
+                    ptr<ptr<int32>> outerCell)
+                {
+                    unsafe { return *outerCell; }
+                }
+                """));
+        Assert.That(incompatibleProviderCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                incompatibleProviderCompilation.Diagnostics));
+        var incompatibleProviderArtifact = TrRmExecutableCompiler.EmitStandard(
+            incompatibleProviderCompilation.Program!, providerIdentity,
+            schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    reemittedConsumer),
+                reemittedConsumerIdentity, [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        incompatibleProviderArtifact),
+                ]));
+    }
+
+    private static BoundCall AssertNestedPointerCall(BoundProgram program)
+    {
+        var function = program.Functions.Single(static candidate =>
+            candidate.Name == "ReadNested");
+        var pendingStatements = new Stack<BoundStatement>();
+        pendingStatements.Push(function.Body);
+        BoundReturn? returnStatement = null;
+        while (pendingStatements.TryPop(out var statement))
+        {
+            switch (statement)
+            {
+                case BoundBlock block:
+                    foreach (var nested in block.Statements)
+                    {
+                        pendingStatements.Push(nested);
+                    }
+                    break;
+                case BoundUnsafe unsafeBlock:
+                    pendingStatements.Push(unsafeBlock.Body);
+                    break;
+                case BoundReturn result:
+                    Assert.That(returnStatement, Is.Null);
+                    returnStatement = result;
+                    break;
+            }
+        }
+
+        Assert.That(returnStatement?.Value, Is.Not.Null);
+        var value = returnStatement!.Value!;
+        for (var depth = 0; depth < 2; depth++)
+        {
+            if (value is BoundUnsafeExpression unsafeExpression)
+            {
+                value = unsafeExpression.Expression;
+            }
+            Assert.That(value, Is.TypeOf<BoundNativePointerRead>());
+            value = ((BoundNativePointerRead)value).Address;
+        }
+        if (value is BoundUnsafeExpression finalUnsafeExpression)
+        {
+            value = finalUnsafeExpression.Expression;
+        }
+        Assert.That(value, Is.TypeOf<BoundCall>());
+        return (BoundCall)value;
+    }
+
     private static void AssertNestedPointerRead(BoundProgram program)
     {
         var function = program.Functions.Single(static candidate =>
