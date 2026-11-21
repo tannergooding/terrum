@@ -345,7 +345,7 @@ public readonly ref struct TrRmFrozenValueNodeTableReader
     }
 
     private static bool IsRegisteredScalar(byte typeCode)
-        => typeCode is <= 0x11 or (>= 0x12 and <= 0x19);
+        => typeCode is <= 0x0F or (>= 0x12 and <= 0x19);
 
     private static int ScalarWidth(byte typeCode) => typeCode switch
     {

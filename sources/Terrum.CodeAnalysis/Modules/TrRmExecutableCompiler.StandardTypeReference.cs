@@ -3182,7 +3182,7 @@ public static partial class TrRmExecutableCompiler
                                     IsPending: false));
                         }
                     }
-                    else if (rootTables.Schema.UsesMethodParameterLabels()
+                    else if (rootTables.Schema.UsesGeneralMethodParameterLabels()
                         && rootTables.MethodParameterLabels
                             .TryGetNameStringRow(methodRow,
                                 checked((uint)ordinal),
@@ -3945,7 +3945,7 @@ public static partial class TrRmExecutableCompiler
                 = tables.Schema.UsesClassParameterDefaults()
                     && genericParameterCount == 0;
             var hasParameterLabels
-                = tables.Schema.UsesMethodParameterLabels();
+                = tables.Schema.UsesGeneralMethodParameterLabels();
             var parameters = ImmutableArray.CreateBuilder<
                 BoundStandardClassMethodParameter>(parameterCount);
             for (var ordinal = 0; ordinal < parameterCount; ordinal++)
@@ -4079,7 +4079,7 @@ public static partial class TrRmExecutableCompiler
             || tables.WitnessAssociatedConsts.Count != 0
             || tables.AssociatedConstDefs.Count != 0
             || (tables.InterfaceMethods.Count != 0
-                && !tables.Schema.UsesMethodParameterLabels()))
+                && !tables.Schema.UsesGeneralMethodParameterLabels()))
         {
             throw Unsupported(
                 "The C1 metadata-only class projection does not support interface or witness declarations outside retained class MethodDef constraints.");

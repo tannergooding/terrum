@@ -52,6 +52,7 @@ public readonly ref struct TrRmTargetProfileTableReader
                 or TrRmArtifactSchema.CopyOriginDraft
                 or TrRmArtifactSchema.ForeignInvocationDraft
                 or TrRmArtifactSchema.ForeignNativeInterfaceDraft
+                or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft

@@ -17,6 +17,7 @@ internal enum TrRmArtifactSchema
     CopyOriginDraft,
     ForeignInvocationDraft,
     ForeignNativeInterfaceDraft,
+    ForeignNativeInterfaceParameterSurfaceDraft,
     ForeignInvocationStorageAddressDraft,
     ForeignInvocationStorageFixedArrayCopyDraft,
     ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft,
@@ -174,6 +175,7 @@ internal static class TrRmArtifactSchemaFacts
 
     internal static bool UsesScalarFrozenValues(this TrRmArtifactSchema schema) =>
         schema is TrRmArtifactSchema.ScalarFrozenValuesDraft
+            or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft
             or TrRmArtifactSchema.NominalEnumsDraft
             or TrRmArtifactSchema.GeneralPredicateGraphsDraft
             or TrRmArtifactSchema
@@ -371,7 +373,8 @@ internal static class TrRmArtifactSchemaFacts
 
     internal static bool UsesMethodParameterLabels(
         this TrRmArtifactSchema schema) =>
-        schema is TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft
+        schema is TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft
+            or TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft
             or TrRmArtifactSchema.GenericMethodCallsParameterLabelsReceiverAccessDraft
             or TrRmArtifactSchema.C1ParameterLabelsReceiverAccessDraft
             or TrRmArtifactSchema.C1M1ParameterLabelsReceiverAccessDraft
@@ -391,6 +394,11 @@ internal static class TrRmArtifactSchemaFacts
             or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidenceDraft
             or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft
             or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsDraft;
+
+    internal static bool UsesGeneralMethodParameterLabels(
+        this TrRmArtifactSchema schema) =>
+        schema.UsesMethodParameterLabels()
+            && !schema.UsesForeignNativeInterfaceParameterSurface();
 
     internal static bool UsesClassParameterDefaults(
         this TrRmArtifactSchema schema)
@@ -432,6 +440,7 @@ internal static class TrRmArtifactSchemaFacts
         this TrRmArtifactSchema schema) =>
         schema is TrRmArtifactSchema.ForeignInvocationDraft
             or TrRmArtifactSchema.ForeignNativeInterfaceDraft
+            or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft
             or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
@@ -444,7 +453,12 @@ internal static class TrRmArtifactSchemaFacts
 
     internal static bool UsesForeignNativeInterface(
         this TrRmArtifactSchema schema)
-        => schema == TrRmArtifactSchema.ForeignNativeInterfaceDraft;
+        => schema is TrRmArtifactSchema.ForeignNativeInterfaceDraft
+            or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft;
+
+    internal static bool UsesForeignNativeInterfaceParameterSurface(
+        this TrRmArtifactSchema schema)
+        => schema == TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft;
 
     internal static bool UsesNativeParameterContracts(
         this TrRmArtifactSchema schema) =>
@@ -591,6 +605,7 @@ public readonly ref struct TrRmArtifactIndex
             or TrRmArtifactSchema.CopyOriginDraft
             or TrRmArtifactSchema.ForeignInvocationDraft
             or TrRmArtifactSchema.ForeignNativeInterfaceDraft
+            or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft
             or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
@@ -963,6 +978,12 @@ public readonly ref struct TrRmArtifactIndex
     internal static TrRmArtifactIndex ForForeignNativeInterfaceDraft(
         ReadOnlySpan<byte> artifact)
         => new(artifact, TrRmArtifactSchema.ForeignNativeInterfaceDraft);
+
+    internal static TrRmArtifactIndex
+        ForForeignNativeInterfaceParameterSurfaceDraft(
+        ReadOnlySpan<byte> artifact)
+        => new(artifact,
+            TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft);
 
     internal static TrRmArtifactIndex
         ForForeignInvocationStorageAddressDraft(ReadOnlySpan<byte> artifact)
@@ -1560,6 +1581,8 @@ public readonly ref struct TrRmArtifactIndex
             0x005E when schema.UsesGeneralPredicateGraphs() => 8,
             0x0064 when schema.UsesGenericConstantMethods() => 0,
             0x0065 when schema.UsesGenericConstantMethods() => 12,
+            0x0066 when schema.UsesForeignNativeInterfaceParameterSurface()
+                => 16,
             0x0066 when schema.UsesClassParameterDefaults() => 16,
             0x0066 when schema.UsesMethodParameterLabels() => 12,
             0x0067 when TrRmExecutableCompiler

@@ -4190,6 +4190,9 @@ public static partial class TrRmExecutableCompiler
                 => TrRmArtifactSchema.ForeignInvocationDraft,
             StandardForeignNativeInterfaceSchemaIdentity
                 => TrRmArtifactSchema.ForeignNativeInterfaceDraft,
+            StandardForeignNativeInterfaceParameterSurfaceSchemaIdentity
+                => TrRmArtifactSchema
+                    .ForeignNativeInterfaceParameterSurfaceDraft,
             StandardForeignInvocationStorageAddressSchemaIdentity
                 => TrRmArtifactSchema.ForeignInvocationStorageAddressDraft,
             StandardForeignInvocationStorageFixedArraySchemaIdentity

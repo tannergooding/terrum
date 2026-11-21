@@ -72,6 +72,18 @@ internal sealed class TrRmInterfaceBaseMethodTableTests
             maximumOffsetBytes, 1, readers.Interfaces, targetProfiles);
         Assert.That(maximumOffsetRows.GetVTableByteOffset(1),
             Is.EqualTo(0xFFFF_FFF8u));
+        var parameterSurfaceProfiles = new TrRmTargetProfileTableReader(
+            targetProfileBytes, 1,
+            TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft);
+        var parameterSurfaceBytes = TrRmForeignNativeInterfaceTableWriter.Encode([
+            new TrRmForeignNativeInterfaceRow(1, 1, 16),
+        ], readers.Interfaces, parameterSurfaceProfiles);
+        var parameterSurfaceRows = new TrRmForeignNativeInterfaceTableReader(
+            parameterSurfaceBytes, 1, readers.Interfaces,
+            parameterSurfaceProfiles,
+            TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft);
+        Assert.That(parameterSurfaceRows.GetVTableByteOffset(1),
+            Is.EqualTo(16u));
         AssertForeignNativeInterfaceRowsRejected(fixture,
             new TrRmForeignNativeInterfaceRow(0, 1, 0));
         AssertForeignNativeInterfaceRowsRejected(fixture,

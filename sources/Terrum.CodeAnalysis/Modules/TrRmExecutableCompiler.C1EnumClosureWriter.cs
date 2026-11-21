@@ -5864,7 +5864,7 @@ public static partial class TrRmExecutableCompiler
                         RemapStandardClassTypeSpecReference(
                             parameter.TypeSpecReference, 0),
                         parameter.Mode, parameter.Flags));
-                    if (schema.UsesMethodParameterLabels())
+                    if (schema.UsesGeneralMethodParameterLabels())
                     {
                         methodParameterLabelRows.Add((
                             methodDefRow, ordinal, parameter.Name));
@@ -6012,7 +6012,7 @@ public static partial class TrRmExecutableCompiler
                             RemapStandardClassTypeSpecReference(
                                 parameter.TypeSpecReference, 0),
                             parameter.Mode, parameter.Flags));
-                        if (schema.UsesMethodParameterLabels())
+                        if (schema.UsesGeneralMethodParameterLabels())
                         {
                             methodParameterLabelRows.Add((
                                 methodDefRow, ordinal, parameter.Name));
@@ -6558,7 +6558,7 @@ public static partial class TrRmExecutableCompiler
                 parameterRows.Add(new TrRmParamRow(
                     initializerSignatureRow, ordinal,
                     FieldTypeSpecReference(parameter.Type), 0, 0));
-                if (schema.UsesMethodParameterLabels())
+                if (schema.UsesGeneralMethodParameterLabels())
                 {
                     methodParameterLabelRows.Add((
                         initializerMethodDefRow, ordinal, parameter.Name));
@@ -6686,7 +6686,7 @@ public static partial class TrRmExecutableCompiler
                     = FieldTypeSpecReference(parameter.Type);
                 parameterRows.Add(new TrRmParamRow(projectionSignatureRow,
                     ordinal, parameterTypeSpecReference, 0, 0));
-                if (schema.UsesMethodParameterLabels())
+                if (schema.UsesGeneralMethodParameterLabels())
                 {
                     methodParameterLabelRows.Add((
                         projectionMethodDefRow, ordinal, parameter.Name));

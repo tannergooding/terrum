@@ -81,6 +81,8 @@ public static partial class TrRmExecutableCompiler
         = "trrm/1-draft-foreign-invocation-contracts-1";
     private const string StandardForeignNativeInterfaceSchemaIdentity
         = "trrm/1-draft-foreign-native-interface-contracts-1";
+    private const string StandardForeignNativeInterfaceParameterSurfaceSchemaIdentity
+        = "trrm/1-draft-foreign-native-interface-parameter-surface-1";
     private const string StandardForeignInvocationStorageAddressSchemaIdentity
         = "trrm/1-draft-foreign-invocation-storage-addresses-1";
     private const string StandardForeignInvocationStorageFixedArraySchemaIdentity
@@ -1536,7 +1538,7 @@ public static partial class TrRmExecutableCompiler
         SourceGenericMethodExports? sourceGenericMethodExports,
         TrRmArtifactSchema schema)
     {
-        var supportsL1 = schema.UsesMethodParameterLabels();
+        var supportsL1 = schema.UsesGeneralMethodParameterLabels();
         if (!supportsL1 && (sourceTypeExports is not null
                 || sourceGenericMethodExports is not null))
         {
@@ -1771,7 +1773,7 @@ public static partial class TrRmExecutableCompiler
             return classArtifact;
         }
 
-        var supportsL1 = schema.UsesMethodParameterLabels();
+        var supportsL1 = schema.UsesGeneralMethodParameterLabels();
         if ((!supportsL1 && sourceTypeExports is { Count: > 0 })
             || (!supportsL1
                 && sourceGenericMethodExports is { Exports.IsEmpty: false })

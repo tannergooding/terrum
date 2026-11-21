@@ -15,7 +15,7 @@ internal readonly ref struct TrRmMethodParameterLabelTableReader
     private readonly Dictionary<ulong, uint>? _nameRows;
     private readonly Dictionary<ulong, uint>? _defaultConstantSourceRows;
     private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
-    private readonly bool _usesClassParameterDefaults;
+    private readonly bool _usesParameterDefaults;
 
     internal TrRmMethodParameterLabelTableReader(ReadOnlySpan<byte> section,
         int recordCount, TrRmStringTableReader strings,
@@ -25,6 +25,7 @@ internal readonly ref struct TrRmMethodParameterLabelTableReader
     {
         if (!schema.UsesMethodParameterLabels()
             || schema.UsesClassParameterDefaults()
+            || schema.UsesForeignNativeInterfaceParameterSurface()
             || recordCount is < 1 or > 0xFF_FFFF
             || (long)recordCount * RowSize != section.Length)
         {
@@ -71,7 +72,7 @@ internal readonly ref struct TrRmMethodParameterLabelTableReader
         Count = recordCount;
         _nameRows = nameRows;
         _defaultConstantSourceRows = null;
-        _usesClassParameterDefaults = false;
+        _usesParameterDefaults = false;
     }
 
     internal TrRmMethodParameterLabelTableReader(ReadOnlySpan<byte> section,
@@ -87,7 +88,8 @@ internal readonly ref struct TrRmMethodParameterLabelTableReader
         TrRmA3LayoutResourceLedger? resourceLedger = null)
     {
         const int surfaceRowSize = 16;
-        if (!schema.UsesClassParameterDefaults()
+        if (!(schema.UsesClassParameterDefaults()
+                || schema.UsesForeignNativeInterfaceParameterSurface())
             || recordCount is < 1 or > 0xFF_FFFF
             || (long)recordCount * surfaceRowSize != section.Length)
         {
@@ -186,9 +188,13 @@ internal readonly ref struct TrRmMethodParameterLabelTableReader
 
             var frozenValueNodeRow = checked((int)
                 constantSources.GetPayloadReference(constantSourceRow));
+            var frozenValueTypeSpecRef
+                = frozenValueNodes.GetTypeSpecRef(frozenValueNodeRow);
             if (frozenValueNodes.GetKind(frozenValueNodeRow) != 1
-                || frozenValueNodes.GetTypeSpecRef(frozenValueNodeRow)
-                    != parameterTypeSpecRef)
+                || (schema.UsesForeignNativeInterfaceParameterSurface()
+                    ? !typeSpecs.AreEquivalentTypeSpecRefs(
+                        frozenValueTypeSpecRef, parameterTypeSpecRef)
+                    : frozenValueTypeSpecRef != parameterTypeSpecRef))
             {
                 throw InvalidTable();
             }
@@ -200,7 +206,7 @@ internal readonly ref struct TrRmMethodParameterLabelTableReader
         Count = recordCount;
         _nameRows = nameRows;
         _defaultConstantSourceRows = defaultRows;
-        _usesClassParameterDefaults = true;
+        _usesParameterDefaults = true;
     }
 
     internal int Count { get; }
@@ -227,7 +233,7 @@ internal readonly ref struct TrRmMethodParameterLabelTableReader
         uint ordinal, out uint constantSourceRow)
     {
         _resourceLedger?.ConsumeWork();
-        if (!_usesClassParameterDefaults
+        if (!_usesParameterDefaults
             || methodDefRow <= 0 || (uint)methodDefRow > 0x00FF_FFFF
             || _defaultConstantSourceRows is null
             || !_defaultConstantSourceRows.TryGetValue(

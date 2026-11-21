@@ -143,7 +143,7 @@ public static partial class TrRmExecutableCompiler
             return cachedDefinitions;
         }
 
-        if (!context.Schema.UsesMethodParameterLabels())
+        if (!context.Schema.UsesGeneralMethodParameterLabels())
         {
             var (legacyTypeStart, legacyTypeEnd)
                 = tables.Modules.GetTypeDefRange(moduleRow);
@@ -1999,7 +1999,7 @@ public static partial class TrRmExecutableCompiler
                 switch (constraintKind)
                 {
                     case 1:
-                        if (!context.Schema.UsesMethodParameterLabels()
+                        if (!context.Schema.UsesGeneralMethodParameterLabels()
                             && !(ownerTypeDefRow != 0
                                 && StandardGenericMethodSchema
                                     .IsClassTypeBindingViews(
@@ -2220,7 +2220,7 @@ public static partial class TrRmExecutableCompiler
                 formalRecords, methodRow, formalTypeOwnerOrdinal,
                 tables.Parameters.GetTypeSpec(paramRow), formalTypes,
                 allowFormalForwarding: false, ordinal: formalCount, out _);
-            var retainsLabel = context.Schema.UsesMethodParameterLabels()
+            var retainsLabel = context.Schema.UsesGeneralMethodParameterLabels()
                 && (tables.Exports.HasExportForMethod(methodRow)
                     || tables.Imports.IsExpectedDefinition(definitionId));
             var parameterName = "arg" + ordinal.ToString(
@@ -3755,7 +3755,7 @@ public static partial class TrRmExecutableCompiler
         ReadOnlySpan<byte> targetRecord, out BoundFunction supportFunction)
     {
         supportFunction = null!;
-        if (!context.Schema.UsesMethodParameterLabels())
+        if (!context.Schema.UsesGeneralMethodParameterLabels())
         {
             throw Unsupported(
                 "The G1 consumer requires an exact label-bearing open interface-requirement schema.");

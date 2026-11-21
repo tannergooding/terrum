@@ -300,6 +300,7 @@ public static class TrRmStructuralMetadataValidator
                     or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft
                     or TrRmArtifactSchema.ForeignInvocationDraft
                     or TrRmArtifactSchema.ForeignNativeInterfaceDraft
+                    or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft
                     or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
                     or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
                     or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
@@ -900,17 +901,28 @@ public static class TrRmStructuralMetadataValidator
     }
 
     internal static void Validate(TrRmArtifactIndex index)
-        => _ = ValidateCore(index, BodyInspection.None,
-            developmentProfile: false,
-            genericConstantMethodsDraft:
-                index.Schema.UsesGenericConstantMethods());
+        => _ = ValidateAndGetExecutionTables(index);
 
     internal static ValidatedExecutionTables ValidateAndGetExecutionTables(
         TrRmArtifactIndex index)
-        => ValidateCore(index, BodyInspection.None,
+    {
+        if (index.Schema.UsesForeignNativeInterfaceParameterSurface())
+        {
+            return ValidateForeignNativeInterfaceParameterSurfaceDraftAndGetExecutionTables(
+                index);
+        }
+
+        if (index.Schema == TrRmArtifactSchema.ForeignNativeInterfaceDraft)
+        {
+            return ValidateForeignNativeInterfaceDraftAndGetExecutionTables(
+                index);
+        }
+
+        return ValidateCore(index, BodyInspection.None,
             developmentProfile: false,
             genericConstantMethodsDraft:
                 index.Schema.UsesGenericConstantMethods());
+    }
 
     internal static ValidatedExecutionTables
         ValidateInitializationReferencePointerLoadNativeParameterDraftAndGetExecutionTables(
@@ -974,6 +986,13 @@ public static class TrRmStructuralMetadataValidator
         TrRmArtifactIndex index)
         => ValidateCore(index, BodyInspection.None, developmentProfile: false,
             foreignInvocationDraft: true, foreignNativeInterfaceDraft: true);
+
+    internal static ValidatedExecutionTables
+        ValidateForeignNativeInterfaceParameterSurfaceDraftAndGetExecutionTables(
+        TrRmArtifactIndex index)
+        => ValidateCore(index, BodyInspection.None, developmentProfile: false,
+            foreignInvocationDraft: true, foreignNativeInterfaceDraft: true,
+            foreignNativeInterfaceParameterSurfaceDraft: true);
 
     internal static ValidatedExecutionTables
         ValidateForeignInvocationStorageAddressDraftAndGetExecutionTables(
@@ -1372,6 +1391,7 @@ public static class TrRmStructuralMetadataValidator
         BodyInspection inspection, bool developmentProfile,
         bool copyOriginDraft = false, bool foreignInvocationDraft = false,
         bool foreignNativeInterfaceDraft = false,
+        bool foreignNativeInterfaceParameterSurfaceDraft = false,
         bool developmentFunctionPointerEffectsDraft = false,
         bool developmentNativeConventionsDraft = false,
         bool nominalEnumsDraft = false, bool scalarFrozenValuesDraft = false,
@@ -1442,6 +1462,9 @@ public static class TrRmStructuralMetadataValidator
                     ? TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
                 : foreignInvocationStorageAddressDraft
                     ? TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
+                : foreignNativeInterfaceParameterSurfaceDraft
+                    ? TrRmArtifactSchema
+                        .ForeignNativeInterfaceParameterSurfaceDraft
                 : foreignNativeInterfaceDraft
                     ? TrRmArtifactSchema.ForeignNativeInterfaceDraft
                 : foreignInvocationDraft
@@ -1457,7 +1480,7 @@ public static class TrRmStructuralMetadataValidator
                     : registerExceptionRegionsDraft
                         ? TrRmArtifactSchema.RegisterExceptionRegionsDraft
                     : genericMethodCallsDraft
-                        ? (index.Schema.UsesMethodParameterLabels()
+                        ? (index.Schema.UsesGeneralMethodParameterLabels()
                             ? TrRmArtifactSchema
                                 .GenericMethodCallsParameterLabelsDraft
                             : TrRmArtifactSchema.GenericMethodCallsDraft)
@@ -1484,6 +1507,7 @@ public static class TrRmStructuralMetadataValidator
         foreignInvocationStorageFixedArrayDraft
             |= foreignInvocationStorageFixedArrayEmptyInitializationDraft;
         foreignInvocationDraft |= foreignNativeInterfaceDraft
+            || foreignNativeInterfaceParameterSurfaceDraft
             || foreignInvocationStorageAddressDraft
             || foreignInvocationStorageFixedArrayDraft
             || foreignInvocationStorageFixedArrayGenericDraft;
@@ -1623,8 +1647,15 @@ public static class TrRmStructuralMetadataValidator
         _ = index.TryGetSection(0x0016, out var methodDefBytes, out var methodDefCount);
         _ = index.TryGetSection(0x0017, out var methodSigBytes, out var methodSigCount);
         _ = index.TryGetSection(0x0018, out var paramBytes, out var paramCount);
-        _ = index.TryGetSection(0x0066, out var methodParameterLabelBytes,
+        var hasMethodParameterLabelSection = index.TryGetSection(0x0066,
+            out var methodParameterLabelBytes,
             out var methodParameterLabelCount);
+        if (index.Schema.UsesForeignNativeInterfaceParameterSurface()
+            && hasMethodParameterLabelSection
+                != (methodParameterLabelCount != 0))
+        {
+            throw InvalidMetadata();
+        }
         _ = index.TryGetSection(0x0019, out var genericParamBytes, out var genericParamCount);
         _ = index.TryGetSection(0x001A, out var constraintBytes, out var constraintCount);
         _ = index.TryGetSection(0x001B, out var contractBytes, out var contractCount);
@@ -1840,6 +1871,7 @@ public static class TrRmStructuralMetadataValidator
             index.Schema, selectedA3LayoutResourceLedger);
         var methodParameterLabels = methodParameterLabelCount == 0 ? default
             : index.Schema.UsesClassParameterDefaults()
+                || index.Schema.UsesForeignNativeInterfaceParameterSurface()
                 ? new TrRmMethodParameterLabelTableReader(
                     methodParameterLabelBytes, methodParameterLabelCount,
                     strings, methods, signatures, parameters, typeSpecs,
@@ -2562,7 +2594,7 @@ public static class TrRmStructuralMetadataValidator
                 }
             }
         }
-        if (index.Schema.UsesMethodParameterLabels())
+        if (index.Schema.UsesGeneralMethodParameterLabels())
         {
             ValidateMethodParameterLabels(methodParameterLabels, strings,
                 features, modules, types, nativeFunctionPointerAnchors,
@@ -2652,6 +2684,15 @@ public static class TrRmStructuralMetadataValidator
                     nativeFunctionPointerAnchors, nativeCallables,
                     nativeFunctionPointerSignatures, nativeVTables,
                     index.Schema);
+                if (index.Schema
+                    .UsesForeignNativeInterfaceParameterSurface())
+                {
+                    ValidateForeignNativeInterfaceParameterSurface(
+                        methodParameterLabels, foreignNativeInterfaces,
+                        interfaces, interfaceMethods, methods, signatures,
+                        parameters, contracts, strings, features, modules,
+                        index.Schema);
+                }
             }
         }
         var sourceFiles = sourceFileCount == 0 ? default
@@ -3937,7 +3978,9 @@ public static class TrRmStructuralMetadataValidator
                     || receiverType.Length != 4 || receiverType[0] != 1
                     || receiverType[1] is not (0 or 1)
                     || receiverType[2] != 0x8C || receiverType[3] != 0
-                    || parameterCount != 0
+                    || (parameterCount != 0
+                        && !schema
+                            .UsesForeignNativeInterfaceParameterSurface())
                     || !TrRmNativeImportTypeContract
                         .TryGetDirectNativeImportResultType(typeSpecs,
                             signatures.GetResultTypeSpec(signature),
@@ -4025,6 +4068,112 @@ public static class TrRmStructuralMetadataValidator
                 {
                     throw InvalidMetadata();
                 }
+            }
+        }
+    }
+
+    private static void ValidateForeignNativeInterfaceParameterSurface(
+        TrRmMethodParameterLabelTableReader surfaces,
+        TrRmForeignNativeInterfaceTableReader foreignNativeInterfaces,
+        TrRmInterfaceDefTableReader interfaces,
+        TrRmInterfaceMethodTableReader interfaceMethods,
+        TrRmMethodDefTableReader methods,
+        TrRmMethodSigTableReader signatures,
+        TrRmParamTableReader parameters,
+        TrRmContractTableReader contracts,
+        TrRmStringTableReader strings,
+        TrRmFeatureTableReader features,
+        TrRmModuleTableReader modules,
+        TrRmArtifactSchema schema)
+    {
+        if (!schema.UsesForeignNativeInterfaceParameterSurface()
+            || foreignNativeInterfaces.Count == 0)
+        {
+            throw InvalidMetadata();
+        }
+
+        var requiresSurfaceByModule = new bool[modules.Count + 1];
+        long expectedSurfaceCount = 0;
+        for (var foreignInterfaceRow = 1;
+            foreignInterfaceRow <= foreignNativeInterfaces.Count;
+            foreignInterfaceRow++)
+        {
+            features.ResourceLedger?.ConsumeWork();
+            var interfaceDef = checked((int)
+                foreignNativeInterfaces.GetOwnerInterfaceDef(
+                    foreignInterfaceRow));
+            var (methodFirst, methodCount)
+                = interfaces.GetMethodRange(interfaceDef);
+            for (var interfaceMethodOffset = 0;
+                interfaceMethodOffset < methodCount;
+                interfaceMethodOffset++)
+            {
+                features.ResourceLedger?.ConsumeWork();
+                var method = interfaceMethods.GetMethodDefRow(
+                    methodFirst + interfaceMethodOffset);
+                var ownerModule = methods.GetOwnerModule(method);
+                requiresSurfaceByModule[ownerModule] = true;
+                var signature = methods.GetSignature(method);
+                var (parameterFirst, parameterCount)
+                    = signatures.GetParamRange(signature);
+                expectedSurfaceCount += parameterCount;
+                if (expectedSurfaceCount > 0xFF_FFFF)
+                {
+                    throw InvalidMetadata();
+                }
+
+                var declarationNames = new HashSet<string>(
+                    StringComparer.Ordinal);
+                var outputOrdinals = new HashSet<int>();
+                foreach (var output in contracts.GetNativeOutputs(method))
+                {
+                    _ = outputOrdinals.Add(output.ParameterOrdinal);
+                }
+
+                for (var ordinal = 0; ordinal < parameterCount; ordinal++)
+                {
+                    features.ResourceLedger?.ConsumeWork();
+                    var parameterOrdinal = checked((uint)ordinal);
+                    if (!surfaces.TryGetNameStringRow(method,
+                            parameterOrdinal, out var nameStringRow)
+                        || !surfaces.TryGetDefaultConstantSourceRow(method,
+                            parameterOrdinal, out var defaultValueRow))
+                    {
+                        throw InvalidMetadata();
+                    }
+
+                    var name = strings.DecodeName(nameStringRow);
+                    if (!declarationNames.Add(name))
+                    {
+                        throw InvalidMetadata();
+                    }
+
+                    if (defaultValueRow != 0
+                        && (outputOrdinals.Contains(ordinal)
+                            || parameters.GetMode(parameterFirst + ordinal) != 0
+                            || parameters.GetFlags(parameterFirst + ordinal) != 0))
+                    {
+                        throw InvalidMetadata();
+                    }
+                }
+            }
+
+        }
+
+        if (expectedSurfaceCount != surfaces.Count)
+        {
+            throw InvalidMetadata();
+        }
+
+        for (var module = 1; module <= modules.Count; module++)
+        {
+            features.ResourceLedger?.ConsumeWork();
+            if (TrRmFeatureManifestValidator.Requires(features, modules,
+                    module,
+                    TrRmFeatureTableReader.MethodParameterLabelsFeatureId,
+                    schema) != requiresSurfaceByModule[module])
+            {
+                throw InvalidMetadata();
             }
         }
     }

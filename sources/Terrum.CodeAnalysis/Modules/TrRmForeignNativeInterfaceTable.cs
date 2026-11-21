@@ -14,7 +14,7 @@ namespace Terrum.CodeAnalysis.Modules;
 public readonly record struct TrRmForeignNativeInterfaceRow(
     uint OwnerInterfaceDefRow, uint TargetProfileRow, uint VTableByteOffset);
 
-/// <summary>Validates provisional ForeignNativeInterface rows under the exact F+I profile.</summary>
+/// <summary>Validates provisional ForeignNativeInterface rows under the exact F+I profiles.</summary>
 /// <remarks>The borrowed section must remain unchanged while this reader is in use.</remarks>
 public readonly ref struct TrRmForeignNativeInterfaceTableReader
 {
@@ -45,7 +45,7 @@ public readonly ref struct TrRmForeignNativeInterfaceTableReader
         TrRmTargetProfileTableReader targetProfiles,
         TrRmArtifactSchema schema)
     {
-        if (schema != TrRmArtifactSchema.ForeignNativeInterfaceDraft
+        if (!schema.UsesForeignNativeInterface()
             || recordCount is <= 0 or > 0xFF_FFFF
             || (long)recordCount * RowSize != section.Length)
         {

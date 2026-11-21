@@ -95,6 +95,7 @@ public static class TrRmContractTableWriter
     {
         if (schema is not (TrRmArtifactSchema.ForeignInvocationDraft
             or TrRmArtifactSchema.ForeignNativeInterfaceDraft
+            or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft
             or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft

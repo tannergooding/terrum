@@ -142,6 +142,62 @@ internal sealed class TrRmArtifactIndexTests
     }
 
     [Test]
+    public void ForeignNativeInterfaceParameterSurfaceUsesItsSeparateSixteenByteProfile()
+    {
+        var schema
+            = TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft;
+        Assert.That(TrRmFeatureTableReader.TryGetRuleRevision(
+            TrRmFeatureTableReader.TypedFrozenValuesFeatureId,
+            schema, out var scalarRevision), Is.True);
+        Assert.That(scalarRevision, Is.EqualTo(1));
+        Assert.That(TrRmFeatureTableReader.TryGetRuleRevision(
+            TrRmFeatureTableReader.MethodParameterLabelsFeatureId,
+            schema, out var surfaceRevision), Is.True);
+        Assert.That(surfaceRevision, Is.EqualTo(1));
+        Assert.That(TrRmFeatureTableReader.TryGetRuleRevision(
+            TrRmFeatureTableReader.NominalUnionMetadataFeatureId,
+            schema, out _), Is.False);
+        Assert.That(TrRmFeatureTableReader.TryGetRuleRevision(
+            TrRmFeatureTableReader.TypedFrozenValuesFeatureId,
+            TrRmArtifactSchema.ForeignNativeInterfaceDraft, out _), Is.False);
+        Assert.That(TrRmFeatureTableReader.TryGetRuleRevision(
+            TrRmFeatureTableReader.MethodParameterLabelsFeatureId,
+            TrRmArtifactSchema.ForeignNativeInterfaceDraft, out _), Is.False);
+
+        var minimal = MinimalArtifact();
+        var moduleBytes = minimal.AsSpan(64, 48).ToArray();
+        var strings = TrRmStringTableWriter.EncodeNames([("A", 0)]);
+        var sections = new TrRmSection[]
+        {
+            new(0x0001, 0, 1, moduleBytes),
+            new(0x0002, 0, 1, strings),
+            new(0x004C, 0, 1, new byte[12]),
+            new(0x0066, 0, 1, new byte[16]),
+        };
+        var artifact = TrRmArtifactWriter.Encode(sections,
+            schema);
+        var index = TrRmArtifactIndex
+            .ForForeignNativeInterfaceParameterSurfaceDraft(artifact);
+
+        Assert.That(index.TryGetSection(0x0066, out var surfaceRows,
+            out var surfaceCount), Is.True);
+        Assert.That(surfaceRows.Length, Is.EqualTo(16));
+        Assert.That(surfaceCount, Is.EqualTo(1));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmArtifactIndex.ForForeignNativeInterfaceDraft(artifact));
+
+        var noSurfaceArtifact = TrRmArtifactWriter.Encode([
+            new TrRmSection(0x0001, 0, 1, moduleBytes),
+            new TrRmSection(0x0002, 0, 1, strings),
+            new TrRmSection(0x004C, 0, 1, new byte[12]),
+        ], schema);
+        var noSurfaceIndex = TrRmArtifactIndex
+            .ForForeignNativeInterfaceParameterSurfaceDraft(noSurfaceArtifact);
+        Assert.That(noSurfaceIndex.TryGetSection(0x0066, out _, out _),
+            Is.False);
+    }
+
+    [Test]
     public void FindsSectionsAtDirectoryBoundariesAndRejectsMissingKinds()
     {
         var artifact = TrRmArtifactWriter.Encode([

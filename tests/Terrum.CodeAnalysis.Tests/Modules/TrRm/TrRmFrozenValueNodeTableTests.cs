@@ -133,29 +133,31 @@ internal sealed class TrRmFrozenValueNodeTableTests
     }
 
     [Test]
-    public void ScalarCodecSupportsNativeWidthAndRejectsNominalTypes()
+    public void ScalarCodecRejectsNativeWidthAndNominalTypes()
     {
         byte[] nativeIntPayload = [1, 2, 3, 4, 5, 6, 7, 8];
+        _ = Assert.Throws<NotSupportedException>(() =>
+            CreateScalarTable(0x10, nativeIntPayload));
         var (nativeIntRows, nativeIntBlobRows, nativeIntBlobCount)
-            = CreateScalarTable(0x10, nativeIntPayload);
+            = CreateRawScalarTable(0x10, nativeIntPayload);
         var nativeIntTypes = CreateTypeSpecs(0x10);
         var nativeIntBlobs = CreateBlobs(nativeIntBlobRows,
             nativeIntBlobCount);
         var nativeIntNodes = new TrRmFrozenValueNodeTableReader(
             nativeIntRows, 1, nativeIntTypes, nativeIntBlobCount, 0, 0);
-        Assert.That(nativeIntNodes.GetScalarPayload(1, nativeIntBlobs)
-            .ToArray(), Is.EqualTo(nativeIntPayload));
+        AssertUnsupportedScalar(nativeIntNodes, nativeIntBlobs);
 
         byte[] nativeUIntPayload = [8, 7, 6, 5, 4, 3, 2, 1];
+        _ = Assert.Throws<NotSupportedException>(() =>
+            CreateScalarTable(0x11, nativeUIntPayload));
         var (nativeUIntRows, nativeUIntBlobRows, nativeUIntBlobCount)
-            = CreateScalarTable(0x11, nativeUIntPayload);
+            = CreateRawScalarTable(0x11, nativeUIntPayload);
         var nativeUIntTypes = CreateTypeSpecs(0x11);
         var nativeUIntBlobs = CreateBlobs(nativeUIntBlobRows,
             nativeUIntBlobCount);
         var nativeUIntNodes = new TrRmFrozenValueNodeTableReader(
             nativeUIntRows, 1, nativeUIntTypes, nativeUIntBlobCount, 0, 0);
-        Assert.That(nativeUIntNodes.GetScalarPayload(1, nativeUIntBlobs)
-            .ToArray(), Is.EqualTo(nativeUIntPayload));
+        AssertUnsupportedScalar(nativeUIntNodes, nativeUIntBlobs);
 
         var nominalTypeBytes = TrRmTypeSpecTableWriter.Encode(
             [new ReadOnlyMemory<byte>(TrRmTypeSpecTableWriter.Reference(0x02, 1))],

@@ -2173,7 +2173,7 @@ internal static class TrRmRegisterBodyMapValidator
         TrRmImportTableReader imports,
         TrRmContractTableReader contracts)
     {
-        if (!body.Schema.UsesMethodParameterLabels()
+        if (!body.Schema.UsesGeneralMethodParameterLabels()
             || methods.GetOwnerType(callerMethodRow) != 0
             || argumentCount != 0)
         {

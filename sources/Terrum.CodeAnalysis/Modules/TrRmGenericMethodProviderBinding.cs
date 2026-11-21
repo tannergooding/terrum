@@ -813,7 +813,7 @@ public static partial class TrRmExecutableCompiler
                 }
 
                 CompleteExpectedGenericMethodBody(target, binding,
-                    Schema.UsesMethodParameterLabels());
+                    Schema.UsesGeneralMethodParameterLabels());
             }
         }
     }
@@ -965,7 +965,7 @@ public static partial class TrRmExecutableCompiler
             expected, imported, expectedInterfaceDefinitions);
         target.CompleteBinding(binding);
         CompleteExpectedGenericMethodBody(target, binding,
-            context.Schema.UsesMethodParameterLabels());
+            context.Schema.UsesGeneralMethodParameterLabels());
         context.ExpectedTargets.Add(target);
         return target;
     }

@@ -13297,7 +13297,7 @@ public static partial class TrRmExecutableCompiler
                 parameterRows.Add(new TrRmParamRow(signatureRow, ordinal,
                     remappedTypeSpec, parameter.Mode, parameter.Flags));
                 if (!schema.UsesClassParameterDefaults()
-                    && schema.UsesMethodParameterLabels())
+                    && schema.UsesGeneralMethodParameterLabels())
                 {
                     methodParameterLabelRows.Add((
                         methodDefRowMap[oldMethodRow], ordinal,
@@ -13942,7 +13942,7 @@ public static partial class TrRmExecutableCompiler
                                 parameter.Name,
                                 defaultConstantSourceRow));
                     }
-                    else if (schema.UsesMethodParameterLabels())
+                    else if (schema.UsesGeneralMethodParameterLabels())
                     {
                         methodParameterLabelRows.Add((
                             methodRows.Count + 1, ordinal,
@@ -14660,7 +14660,7 @@ public static partial class TrRmExecutableCompiler
                                 parameterNameStringRow),
                             remappedDefaultConstantSourceRow));
                 }
-                else if (schema.UsesMethodParameterLabels()
+                else if (schema.UsesGeneralMethodParameterLabels()
                     && hasParameterLabel)
                 {
                     methodParameterLabelRows.Add((
@@ -17552,7 +17552,7 @@ public static partial class TrRmExecutableCompiler
                             ordinal, parameter.Name,
                             defaultConstantSourceRow));
                 }
-                else if (schema.UsesMethodParameterLabels())
+                else if (schema.UsesGeneralMethodParameterLabels())
                 {
                     methodParameterLabelRows.Add((outputMethodRow,
                         ordinal, parameter.Name));

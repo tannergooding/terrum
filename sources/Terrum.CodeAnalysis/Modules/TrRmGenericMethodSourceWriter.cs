@@ -120,7 +120,7 @@ public static partial class TrRmExecutableCompiler
                 : null;
 
         if (sourceTypeExports is { Count: > 0 }
-            && !schema.UsesMethodParameterLabels()
+            && !schema.UsesGeneralMethodParameterLabels()
             && sourceTypeExports.Any(static export =>
                 !export.InterfaceMethodExports.IsDefaultOrEmpty))
         {
@@ -3310,7 +3310,7 @@ public static partial class TrRmExecutableCompiler
         TrRmArtifactSchema schema,
         GenericMethodNominalTypeWriter nominalTypes)
     {
-        if (!schema.UsesMethodParameterLabels()
+        if (!schema.UsesGeneralMethodParameterLabels()
             || !TryGetDirectGenericCallReturn(function, out var call,
                 out var resultVariable)
             || call is null
@@ -4306,7 +4306,7 @@ public static partial class TrRmExecutableCompiler
                         builtInTypeSpecRows, typeSpecRows,
                         nominalTypes: nominalTypes);
 
-            if (!schema.UsesMethodParameterLabels()
+            if (!schema.UsesGeneralMethodParameterLabels()
                 && expected.Formals.Any(static formal =>
                     !formal.InterfaceConstraints.IsEmpty))
             {
@@ -4548,7 +4548,7 @@ public static partial class TrRmExecutableCompiler
                 parameterBytes.Add(0);
                 parameterBytes.Add(0);
 
-                if (schema.UsesMethodParameterLabels())
+                if (schema.UsesGeneralMethodParameterLabels())
                 {
                     var parameterNameStringRow = names.Count + 1;
                     names.Add((parameter.Name, 1));
@@ -4760,7 +4760,7 @@ public static partial class TrRmExecutableCompiler
             .Select(static export => export.Definition.DefinitionOrdinal)
             .ToHashSet();
         var labelSection = default(TrRmSection);
-        var labelBearing = schema.UsesMethodParameterLabels();
+        var labelBearing = schema.UsesGeneralMethodParameterLabels();
         var hasLabelSection = labelBearing
             && TryGetSection(sections, 0x0066, out labelSection);
         var methodParameterLabelBytes = hasLabelSection
@@ -5033,7 +5033,7 @@ public static partial class TrRmExecutableCompiler
                 }
                 if (!formal.InterfaceConstraints.IsEmpty)
                 {
-                    if (!schema.UsesMethodParameterLabels())
+                    if (!schema.UsesGeneralMethodParameterLabels())
                     {
                         throw Unsupported(
                             "G1 interface constraints require the exact G1L1 schema.");
@@ -5923,7 +5923,7 @@ public static partial class TrRmExecutableCompiler
                         }
                     }
 
-                    if (schema.UsesMethodParameterLabels())
+                    if (schema.UsesGeneralMethodParameterLabels())
                     {
                         var parameterNameStringRow = names.Count + 1;
                         names.Add((parameter.Name, 1));
@@ -6164,7 +6164,7 @@ public static partial class TrRmExecutableCompiler
         {
             return artifact;
         }
-        if (!schema.UsesMethodParameterLabels()
+        if (!schema.UsesGeneralMethodParameterLabels()
             && emissions.Any(static emission =>
                 emission.Definition.Members.Any(static member =>
                     member.Kind == BoundInterfaceMemberKind.Callable)))
