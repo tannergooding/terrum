@@ -1,6 +1,7 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -23,6 +24,24 @@ internal sealed class TrRmStandardNestedPointerLoadTests
         = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-pointer-loads-1";
     private const string InitializationReferenceSchemaIdentity
         = "trrm/1-draft-init-reference-bodies-1";
+
+    public static IEnumerable<TestCaseData> PointerLoadScalarTypeCases()
+    {
+        foreach (var schemaIdentity in new[] {
+            PointerLoadsSchemaIdentity,
+            GeneralPredicateGraphsPointerLoadsSchemaIdentity,
+        })
+        {
+            foreach (var typeName in new[] {
+                "int8", "uint8", "int16", "uint16", "int32", "uint32",
+                "int64", "uint64", "int128", "uint128", "nint", "nuint",
+                "float32", "float64",
+            })
+            {
+                yield return new TestCaseData(schemaIdentity, typeName);
+            }
+        }
+    }
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int ReadNestedPointerFunction(nint pointer);
@@ -164,6 +183,36 @@ internal sealed class TrRmStandardNestedPointerLoadTests
         }
     }
 
+    [TestCaseSource(nameof(PointerLoadScalarTypeCases))]
+    public void ScalarPointerLoadTypesRoundTrip(
+        string schemaIdentity, string typeName)
+    {
+        const string moduleIdentity = "standard-scalar-pointer-load";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse($"""
+            public unsafe {typeName} Read(ptr<{typeName}> value)
+            {
+                unsafe { return *value; }
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            moduleIdentity, []);
+        AssertDirectPointerLoad(loaded);
+        var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
+            moduleIdentity + "-reemitted", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, reemitted),
+            moduleIdentity + "-reemitted", []);
+        AssertDirectPointerLoad(loaded);
+    }
+
     [TestCase(PointerLoadsSchemaIdentity)]
     [TestCase(GeneralPredicateGraphsPointerLoadsSchemaIdentity)]
     public void NestedPointerLoadProviderSurvivesReemission(
@@ -260,31 +309,7 @@ internal sealed class TrRmStandardNestedPointerLoadTests
     {
         var function = program.Functions.Single(static candidate =>
             candidate.Name == "ReadNested");
-        var pendingStatements = new Stack<BoundStatement>();
-        pendingStatements.Push(function.Body);
-        BoundReturn? returnStatement = null;
-        while (pendingStatements.TryPop(out var statement))
-        {
-            switch (statement)
-            {
-                case BoundBlock block:
-                    foreach (var nested in block.Statements)
-                    {
-                        pendingStatements.Push(nested);
-                    }
-                    break;
-                case BoundUnsafe unsafeBlock:
-                    pendingStatements.Push(unsafeBlock.Body);
-                    break;
-                case BoundReturn result:
-                    Assert.That(returnStatement, Is.Null);
-                    returnStatement = result;
-                    break;
-            }
-        }
-
-        Assert.That(returnStatement?.Value, Is.Not.Null);
-        var value = returnStatement!.Value!;
+        var value = GetSingleReturnValue(function);
         for (var depth = 0; depth < 2; depth++)
         {
             if (value is BoundUnsafeExpression unsafeExpression)
@@ -306,6 +331,41 @@ internal sealed class TrRmStandardNestedPointerLoadTests
     {
         var function = program.Functions.Single(static candidate =>
             candidate.Name == "ReadNested");
+        var value = GetSingleReturnValue(function);
+        for (var depth = 0; depth < 3; depth++)
+        {
+            if (value is BoundUnsafeExpression unsafeExpression)
+            {
+                value = unsafeExpression.Expression;
+            }
+            Assert.That(value, Is.TypeOf<BoundNativePointerRead>());
+            value = ((BoundNativePointerRead)value).Address;
+        }
+        Assert.That(value, Is.TypeOf<BoundRead>());
+    }
+
+    private static void AssertDirectPointerLoad(BoundProgram program)
+    {
+        var function = program.Functions.Single(static candidate =>
+            candidate.Name == "Read");
+        var value = GetSingleReturnValue(function);
+        if (value is BoundUnsafeExpression unsafeExpression)
+        {
+            value = unsafeExpression.Expression;
+        }
+        Assert.That(value, Is.TypeOf<BoundNativePointerRead>());
+        var pointerRead = (BoundNativePointerRead)value;
+        Assert.That(pointerRead.Type, Is.EqualTo(function.ReturnType));
+        var parameterType = function.Variables[0].Type;
+        Assert.That(NativePointerTypes.IsType(parameterType), Is.True);
+        var pointerType = program.NativePointerTypes[
+            NativePointerTypes.Index(parameterType)];
+        Assert.That(pointerType.PointeeType, Is.EqualTo(pointerRead.Type));
+    }
+
+    private static BoundExpression GetSingleReturnValue(
+        BoundFunction function)
+    {
         var pendingStatements = new Stack<BoundStatement>();
         pendingStatements.Push(function.Body);
         BoundReturn? returnStatement = null;
@@ -330,16 +390,6 @@ internal sealed class TrRmStandardNestedPointerLoadTests
         }
 
         Assert.That(returnStatement?.Value, Is.Not.Null);
-        var value = returnStatement!.Value!;
-        for (var depth = 0; depth < 3; depth++)
-        {
-            if (value is BoundUnsafeExpression unsafeExpression)
-            {
-                value = unsafeExpression.Expression;
-            }
-            Assert.That(value, Is.TypeOf<BoundNativePointerRead>());
-            value = ((BoundNativePointerRead)value).Address;
-        }
-        Assert.That(value, Is.TypeOf<BoundRead>());
+        return returnStatement!.Value!;
     }
 }
