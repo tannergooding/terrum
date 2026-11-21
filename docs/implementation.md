@@ -871,7 +871,14 @@ the phase-1/2 producer also emits named role-2 captures, and
 binding/verification preserve their descriptor type and backing/provenance.
 NativeEmitter lowers the
 bounded type/access match and copies the descriptor only on a compatible
-match. Producer and emission regressions remain
+match. Source `not`, `and` and `or` pattern composition is retained separately
+from Boolean operators and emitted as PatternNot `0x4C`, PatternAnd `0x4D` and
+PatternOr `0x4E`, with one shared input-place observation and ordered
+short-circuit children. The bounded composition path accepts currently
+supported wildcard, scalar constant, scalar-or-optional type/value and exact
+checked-reference children in phases 1/2, plus optional-scalar null/inferred
+children in phase 2; it does not add tuple, union,
+generic-type or projection-pattern support. Producer and emission regressions remain
 unverified under the active hold. The phase-1/2 consumer, failure maps,
 provider binding, source-free remapping/re-emission and graph execution remain
 open.

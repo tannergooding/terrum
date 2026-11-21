@@ -897,7 +897,9 @@ internal static class TrRmGeneralPredicateGraphValidator
             0x45 => childCount == 0
                 && HasOperandKinds(node, nodes, operands, 6, 3)
                 && TypeUseOperandsValid(node, nodes, operands, typeUses)
-                && CaptureHasRole(node, 1, 1, nodes, operands, captures, graph),
+                && CaptureHasRole(node, 1, 1, nodes, operands, captures, graph)
+                && CaptureTypeUseMatches(node, nodes, operands, typeUses,
+                    captures, typeSpecs),
             0x46 or 0x47 => childCount == 0
                 && HasOperandKinds(node, nodes, operands, 3)
                 && CaptureHasRole(node, 0, 1, nodes, operands, captures, graph),
@@ -945,6 +947,23 @@ internal static class TrRmGeneralPredicateGraphValidator
         var capture = GetOperandRef(node, operandOrdinal, nodes, operands);
         return captures.GetGraphRow(checked((int)capture)) == graph
             && captures.GetRole(checked((int)capture)) == role;
+    }
+
+    private static bool CaptureTypeUseMatches(int node,
+        TrRmPredicateNodeTableReader nodes,
+        TrRmPredicateNodeOperandTableReader operands,
+        TrRmPredicateTypeUseTableReader typeUses,
+        TrRmPredicateCaptureTableReader captures,
+        TrRmTypeSpecTableReader typeSpecs)
+    {
+        var firstOperand = nodes.GetOperandFirstRow(node);
+        var typeUseRow = checked((int)operands.GetOperandRef(
+            checked((int)firstOperand)));
+        var captureRow = checked((int)operands.GetOperandRef(
+            checked((int)(firstOperand + 1)));
+        return typeSpecs.AreEquivalentTypeSpecRefs(
+            typeUses.GetTypeSpecRef(typeUseRow),
+            captures.GetCapturedTypeSpecRef(captureRow));
     }
 
     private static bool CapturePlaceTypeMatches(int node,

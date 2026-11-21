@@ -3270,6 +3270,7 @@ public static partial class TrRmExecutableCompiler
             if (expression is BoundRead or BoundConstant
                 or BoundIsInitialized
                 or BoundIsNull
+                or BoundWildcardPattern
                 or BoundTypeTestPattern
                 or BoundTypedValuePattern
                 or BoundReferenceTypeTestPattern
@@ -3282,6 +3283,17 @@ public static partial class TrRmExecutableCompiler
             }
 
             return expression switch {
+                BoundUnary {
+                    IsPatternComposition: true,
+                    PatternObservation: not null,
+                } unary => [unary.Operand],
+                BoundBinary {
+                    IsPatternComposition: true,
+                    PatternObservation: not null,
+                } binary => [
+                    binary.Left,
+                    binary.Right,
+                ],
                 BoundUnary {
                     Operator: TokenKind.Bang,
                     Type: PrimitiveType.Bool,
@@ -3622,6 +3634,331 @@ public static partial class TrRmExecutableCompiler
                 matchNodeRow, 1, checked((int)constantPatternNodeRow)));
         }
 
+        int AddPatternGraphNode(int parentNodeRow, uint childOrdinal,
+            uint nodeKind, params TrRmPredicateNodeOperandRow[] nodeOperands)
+        {
+            var nodeRow = checked(predicateNodes.Count + 1);
+            var operandFirstRow = nodeOperands.Length == 0
+                ? 0u : checked((uint)predicateNodeOperands.Count + 1);
+            predicateNodeOperands.AddRange(nodeOperands);
+            predicateNodes.Add(new TrRmPredicateNodeRow(nodeKind,
+                checked((uint)TypeSpecRowFor(PrimitiveType.Bool)),
+                operandFirstRow, checked((uint)nodeOperands.Length)));
+            predicateChildEdges.Add(new TrRmPredicateChildEdgeRow(
+                parentNodeRow, childOrdinal, nodeRow));
+            return nodeRow;
+        }
+
+        void BuildPatternCompositionNode(
+            BoundFunction function, BoundExpression pattern,
+            BoundRead observation, int parentNodeRow, uint childOrdinal,
+            Dictionary<(byte Kind, int Identity), uint> rootRowsByIdentity,
+            Dictionary<int, (uint CaptureRow, uint Ordinal,
+                PrimitiveType Type)> captureRowsByVariable,
+            BoundDeclarationContractPhase declarationPhase)
+        {
+            bool IsSameObservation(BoundExpression value)
+                => value is BoundRead read
+                    && read.Variable == observation.Variable
+                    && read.Type == observation.Type;
+
+            if (pattern is BoundUnary {
+                    IsPatternComposition: true,
+                    Operator: TokenKind.Bang,
+                    PatternObservation: BoundRead patternObservation,
+                } notPattern)
+            {
+                if (!IsSameObservation(patternObservation))
+                {
+                    throw Unsupported(
+                        "A nested PatternNot must retain its parent's input observation.");
+                }
+
+                var notNode = AddPatternGraphNode(parentNodeRow,
+                    childOrdinal, 0x4C);
+                BuildPatternCompositionNode(function, notPattern.Operand,
+                    observation, notNode, 0, rootRowsByIdentity,
+                    captureRowsByVariable, declarationPhase);
+                return;
+            }
+
+            if (pattern is BoundBinary {
+                    IsPatternComposition: true,
+                    Operator: TokenKind.AmpersandAmpersand
+                        or TokenKind.PipePipe,
+                    PatternObservation: BoundRead patternObservation,
+                } binaryPattern)
+            {
+                if (!IsSameObservation(patternObservation))
+                {
+                    throw Unsupported(
+                        "A nested pattern composition must retain its parent's input observation.");
+                }
+
+                var nodeKind = binaryPattern.Operator
+                    == TokenKind.AmpersandAmpersand ? 0x4D : 0x4E;
+                var compositionNode = AddPatternGraphNode(parentNodeRow,
+                    childOrdinal, checked((uint)nodeKind));
+                BuildPatternCompositionNode(function, binaryPattern.Left,
+                    observation, compositionNode, 0, rootRowsByIdentity,
+                    captureRowsByVariable, declarationPhase);
+                BuildPatternCompositionNode(function, binaryPattern.Right,
+                    observation, compositionNode, 1, rootRowsByIdentity,
+                    captureRowsByVariable, declarationPhase);
+                return;
+            }
+
+            if (observation.Variable < 0
+                || observation.Variable >= function.ParameterCount
+                || function.Variables[observation.Variable].Type
+                    != observation.Type
+                || function.Variables[observation.Variable].IsOut
+                || function.Variables[observation.Variable].IsInit
+                || function.Variables[observation.Variable].IsMutable
+                || !rootRowsByIdentity.TryGetValue(
+                    (2, observation.Variable), out _))
+            {
+                throw Unsupported(
+                    "A composed declaration pattern requires one immutable input-formal observation.");
+            }
+
+            switch (pattern)
+            {
+                case BoundWildcardPattern wildcardPattern
+                    when IsSameObservation(
+                        wildcardPattern.Observation):
+                    _ = AddPatternGraphNode(parentNodeRow, childOrdinal,
+                        0x40);
+                    return;
+
+                case BoundTypeTestPattern typeTest
+                    when IsSameObservation(typeTest.Value)
+                        && declarationPhase is (
+                            BoundDeclarationContractPhase.Precondition
+                            or BoundDeclarationContractPhase
+                                .NormalPostcondition)
+                        && (PrimitiveTypeFacts.IsBuiltInScalar(
+                                observation.Type)
+                            || TryGetOptionalBuiltInScalarType(
+                                observation.Type,
+                                program.CheckedReferenceTypes, out _))
+                        && generalPredicateScalarTypeRows.ContainsKey(
+                            typeTest.TestedType):
+                    _ = AddPatternGraphNode(parentNodeRow, childOrdinal,
+                        0x44, new TrRmPredicateNodeOperandRow(6,
+                            PredicateTypeUseRowFor(typeTest.TestedType)));
+                    return;
+
+                case BoundTypedValuePattern typedValuePattern
+                    when IsSameObservation(typedValuePattern.Value)
+                        && declarationPhase is (
+                            BoundDeclarationContractPhase.Precondition
+                            or BoundDeclarationContractPhase
+                                .NormalPostcondition)
+                        && (PrimitiveTypeFacts.IsBuiltInScalar(
+                                observation.Type)
+                            || TryGetOptionalBuiltInScalarType(
+                                observation.Type,
+                                program.CheckedReferenceTypes, out _))
+                        && generalPredicateScalarTypeRows.ContainsKey(
+                            typedValuePattern.TestedType)
+                        && captureRowsByVariable.TryGetValue(
+                            typedValuePattern.Variable,
+                            out var valueCapture)
+                        && valueCapture.Type == typedValuePattern.TestedType:
+                    _ = AddPatternGraphNode(parentNodeRow, childOrdinal,
+                        0x45,
+                        new TrRmPredicateNodeOperandRow(6,
+                            PredicateTypeUseRowFor(
+                                typedValuePattern.TestedType)),
+                        new TrRmPredicateNodeOperandRow(3,
+                            valueCapture.CaptureRow));
+                    return;
+
+                case BoundReferenceTypeTestPattern referencePattern
+                    when IsSameObservation(referencePattern.Value)
+                        && declarationPhase is (
+                            BoundDeclarationContractPhase.Precondition
+                            or BoundDeclarationContractPhase
+                                .NormalPostcondition)
+                        && CheckedReferenceTypeContract
+                            .IsSupportedReferencePatternType(
+                                observation.Type,
+                                program.CheckedReferenceTypes)
+                        && referencePattern.Variable >= -1:
+                    var referenceOperands = new List<
+                        TrRmPredicateNodeOperandRow> {
+                        new(0x0B, ReferenceTypePatternRowFor(
+                            referencePattern.TestedType)),
+                    };
+                    if (referencePattern.Variable >= 0)
+                    {
+                        if (!captureRowsByVariable.TryGetValue(
+                                referencePattern.Variable,
+                                out var referenceCapture)
+                            || referenceCapture.Type
+                                != referencePattern.TestedType)
+                        {
+                            throw Unsupported(
+                                "A composed ReferencePattern has no matching role-2 capture.");
+                        }
+
+                        referenceOperands.Add(
+                            new TrRmPredicateNodeOperandRow(3,
+                                referenceCapture.CaptureRow));
+                    }
+
+                    _ = AddPatternGraphNode(parentNodeRow, childOrdinal,
+                        0x48, [.. referenceOperands]);
+                    return;
+
+                case BoundIsNull nullTest
+                    when declarationPhase
+                        == BoundDeclarationContractPhase
+                            .NormalPostcondition
+                        && IsSameObservation(nullTest.Value)
+                        && TryGetOptionalBuiltInScalarType(
+                            observation.Type,
+                            program.CheckedReferenceTypes, out _):
+                    _ = AddPatternGraphNode(parentNodeRow, childOrdinal,
+                        0x42);
+                    return;
+
+                case BoundIsSome somePattern
+                    when declarationPhase
+                        == BoundDeclarationContractPhase
+                            .NormalPostcondition
+                        && IsSameObservation(somePattern.Value)
+                        && TryGetOptionalBuiltInScalarType(
+                            observation.Type, program.CheckedReferenceTypes,
+                            out var payloadType)
+                        && captureRowsByVariable.TryGetValue(
+                            somePattern.Variable, out var someCapture)
+                        && someCapture.Type == payloadType:
+                    _ = AddPatternGraphNode(parentNodeRow, childOrdinal,
+                        0x46, new TrRmPredicateNodeOperandRow(3,
+                            someCapture.CaptureRow));
+                    return;
+
+                case BoundIsVariablePattern variablePattern
+                    when declarationPhase
+                        == BoundDeclarationContractPhase
+                            .NormalPostcondition
+                        && IsSameObservation(variablePattern.Value)
+                        && TryGetOptionalBuiltInScalarType(
+                            observation.Type, program.CheckedReferenceTypes,
+                            out var variablePayloadType)
+                        && captureRowsByVariable.TryGetValue(
+                            variablePattern.Variable,
+                            out var variableCapture)
+                        && variableCapture.Type
+                            == (variablePattern.IncludeNull
+                                ? observation.Type : variablePayloadType):
+                    _ = AddPatternGraphNode(parentNodeRow, childOrdinal,
+                        variablePattern.IncludeNull ? 0x47u : 0x46u,
+                        new TrRmPredicateNodeOperandRow(3,
+                            variableCapture.CaptureRow));
+                    return;
+
+                case BoundBinary {
+                        IsConstantPatternTest: true,
+                        Operator: TokenKind.EqualsEquals,
+                        Left: BoundRead constantSubject,
+                        Right: BoundConstant constant,
+                    } when IsSameObservation(constantSubject)
+                        && declarationPhase is (
+                            BoundDeclarationContractPhase.Precondition
+                            or BoundDeclarationContractPhase
+                                .NormalPostcondition)
+                        && PrimitiveTypeFacts.IsBuiltInScalar(
+                            observation.Type)
+                        && constant.Type == observation.Type
+                        && constant.RepresentationType == observation.Type
+                        && constant.Bits.IsCanonicalFor(observation.Type):
+                    var frozenValue
+                        = predicateFrozenScalarValues
+                            .AddFrozenValueNode(constant);
+                    _ = AddPatternGraphNode(parentNodeRow, childOrdinal,
+                        0x43, new TrRmPredicateNodeOperandRow(2,
+                            frozenValue.FrozenValueNodeRow));
+                    return;
+            }
+
+            throw Unsupported(
+                "A composed declaration pattern contains an unsupported child pattern.");
+        }
+
+        int AddPatternCompositionMatchGraph(
+            BoundFunction function, BoundExpression expression,
+            int parentNodeRow, uint childOrdinal,
+            Dictionary<(byte Kind, int Identity), uint> rootRowsByIdentity,
+            Dictionary<int, (uint CaptureRow, uint Ordinal,
+                PrimitiveType Type)> captureRowsByVariable,
+            BoundDeclarationContractPhase? declarationPhase)
+        {
+            var observation = expression switch {
+                BoundUnary {
+                    IsPatternComposition: true,
+                    PatternObservation: BoundRead unaryRead,
+                } => unaryRead,
+                BoundBinary {
+                    IsPatternComposition: true,
+                    PatternObservation: BoundRead binaryRead,
+                } => binaryRead,
+                _ => throw Unsupported(
+                    "A pattern composition has no retained input observation."),
+            };
+            if (declarationPhase is not (
+                    BoundDeclarationContractPhase.Precondition
+                    or BoundDeclarationContractPhase.NormalPostcondition)
+                || observation.Variable < 0
+                || observation.Variable >= function.ParameterCount
+                || function.Variables[observation.Variable].Type
+                    != observation.Type
+                || function.Variables[observation.Variable].IsOut
+                || function.Variables[observation.Variable].IsInit
+                || function.Variables[observation.Variable].IsMutable
+                || (!PrimitiveTypeFacts.IsBuiltInScalar(
+                        observation.Type)
+                    && !TryGetOptionalBuiltInScalarType(
+                        observation.Type, program.CheckedReferenceTypes,
+                        out _)
+                    && !CheckedReferenceTypeContract
+                        .IsSupportedReferencePatternType(
+                            observation.Type,
+                            program.CheckedReferenceTypes))
+                || !rootRowsByIdentity.TryGetValue(
+                    (2, observation.Variable), out var inputRootRow))
+            {
+                throw Unsupported(
+                    "A composed declaration pattern requires its immutable phase-1/2 input formal.");
+            }
+
+            var matchNodeRow = checked(predicateNodes.Count + 1);
+            predicateNodes.Add(new TrRmPredicateNodeRow(0x34,
+                checked((uint)TypeSpecRowFor(PrimitiveType.Bool)), 0, 0));
+            if (parentNodeRow != 0)
+            {
+                predicateChildEdges.Add(new TrRmPredicateChildEdgeRow(
+                    parentNodeRow, childOrdinal, matchNodeRow));
+            }
+
+            var subjectNodeRow = checked((uint)predicateNodes.Count + 1);
+            var subjectOperandFirstRow = checked(
+                (uint)predicateNodeOperands.Count + 1);
+            predicateNodeOperands.Add(
+                new TrRmPredicateNodeOperandRow(1, inputRootRow));
+            predicateNodes.Add(new TrRmPredicateNodeRow(0x10,
+                checked((uint)TypeSpecRowFor(observation.Type)),
+                subjectOperandFirstRow, 1));
+            predicateChildEdges.Add(new TrRmPredicateChildEdgeRow(
+                matchNodeRow, 0, checked((int)subjectNodeRow)));
+            BuildPatternCompositionNode(function, expression, observation,
+                matchNodeRow, 1, rootRowsByIdentity,
+                captureRowsByVariable, declarationPhase.Value);
+            return matchNodeRow;
+        }
+
         void AddCapturedValueLoadGraph(
             int parentNodeRow, uint childOrdinal,
             PrimitiveType capturedType, uint captureRow,
@@ -3722,6 +4059,95 @@ public static partial class TrRmExecutableCompiler
                         frame.ChildOrdinal, subjectRead.Type,
                         constantSubjectRootRow, constant,
                         ref rootNodeRow);
+                    continue;
+                }
+
+                if (frame.Expression is BoundUnary {
+                        IsPatternComposition: true,
+                    } or BoundBinary {
+                        IsPatternComposition: true,
+                    })
+                {
+                    var matchNodeRow = AddPatternCompositionMatchGraph(
+                        function, frame.Expression, frame.ParentNodeRow,
+                        frame.ChildOrdinal, rootRowsByIdentity,
+                        captureRowsByVariable, declarationPhase);
+                    if (frame.ParentNodeRow == 0)
+                    {
+                        rootNodeRow = matchNodeRow;
+                    }
+                    continue;
+                }
+
+                if (frame.Expression is BoundWildcardPattern wildcardPattern)
+                {
+                    if (declarationPhase is not (
+                            BoundDeclarationContractPhase.Precondition
+                            or BoundDeclarationContractPhase
+                                .NormalPostcondition)
+                        || wildcardPattern.Observation
+                            is not BoundRead wildcardRead
+                        || wildcardRead.Variable < 0
+                        || wildcardRead.Variable >= function.ParameterCount
+                        || function.Variables[wildcardRead.Variable].Type
+                            != wildcardRead.Type
+                        || function.Variables[wildcardRead.Variable].IsOut
+                        || function.Variables[wildcardRead.Variable].IsInit
+                        || function.Variables[wildcardRead.Variable].IsMutable
+                        || (!PrimitiveTypeFacts.IsBuiltInScalar(
+                                wildcardRead.Type)
+                            && !TryGetOptionalBuiltInScalarType(
+                                wildcardRead.Type,
+                                program.CheckedReferenceTypes, out _)
+                            && !CheckedReferenceTypeContract
+                                .IsSupportedReferencePatternType(
+                                    wildcardRead.Type,
+                                    program.CheckedReferenceTypes))
+                        || !rootRowsByIdentity.TryGetValue(
+                            (2, wildcardRead.Variable),
+                            out var wildcardInputRootRow))
+                    {
+                        throw Unsupported(
+                            "A wildcard graph requires one supported immutable input-formal observation.");
+                    }
+
+                    var matchNodeRow = checked(predicateNodes.Count + 1);
+                    predicateNodes.Add(new TrRmPredicateNodeRow(0x34,
+                        checked((uint)TypeSpecRowFor(PrimitiveType.Bool)),
+                        0, 0));
+                    if (frame.ParentNodeRow == 0)
+                    {
+                        rootNodeRow = matchNodeRow;
+                    }
+                    else
+                    {
+                        predicateChildEdges.Add(
+                            new TrRmPredicateChildEdgeRow(
+                                frame.ParentNodeRow, frame.ChildOrdinal,
+                                matchNodeRow));
+                    }
+
+                    var subjectNodeRow
+                        = checked((uint)predicateNodes.Count + 1);
+                    var subjectOperandFirstRow = checked(
+                        (uint)predicateNodeOperands.Count + 1);
+                    predicateNodeOperands.Add(
+                        new TrRmPredicateNodeOperandRow(1,
+                            wildcardInputRootRow));
+                    predicateNodes.Add(new TrRmPredicateNodeRow(0x10,
+                        checked((uint)TypeSpecRowFor(wildcardRead.Type)),
+                        subjectOperandFirstRow, 1));
+                    var wildcardNodeRow
+                        = checked((uint)predicateNodes.Count + 1);
+                    predicateNodes.Add(new TrRmPredicateNodeRow(0x40,
+                        checked((uint)TypeSpecRowFor(PrimitiveType.Bool)),
+                        0, 0));
+                    predicateChildEdges.Add(
+                        new TrRmPredicateChildEdgeRow(matchNodeRow, 0,
+                            checked((int)subjectNodeRow)));
+                    predicateChildEdges.Add(
+                        new TrRmPredicateChildEdgeRow(matchNodeRow, 1,
+                            checked((int)wildcardNodeRow)));
                     continue;
                 }
 
@@ -4431,13 +4857,64 @@ public static partial class TrRmExecutableCompiler
                         (captureRow, captureOrdinal, capturedType));
                 }
 
+                void AddPatternObservationRoot(
+                    BoundExpression observation)
+                {
+                    if (clause.Phase is not (
+                            BoundDeclarationContractPhase.Precondition
+                            or BoundDeclarationContractPhase
+                                .NormalPostcondition)
+                        || observation is not BoundRead patternRead
+                        || patternRead.Variable < 0
+                        || patternRead.Variable >= function.ParameterCount
+                        || function.Variables[patternRead.Variable].Type
+                            != patternRead.Type
+                        || function.Variables[patternRead.Variable].IsOut
+                        || function.Variables[patternRead.Variable].IsInit
+                        || function.Variables[patternRead.Variable].IsMutable
+                        || (!PrimitiveTypeFacts.IsBuiltInScalar(
+                                patternRead.Type)
+                            && !TryGetOptionalBuiltInScalarType(
+                                patternRead.Type,
+                                program.CheckedReferenceTypes, out _)
+                            && !CheckedReferenceTypeContract
+                                .IsSupportedReferencePatternType(
+                                    patternRead.Type,
+                                    program.CheckedReferenceTypes)))
+                    {
+                        throw Unsupported(
+                            "A composed declaration pattern requires one supported immutable input-formal observation.");
+                    }
+
+                    _ = readRoots.Add((2, patternRead.Variable));
+                }
+
                 var pendingExpressions = new Stack<BoundExpression>();
                 pendingExpressions.Push(clause.Predicate);
                 while (pendingExpressions.Count != 0)
                 {
                     var expression = pendingExpressions.Pop();
                     var children = GetGeneralPredicateChildren(expression);
-                    if (expression is BoundBinary {
+                    if (expression is BoundUnary {
+                            IsPatternComposition: true,
+                            PatternObservation: { } unaryObservation,
+                        })
+                    {
+                        AddPatternObservationRoot(unaryObservation);
+                    }
+                    else if (expression is BoundBinary {
+                            IsPatternComposition: true,
+                            PatternObservation: { } binaryObservation,
+                        })
+                    {
+                        AddPatternObservationRoot(binaryObservation);
+                    }
+                    else if (expression is BoundWildcardPattern wildcardPattern)
+                    {
+                        AddPatternObservationRoot(
+                            wildcardPattern.Observation);
+                    }
+                    else if (expression is BoundBinary {
                             IsConstantPatternTest: true,
                         } constantPatternTest)
                     {
