@@ -33,6 +33,15 @@ internal sealed class TrRmNativeParameterAggregateBackingTests
         public int Third;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeNestedArrayHolder
+    {
+        public int First;
+        public int Second;
+        public int Third;
+        public int Fourth;
+    }
+
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int ProbeDelegate(nint process, NativePair value,
         nint bytesRead);
@@ -46,6 +55,10 @@ internal sealed class TrRmNativeParameterAggregateBackingTests
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int FieldArrayProbeDelegate(nint process,
         NativeArrayHolder value, nint bytesRead);
+
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int NestedFieldArrayProbeDelegate(nint process,
+        NativeNestedArrayHolder value, nint bytesRead);
 
     [Test]
     public async Task StandardNativeOutputUsesAggregateNativeParameterBackingAsync()
@@ -571,6 +584,143 @@ internal sealed class TrRmNativeParameterAggregateBackingTests
                     Second = 22,
                     Third = 33,
                 }, bytesRead), Is.EqualTo(1));
+                Assert.That(Marshal.ReadInt64(bytesRead), Is.EqualTo(8));
+            }
+            finally
+            {
+                if (bytesRead != 0)
+                {
+                    Marshal.FreeHGlobal(bytesRead);
+                }
+                NativeLibrary.Free(library);
+            }
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
+    public async Task StandardA2NativeOutputUsesNestedFieldAndArrayBackingAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
+        const string moduleIdentity = "a2-native-output-nested-field-array";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Pair {
+                public int32 First;
+                public int32 Second;
+            }
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Nested {
+                public mut [[int32; 2]; 2] Values;
+            }
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Holder {
+                public mut Nested Data;
+            }
+            [param(buffer): DependsOn(nameof(baseAddress))]
+            [Terrum.Interop.NativeImport("kernel32.dll",
+                "ReadProcessMemory")]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 2)]
+            [Terrum.Interop.NativeParameter(5, Write, NoEscape, 1)]
+            extern unsafe int32 ReadProcessMemory(
+                ptr<void> process, ptr<int32> baseAddress,
+                [Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                write ptr<Pair> buffer, nuint bytesToRead,
+                write ptr<nuint> bytesRead);
+
+            public unsafe int32 Probe(ptr<void> process, Holder value,
+                write ptr<nuint> bytesRead) {
+                mut Holder backing = value;
+                int32 outerIndex = 1;
+                int32 innerIndex = 0;
+                nuint bytesToRead = 8;
+                init mut Pair buffer;
+                unsafe {
+                    return ReadProcessMemory(process,
+                        &backing.Data.Values[outerIndex][innerIndex],
+                        &init buffer,
+                        bytesToRead, bytesRead);
+                }
+            }
+            """), NativeOutputCoreRegistrationTests
+                .CreateRegisteredCompilationOptions());
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity,
+            moduleTargetRequirement: 1);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            moduleIdentity, []);
+        var caller = loaded.Functions.Single(static function =>
+            function.Name == "Probe");
+        BoundNativeStorageAddress? fieldBacking = null;
+        Assert.That(BoundTreeTraversal.VisitExpressions(caller.Body,
+            expression =>
+            {
+                if (expression is BoundNativeStorageAddress address
+                    && address.FieldPlace is not null)
+                {
+                    fieldBacking = address;
+                }
+            }), Is.True);
+        Assert.That(fieldBacking, Is.Not.Null);
+        var storageAddress = fieldBacking!;
+        Assert.That(storageAddress.Projections.Length, Is.EqualTo(2));
+        Assert.That(storageAddress.ElementCount, Is.EqualTo(2UL));
+        Assert.That(storageAddress.ElementStride, Is.EqualTo(4UL));
+        Assert.That(storageAddress.ByteExtent, Is.EqualTo(8UL));
+        var fieldDepth = 0;
+        var fieldPlace = storageAddress.FieldPlace;
+        while (fieldPlace is BoundFieldRead fieldRead)
+        {
+            fieldDepth++;
+            fieldPlace = fieldRead.Receiver;
+        }
+        Assert.That(fieldDepth, Is.EqualTo(2));
+
+        var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
+            moduleIdentity, schemaIdentity, moduleTargetRequirement: 1);
+        Assert.That(reemitted, Is.EqualTo(artifact));
+        var reemittedInput = new TrRmStandardArtifactInput(schemaIdentity,
+            reemitted);
+        _ = TrRmExecutableCompiler.LoadStandard(reemittedInput,
+            moduleIdentity, []);
+        var image = NativeModuleCompiler.EmitStandardLibrary(
+            reemittedInput, moduleIdentity, [], ["Probe"],
+            NativeRuntimePolicy.FailFast);
+        var directory = TestArtifactPaths.CreateDirectory(
+            "terrum-a2-native-output-nested-field-array-");
+        try
+        {
+            var imagePath = Path.Combine(directory, "library.dll");
+            await File.WriteAllBytesAsync(imagePath, image)
+                .ConfigureAwait(true);
+            var library = NativeLibrary.Load(imagePath);
+            nint bytesRead = 0;
+            try
+            {
+                bytesRead = Marshal.AllocHGlobal(sizeof(long));
+                Marshal.WriteInt64(bytesRead, 0);
+                var function = Marshal.GetDelegateForFunctionPointer<
+                    NestedFieldArrayProbeDelegate>(
+                    NativeLibrary.GetExport(library, "Probe"));
+                Assert.That(function(new IntPtr(-1),
+                    new NativeNestedArrayHolder {
+                        First = 11,
+                        Second = 22,
+                        Third = 33,
+                        Fourth = 44,
+                    }, bytesRead), Is.EqualTo(1));
                 Assert.That(Marshal.ReadInt64(bytesRead), Is.EqualTo(8));
             }
             finally
