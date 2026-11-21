@@ -5228,6 +5228,205 @@ internal sealed class TrRmStandardInitializationReferenceBodyTests
     }
 
     [Test]
+    public void Construction2EmitsPhaseOneTypeTestAndTypedValueBindGraphs()
+    {
+        const string moduleIdentity = "phase-one-type-pattern-producer";
+        const string source = """
+            void Check(int32? value)
+                require value is int32
+                require value is int32 captured && captured > 0
+                ensure value is int64
+            {
+            }
+            """;
+        var failureSelection = new CoreContractFailureIdentitySelection(
+            moduleIdentity,
+            new CoreContractFailureDeclarationIdentity(
+                "core.contracts", "requirement-exception"),
+            new CoreContractFailureDeclarationIdentity(
+                "core.contracts", "postcondition-exception"),
+            new CoreContractFailureDeclarationIdentity(
+                "core.contracts", "require-exception-schema"));
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+            new CompilationOptions {
+                CoreContractFailureIdentitySelection = failureSelection,
+            });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = (BoundProgram)compilation.Program!;
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            moduleIdentity, C1M1Construction2SchemaIdentity, 1,
+            out var emittedFailureSelections);
+        Assert.That(emittedFailureSelections, Is.EqualTo([failureSelection]));
+        Assert.That(NativeEmitter.EmitLibrary(program, ["Check"],
+            NativeRuntimePolicy.FailFast), Is.Not.Empty);
+
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex.ForC1M1Construction2Draft(artifact));
+        var predicates = tables.Contracts.GetPredicateGraphContracts(1)
+            .OrderBy(static predicate => predicate.PhaseTag)
+            .ThenBy(static predicate => predicate.PhaseLocalOrdinal)
+            .ToArray();
+        Assert.That(predicates.Select(static predicate =>
+                (predicate.PhaseTag, predicate.PhaseLocalOrdinal)),
+            Is.EqualTo([
+                ((byte)1, 0u),
+                ((byte)1, 1u),
+                ((byte)2, 0u),
+            ]));
+        Assert.That(tables.PredicateTypeUses.Count, Is.EqualTo(2));
+        Assert.That(tables.PredicateCaptures.Count, Is.EqualTo(1));
+
+        var firstRoot = tables.PredicateGraphs.GetRootNodeRow(
+            predicates[0].PredicateGraphRow);
+        Assert.That(tables.PredicateNodes.GetNodeKind(firstRoot),
+            Is.EqualTo(0x34u));
+        var firstPattern = tables.PredicateChildEdges
+            .GetChildNodeRowByOrdinal(firstRoot, 1);
+        Assert.That(tables.PredicateNodes.GetNodeKind(firstPattern),
+            Is.EqualTo(0x44u));
+
+        var secondRoot = tables.PredicateGraphs.GetRootNodeRow(
+            predicates[1].PredicateGraphRow);
+        Assert.That(tables.PredicateNodes.GetNodeKind(secondRoot),
+            Is.EqualTo(0x27u));
+        var matchNode = tables.PredicateChildEdges
+            .GetChildNodeRowByOrdinal(secondRoot, 0);
+        var typedPattern = tables.PredicateChildEdges
+            .GetChildNodeRowByOrdinal(matchNode, 1);
+        Assert.That(tables.PredicateNodes.GetNodeKind(typedPattern),
+            Is.EqualTo(0x45u));
+        Assert.That(tables.PredicateCaptures.GetGraphRow(1),
+            Is.EqualTo(predicates[1].PredicateGraphRow));
+        Assert.That(tables.PredicateCaptures.GetRole(1),
+            Is.EqualTo((byte)1));
+
+        var thirdRoot = tables.PredicateGraphs.GetRootNodeRow(
+            predicates[2].PredicateGraphRow);
+        Assert.That(tables.PredicateNodes.GetNodeKind(thirdRoot),
+            Is.EqualTo(0x34u));
+        var thirdPattern = tables.PredicateChildEdges
+            .GetChildNodeRowByOrdinal(thirdRoot, 1);
+        Assert.That(tables.PredicateNodes.GetNodeKind(thirdPattern),
+            Is.EqualTo(0x44u));
+        for (var index = 0; index < predicates.Length; index++)
+        {
+            var footprint = tables.PredicateGraphs.GetReadFootprintRow(
+                predicates[index].PredicateGraphRow);
+            Assert.That(tables.PredicateReadFootprints.GetRootRowCount(
+                    footprint), Is.EqualTo(1));
+            var rootRow = checked((int)tables.PredicateReadFootprints
+                .GetRootFirstRow(footprint));
+            Assert.That((tables.PredicateReadRoots.GetRootKind(rootRow),
+                    tables.PredicateReadRoots.GetRootIdentity(rootRow)),
+                Is.EqualTo(((byte)2, 0u)));
+        }
+    }
+
+    [Test]
+    public void Construction2EmitsPhaseOneDirectScalarTypePatterns()
+    {
+        const string moduleIdentity = "phase-one-direct-type-pattern-producer";
+        const string source = """
+            void Check(int32 value)
+                require value is int32
+                require value is int32 captured && captured > 0
+            {
+            }
+            """;
+        var failureSelection = new CoreContractFailureIdentitySelection(
+            moduleIdentity,
+            new CoreContractFailureDeclarationIdentity(
+                "core.contracts", "requirement-exception"),
+            new CoreContractFailureDeclarationIdentity(
+                "core.contracts", "postcondition-exception"),
+            new CoreContractFailureDeclarationIdentity(
+                "core.contracts", "require-exception-schema"));
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+            new CompilationOptions {
+                CoreContractFailureIdentitySelection = failureSelection,
+            });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = (BoundProgram)compilation.Program!;
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            moduleIdentity, C1M1Construction2SchemaIdentity, 1,
+            out var emittedFailureSelections);
+        Assert.That(emittedFailureSelections, Is.EqualTo([failureSelection]));
+        Assert.That(NativeEmitter.EmitLibrary(program, ["Check"],
+            NativeRuntimePolicy.FailFast), Is.Not.Empty);
+
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex.ForC1M1Construction2Draft(artifact));
+        var predicates = tables.Contracts.GetPredicateGraphContracts(1)
+            .OrderBy(static predicate => predicate.PhaseLocalOrdinal)
+            .ToArray();
+        Assert.That(predicates.Select(static predicate =>
+                (predicate.PhaseTag, predicate.PhaseLocalOrdinal)),
+            Is.EqualTo([
+                ((byte)1, 0u),
+                ((byte)1, 1u),
+            ]));
+        Assert.That(tables.PredicateTypeUses.Count, Is.EqualTo(1));
+        Assert.That(tables.PredicateCaptures.Count, Is.EqualTo(1));
+
+        var typeTestRoot = tables.PredicateGraphs.GetRootNodeRow(
+            predicates[0].PredicateGraphRow);
+        Assert.That(tables.PredicateNodes.GetNodeKind(typeTestRoot),
+            Is.EqualTo(0x34u));
+        var typeTestPattern = tables.PredicateChildEdges
+            .GetChildNodeRowByOrdinal(typeTestRoot, 1);
+        Assert.That(tables.PredicateNodes.GetNodeKind(typeTestPattern),
+            Is.EqualTo(0x44u));
+
+        var typedBindRoot = tables.PredicateGraphs.GetRootNodeRow(
+            predicates[1].PredicateGraphRow);
+        Assert.That(tables.PredicateNodes.GetNodeKind(typedBindRoot),
+            Is.EqualTo(0x27u));
+        var matchNode = tables.PredicateChildEdges
+            .GetChildNodeRowByOrdinal(typedBindRoot, 0);
+        Assert.That(tables.PredicateNodes.GetNodeKind(matchNode),
+            Is.EqualTo(0x34u));
+        var subjectNode = tables.PredicateChildEdges
+            .GetChildNodeRowByOrdinal(matchNode, 0);
+        var subjectType = tables.TypeSpecs.GetTypeSpecRef(
+            tables.PredicateNodes.GetResultTypeSpecRef(subjectNode));
+        Assert.That((subjectType.Form, subjectType.TypeCode),
+            Is.EqualTo(((byte)0x01, (byte)0x08)));
+        var typedValuePattern = tables.PredicateChildEdges
+            .GetChildNodeRowByOrdinal(matchNode, 1);
+        Assert.That(tables.PredicateNodes.GetNodeKind(typedValuePattern),
+            Is.EqualTo(0x45u));
+        var captureOperand = checked((int)tables.PredicateNodes
+            .GetOperandFirstRow(typedValuePattern)) + 1;
+        Assert.That(tables.PredicateNodeOperands.GetOperandKind(
+            captureOperand), Is.EqualTo((byte)3));
+        var captureRow = checked((int)tables.PredicateNodeOperands
+            .GetOperandRef(captureOperand));
+        Assert.That(tables.PredicateCaptures.GetGraphRow(captureRow),
+            Is.EqualTo(predicates[1].PredicateGraphRow));
+        Assert.That(tables.PredicateCaptures.GetRole(captureRow),
+            Is.EqualTo((byte)1));
+
+        for (var index = 0; index < predicates.Length; index++)
+        {
+            var footprint = tables.PredicateGraphs.GetReadFootprintRow(
+                predicates[index].PredicateGraphRow);
+            Assert.That(tables.PredicateReadFootprints.GetRootRowCount(
+                    footprint), Is.EqualTo(1));
+            var rootRow = checked((int)tables.PredicateReadFootprints
+                .GetRootFirstRow(footprint));
+            Assert.That((tables.PredicateReadRoots.GetRootKind(rootRow),
+                    tables.PredicateReadRoots.GetRootIdentity(rootRow)),
+                Is.EqualTo(((byte)2, 0u)));
+        }
+    }
+
+    [Test]
     public void ScalarTypeTestBindsAndEmitsOutsideDeclarationContracts()
     {
         const string source = """

@@ -3358,7 +3358,7 @@ public static partial class TrRmExecutableCompiler
         }
 
         void AddTypeTestMatchGraph(int parentNodeRow,
-            uint childOrdinal, PrimitiveType optionalType,
+            uint childOrdinal, PrimitiveType subjectType,
             uint inputRootRow, uint typeUseRow,
             ref int rootNodeRow)
         {
@@ -3381,7 +3381,7 @@ public static partial class TrRmExecutableCompiler
             predicateNodeOperands.Add(
                 new TrRmPredicateNodeOperandRow(1, inputRootRow));
             predicateNodes.Add(new TrRmPredicateNodeRow(0x11,
-                checked((uint)TypeSpecRowFor(optionalType)),
+                checked((uint)TypeSpecRowFor(subjectType)),
                 subjectOperandFirstRow, 1));
 
             var typeTestPatternNodeRow
@@ -3614,9 +3614,10 @@ public static partial class TrRmExecutableCompiler
                 if (frame.Expression
                     is BoundTypeTestPattern typeTest)
                 {
-                    if (declarationPhase
-                            != BoundDeclarationContractPhase
-                                .NormalPostcondition
+                    if (declarationPhase is not (
+                            BoundDeclarationContractPhase.Precondition
+                            or BoundDeclarationContractPhase
+                                .NormalPostcondition)
                         || typeTest.Value is not BoundRead optionalRead
                         || optionalRead.Variable < 0
                         || optionalRead.Variable >= function.ParameterCount
@@ -3626,9 +3627,11 @@ public static partial class TrRmExecutableCompiler
                         || function.Variables[optionalRead.Variable].IsInit
                         || function.Variables[optionalRead.Variable]
                             .IsMutable
-                        || !TryGetOptionalBuiltInScalarType(
-                            optionalRead.Type, program.CheckedReferenceTypes,
-                            out _)
+                        || (!PrimitiveTypeFacts.IsBuiltInScalar(
+                                optionalRead.Type)
+                            && !TryGetOptionalBuiltInScalarType(
+                                optionalRead.Type,
+                                program.CheckedReferenceTypes, out _))
                         || !generalPredicateScalarTypeRows.ContainsKey(
                             typeTest.TestedType)
                         || !rootRowsByIdentity.TryGetValue(
@@ -3636,7 +3639,7 @@ public static partial class TrRmExecutableCompiler
                             out var typeTestInputRootRow))
                     {
                         throw Unsupported(
-                            "A TypeTest graph requires its phase-2 optional input and a supported scalar TypeUse.");
+                            "A TypeTest graph requires a scalar input formal and supported scalar TypeUse.");
                     }
 
                     AddTypeTestMatchGraph(frame.ParentNodeRow,
@@ -3650,9 +3653,10 @@ public static partial class TrRmExecutableCompiler
                 if (frame.Expression
                     is BoundTypedValuePattern typedValuePattern)
                 {
-                    if (declarationPhase
-                            != BoundDeclarationContractPhase
-                                .NormalPostcondition
+                    if (declarationPhase is not (
+                            BoundDeclarationContractPhase.Precondition
+                            or BoundDeclarationContractPhase
+                                .NormalPostcondition)
                         || typedValuePattern.Value
                             is not BoundRead typedValueRead
                         || typedValueRead.Variable < 0
@@ -3680,7 +3684,7 @@ public static partial class TrRmExecutableCompiler
                             out var typedValueInputRootRow))
                     {
                         throw Unsupported(
-                            "A TypedValueBind graph requires its phase-2 scalar input, TypeUse and graph-local value capture.");
+                            "A TypedValueBind graph requires a scalar input, TypeUse and graph-local value capture.");
                     }
 
                     AddTypedValueBindMatchGraph(frame.ParentNodeRow,
@@ -4269,9 +4273,10 @@ public static partial class TrRmExecutableCompiler
                     else if (expression
                         is BoundTypeTestPattern typeTest)
                     {
-                        if (clause.Phase
-                                != BoundDeclarationContractPhase
-                                    .NormalPostcondition
+                        if (clause.Phase is not (
+                                BoundDeclarationContractPhase.Precondition
+                                or BoundDeclarationContractPhase
+                                    .NormalPostcondition)
                             || typeTest.Value is not BoundRead optionalRead
                             || optionalRead.Variable < 0
                             || optionalRead.Variable
@@ -4282,14 +4287,16 @@ public static partial class TrRmExecutableCompiler
                             || function.Variables[optionalRead.Variable].IsInit
                             || function.Variables[optionalRead.Variable]
                                 .IsMutable
-                            || !TryGetOptionalBuiltInScalarType(
-                                optionalRead.Type,
-                                program.CheckedReferenceTypes, out _)
+                            || (!PrimitiveTypeFacts.IsBuiltInScalar(
+                                    optionalRead.Type)
+                                && !TryGetOptionalBuiltInScalarType(
+                                    optionalRead.Type,
+                                    program.CheckedReferenceTypes, out _))
                             || !generalPredicateScalarTypeRows.ContainsKey(
                                 typeTest.TestedType))
                         {
                             throw Unsupported(
-                                "A TypeTest graph requires a scalar optional input and a supported scalar TypeUse in a phase-2 clause.");
+                                "A TypeTest graph requires a scalar input and a supported scalar TypeUse in a declaration clause.");
                         }
 
                         _ = readRoots.Add((2, optionalRead.Variable));
@@ -4357,9 +4364,10 @@ public static partial class TrRmExecutableCompiler
                     else if (expression
                         is BoundTypedValuePattern typedValuePattern)
                     {
-                        if (clause.Phase
-                                != BoundDeclarationContractPhase
-                                    .NormalPostcondition
+                        if (clause.Phase is not (
+                                BoundDeclarationContractPhase.Precondition
+                                or BoundDeclarationContractPhase
+                                    .NormalPostcondition)
                             || typedValuePattern.Value
                                 is not BoundRead typedValueRead
                             || typedValueRead.Variable < 0
@@ -4383,7 +4391,7 @@ public static partial class TrRmExecutableCompiler
                                 typedValuePattern.TestedType))
                         {
                             throw Unsupported(
-                                "A TypedValueBind graph requires a scalar phase-2 input and supported scalar TypeUse.");
+                                "A TypedValueBind graph requires a scalar input and supported scalar TypeUse.");
                         }
 
                         AddRoleOneCapture(typedValuePattern.Variable,
