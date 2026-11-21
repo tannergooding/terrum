@@ -2038,10 +2038,18 @@ public static partial class TrRmExecutableCompiler
         var generalPredicateGraphsInitializationReferenceBodies
             = standardInitializationReferenceBodies
                 && schema.UsesGeneralPredicateGraphs();
+        var emitsConstruction2DeclarationPredicateGraphs
+            = hasCoreContractFailureIdentityTransport
+                && standardInitializationReferenceBodies
+                && generalPredicateGraphsInitializationReferenceBodies
+                && schema == TrRmArtifactSchema.C1M1Construction2Draft;
         bool IsScalarValueType(PrimitiveType type)
             => Scalar(type)
                 || (generalPredicateGraphsInitializationReferenceBodies
-                    && PrimitiveTypeFacts.IsBuiltInScalar(type));
+                    && (PrimitiveTypeFacts.IsBuiltInScalar(type)
+                        || (emitsConstruction2DeclarationPredicateGraphs
+                            && TryGetOptionalBuiltInScalarType(type,
+                                program.CheckedReferenceTypes, out _))));
         if (program.EntryPoint == -1
             && program.Functions.Any(static function =>
                 !function.IsPrivate && !function.IsInternal
@@ -2064,11 +2072,6 @@ public static partial class TrRmExecutableCompiler
             throw Unsupported(
                 "The selected TRRM schema does not yet retain imported generic MethodDef specialization origins.");
         }
-        var emitsConstruction2DeclarationPredicateGraphs
-            = hasCoreContractFailureIdentityTransport
-                && standardInitializationReferenceBodies
-                && generalPredicateGraphsInitializationReferenceBodies
-                && schema == TrRmArtifactSchema.C1M1Construction2Draft;
         if (program.Functions.Any(function =>
             function.DeclarationContractClauses.IsDefault
                 || (!function.DeclarationContractClauses.IsEmpty
@@ -2562,8 +2565,9 @@ public static partial class TrRmExecutableCompiler
                 throw Unsupported($"Function '{function.Name}' has an invalid native vtable contract.");
             }
             var features = function.IsExternal || hasNativeVTable ? default
-                : AnalyzeFunction(function,
-                    generalPredicateGraphsInitializationReferenceBodies);
+                : AnalyzeFunction(function, program,
+                    generalPredicateGraphsInitializationReferenceBodies,
+                    emitsConstruction2DeclarationPredicateGraphs);
             functionFeatures[index] = features;
             outputFeatures[index] = !function.IsExternal && !hasNativeVTable
                 && HasOutputFeature(function, program);
@@ -2837,6 +2841,7 @@ public static partial class TrRmExecutableCompiler
             effectCount + nativeImportCount + nativeCallableCount + nativeVTableCount
             + (2 * program.NativeFunctionPointerSignatures.Length));
         var predicateGraphs = new List<TrRmPredicateGraphRow>();
+        var predicateCaptures = new List<TrRmPredicateCaptureRow>();
         var predicateReadFootprints
             = new List<TrRmPredicateReadFootprintRow>();
         var predicateReadRoots = new List<TrRmPredicateReadRootRow>();
@@ -3023,6 +3028,25 @@ public static partial class TrRmExecutableCompiler
             {
                 var definition = program.CheckedReferenceTypes[
                     CheckedReferenceTypes.Index(type)];
+                if (definition.IsOptionalValue
+                    && emitsConstruction2DeclarationPredicateGraphs)
+                {
+                    if (!TryGetOptionalBuiltInScalarType(type,
+                            program.CheckedReferenceTypes,
+                            out var payloadType)
+                        || payloadType != definition.ReferentType)
+                    {
+                        throw Unsupported(
+                            "GeneralPredicateGraphsDraft optional-value TypeSpecs require a fixed-scalar payload.");
+                    }
+
+                    var payloadRow = TypeSpecRowFor(payloadType);
+                    var optionalRow = checked(typeRowsList.Count + 1);
+                    typeRowsList.Add(TrRmTypeSpecTableWriter.Wrapped(0x06,
+                        checked((uint)payloadRow)));
+                    checkedReferenceTypeSpecRows.Add(type, optionalRow);
+                    return optionalRow;
+                }
                 if (definition.IsOptionalValue || definition.IsOptional)
                 {
                     throw Unsupported(
@@ -3143,8 +3167,10 @@ public static partial class TrRmExecutableCompiler
         {
             if (expression is BoundRead or BoundConstant
                 or BoundIsInitialized
+                or BoundIsNull
                 or BoundContractReturnValue
-                or BoundReferenceInitializationTest)
+                or BoundReferenceInitializationTest or BoundIsSome
+                or BoundIsVariablePattern)
             {
                 return [];
             }
@@ -3231,10 +3257,121 @@ public static partial class TrRmExecutableCompiler
                 checked((int)initializedPatternNodeRow)));
         }
 
+        void AddInferredBindingMatchGraph(
+            int parentNodeRow, uint childOrdinal,
+            PrimitiveType optionalType, uint inputRootRow,
+            uint patternNodeKind, uint captureRow,
+            ref int rootNodeRow)
+        {
+            var matchNodeRow = checked(predicateNodes.Count + 1);
+            predicateNodes.Add(new TrRmPredicateNodeRow(0x34,
+                checked((uint)TypeSpecRowFor(PrimitiveType.Bool)), 0, 0));
+            if (parentNodeRow == 0)
+            {
+                rootNodeRow = matchNodeRow;
+            }
+            else
+            {
+                predicateChildEdges.Add(new TrRmPredicateChildEdgeRow(
+                    parentNodeRow, childOrdinal, matchNodeRow));
+            }
+
+            var subjectNodeRow = checked((uint)predicateNodes.Count + 1);
+            var subjectOperandFirstRow = checked(
+                (uint)predicateNodeOperands.Count + 1);
+            predicateNodeOperands.Add(
+                new TrRmPredicateNodeOperandRow(1, inputRootRow));
+            predicateNodes.Add(new TrRmPredicateNodeRow(0x11,
+                checked((uint)TypeSpecRowFor(optionalType)),
+                subjectOperandFirstRow, 1));
+
+            var bindingPatternNodeRow
+                = checked((uint)predicateNodes.Count + 1);
+            var patternOperandFirstRow = checked(
+                (uint)predicateNodeOperands.Count + 1);
+            predicateNodeOperands.Add(
+                new TrRmPredicateNodeOperandRow(3, captureRow));
+            predicateNodes.Add(new TrRmPredicateNodeRow(patternNodeKind,
+                checked((uint)TypeSpecRowFor(PrimitiveType.Bool)),
+                patternOperandFirstRow, 1));
+            predicateChildEdges.Add(new TrRmPredicateChildEdgeRow(
+                matchNodeRow, 0, checked((int)subjectNodeRow)));
+            predicateChildEdges.Add(new TrRmPredicateChildEdgeRow(
+                matchNodeRow, 1, checked((int)bindingPatternNodeRow)));
+        }
+
+        void AddNullMatchGraph(int parentNodeRow, uint childOrdinal,
+            PrimitiveType optionalType, uint inputRootRow,
+            ref int rootNodeRow)
+        {
+            var matchNodeRow = checked(predicateNodes.Count + 1);
+            predicateNodes.Add(new TrRmPredicateNodeRow(0x34,
+                checked((uint)TypeSpecRowFor(PrimitiveType.Bool)), 0, 0));
+            if (parentNodeRow == 0)
+            {
+                rootNodeRow = matchNodeRow;
+            }
+            else
+            {
+                predicateChildEdges.Add(new TrRmPredicateChildEdgeRow(
+                    parentNodeRow, childOrdinal, matchNodeRow));
+            }
+
+            var subjectNodeRow = checked((uint)predicateNodes.Count + 1);
+            var subjectOperandFirstRow = checked(
+                (uint)predicateNodeOperands.Count + 1);
+            predicateNodeOperands.Add(
+                new TrRmPredicateNodeOperandRow(1, inputRootRow));
+            predicateNodes.Add(new TrRmPredicateNodeRow(0x11,
+                checked((uint)TypeSpecRowFor(optionalType)),
+                subjectOperandFirstRow, 1));
+
+            var nullPatternNodeRow = checked((uint)predicateNodes.Count + 1);
+            predicateNodes.Add(new TrRmPredicateNodeRow(0x42,
+                checked((uint)TypeSpecRowFor(PrimitiveType.Bool)), 0, 0));
+            predicateChildEdges.Add(new TrRmPredicateChildEdgeRow(
+                matchNodeRow, 0, checked((int)subjectNodeRow)));
+            predicateChildEdges.Add(new TrRmPredicateChildEdgeRow(
+                matchNodeRow, 1, checked((int)nullPatternNodeRow)));
+        }
+
+        void AddCapturedValueLoadGraph(
+            int parentNodeRow, uint childOrdinal,
+            PrimitiveType capturedType, uint captureRow,
+            ref int rootNodeRow)
+        {
+            var loadNodeRow = checked(predicateNodes.Count + 1);
+            predicateNodes.Add(new TrRmPredicateNodeRow(0x13,
+                checked((uint)TypeSpecRowFor(capturedType)), 0, 0));
+            if (parentNodeRow == 0)
+            {
+                rootNodeRow = loadNodeRow;
+            }
+            else
+            {
+                predicateChildEdges.Add(new TrRmPredicateChildEdgeRow(
+                    parentNodeRow, childOrdinal, loadNodeRow));
+            }
+
+            var capturePlaceNodeRow
+                = checked((uint)predicateNodes.Count + 1);
+            var operandFirstRow = checked(
+                (uint)predicateNodeOperands.Count + 1);
+            predicateNodeOperands.Add(
+                new TrRmPredicateNodeOperandRow(3, captureRow));
+            predicateNodes.Add(new TrRmPredicateNodeRow(0x12,
+                checked((uint)TypeSpecRowFor(capturedType)),
+                operandFirstRow, 1));
+            predicateChildEdges.Add(new TrRmPredicateChildEdgeRow(
+                loadNodeRow, 0, checked((int)capturePlaceNodeRow)));
+        }
+
         int BuildGeneralPredicateNode(
             BoundFunction function, BoundExpression expression,
             Dictionary<(byte Kind, int Identity), uint>
                 rootRowsByIdentity,
+            Dictionary<int, (uint CaptureRow, uint Ordinal,
+                PrimitiveType Type)> captureRowsByVariable,
             BoundDeclarationContractPhase? declarationPhase)
         {
             var stack = new Stack<(BoundExpression Expression,
@@ -3255,6 +3392,106 @@ public static partial class TrRmExecutableCompiler
                                 frame.Expression.Type)),
                             frame.OperandFirstRow,
                             frame.OperandCount);
+                    continue;
+                }
+
+                if (frame.Expression is BoundIsNull nullTest)
+                {
+                    if (declarationPhase
+                            != BoundDeclarationContractPhase
+                                .NormalPostcondition
+                        || nullTest.Value is not BoundRead optionalRead
+                        || !rootRowsByIdentity.TryGetValue(
+                            (2, optionalRead.Variable),
+                            out var nullInputRootRow))
+                    {
+                        throw Unsupported(
+                            "A Null pattern graph requires its phase-2 optional input value.");
+                    }
+
+                    AddNullMatchGraph(frame.ParentNodeRow,
+                        frame.ChildOrdinal, optionalRead.Type,
+                        nullInputRootRow, ref rootNodeRow);
+                    continue;
+                }
+
+                if (frame.Expression is BoundIsSome optionalTest)
+                {
+                    if (declarationPhase
+                            != BoundDeclarationContractPhase
+                                .NormalPostcondition
+                        || optionalTest.Value is not BoundRead optionalRead
+                        || !captureRowsByVariable.TryGetValue(
+                            optionalTest.Variable,
+                            out var someValueBinding)
+                        || !rootRowsByIdentity.TryGetValue(
+                            (2, optionalRead.Variable),
+                            out var optionalInputRootRow)
+                        || someValueBinding.Type
+                            != function.Variables[
+                                optionalTest.Variable].Type)
+                    {
+                        throw Unsupported(
+                            "An InferredNonNullBind graph requires its phase-2 optional input and graph-local value capture.");
+                    }
+
+                    AddInferredBindingMatchGraph(frame.ParentNodeRow,
+                        frame.ChildOrdinal, optionalRead.Type,
+                        optionalInputRootRow, 0x46,
+                        someValueBinding.CaptureRow, ref rootNodeRow);
+                    continue;
+                }
+
+                if (frame.Expression
+                    is BoundIsVariablePattern variablePattern)
+                {
+                    if (declarationPhase
+                            != BoundDeclarationContractPhase
+                                .NormalPostcondition
+                        || variablePattern.Value
+                            is not BoundRead optionalRead
+                        || !captureRowsByVariable.TryGetValue(
+                            variablePattern.Variable,
+                            out var nullableValueBinding)
+                        || !rootRowsByIdentity.TryGetValue(
+                            (2, optionalRead.Variable),
+                            out var nullableInputRootRow)
+                        || !TryGetOptionalBuiltInScalarType(
+                            optionalRead.Type, program.CheckedReferenceTypes,
+                            out var payloadType)
+                        || nullableValueBinding.Type
+                            != (variablePattern.IncludeNull
+                                ? optionalRead.Type : payloadType))
+                    {
+                        throw Unsupported(
+                            "An inferred optional binding requires its phase-2 input and graph-local capture.");
+                    }
+
+                    AddInferredBindingMatchGraph(frame.ParentNodeRow,
+                        frame.ChildOrdinal, optionalRead.Type,
+                        nullableInputRootRow,
+                        variablePattern.IncludeNull ? 0x47u : 0x46u,
+                        nullableValueBinding.CaptureRow, ref rootNodeRow);
+                    continue;
+                }
+
+                if (frame.Expression is BoundRead capturedRead
+                    && captureRowsByVariable.TryGetValue(
+                        capturedRead.Variable,
+                        out var capturedValueBinding))
+                {
+                    if (declarationPhase
+                            != BoundDeclarationContractPhase
+                                .NormalPostcondition
+                        || capturedRead.Type != capturedValueBinding.Type)
+                    {
+                        throw Unsupported(
+                            "A graph-local role-1 capture read has an invalid phase or type.");
+                    }
+
+                    AddCapturedValueLoadGraph(frame.ParentNodeRow,
+                        frame.ChildOrdinal, capturedValueBinding.Type,
+                        capturedValueBinding.CaptureRow, ref rootNodeRow);
                     continue;
                 }
 
@@ -3594,8 +3831,10 @@ public static partial class TrRmExecutableCompiler
                 predicateReadFootprints.Add(
                     new TrRmPredicateReadFootprintRow(firstRootRow,
                         readRoots.Count, 0, 0));
+                var noCaptures = new Dictionary<int,
+                    (uint CaptureRow, uint Ordinal, PrimitiveType Type)>();
                 var graphRootNode = BuildGeneralPredicateNode(function,
-                    predicate, rootRowsByIdentity, null);
+                    predicate, rootRowsByIdentity, noCaptures, null);
                 predicateGraphs.Add(new TrRmPredicateGraphRow(
                     graphRootNode, footprintRow));
 
@@ -3651,29 +3890,154 @@ public static partial class TrRmExecutableCompiler
                 var footprintRow
                     = checked(predicateReadFootprints.Count + 1);
                 var readRoots = new SortedSet<(byte Kind, int Identity)>();
+                var captureRowsByVariable = new Dictionary<int,
+                    (uint CaptureRow, uint Ordinal, PrimitiveType Type)>();
+                void AddRoleOneCapture(int variable,
+                    PrimitiveType capturedType)
+                {
+                    if (variable < function.ParameterCount
+                        || variable >= function.Variables.Length
+                        || function.Variables[variable].Type != capturedType
+                        || function.Variables[variable].IsOut
+                        || function.Variables[variable].IsInit
+                        || function.Variables[variable].IsMutable
+                        || captureRowsByVariable.ContainsKey(variable))
+                    {
+                        throw Unsupported(
+                            "A role-1 graph capture has an invalid owner, type or ordinal.");
+                    }
+
+                    var captureOrdinal
+                        = checked((uint)captureRowsByVariable.Count);
+                    var captureRow
+                        = checked((uint)predicateCaptures.Count + 1);
+                    var capturedTypeSpecRef
+                        = checked((uint)TypeSpecRowFor(capturedType));
+                    predicateCaptures.Add(new TrRmPredicateCaptureRow(
+                        graphRow, captureOrdinal, 1, 0,
+                        capturedTypeSpecRef));
+                    captureRowsByVariable.Add(variable,
+                        (captureRow, captureOrdinal, capturedType));
+                }
+
                 var pendingExpressions = new Stack<BoundExpression>();
                 pendingExpressions.Push(clause.Predicate);
                 while (pendingExpressions.Count != 0)
                 {
                     var expression = pendingExpressions.Pop();
                     var children = GetGeneralPredicateChildren(expression);
-                    if (expression is BoundRead read)
+                    if (expression is BoundIsNull nullTest)
                     {
-                        if (read.Variable < 0
-                            || read.Variable >= function.ParameterCount
-                            || function.Variables[read.Variable].IsOut
-                            || function.Variables[read.Variable].IsInit
-                            || function.Variables[read.Variable].IsMutable
-                            || function.Variables[read.Variable].Type
-                                != read.Type
+                        if (clause.Phase
+                                != BoundDeclarationContractPhase
+                                    .NormalPostcondition
+                            || nullTest.Value is not BoundRead optionalRead
+                            || optionalRead.Variable < 0
+                            || optionalRead.Variable
+                                >= function.ParameterCount
+                            || function.Variables[optionalRead.Variable].Type
+                                != optionalRead.Type
+                            || function.Variables[optionalRead.Variable].IsOut
+                            || function.Variables[optionalRead.Variable].IsInit
+                            || function.Variables[optionalRead.Variable]
+                                .IsMutable
+                            || !TryGetOptionalBuiltInScalarType(
+                                optionalRead.Type,
+                                program.CheckedReferenceTypes, out _))
+                        {
+                            throw Unsupported(
+                                "A Null pattern graph requires a scalar optional input formal.");
+                        }
+
+                        _ = readRoots.Add((2, optionalRead.Variable));
+                    }
+                    else if (expression is BoundIsSome optionalTest)
+                    {
+                        if (clause.Phase
+                                != BoundDeclarationContractPhase
+                                    .NormalPostcondition
+                            || optionalTest.Value is not BoundRead optionalRead
+                            || optionalRead.Variable < 0
+                            || optionalRead.Variable
+                                >= function.ParameterCount
+                            || function.Variables[optionalRead.Variable].Type
+                                != optionalRead.Type
+                            || function.Variables[optionalRead.Variable].IsOut
+                            || function.Variables[optionalRead.Variable].IsInit
+                            || function.Variables[optionalRead.Variable]
+                                .IsMutable
+                            || !TryGetOptionalBuiltInScalarType(
+                                optionalRead.Type,
+                                program.CheckedReferenceTypes,
+                                out var payloadType))
+                        {
+                            throw Unsupported(
+                                "InferredNonNullBind requires one scalar optional input and its exact graph-local value capture.");
+                        }
+
+                        AddRoleOneCapture(optionalTest.Variable,
+                            payloadType);
+                        _ = readRoots.Add((2, optionalRead.Variable));
+                    }
+                    else if (expression
+                        is BoundIsVariablePattern variablePattern)
+                    {
+                        if (clause.Phase
+                                != BoundDeclarationContractPhase
+                                    .NormalPostcondition
+                            || variablePattern.Value
+                                is not BoundRead optionalRead
+                            || optionalRead.Variable < 0
+                            || optionalRead.Variable
+                                >= function.ParameterCount
+                            || function.Variables[optionalRead.Variable].Type
+                                != optionalRead.Type
+                            || function.Variables[optionalRead.Variable].IsOut
+                            || function.Variables[optionalRead.Variable].IsInit
+                            || function.Variables[optionalRead.Variable]
+                                .IsMutable
+                            || !TryGetOptionalBuiltInScalarType(
+                                optionalRead.Type,
+                                program.CheckedReferenceTypes,
+                                out var payloadType))
+                        {
+                            throw Unsupported(
+                                "An inferred optional binding requires a scalar optional input.");
+                        }
+
+                        var captureType = variablePattern.IncludeNull
+                            ? optionalRead.Type : payloadType;
+                        AddRoleOneCapture(variablePattern.Variable,
+                            captureType);
+                        _ = readRoots.Add((2, optionalRead.Variable));
+                    }
+                    else if (expression is BoundRead capturedRead
+                        && captureRowsByVariable.TryGetValue(
+                            capturedRead.Variable, out var capture))
+                    {
+                        if (capturedRead.Type != capture.Type)
+                        {
+                            throw Unsupported(
+                                "A graph-local role-1 capture read has a mismatched type.");
+                        }
+                    }
+                    else if (expression is BoundRead formalRead)
+                    {
+                        if (formalRead.Variable < 0
+                            || formalRead.Variable >= function.ParameterCount
+                            || function.Variables[formalRead.Variable].IsOut
+                            || function.Variables[formalRead.Variable].IsInit
+                            || function.Variables[formalRead.Variable].IsMutable
+                            || function.Variables[formalRead.Variable].Type
+                                != formalRead.Type
                             || !PrimitiveTypeFacts.IsBuiltInScalar(
-                                read.Type))
+                                formalRead.Type))
                         {
                             throw Unsupported(
                                 "A declaration predicate graph must read only immutable scalar input formals.");
                         }
 
-                        _ = readRoots.Add((2, read.Variable));
+                        _ = readRoots.Add((2, formalRead.Variable));
                     }
                     else if (expression is BoundIsInitialized initialized)
                     {
@@ -3773,7 +4137,8 @@ public static partial class TrRmExecutableCompiler
                     new TrRmPredicateReadFootprintRow(firstRootRow,
                         readRoots.Count, 0, 0));
                 var graphRootNode = BuildGeneralPredicateNode(function,
-                    clause.Predicate, rootRowsByIdentity, clause.Phase);
+                    clause.Predicate, rootRowsByIdentity,
+                    captureRowsByVariable, clause.Phase);
                 predicateGraphs.Add(new TrRmPredicateGraphRow(
                     graphRootNode, footprintRow));
 
@@ -5594,13 +5959,17 @@ public static partial class TrRmExecutableCompiler
         var predicateNodeBytes = predicateNodes.Count == 0 ? []
             : TrRmPredicateNodeTableWriter.Encode(predicateNodes,
                 predicateNodeOperands.Count, types, schema);
+        var predicateCaptureBytes = predicateCaptures.Count == 0 ? []
+            : TrRmPredicateCaptureTableWriter.Encode(predicateCaptures,
+                predicateGraphs.Count, types);
         var predicateFrozenScalarTables
             = predicateFrozenScalarValues.FrozenValueNodeCount == 0
                 ? new TrRmFrozenScalarValueTables([], 0, [], 0, [], 0)
                 : predicateFrozenScalarValues.Encode(types);
         var predicateOperandCounts = new TrRmPredicateTableRowCounts(
             predicateReadRoots.Count,
-            predicateFrozenScalarTables.FrozenValueNodeCount, 0,
+            predicateFrozenScalarTables.FrozenValueNodeCount,
+            predicateCaptures.Count,
             predicateOperations.Count,
             0, 0, 0, 0, 0, 0, 0);
         var predicateNodeOperandBytes = predicateNodeOperands.Count == 0 ? []
@@ -5641,6 +6010,7 @@ public static partial class TrRmExecutableCompiler
             != 0 ? 1 : 0;
         sectionCount += predicateGraphs.Count == 0 ? 0 : 5;
         sectionCount += predicateChildEdges.Count == 0 ? 0 : 1;
+        sectionCount += predicateCaptures.Count == 0 ? 0 : 1;
         sectionCount += predicateOperations.Count == 0 ? 0 : 1;
         sectionCount += methodParameterSurfaceRows.Count == 0 ? 0 : 1;
         sectionCount += typeDefBindingEqualityRows.Count == 0 ? 0 : 1;
@@ -5761,6 +6131,12 @@ public static partial class TrRmExecutableCompiler
                 sections.Add(new(0x003D, 0,
                     (uint)predicateChildEdges.Count,
                     predicateChildEdgeBytes));
+            }
+            if (predicateCaptures.Count != 0)
+            {
+                sections.Add(new(0x003E, 0,
+                    (uint)predicateCaptures.Count,
+                    predicateCaptureBytes));
             }
             if (predicateOperations.Count != 0)
             {
@@ -9088,6 +9464,19 @@ public static partial class TrRmExecutableCompiler
 
     private static bool Scalar(PrimitiveType type) => Array.IndexOf(s_types, type) >= 0;
 
+    private static bool TryGetOptionalBuiltInScalarType(
+        PrimitiveType type,
+        IReadOnlyList<CheckedReferenceTypeDefinition> checkedReferenceTypes,
+        out PrimitiveType payloadType)
+    {
+        payloadType = default;
+        return CheckedReferenceTypeContract.IsOptionalValueType(type,
+                checkedReferenceTypes)
+            && SourceOptionalTypes.TryGetRequired(type,
+                checkedReferenceTypes, out payloadType)
+            && PrimitiveTypeFacts.IsBuiltInScalar(payloadType);
+    }
+
     private static bool CanReinterpret(PrimitiveType source, PrimitiveType destination)
         => (source is PrimitiveType.Int32 or PrimitiveType.UInt32
                 && destination is PrimitiveType.Int32 or PrimitiveType.UInt32)
@@ -9106,21 +9495,31 @@ public static partial class TrRmExecutableCompiler
 
     private static (bool HasFloatingTypes, bool HasIndexedFlow,
         bool HasNonScalarStorage) AnalyzeFunction(BoundFunction function,
-        bool includeGeneralPredicateScalars)
+        BoundProgram program,
+        bool includeGeneralPredicateScalars,
+        bool includeOptionalScalarValues)
     {
         var hasFloatingTypes = IsFloat(function.ReturnType);
         var hasNonScalarStorage = false;
         for (var index = 0; index < function.Variables.Length; index++)
         {
             var variable = function.Variables[index];
-            hasFloatingTypes |= IsFloat(variable.Type);
+            var optionalScalarPayloadType = default(PrimitiveType);
+            var isOptionalScalar = includeOptionalScalarValues
+                && TryGetOptionalBuiltInScalarType(variable.Type,
+                    program.CheckedReferenceTypes,
+                    out optionalScalarPayloadType);
+            hasFloatingTypes |= IsFloat(variable.Type)
+                || (isOptionalScalar
+                    && IsFloat(optionalScalarPayloadType));
             var isNativeCallableParameter = function.NativeFunctionPointerType is not null
                 && index < function.ParameterCount
                 && (variable.Type == PrimitiveType.NativeRawPointer
                     || NativeFunctionPointerTypes.IsType(variable.Type));
             hasNonScalarStorage |= (!Scalar(variable.Type)
                     && !(includeGeneralPredicateScalars
-                        && PrimitiveTypeFacts.IsBuiltInScalar(variable.Type))
+                        && (PrimitiveTypeFacts.IsBuiltInScalar(variable.Type)
+                            || isOptionalScalar))
                     && !isNativeCallableParameter
                     && !NativeFunctionPointerTypes.IsType(variable.Type)
                     && !NativePointerTypes.IsType(variable.Type))
