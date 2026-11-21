@@ -2125,6 +2125,12 @@ internal sealed class NativeCoreRegistrationTests
             & 0x00FF_FFFF));
         Assert.That(consumerTables.TypeDefs.HasDeclaredCopy(
             expectedPointTypeDef), Is.True);
+        var missingExpectedCopy = RewriteTypeDefFlags(
+            consumerArtifact, schema, expectedPointTypeDef,
+            clearMask: 0x20);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
+                new TrRmArtifactIndex(missingExpectedCopy, schema)));
         var consumerBody = GetBody(consumerTables,
             "InvokeImportedPoint");
         AssertAggregateOutputBody(consumerBody, 0x1C);
@@ -2248,6 +2254,34 @@ internal sealed class NativeCoreRegistrationTests
                 sections[sectionIndex] = new TrRmSection(kind, flags,
                     checked((uint)count),
                     kind == 0x0020 ? bodySectionBytes : bytes.ToArray());
+            }
+
+            return TrRmArtifactWriter.Encode(sections, schema);
+        }
+
+        static byte[] RewriteTypeDefFlags(byte[] artifact,
+            TrRmArtifactSchema schema, int typeDefRow, uint clearMask)
+        {
+            var index = new TrRmArtifactIndex(artifact, schema);
+            Assert.That(index.TryGetSection(0x0013,
+                out var typeDefSection, out _), Is.True);
+            var typeDefBytes = typeDefSection.ToArray();
+            var flagsOffset = checked((typeDefRow - 1) * 44 + 8);
+            var typeDefFlags = BinaryPrimitives.ReadUInt32LittleEndian(
+                typeDefBytes.AsSpan(flagsOffset));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                typeDefBytes.AsSpan(flagsOffset),
+                typeDefFlags & ~clearMask);
+            var sections = new TrRmSection[index.SectionCount];
+            for (var sectionIndex = 0;
+                sectionIndex < index.SectionCount;
+                sectionIndex++)
+            {
+                index.GetSection(sectionIndex, out var kind,
+                    out var sectionFlags, out var bytes, out var count);
+                sections[sectionIndex] = new TrRmSection(kind, sectionFlags,
+                    checked((uint)count),
+                    kind == 0x0013 ? typeDefBytes : bytes.ToArray());
             }
 
             return TrRmArtifactWriter.Encode(sections, schema);
