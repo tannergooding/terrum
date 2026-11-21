@@ -286,6 +286,7 @@ internal sealed partial class CliTests
                 Encoding.UTF8.GetBytes(consumerSource), "compile-trrm", "-",
                 "--identity", consumerIdentity, "--trrm-schema", schemaIdentity,
                 "--trrm-source-providers", providerSelections,
+                "--trrm-source-type-exports", consumerExports,
                 "--layout-core-manifest", consumerLayout,
                 "-o", consumerArtifact, "--runtime", "fail-fast", "--json")
                 .ConfigureAwait(false);
