@@ -1248,12 +1248,14 @@ public static partial class TrRmExecutableCompiler
                 || StringComparer.Ordinal.Equals(schemaIdentity,
                     StandardCM1AR1SchemaIdentity)
                 || StringComparer.Ordinal.Equals(schemaIdentity,
-                    StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidenceSchemaIdentity))
+                    StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidenceSchemaIdentity)
+                || StandardGenericMethodSchema.IsClassTypeBindingViews(
+                    schemaIdentity))
             && !program.StandardClassDeclarations.IsEmpty)
         {
-            if (sourceClassExports is not null
-                || sourceTypeExports is not null
-                || sourceGenericMethodExports is not null)
+            if (sourceClassExports?.Exports.IsEmpty == false
+                || sourceTypeExports is { Count: > 0 }
+                || sourceGenericMethodExports?.Exports.IsEmpty == false)
             {
                 throw Unsupported(
                     "C1M1 metadata-only class re-emission does not accept new source mappings.");

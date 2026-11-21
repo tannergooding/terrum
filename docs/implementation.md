@@ -407,7 +407,19 @@ checked-reference wrappers such as `ref<Box<T>>` and nested
 Producer/consumer, compatible TypeDef relocation and incompatible provider
 regressions are added but remain unverified under the active hold. Other
 optional/qualified wrapper combinations, generic provider compatibility,
-callable imports and broader generic-row re-emission remain open. The exact
+callable imports and broader generic-row re-emission remain open. Under the
+three exact class-context TypeDef successor schemas, source-free class
+metadata re-emission now retains expected generic class MethodDef views with
+type-formal ordinals/domains, MethodSig/Param, remapped type defaults and
+kind-2 property constraints. It validates each retained method's owner Module
+snapshot and class-owner Import context, while preserving MethodDef aliases
+and the existing TypeDefBindingEquality groups. Associated-relation
+constraints and unsupported interface/default TypeSpec import closure are
+rejected rather than dropped in the separate-artifact path. A source-free
+CM1AR1 class-view reload/re-emission/provider-replacement regression is added
+but remains unverified under the active hold; separate-artifact CM1AR1
+associated-relation closure and broader interface constraints remain open.
+The exact
 Construction-2/CM1 class source producer
 also emits Body-04
 for direct scalar-field reference getters backed by one receiver or class-handle

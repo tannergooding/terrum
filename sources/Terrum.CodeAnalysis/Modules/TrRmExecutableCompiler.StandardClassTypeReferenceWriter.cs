@@ -3965,7 +3965,7 @@ public static partial class TrRmExecutableCompiler
                     }
 
                     var constraintCount = genericConstraintRows.Count
-                        - constraintFirst;
+                        - constraintFirst + 1;
                     if (constraintCount == 0)
                     {
                         constraintFirst = 0;
@@ -15531,7 +15531,6 @@ public static partial class TrRmExecutableCompiler
             || rootSnapshot.RuntimePolicy != (uint)program.RuntimePolicy
             || rootSnapshot.TargetRequirement != moduleTargetRequirement
             || !program.Functions.IsEmpty
-            || !program.RetainedGenericMethodRoots.IsEmpty
             || program.StandardClassDeclarations.Length
                 < rootDeclarations.Count
             || program.GenericNominalTypeDefinitions.Any(
@@ -15769,6 +15768,9 @@ public static partial class TrRmExecutableCompiler
         var methodPlansBySource
             = new Dictionary<(int SourceIndex, int MethodRow),
                 C1M1MethodEmissionPlan>();
+        var retainedGenericClassMethodRoots
+            = new HashSet<BoundGenericMethodImport>(
+                ReferenceEqualityComparer.Instance);
         var plannedTypeDefs = new HashSet<(int SourceIndex, int Row)>();
         void AddDirectClassMethodPlans(
             BoundStandardClassTypeView owner,
@@ -15849,11 +15851,51 @@ public static partial class TrRmExecutableCompiler
                 || methodExpectation.ProviderOwnerDefinitionId
                     != expectation.Binding.ProviderDefinitionId
                 || expectedMethod is null
-                || expectedMethod.BodyRow != 0
-                || expectedMethod.GenericParameterCount != 0)
+                || expectedMethod.BodyRow != 0)
             {
                 throw Unsupported(
-                    "Separate-artifact expected class MethodDefs must be bodyless nongeneric views with exact TypeDef ownership.");
+                    "Separate-artifact expected class MethodDefs must be bodyless views with exact TypeDef ownership.");
+            }
+
+            if (expectedMethod.GenericParameterCount != 0)
+            {
+                var matchingRoots = program.RetainedGenericMethodRoots
+                    .Where(root =>
+                        root.Origin.MethodDefId
+                            == methodExpectation.ProviderDefinitionId
+                        && !root.Origin.IsMethodDefTarget
+                        && StringComparer.Ordinal.Equals(
+                            root.Origin.ProviderIdentity,
+                            methodExpectation.Provider.ModuleIdentity)
+                        && StringComparer.Ordinal.Equals(
+                            root.Origin.SchemaIdentity, schemaIdentity)
+                        && StringComparer.Ordinal.Equals(
+                            root.Origin.ExportKey,
+                            methodExpectation.ExportKey)
+                        && root.Origin.OwnerModule is
+                            BoundSourceTypeProviderSnapshot ownerModule
+                        && SourceTypeSnapshotsMatch(ownerModule,
+                            methodExpectation.Provider)
+                        && root.Origin.ClassOwner
+                            is BoundGenericMethodClassOwner owner
+                        && owner.Identity.DefinitionId
+                            == methodExpectation.ProviderOwnerDefinitionId
+                        && owner.ExpectedDefinitionId
+                            == methodExpectation.ExpectedOwnerDefinitionId
+                        && StringComparer.Ordinal.Equals(owner.ExportKey,
+                            expectation.Binding.ExportKey))
+                    .ToArray();
+                if (!schema.UsesGenericMethodCalls()
+                    || matchingRoots.Length != 1
+                    || matchingRoots[0].Formals.Length
+                        != expectedMethod.GenericParameterCount)
+                {
+                    throw new InvalidDataException(
+                        "A separate-artifact generic class MethodDef has no unique exact typed provider root and owner Module snapshot.");
+                }
+
+                _ = retainedGenericClassMethodRoots.Add(
+                    matchingRoots[0]);
             }
 
             var importKey = (sourceIndex, methodExpectation.ImportRow);
@@ -16177,6 +16219,7 @@ public static partial class TrRmExecutableCompiler
                 }
             }
         }
+
         foreach (var definition in program.GenericNominalTypeDefinitions)
         {
             if (definition.NominalKind is not (1 or 2)
@@ -16306,6 +16349,54 @@ public static partial class TrRmExecutableCompiler
                                 binding.UsingModule, typeDefRow), []));
                 }
             }
+        }
+
+        foreach (var root in program.RetainedGenericMethodRoots)
+        {
+            if (retainedGenericClassMethodRoots.Contains(root))
+            {
+                continue;
+            }
+
+            var ownerModule = root.Origin.OwnerModule;
+            var classOwner = root.Origin.ClassOwner;
+            var methodRow = checked((int)(
+                root.Origin.MethodDefId & 0x00FF_FFFF));
+            var sourceIndex = ownerModule is null ? -1
+                : sourceModules.FindIndex(provider =>
+                    SourceTypeSnapshotsMatch(provider, ownerModule));
+            var localMethod = sourceIndex >= 0
+                && methodPlansBySource.TryGetValue(
+                    (sourceIndex, methodRow), out var methodPlan)
+                ? methodPlan : null;
+            if (root.Origin.IsMethodDefTarget
+                || ownerModule is null || classOwner is null
+                || sourceIndex < 0
+                || !StringComparer.Ordinal.Equals(
+                    root.Origin.ProviderIdentity,
+                    ownerModule.ModuleIdentity)
+                || !StringComparer.Ordinal.Equals(
+                    root.Origin.SchemaIdentity, schemaIdentity)
+                || localMethod is null
+                || !localMethod.Imports.IsEmpty
+                || localMethod.Method.BodyRow == 0
+                || localMethod.Owner.Identity.DefinitionId
+                    != classOwner.Identity.DefinitionId
+                || !localMethod.Method.ExportKeys.Contains(
+                    root.Origin.ExportKey, StringComparer.Ordinal))
+            {
+                throw Unsupported(
+                    "Separate-artifact class re-emission cannot discard an unselected generic MethodDef root.");
+            }
+
+            _ = retainedGenericClassMethodRoots.Add(root);
+        }
+
+        if (retainedGenericClassMethodRoots.Count
+            != program.RetainedGenericMethodRoots.Length)
+        {
+            throw Unsupported(
+                "Separate-artifact class re-emission cannot discard a retained generic MethodDef root.");
         }
 
         var globalArtifactInputs = new List<byte[]> {
@@ -16880,15 +16971,21 @@ public static partial class TrRmExecutableCompiler
                     sourceModules[sourceModuleIndex].ArtifactSnapshot
                         .ToArray(), schema,
                     standardSchemaIdentity: schemaIdentity));
+            var oldSignatureRow
+                = sourceTables.Methods.GetSignature(key.MethodRow);
+            var (oldGenericFirst, oldGenericCount)
+                = sourceTables.Signatures.GetGenericRange(oldSignatureRow);
             var oldOwnerTypeDefRow = GetTypeDefRow(
                 plan.Owner.Identity.DefinitionId);
-            if (plan.Method.GenericParameterCount != 0
-                || sourceTables.Methods.GetOwnerType(key.MethodRow)
+            if (sourceTables.Methods.GetOwnerType(key.MethodRow)
                     != oldOwnerTypeDefRow
                 || sourceTables.Methods.GetOwnerModule(key.MethodRow)
                     != sourceModules[sourceModuleIndex].ModuleRow
                 || sourceTables.Methods.GetBodyRow(key.MethodRow)
                     != plan.Method.BodyRow
+                || oldGenericCount != plan.Method.GenericParameterCount
+                || oldGenericCount != plan.Method.GenericParameters.Length
+                || oldGenericCount > 8
                 || (plan.Imports.IsEmpty
                     ? plan.Method.BodyRow == 0 || plan.Body.IsEmpty
                     : plan.Method.BodyRow != 0 || !plan.Body.IsEmpty)
@@ -16897,7 +16994,7 @@ public static partial class TrRmExecutableCompiler
                         (0x01 or 0x02 or 0x03 or 0x04 or 0x05)))
             {
                 throw Unsupported(
-                    "Separate-artifact class MethodDef retention currently requires nongeneric MethodDefs with exact TypeDef and Module owners.");
+                    "Separate-artifact class MethodDefs require exact TypeDef and Module owners and bounded type-formal signatures.");
             }
 
             var outputMethodRow = index + 1;
@@ -16906,6 +17003,45 @@ public static partial class TrRmExecutableCompiler
             {
                 throw new InvalidDataException(
                     "A separate-artifact class MethodDef was retained more than once.");
+            }
+
+            var genericParamRowMap = new Dictionary<int, int>();
+            var genericParamFirst = oldGenericCount == 0
+                ? 0 : genericParamRows.Count + 1;
+            for (var ordinal = 0; ordinal < oldGenericCount; ordinal++)
+            {
+                var formal = plan.Method.GenericParameters[ordinal];
+                var expectedGenericParamRow = oldGenericFirst + ordinal;
+                if (formal.Row != expectedGenericParamRow
+                    || formal.OwnerDefinitionId
+                        != plan.Method.DefinitionId
+                    || formal.Ordinal != (uint)ordinal
+                    || formal.FormalKind != 1
+                    || formal.ConstantTypeSpecReference != 0
+                    || formal.Constraints.IsDefault
+                    || string.IsNullOrEmpty(formal.Name)
+                    || !genericParamRowMap.TryAdd(formal.Row,
+                        genericParamRows.Count + 1))
+                {
+                    throw new InvalidDataException(
+                        "A separate-artifact class MethodDef GenericParam has an invalid owner, kind, ordinal, or row.");
+                }
+
+                genericParamRows.Add(new TrRmGenericParamRow(
+                    0x1600_0000u | checked((uint)outputMethodRow),
+                    ordinal, 0, 0, 0, formal.FormalKind,
+                    formal.OwnershipDomain, formal.NullabilityDomain, 0, 0));
+                genericParamNames.Add(formal.Name);
+            }
+
+            var methodKey = (sourceModuleIndex, key.MethodRow);
+            if (!genericParamRowMapsByMethod.TryAdd(methodKey,
+                    genericParamRowMap)
+                || !genericParamRangesByMethod.TryAdd(methodKey,
+                    (genericParamFirst, oldGenericCount)))
+            {
+                throw new InvalidDataException(
+                    "A separate-artifact class MethodDef has duplicate GenericParam mappings.");
             }
 
             methodDefCountsByModule[
@@ -16936,6 +17072,13 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
+        var genericParamRows = new List<TrRmGenericParamRow>();
+        var genericParamNames = new List<string>();
+        var genericConstraintRows = new List<TrRmConstraintRow>();
+        var genericParamRowMapsByMethod = new Dictionary<
+            (int SourceIndex, int MethodRow), Dictionary<int, int>>();
+        var genericParamRangesByMethod = new Dictionary<
+            (int SourceIndex, int MethodRow), (int First, int Count)>();
         var fieldRowMapsBySource = new Dictionary<int, int>[
             sourceModules.Count];
         var methodRows = new List<TrRmMethodDefRow>(
@@ -17165,6 +17308,10 @@ public static partial class TrRmExecutableCompiler
                 = sourceTables.Signatures.GetParamRange(oldSignatureRow);
             var (oldGenericStart, oldGenericCount)
                 = sourceTables.Signatures.GetGenericRange(oldSignatureRow);
+            var genericParamMap
+                = genericParamRowMapsByMethod[(sourceIndex, oldMethodRow)];
+            var genericParamRange
+                = genericParamRangesByMethod[(sourceIndex, oldMethodRow)];
             if (sourceTables.Methods.GetFlags(oldMethodRow) != method.Flags
                 || sourceTables.Methods.GetBodyRow(oldMethodRow)
                     != method.BodyRow
@@ -17174,9 +17321,12 @@ public static partial class TrRmExecutableCompiler
                     oldSignatureRow) != method.ReceiverTypeSpecReference
                 || oldParameterCount != method.Parameters.Length
                 || method.Parameters.IsDefault
-                || oldGenericCount != 0
-                || oldGenericStart != 0
-                || method.GenericParameterCount != 0
+                || oldGenericCount != method.GenericParameterCount
+                || oldGenericCount != method.GenericParameters.Length
+                || genericParamRange.Count != oldGenericCount
+                || (oldGenericCount != 0
+                    && oldGenericStart
+                        != method.GenericParameters[0].Row)
                 || (method.EffectsMask & ~6u) != 0
                 || sourceTables.Contracts.GetEffectsMask(oldMethodRow)
                     != method.EffectsMask
@@ -17232,7 +17382,8 @@ public static partial class TrRmExecutableCompiler
                 typeDefRowMapsBySource[sourceIndex],
                 importRowMaps[sourceIndex], outputTypeSpecRows,
                 typeSpecRowMaps[sourceIndex],
-                activeTypeSpecRows[sourceIndex], depth: 0);
+                activeTypeSpecRows[sourceIndex], depth: 0,
+                genericParamRowMap: genericParamMap);
             var receiverTypeSpec = method.ReceiverTypeSpecReference == 0
                 ? 0
                 : RemapC1M1ClassTypeSpec(sourceTables,
@@ -17240,7 +17391,98 @@ public static partial class TrRmExecutableCompiler
                     typeDefRowMapsBySource[sourceIndex],
                     importRowMaps[sourceIndex], outputTypeSpecRows,
                     typeSpecRowMaps[sourceIndex],
-                    activeTypeSpecRows[sourceIndex], depth: 0);
+                    activeTypeSpecRows[sourceIndex], depth: 0,
+                    genericParamRowMap: genericParamMap);
+            for (var ordinal = 0;
+                ordinal < method.GenericParameters.Length; ordinal++)
+            {
+                var formal = method.GenericParameters[ordinal];
+                var genericParamRow = genericParamMap[formal.Row];
+                var sourceGenericParamRow = oldGenericStart + ordinal;
+                if (formal.Row != sourceGenericParamRow
+                    || sourceTables.GenericParams.GetOwnerDefId(
+                        sourceGenericParamRow)
+                        != (0x1600_0000u
+                            | checked((uint)oldMethodRow))
+                    || sourceTables.GenericParams.GetOrdinal(
+                        sourceGenericParamRow) != (uint)ordinal
+                    || sourceTables.GenericParams.GetFormalKind(
+                        sourceGenericParamRow) != 1
+                    || sourceTables.GenericParams.GetDefaultArgumentRef(
+                        sourceGenericParamRow)
+                        != formal.DefaultArgumentReference)
+                {
+                    throw new InvalidDataException(
+                        "A separate-artifact class MethodDef GenericParam differs from its source row.");
+                }
+
+                var constraintFirst = genericConstraintRows.Count + 1;
+                foreach (var constraint in formal.Constraints)
+                {
+                    if (constraint.OwnerGenericParamRow != formal.Row)
+                    {
+                        throw new InvalidDataException(
+                            "A separate-artifact class MethodDef Constraint has an invalid owner.");
+                    }
+
+                    uint payload;
+                    switch (constraint.Kind)
+                    {
+                        case 1 when schema.UsesGenericMethodCalls():
+                            payload = RemapC1M1ClassTypeSpec(sourceTables,
+                                constraint.Payload,
+                                typeDefRowMapsBySource[sourceIndex],
+                                importRowMaps[sourceIndex],
+                                outputTypeSpecRows,
+                                typeSpecRowMaps[sourceIndex],
+                                activeTypeSpecRows[sourceIndex], depth: 0,
+                                genericParamRowMap: genericParamMap);
+                            break;
+
+                        case 2 when constraint.Payload is >= 1 and <= 3:
+                            payload = constraint.Payload;
+                            break;
+
+                        case 3 when schema
+                            .UsesAssociatedRelationConstraints():
+                            throw Unsupported(
+                                "Separate-artifact CM1AR1 class MethodDef re-emission does not yet retain associated-relation declaration closure.");
+
+                        default:
+                            throw new InvalidDataException(
+                                "A separate-artifact class MethodDef Constraint has an unsupported kind or payload.");
+                    }
+
+                    genericConstraintRows.Add(new TrRmConstraintRow(
+                        genericParamRow, constraint.Kind, payload));
+                }
+
+                var constraintCount = genericConstraintRows.Count
+                    - constraintFirst + 1;
+                if (constraintCount == 0)
+                {
+                    constraintFirst = 0;
+                }
+
+                var defaultArgumentReference
+                    = formal.DefaultArgumentReference == 0 ? 0
+                        : RemapC1M1ClassTypeSpec(sourceTables,
+                            formal.DefaultArgumentReference,
+                            typeDefRowMapsBySource[sourceIndex],
+                            importRowMaps[sourceIndex],
+                            outputTypeSpecRows,
+                            typeSpecRowMaps[sourceIndex],
+                            activeTypeSpecRows[sourceIndex], depth: 0,
+                            genericParamRowMap: genericParamMap);
+                genericParamRows[genericParamRow - 1]
+                    = new TrRmGenericParamRow(
+                        0x1600_0000u | checked((uint)outputMethodRow),
+                        ordinal, 0, constraintFirst, constraintCount,
+                        formal.FormalKind, formal.OwnershipDomain,
+                        formal.NullabilityDomain, 0,
+                        defaultArgumentReference);
+            }
+
             var parameterFirst = method.Parameters.IsEmpty
                 ? 0 : parameterRows.Count + 1;
             for (var ordinal = 0; ordinal < method.Parameters.Length;
@@ -17270,7 +17512,8 @@ public static partial class TrRmExecutableCompiler
                     typeDefRowMapsBySource[sourceIndex],
                     importRowMaps[sourceIndex], outputTypeSpecRows,
                     typeSpecRowMaps[sourceIndex],
-                    activeTypeSpecRows[sourceIndex], depth: 0);
+                    activeTypeSpecRows[sourceIndex], depth: 0,
+                    genericParamRowMap: genericParamMap);
                 parameterRows.Add(new TrRmParamRow(outputSignatureRow,
                     ordinal, remappedTypeSpec, parameter.Mode,
                     parameter.Flags));
@@ -17318,7 +17561,7 @@ public static partial class TrRmExecutableCompiler
 
             methodSignatureRows.Add(new TrRmMethodSigRow(resultTypeSpec,
                 receiverTypeSpec, parameterFirst, method.Parameters.Length,
-                0, 0));
+                genericParamRange.First, genericParamRange.Count));
 
             var contractFirst = 0;
             var methodContractCount = 0;
@@ -17510,7 +17753,7 @@ public static partial class TrRmExecutableCompiler
                     frozenScalarValueBuilder, outputTypeSpecRows,
                     typeSpecRowMaps[sourceIndex],
                     activeTypeSpecRows[sourceIndex], schema,
-                    new Dictionary<int, int>()));
+                    genericParamMap));
             }
 
             if (plan.Imports.IsEmpty
@@ -17598,6 +17841,8 @@ public static partial class TrRmExecutableCompiler
             || methodRows.Count > 0xFF_FFFF
             || methodSignatureRows.Count > 0xFF_FFFF
             || parameterRows.Count > 0xFF_FFFF
+            || genericParamRows.Count > 0xFF_FFFF
+            || genericConstraintRows.Count > 0xFF_FFFF
             || contractRows.Count > 0xFF_FFFF
             || bodyRows.Count > 0xFF_FFFF
             || fieldPathRows.Count > 0xFF_FFFF
@@ -17656,6 +17901,10 @@ public static partial class TrRmExecutableCompiler
         {
             AddString(methodName);
         }
+        foreach (var genericParamName in genericParamNames)
+        {
+            AddString(genericParamName);
+        }
         foreach (var surface in parameterSurfaceRows)
         {
             AddString(surface.Name);
@@ -17685,6 +17934,12 @@ public static partial class TrRmExecutableCompiler
         {
             methodRows[index] = methodRows[index] with {
                 NameStringRow = stringRows[methodNames[index]],
+            };
+        }
+        for (var index = 0; index < genericParamRows.Count; index++)
+        {
+            genericParamRows[index] = genericParamRows[index] with {
+                NameStringRow = stringRows[genericParamNames[index]],
             };
         }
 
@@ -17738,19 +17993,22 @@ public static partial class TrRmExecutableCompiler
                 moduleRefRows.Length, strings, modules);
         var typeSpecBytes = outputTypeSpecRows.Count == 0 ? []
             : TrRmTypeSpecTableWriter.Encode(outputTypeSpecRows,
-                outputTypeDefRows.Count, outputImportPlans.Count, 0, 0,
-                schema, methodDefCount: methodRows.Count);
+                outputTypeDefRows.Count, outputImportPlans.Count,
+                genericParamRows.Count, 0, schema,
+                methodDefCount: methodRows.Count);
         var typeSpecReaderBytes = outputTypeSpecRows.Count == 0
             ? new byte[sizeof(uint)] : typeSpecBytes;
         var typeSpecs = new TrRmTypeSpecTableReader(typeSpecReaderBytes,
             outputTypeSpecRows.Count, outputTypeDefRows.Count,
-            outputImportPlans.Count, 0, 0, schema,
+            outputImportPlans.Count, genericParamRows.Count, 0, schema,
             methodDefCount: methodRows.Count);
         var typeDefBytes = TrRmTypeDefTableWriter.Encode(
-            outputTypeDefRows, strings, modules, fieldRows.Count, 0,
+            outputTypeDefRows, strings, modules, fieldRows.Count,
+            genericParamRows.Count,
             layoutRows.Count, 0, schema);
         var typeDefs = new TrRmTypeDefTableReader(typeDefBytes,
-            outputTypeDefRows.Count, strings, modules, fieldRows.Count, 0,
+            outputTypeDefRows.Count, strings, modules, fieldRows.Count,
+            genericParamRows.Count,
             layoutRows.Count, 0, schema);
         var importRows = new TrRmImportRow[outputImportPlans.Count];
         foreach (var import in outputImportPlans)
@@ -17935,11 +18193,11 @@ public static partial class TrRmExecutableCompiler
             strings, typeDefs, typeSpecs);
         var signatureBytes = methodSignatureRows.Count == 0 ? []
             : TrRmMethodSigTableWriter.Encode(methodSignatureRows, typeSpecs,
-                parameterRows.Count, genericParamCount: 0);
+                parameterRows.Count, genericParamRows.Count);
         var signatures = methodSignatureRows.Count == 0 ? default
             : new TrRmMethodSigTableReader(signatureBytes,
                 methodSignatureRows.Count, typeSpecs, parameterRows.Count,
-                genericParamCount: 0);
+                genericParamRows.Count);
         var parameterBytes = parameterRows.Count == 0 ? []
             : TrRmParamTableWriter.Encode(parameterRows, signatures,
                 typeSpecs, schema);
@@ -17962,6 +18220,20 @@ public static partial class TrRmExecutableCompiler
             : new TrRmImportTableReader(importBytes, importRows.Length,
                 strings, moduleRefs, typeDefs, methodReader, default, default,
                 default, fields, featureReader, modules, schema);
+        var genericParamBytes = genericParamRows.Count == 0 ? []
+            : TrRmGenericParamTableWriter.Encode(genericParamRows, strings,
+                typeDefs, methodReader, signatures, typeSpecs,
+                genericConstraintRows.Count);
+        var genericParams = genericParamRows.Count == 0 ? default
+            : new TrRmGenericParamTableReader(genericParamBytes,
+                genericParamRows.Count, strings, typeDefs, methodReader,
+                signatures, typeSpecs, genericConstraintRows.Count);
+        var associatedRelations
+            = new TrRmAssociatedRelationTableReader([], 0, typeSpecs, 0,
+                imports);
+        var genericConstraintBytes = genericConstraintRows.Count == 0 ? []
+            : TrRmConstraintTableWriter.Encode(genericConstraintRows,
+                genericParams, typeSpecs, associatedRelations);
         var contractBytes = contractRows.Count == 0 ? []
             : schema.UsesConstructionContracts()
                 ? TrRmContractTableWriter
@@ -18061,6 +18333,17 @@ public static partial class TrRmExecutableCompiler
         {
             sections.Add(new TrRmSection(0x0018, 0,
                 checked((uint)parameterRows.Count), parameterBytes));
+        }
+        if (genericParamRows.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x0019, 0,
+                checked((uint)genericParamRows.Count), genericParamBytes));
+        }
+        if (genericConstraintRows.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x001A, 0,
+                checked((uint)genericConstraintRows.Count),
+                genericConstraintBytes));
         }
         if (contractRows.Count != 0)
         {

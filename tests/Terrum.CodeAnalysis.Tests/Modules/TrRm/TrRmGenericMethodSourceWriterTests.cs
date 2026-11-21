@@ -5380,6 +5380,40 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                         associatedTypeExportKey)),
                 Is.True);
         }
+
+        var sourceFreeCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), originalReload);
+        Assert.That(sourceFreeCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                sourceFreeCompilation.Diagnostics));
+        var sourceFreeProgram = (BoundProgram)sourceFreeCompilation.Program!;
+        var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(
+            sourceFreeProgram, publisherIdentity + ".reemitted",
+            schemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(),
+            Array.Empty<TrRmSourceGenericMethodExport>());
+        var reemittedInput = new TrRmStandardArtifactInput(schemaIdentity,
+            reemittedArtifact);
+        foreach (var provider in new[] { providerInput, replacementInput })
+        {
+            var reloadedReference
+                = TrRmExecutableCompiler.CreateStandardReference(
+                    reemittedInput, publisherIdentity + ".reemitted",
+                    [provider], ["example.class/Container"]);
+            var reloadedMethods = reloadedReference.GenericMethodImports
+                .Where(import => StringComparer.Ordinal.Equals(
+                    import.Origin.ExportKey, methodExportKey)).ToArray();
+            Assert.That(reloadedMethods, Has.Length.EqualTo(2));
+            Assert.That(reloadedMethods.All(import =>
+                    import.Formals.Length == 1
+                    && import.Formals[0].InterfaceConstraints.Length == 1
+                    && import.Origin.OwnerModule is
+                        BoundSourceTypeProviderSnapshot ownerModule
+                    && ownerModule.ModuleIdentity == providerIdentity
+                    && ownerModule.ArtifactSnapshot.AsSpan()
+                        .SequenceEqual(provider.Artifact.Span)),
+                Is.True);
+        }
     }
 
     [TestCase(
