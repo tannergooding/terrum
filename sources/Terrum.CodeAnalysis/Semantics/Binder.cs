@@ -18604,9 +18604,7 @@ internal sealed partial class Binder
                 var patternSyntax = node.Children
                     .OfType<SyntaxNode>()
                     .LastOrDefault();
-                if (_bindingContractPhase is not null
-                    && patternSyntax?.Kind
-                        == SyntaxKind.SwitchTypedBindingPattern
+                if (patternSyntax?.Kind == SyntaxKind.SwitchTypedBindingPattern
                     && patternSyntax.Children.Length == 1
                     && patternSyntax.Children[0] is SyntaxNode {
                         Kind: SyntaxKind.TypeName,
@@ -18622,7 +18620,7 @@ internal sealed partial class Binder
                         if (DiagnosticCount == diagnosticsBeforeType)
                         {
                             Report("TRM3007",
-                                "A declaration TypeTest requires a fixed scalar type.",
+                                "A TypeTest requires a fixed scalar type.",
                                 patternSyntax.Span);
                         }
                         expression = ErrorExpression(node.Span);
@@ -18641,7 +18639,7 @@ internal sealed partial class Binder
                                     subjectValueType))))
                     {
                         Report("TRM3007",
-                            "A declaration TypeTest requires a named scalar or optional scalar input value.",
+                            "A TypeTest requires a named scalar or optional scalar value.",
                             node.Span);
                         expression = ErrorExpression(node.Span);
                         break;

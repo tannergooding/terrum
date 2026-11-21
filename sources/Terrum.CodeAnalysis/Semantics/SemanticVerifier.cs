@@ -19409,7 +19409,7 @@ public static partial class SemanticVerifier
             case BoundTypeTestPattern typeTest:
                 if (typeTest.Value is not BoundRead testRead
                     || testRead.Variable < 0
-                    || testRead.Variable >= function.ParameterCount
+                    || testRead.Variable >= function.Variables.Length
                     || function.Variables[testRead.Variable].Type
                         != testRead.Type
                     || function.Variables[testRead.Variable].IsOut

@@ -5019,6 +5019,25 @@ internal sealed class TrRmStandardInitializationReferenceBodyTests
                 out ImmutableArray<CoreContractFailureIdentitySelection> _));
     }
 
+    [Test]
+    public void ScalarTypeTestBindsAndEmitsOutsideDeclarationContracts()
+    {
+        const string source = """
+            bool Check(int32? input)
+            {
+                int32? value = input;
+                return value is int32;
+            }
+            """;
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = (BoundProgram)compilation.Program!;
+        Assert.That(NativeEmitter.EmitLibrary(program, ["Check"],
+            NativeRuntimePolicy.FailFast), Is.Not.Empty);
+    }
+
     [TestCase("(enabled && ready) == (*destination is init)",
         "if (enabled && ready) { *destination = 42; }",
         "1:0001|0:1110")]
