@@ -2258,6 +2258,42 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
                     malformed), moduleIdentity, []));
     }
 
+    [Test]
+    public void L1StorageAddressRejectsFormalSourceHome()
+    {
+        const string moduleIdentity = "l1p-storage-address-formal-home";
+        const string l1pSchemaIdentity
+            = "trrm/1-draft-local-aggregate-layout-execution-pointer-loads-1";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            struct Snapshot {
+                public int32 Value;
+                public Snapshot(int32 value) { Value = value; }
+            }
+            public int32 Main(Snapshot formal) {
+                mut Snapshot snapshot = new Snapshot(42);
+                unsafe {
+                    Snapshot captured = *(&snapshot);
+                    return captured.Value + formal.Value;
+                }
+            }
+            """), new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, l1pSchemaIdentity,
+            moduleTargetRequirement: 1);
+        var malformed = MutateL1pStorageAddressSourceIndexToFormalHome(
+            artifact, l1pSchemaIdentity, "Main");
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(l1pSchemaIdentity,
+                    malformed), moduleIdentity, []));
+    }
+
     [TestCase(14)]
     [TestCase(15)]
     public void L1ArrayStorageAddressRejectsReservedPlaceRegisters(
@@ -3515,7 +3551,7 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
         byte[] artifact, string schemaIdentity, string methodName)
         => MutateL1pStorageAddressRecord(artifact, schemaIdentity,
             methodName, 2,
-            static (bodyBytes, recordStart) =>
+            static (bodyBytes, recordStart, _) =>
                 BinaryPrimitives.WriteUInt32LittleEndian(
                     bodyBytes.AsSpan(recordStart + 12), 2));
 
@@ -3524,18 +3560,27 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
         bool resultHomeIndex)
         => MutateL1pStorageAddressRecord(artifact, schemaIdentity,
             methodName, 2,
-            (bodyBytes, recordStart) =>
+            (bodyBytes, recordStart, _) =>
                 BinaryPrimitives.WriteUInt16LittleEndian(
                     bodyBytes.AsSpan(recordStart
                         + (resultHomeIndex ? 8 : 6)),
                     ushort.MaxValue));
+
+    private static byte[] MutateL1pStorageAddressSourceIndexToFormalHome(
+        byte[] artifact, string schemaIdentity, string methodName)
+        => MutateL1pStorageAddressRecord(artifact, schemaIdentity,
+            methodName, 2,
+            static (bodyBytes, recordStart, homeCount) =>
+                BinaryPrimitives.WriteUInt16LittleEndian(
+                    bodyBytes.AsSpan(recordStart + 6),
+                    checked((ushort)(homeCount - 1))));
 
     private static byte[] MutateL1pStorageAddressTypeMapIndex(
         byte[] artifact, string schemaIdentity, string methodName,
         byte sourceKind, ushort invalidTypeMapIndex)
         => MutateL1pStorageAddressRecord(artifact, schemaIdentity,
             methodName, sourceKind,
-            (bodyBytes, recordStart) =>
+            (bodyBytes, recordStart, _) =>
                 BinaryPrimitives.WriteUInt16LittleEndian(
                     bodyBytes.AsSpan(recordStart + 10),
                     invalidTypeMapIndex));
@@ -3545,7 +3590,7 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
         byte sourceKind, bool resultKind)
         => MutateL1pStorageAddressRecord(artifact, schemaIdentity,
             methodName, sourceKind,
-            (bodyBytes, recordStart) =>
+            (bodyBytes, recordStart, _) =>
                 bodyBytes[recordStart + (resultKind ? 5 : 4)]
                     = byte.MaxValue);
 
@@ -3554,7 +3599,7 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
         ushort invalidRegister)
         => MutateL1pStorageAddressRecord(artifact, schemaIdentity,
             methodName, 1,
-            (bodyBytes, recordStart) =>
+            (bodyBytes, recordStart, _) =>
                 BinaryPrimitives.WriteUInt16LittleEndian(
                     bodyBytes.AsSpan(recordStart + 6), invalidRegister));
 
@@ -3601,7 +3646,7 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
 
     private static byte[] MutateL1pStorageAddressRecord(
         byte[] artifact, string schemaIdentity, string methodName,
-        byte expectedSourceKind, Action<byte[], int> mutateRecord)
+        byte expectedSourceKind, Action<byte[], int, int> mutateRecord)
     {
         var index = new TrRmArtifactIndex(artifact,
             TrRmArtifactSchema.LocalAggregateLayoutDraft,
@@ -3672,7 +3717,7 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
                         recordOffsetsStart + (recordIndex * sizeof(uint))));
                 var recordStart = recordDataStart
                     + checked((int)recordOffset);
-                mutateRecord(bodyBytes, recordStart);
+                mutateRecord(bodyBytes, recordStart, body.HomeCount);
                 foundAddress = true;
                 break;
             }
