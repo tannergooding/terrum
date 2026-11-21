@@ -491,6 +491,33 @@ internal sealed class NativeCoreRegistrationTests
             changedProviderProgram, "provider.module",
             "trrm/1-draft-foreign-native-interface-parameter-surface-1", 1,
             [changedProviderExport]);
+        var outputChangedProviderCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(providerSource.Replace(
+                "NativeOutputCondition.NonNegative",
+                "NativeOutputCondition.NonZero",
+                StringComparison.Ordinal)), options);
+        Assert.That(outputChangedProviderCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                outputChangedProviderCompilation.Diagnostics));
+        var outputChangedProviderProgram
+            = outputChangedProviderCompilation.Program
+                ?? throw new AssertionException(
+                    "Expected a provider with a changed NativeOutput condition.");
+        var outputChangedProviderExport = new TrRmSourceTypeExport("", "IProbe",
+            "provider/IProbe") {
+            GenericArity = 0,
+            InterfaceMethodExports = [.. outputChangedProviderProgram
+                .Interfaces.Single().Members.Select(member =>
+                    new TrRmSourceInterfaceMethodExport(
+                        member.SourceInputOrdinal,
+                        member.SourceDeclarationSpan,
+                        $"provider/IProbe.{member.Name}"))],
+        };
+        var outputChangedProviderArtifact
+            = TrRmExecutableCompiler.EmitStandard(
+                outputChangedProviderProgram, "provider.module",
+                "trrm/1-draft-foreign-native-interface-parameter-surface-1",
+                1, [outputChangedProviderExport]);
         var incompatibleProviderCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse(providerSource.Replace(
                 "int32 Count(int32 count = 1)",
@@ -570,6 +597,15 @@ internal sealed class NativeCoreRegistrationTests
                 new TrRmStandardArtifactInput(
                     "trrm/1-draft-foreign-native-interface-parameter-surface-1",
                     incompatibleProviderArtifact),
+            ]));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(
+                    "trrm/1-draft-foreign-native-interface-parameter-surface-1",
+                    importerArtifact), "consumer.module", [
+                new TrRmStandardArtifactInput(
+                    "trrm/1-draft-foreign-native-interface-parameter-surface-1",
+                    outputChangedProviderArtifact),
             ]));
     }
 
