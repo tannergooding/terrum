@@ -1930,6 +1930,15 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
                 new TrRmStandardArtifactInput(l1pSchemaIdentity,
                     incompatibleTypeArtifact),
             ]));
+        var incompatibleRawUnionArtifact = CreateL1pTypeProviderArtifact(
+            typeProviderIdentity, l1pSchemaIdentity, relocate: true,
+            incompatibleRawUnion: true);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(rootInput, rootIdentity, [
+                methodProviderInput,
+                new TrRmStandardArtifactInput(l1pSchemaIdentity,
+                    incompatibleRawUnionArtifact),
+            ]));
     }
 
     [Test]
@@ -2152,7 +2161,8 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
 
     private static byte[] CreateL1pTypeProviderArtifact(
         string moduleIdentity, string schemaIdentity,
-        bool relocate = false, bool incompatible = false)
+        bool relocate = false, bool incompatible = false,
+        bool incompatibleRawUnion = false)
     {
         var prefix = relocate ? """
             [Blittable] [Layout(LayoutKind.Sequential)]
@@ -2161,12 +2171,13 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
             }
             """ : string.Empty;
         var firstFieldType = incompatible ? "uint32" : "int32";
+        var wideFieldType = incompatibleRawUnion ? "uint32" : "uint64";
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse($$"""
             {{prefix}}
             [Blittable] [Layout(LayoutKind.Union)]
             public struct RawWord {
                 public mut uint32 Narrow;
-                public mut uint64 Wide;
+                public mut {{wideFieldType}} Wide;
             }
             [Blittable] [Layout(LayoutKind.Sequential)]
             public struct Inner {
