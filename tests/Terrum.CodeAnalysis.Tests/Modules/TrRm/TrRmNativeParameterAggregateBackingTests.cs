@@ -44,21 +44,31 @@ internal sealed class TrRmNativeParameterAggregateBackingTests
 
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int ProbeDelegate(nint process, NativePair value,
-        nint bytesRead);
+        nuint bytesToRead, nint bytesRead);
 
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
-    private delegate int ArrayProbeDelegate(nint process, nint bytesRead);
+    private delegate int ArrayProbeDelegate(nint process,
+        nuint bytesToRead, nint bytesRead);
 
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
-    private delegate int NativeParameterArrayProbeDelegate();
+    private delegate int WideIndexProbeDelegate(nint process, ulong index,
+        nuint bytesToRead, nint bytesRead);
+
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int ArrayUpdateProbeDelegate(nint process,
+        int initialIndex, nuint bytesToRead, nint bytesRead);
+
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int NativeParameterArrayProbeDelegate(ulong byteCount);
 
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int FieldArrayProbeDelegate(nint process,
-        NativeArrayHolder value, nint bytesRead);
+        NativeArrayHolder value, nuint bytesToRead, nint bytesRead);
 
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int NestedFieldArrayProbeDelegate(nint process,
-        NativeNestedArrayHolder value, nint bytesRead);
+        NativeNestedArrayHolder value, int outerIndex, int innerIndex,
+        nuint bytesToRead, nint bytesRead);
 
     [Test]
     public async Task StandardNativeOutputUsesAggregateNativeParameterBackingAsync()
@@ -88,8 +98,7 @@ internal sealed class TrRmNativeParameterAggregateBackingTests
                 write ptr<nuint> bytesRead);
 
             public unsafe int32 Probe(ptr<void> process, Pair value,
-                write ptr<nuint> bytesRead) {
-                nuint bytesToRead = 8;
+                nuint bytesToRead, write ptr<nuint> bytesRead) {
                 mut Pair backing = value;
                 init mut Pair buffer;
                 unsafe {
@@ -136,7 +145,7 @@ internal sealed class TrRmNativeParameterAggregateBackingTests
                 Assert.That(function(new IntPtr(-1), new NativePair {
                     First = 11,
                     Second = 22,
-                }, bytesRead),
+                }, (nuint)Marshal.SizeOf<NativePair>(), bytesRead),
                     Is.EqualTo(1));
                 Assert.That(Marshal.ReadInt64(bytesRead), Is.EqualTo(8));
             }
@@ -183,8 +192,7 @@ internal sealed class TrRmNativeParameterAggregateBackingTests
                 write ptr<nuint> bytesRead);
 
             public unsafe int32 Probe(ptr<void> process, Quad value,
-                write ptr<nuint> bytesRead) {
-                nuint bytesToRead = 16;
+                nuint bytesToRead, write ptr<nuint> bytesRead) {
                 mut Quad backing = value;
                 init mut Quad buffer;
                 unsafe {
@@ -235,8 +243,8 @@ internal sealed class TrRmNativeParameterAggregateBackingTests
     }
 
     [Test]
-    [TestCase(3, "mut [int32; 3] source = [11, 22, 33];", "&source[0]", 0, 3UL)]
-    [TestCase(2, "mut [[int32; 2]; 2] source = [[11, 22], [33, 44]];",
+    [TestCase(3, "mut [int32; 3] source = [0, 0, 0];", "&source[0]", 0, 3UL)]
+    [TestCase(2, "mut [[int32; 2]; 2] source = [[0, 0], [0, 0]];",
         "&source[1][0]", 2, 2UL)]
     public async Task StandardNativeOutputUsesMultiElementFixedArrayBackingAsync(
         int nativeParameterExtent, string sourceInitialization,
@@ -269,9 +277,8 @@ internal sealed class TrRmNativeParameterAggregateBackingTests
                 write ptr<nuint> bytesRead);
 
             public unsafe int32 Probe(ptr<void> process,
-                write ptr<nuint> bytesRead) {
+                nuint bytesToRead, write ptr<nuint> bytesRead) {
                 {{sourceInitialization}}
-                nuint bytesToRead = 8;
                 init mut Pair buffer;
                 unsafe {
                     return ReadProcessMemory(process, {{sourceAddress}},
@@ -337,7 +344,8 @@ internal sealed class TrRmNativeParameterAggregateBackingTests
                 var function = Marshal.GetDelegateForFunctionPointer<
                     ArrayProbeDelegate>(NativeLibrary.GetExport(library,
                     "Probe"));
-                Assert.That(function(new IntPtr(-1), bytesRead),
+                Assert.That(function(new IntPtr(-1),
+                    (nuint)Marshal.SizeOf<NativePair>(), bytesRead),
                     Is.EqualTo(1));
                 Assert.That(Marshal.ReadInt64(bytesRead), Is.EqualTo(8));
             }
@@ -375,10 +383,9 @@ internal sealed class TrRmNativeParameterAggregateBackingTests
                 ptr<int32> source,
                 uint64 byteCount);
 
-            public unsafe int32 Probe() {
-                mut [int32; 3] source = [11, 22, 33];
+            public unsafe int32 Probe(uint64 byteCount) {
+                mut [int32; 3] source = [-1, -1, -1];
                 mut [int32; 3] destination = [0, 0, 0];
-                uint64 byteCount = 12;
                 unsafe {
                     RtlMoveMemory(&destination[0], &source[0],
                         byteCount);
@@ -440,7 +447,7 @@ internal sealed class TrRmNativeParameterAggregateBackingTests
                 var function = Marshal.GetDelegateForFunctionPointer<
                     NativeParameterArrayProbeDelegate>(
                     NativeLibrary.GetExport(library, "Probe"));
-                Assert.That(function(), Is.EqualTo(66));
+                Assert.That(function(12), Is.EqualTo(-3));
             }
             finally
             {
@@ -503,9 +510,8 @@ internal sealed class TrRmNativeParameterAggregateBackingTests
                 write ptr<nuint> bytesRead);
 
             public unsafe int32 Probe(ptr<void> process, Holder value,
-                write ptr<nuint> bytesRead) {
+                nuint bytesToRead, write ptr<nuint> bytesRead) {
                 mut Holder backing = value;
-                nuint bytesToRead = 8;
                 init mut Pair buffer;
                 unsafe {
                     return ReadProcessMemory(process,
@@ -583,7 +589,7 @@ internal sealed class TrRmNativeParameterAggregateBackingTests
                     First = 11,
                     Second = 22,
                     Third = 33,
-                }, bytesRead), Is.EqualTo(1));
+                }, 8, bytesRead), Is.EqualTo(1));
                 Assert.That(Marshal.ReadInt64(bytesRead), Is.EqualTo(8));
             }
             finally
@@ -638,11 +644,9 @@ internal sealed class TrRmNativeParameterAggregateBackingTests
                 write ptr<nuint> bytesRead);
 
             public unsafe int32 Probe(ptr<void> process, Holder value,
+                int32 outerIndex, int32 innerIndex, nuint bytesToRead,
                 write ptr<nuint> bytesRead) {
                 mut Holder backing = value;
-                int32 outerIndex = 1;
-                int32 innerIndex = 0;
-                nuint bytesToRead = 8;
                 init mut Pair buffer;
                 unsafe {
                     return ReadProcessMemory(process,
@@ -720,7 +724,7 @@ internal sealed class TrRmNativeParameterAggregateBackingTests
                         Second = 22,
                         Third = 33,
                         Fourth = 44,
-                    }, bytesRead), Is.EqualTo(1));
+                    }, 1, 0, 8, bytesRead), Is.EqualTo(1));
                 Assert.That(Marshal.ReadInt64(bytesRead), Is.EqualTo(8));
             }
             finally
@@ -765,20 +769,15 @@ internal sealed class TrRmNativeParameterAggregateBackingTests
                 write ptr<nuint> bytesRead);
 
             public unsafe int32 Probe(ptr<void> process,
+                {{indexTypeName}} index, nuint bytesToRead,
                 write ptr<nuint> bytesRead) {
-                mut [int32; 3] source = [11, 22, 33];
-                {{indexTypeName}} index = 1;
-                nuint bytesToRead = 4;
+                mut [int32; 3] source = [0, 0, 0];
                 init mut int32 buffer;
                 unsafe {
-                    int32 result = ReadProcessMemory(process,
+                    return ReadProcessMemory(process,
                         &source[index], &init buffer, bytesToRead,
                         bytesRead);
-                    if (result != 0) {
-                        return buffer;
-                    }
                 }
-                return 0;
             }
             """), NativeOutputCoreRegistrationTests
                 .CreateRegisteredCompilationOptions());
@@ -829,10 +828,114 @@ internal sealed class TrRmNativeParameterAggregateBackingTests
                 bytesRead = Marshal.AllocHGlobal(sizeof(long));
                 Marshal.WriteInt64(bytesRead, 0);
                 var function = Marshal.GetDelegateForFunctionPointer<
-                    ArrayProbeDelegate>(NativeLibrary.GetExport(library,
+                    WideIndexProbeDelegate>(NativeLibrary.GetExport(library,
                     "Probe"));
-                Assert.That(function(new IntPtr(-1), bytesRead),
-                    Is.EqualTo(22));
+                Assert.That(function(new IntPtr(-1), 1, 4, bytesRead),
+                    Is.EqualTo(1));
+                Assert.That(Marshal.ReadInt64(bytesRead), Is.EqualTo(4));
+            }
+            finally
+            {
+                if (bytesRead != 0)
+                {
+                    Marshal.FreeHGlobal(bytesRead);
+                }
+                NativeLibrary.Free(library);
+            }
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
+    public async Task StandardA2NativeOutputCapturesPostfixArrayIndexAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
+        const string moduleIdentity = "a2-native-output-postfix-array-index";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [param(buffer): DependsOn(nameof(baseAddress))]
+            [Terrum.Interop.NativeImport("kernel32.dll",
+                "ReadProcessMemory")]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(5, Write, NoEscape, 1)]
+            extern unsafe int32 ReadProcessMemory(
+                ptr<void> process, ptr<int32> baseAddress,
+                [Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                write ptr<int32> buffer, nuint bytesToRead,
+                write ptr<nuint> bytesRead);
+
+            public unsafe int32 Probe(ptr<void> process, int32 initialIndex,
+                nuint bytesToRead, write ptr<nuint> bytesRead) {
+                mut [int32; 3] source = [0, 0, 0];
+                mut int32 index = initialIndex;
+                init mut int32 buffer;
+                unsafe {
+                    return ReadProcessMemory(process, &source[index++],
+                        &init buffer, bytesToRead, bytesRead);
+                }
+            }
+            """), NativeOutputCoreRegistrationTests
+                .CreateRegisteredCompilationOptions());
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity,
+            moduleTargetRequirement: 1);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            moduleIdentity, []);
+        var caller = loaded.Functions.Single(static function =>
+            function.Name == "Probe");
+        BoundNativeStorageAddress? arrayBacking = null;
+        Assert.That(BoundTreeTraversal.VisitExpressions(caller.Body,
+            expression =>
+            {
+                if (expression is BoundNativeStorageAddress address
+                    && NativeFixedArrayTypes.IsType(address.CarrierType))
+                {
+                    arrayBacking = address;
+                }
+            }), Is.True);
+        Assert.That(arrayBacking, Is.Not.Null);
+        Assert.That(arrayBacking!.Index, Is.TypeOf<BoundUpdate>());
+        Assert.That(((BoundUpdate)arrayBacking.Index).IsPrefix, Is.False);
+
+        var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
+            moduleIdentity, schemaIdentity, moduleTargetRequirement: 1);
+        Assert.That(reemitted, Is.EqualTo(artifact));
+        var reemittedInput = new TrRmStandardArtifactInput(schemaIdentity,
+            reemitted);
+        _ = TrRmExecutableCompiler.LoadStandard(reemittedInput,
+            moduleIdentity, []);
+        var image = NativeModuleCompiler.EmitStandardLibrary(
+            reemittedInput, moduleIdentity, [], ["Probe"],
+            NativeRuntimePolicy.FailFast);
+        var directory = TestArtifactPaths.CreateDirectory(
+            "terrum-a2-native-output-postfix-index-");
+        try
+        {
+            var imagePath = Path.Combine(directory, "library.dll");
+            await File.WriteAllBytesAsync(imagePath, image)
+                .ConfigureAwait(true);
+            var library = NativeLibrary.Load(imagePath);
+            nint bytesRead = 0;
+            try
+            {
+                bytesRead = Marshal.AllocHGlobal(sizeof(long));
+                Marshal.WriteInt64(bytesRead, 0);
+                var function = Marshal.GetDelegateForFunctionPointer<
+                    ArrayUpdateProbeDelegate>(NativeLibrary.GetExport(
+                    library, "Probe"));
+                Assert.That(function(new IntPtr(-1), 1, 4, bytesRead),
+                    Is.EqualTo(1));
                 Assert.That(Marshal.ReadInt64(bytesRead), Is.EqualTo(4));
             }
             finally

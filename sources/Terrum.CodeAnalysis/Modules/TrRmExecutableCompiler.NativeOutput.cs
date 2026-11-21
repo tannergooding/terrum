@@ -373,6 +373,60 @@ public static partial class TrRmExecutableCompiler
             return path;
         }
 
+        ImmutableArray<BoundNativeFixedArrayProjection>
+            GetNativeOutputArrayProjections(
+                BoundNativeStorageAddress address)
+        {
+            if (!address.Projections.IsDefaultOrEmpty)
+            {
+                return address.Projections;
+            }
+
+            return NativeFixedArrayContract.TryGetLayout(
+                address.CarrierType, program.Structures,
+                program.NativeFixedArrayTypes, out var rootLayout)
+                ? [new BoundNativeFixedArrayProjection(rootLayout,
+                    address.Index)]
+                : [];
+        }
+
+        bool IsSupportedNativeOutputArrayIndex(BoundExpression index)
+        {
+            int variable;
+            switch (index)
+            {
+                case BoundRead read:
+                    variable = read.Variable;
+                    break;
+
+                case BoundUpdate update
+                    when update.Place is BoundRead place
+                        && update.Type == place.Type
+                        && (update.Operator is TokenKind.PlusPlus
+                            or TokenKind.MinusMinus)
+                        && (update.OverflowBehavior is
+                            BoundIntegerOverflowBehavior.Checked
+                                or BoundIntegerOverflowBehavior.Wrapping):
+                    variable = place.Variable;
+                    if ((uint)variable
+                            >= (uint)caller.Variables.Length
+                        || !caller.Variables[variable].IsMutable)
+                    {
+                        return false;
+                    }
+                    break;
+
+                default:
+                    return false;
+            }
+
+            return (uint)variable < (uint)caller.Variables.Length
+                && index.Type == caller.Variables[variable].Type
+                && NativeFixedArrayContract.IsIndexType(index.Type)
+                && (variable < caller.ParameterCount
+                    || backingLocalByVariable.ContainsKey(variable));
+        }
+
         for (var callIndex = 0; callIndex < outputCalls.Count; callIndex++)
         {
             var selectedCall = outputCalls[callIndex];
@@ -416,18 +470,8 @@ public static partial class TrRmExecutableCompiler
                     {
                         var isArrayCarrier = NativeFixedArrayTypes.IsType(
                             address.CarrierType);
-                        var projections = address.Projections;
-                        if (isArrayCarrier && projections.IsDefaultOrEmpty
-                            && NativeFixedArrayContract.TryGetLayout(
-                                address.CarrierType, program.Structures,
-                                program.NativeFixedArrayTypes,
-                                out var rootLayout))
-                        {
-                            projections = [
-                                new BoundNativeFixedArrayProjection(
-                                    rootLayout, address.Index),
-                            ];
-                        }
+                        var projections = isArrayCarrier
+                            ? GetNativeOutputArrayProjections(address) : [];
 
                         var hasArrayPath = isArrayCarrier
                             && !projections.IsDefaultOrEmpty
@@ -439,14 +483,8 @@ public static partial class TrRmExecutableCompiler
                             && leafLayout.ElementCount == address.ElementCount
                             && leafLayout.ElementStride == address.ElementStride
                             && projections.All(projection =>
-                                projection.Index is BoundRead indexRead
-                                    && NativeFixedArrayContract.IsIndexType(
-                                        indexRead.Type)
-                                    && (uint)indexRead.Variable
-                                        < (uint)caller.Variables.Length
-                                    && (indexRead.Variable < caller.ParameterCount
-                                        || backingLocalByVariable.ContainsKey(
-                                            indexRead.Variable)));
+                                IsSupportedNativeOutputArrayIndex(
+                                    projection.Index));
                         var requiredElementCount = address.ElementStride == 0
                             || address.ByteExtent % address.ElementStride != 0
                             ? 0
@@ -536,12 +574,46 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
+        var indexCaptureRequests
+            = new List<(int CallIndex, int Formal, int ProjectionIndex,
+                PrimitiveType Type)>();
+        for (var callIndex = 0; callIndex < outputCalls.Count; callIndex++)
+        {
+            for (var formal = 0; formal < target.ParameterCount; formal++)
+            {
+                if (!nativeParameterAddressByCallFormal.TryGetValue(
+                        (callIndex, formal), out var address)
+                    || !NativeFixedArrayTypes.IsType(address.CarrierType))
+                {
+                    continue;
+                }
+
+                var projections = GetNativeOutputArrayProjections(address);
+                for (var projectionIndex = 0;
+                    projectionIndex < projections.Length; projectionIndex++)
+                {
+                    if (projections[projectionIndex].Index
+                        is BoundUpdate { IsPrefix: false } update)
+                    {
+                        indexCaptureRequests.Add((callIndex, formal,
+                            projectionIndex, update.Type));
+                    }
+                }
+            }
+        }
+
         var placeSelectionCount = nativeParameterAddressByCallFormal.Values
             .Where(static address => NativeFixedArrayTypes.IsType(
                 address.CarrierType))
-            .Sum(address => (address.Projections.IsDefaultOrEmpty
-                    ? 1 : address.Projections.Length)
+            .Sum(address => (long)GetNativeOutputArrayProjections(address).Length
                 + GetFieldPlacePath(address.FieldPlace).Count);
+        if (minimumHomeCount + backingLocals.Length
+                + indexCaptureRequests.Count > 65_536)
+        {
+            throw Unsupported(
+                "The direct NativeOutput Body exceeds the selected Home index range.");
+        }
+
         var arrayInitializationRecordCount = backingLocals.Sum(local =>
             local.Initializer
                 is BoundNativeFixedArrayInitialization initialization
@@ -1207,7 +1279,22 @@ public static partial class TrRmExecutableCompiler
             [0x1600_0000u | checked((uint)targetMethodRow)]);
         var parameterHomeStart = outputVariables.Length;
         var backingHomeStart = parameterHomeStart + caller.ParameterCount;
-        var storageHomeStart = backingHomeStart + backingLocals.Length;
+        var indexCaptureHomeStart = backingHomeStart
+            + backingLocals.Length;
+        var indexCaptureHomeByCallFormalProjection
+            = new Dictionary<(int CallIndex, int Formal, int ProjectionIndex),
+                ushort>(indexCaptureRequests.Count);
+        for (var index = 0; index < indexCaptureRequests.Count; index++)
+        {
+            var request = indexCaptureRequests[index];
+            var home = checked((ushort)(indexCaptureHomeStart + index));
+            indexCaptureHomeByCallFormalProjection.Add(
+                (request.CallIndex, request.Formal, request.ProjectionIndex),
+                home);
+        }
+
+        var storageHomeStart = indexCaptureHomeStart
+            + indexCaptureRequests.Count;
         var storageHomeCount
             = nativeParameterAddressByCallFormal.Count;
         var homeMap = new byte[checked((storageHomeStart
@@ -1253,6 +1340,18 @@ public static partial class TrRmExecutableCompiler
                     ? (byte)1 : (byte)0;
             BinaryPrimitives.WriteUInt16LittleEndian(homeMap.AsSpan(offset + 2),
                 maps.GetTypeMapIndex(backingLocalTypeMapTokens[index]));
+        }
+
+        foreach (var request in indexCaptureRequests)
+        {
+            var home = indexCaptureHomeByCallFormalProjection[(
+                request.CallIndex, request.Formal, request.ProjectionIndex)];
+            var offset = home * 8;
+            homeMap[offset] = 3;
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                homeMap.AsSpan(offset + 2),
+                maps.GetTypeMapIndex(CreateStandardBodyTypeMapToken(
+                    GetTypeSpecRef(request.Type))));
         }
 
         var storageHomeOrdinal = 0;
@@ -1332,7 +1431,9 @@ public static partial class TrRmExecutableCompiler
                 storageHomeCount);
         var placeSelectionRecordsByCallFormal
             = new Dictionary<(int CallIndex, int Formal),
-                ImmutableArray<(ushort RecordIndex, byte DestinationRegister)>>();
+                ImmutableArray<(ushort RecordIndex, byte DestinationRegister,
+                    BoundUpdate? IndexUpdate, int CaptureHome,
+                    byte UpdateRegister)>>();
         var reservationRecordByCallFormal
             = new Dictionary<(int CallIndex, int Formal), ushort>(
                 outputVariables.Length);
@@ -1352,24 +1453,14 @@ public static partial class TrRmExecutableCompiler
                     var sourceIndex = homeByVariable[address.Variable];
                     if (NativeFixedArrayTypes.IsType(address.CarrierType))
                     {
-                        var projections = address.Projections;
-                        if (projections.IsDefaultOrEmpty
-                            && NativeFixedArrayContract.TryGetLayout(
-                                address.CarrierType, program.Structures,
-                                program.NativeFixedArrayTypes,
-                                out var rootLayout))
-                        {
-                            projections = [
-                                new BoundNativeFixedArrayProjection(
-                                    rootLayout, address.Index),
-                            ];
-                        }
-
+                        var projections
+                            = GetNativeOutputArrayProjections(address);
                         var fieldPath = GetFieldPlacePath(address.FieldPlace);
                         var selections
                             = ImmutableArray.CreateBuilder<
-                                (ushort RecordIndex,
-                                    byte DestinationRegister)>(
+                                (ushort RecordIndex, byte DestinationRegister,
+                                    BoundUpdate? IndexUpdate,
+                                    int CaptureHome, byte UpdateRegister)>(
                                         fieldPath.Count + projections.Length);
                         var accessKind = address.IsReadonly
                             ? (byte)1 : (byte)2;
@@ -1437,7 +1528,7 @@ public static partial class TrRmExecutableCompiler
                                                             fieldRead.Type))),
                                             schema));
                                 selections.Add((selectionRecordIndex,
-                                    destinationRegister));
+                                    destinationRegister, null, -1, 0));
                                 previousFieldRegister = destinationRegister;
                             }
 
@@ -1451,8 +1542,60 @@ public static partial class TrRmExecutableCompiler
                             projectionIndex++)
                         {
                             var projection = projections[projectionIndex];
-                            var indexRead = (BoundRead)projection.Index;
-                            var indexHome = homeByVariable[indexRead.Variable];
+                            var indexHome = -1;
+                            var captureHome = -1;
+                            var updateRegister = (byte)0;
+                            BoundUpdate? indexUpdate = null;
+                            switch (projection.Index)
+                            {
+                                case BoundRead indexRead:
+                                    indexHome = homeByVariable[
+                                        indexRead.Variable];
+                                    break;
+
+                                case BoundUpdate update
+                                    when update.Place is BoundRead place:
+                                    indexUpdate = update;
+                                    if (!homeByVariable.TryGetValue(
+                                            place.Variable,
+                                            out var sourceIndexHome))
+                                    {
+                                        throw Unsupported(
+                                            "An A2 NativeParameter index update has no source Home.");
+                                    }
+
+                                    if (update.IsPrefix)
+                                    {
+                                        indexHome = sourceIndexHome;
+                                    }
+                                    else if (
+                                        !indexCaptureHomeByCallFormalProjection
+                                            .TryGetValue((callIndex, formal,
+                                                    projectionIndex),
+                                                out var capturedHome))
+                                    {
+                                        throw Unsupported(
+                                            "An A2 postfix index update has no capture Home.");
+                                    }
+                                    else
+                                    {
+                                        captureHome = capturedHome;
+                                        indexHome = capturedHome;
+                                    }
+
+                                    updateRegister
+                                        = projectionIndex == 0
+                                            && selectedArrayBaseKind == 1
+                                                ? (byte)13
+                                                : checked((byte)(
+                                                    projectionIndex % 2));
+                                    break;
+
+                                default:
+                                    throw Unsupported(
+                                        "An A2 NativeParameter index expression is unsupported.");
+                            }
+
                             var arrayTypeIndex = NativeFixedArrayTypes.Index(
                                 projection.Layout.CarrierType);
                             if (indexHome < 0
@@ -1490,7 +1633,8 @@ public static partial class TrRmExecutableCompiler
                                                         .ElementType))),
                                         schema));
                             selections.Add((selectionRecordIndex,
-                                destinationRegister));
+                                destinationRegister, indexUpdate,
+                                captureHome, updateRegister));
                             previousArrayRegister = destinationRegister;
                         }
 
@@ -1943,6 +2087,76 @@ public static partial class TrRmExecutableCompiler
             currentCode.Add(checked((byte)(home >> 8)));
         }
 
+        void AppendStoreHome(int register, int home)
+        {
+            if ((uint)register >= 14u || (uint)home > ushort.MaxValue)
+            {
+                throw Unsupported(
+                    "A direct NativeOutput Home store has an invalid register or Home.");
+            }
+
+            currentCode.Add(0xD6);
+            currentCode.Add(checked((byte)(0x10 | register)));
+            currentCode.Add(unchecked((byte)home));
+            currentCode.Add(checked((byte)(home >> 8)));
+        }
+
+        void AppendNativeOutputIndexUpdate(BoundUpdate update,
+            int captureHome, byte valueRegister)
+        {
+            if (update.Place is not BoundRead place
+                || update.Type != place.Type
+                || !NativeFixedArrayContract.IsIndexType(update.Type)
+                || update.Operator is not (TokenKind.PlusPlus
+                    or TokenKind.MinusMinus)
+                || update.OverflowBehavior is not (
+                    BoundIntegerOverflowBehavior.Checked
+                    or BoundIntegerOverflowBehavior.Wrapping)
+                || (uint)place.Variable
+                    >= (uint)caller.Variables.Length
+                || !caller.Variables[place.Variable].IsMutable
+                || (!update.IsPrefix
+                    && (uint)captureHome > ushort.MaxValue))
+            {
+                throw Unsupported(
+                    "A direct NativeOutput array index update is unsupported.");
+            }
+
+            if (!homeByVariable.TryGetValue(place.Variable,
+                    out var sourceHome))
+            {
+                throw Unsupported(
+                    "A direct NativeOutput array index update has no source Home.");
+            }
+
+            AppendLoadHome(valueRegister, sourceHome);
+            if (!update.IsPrefix)
+            {
+                AppendStoreHome(valueRegister, captureHome);
+            }
+
+            var operation = (update.Operator, update.OverflowBehavior) switch
+            {
+                (TokenKind.PlusPlus,
+                    BoundIntegerOverflowBehavior.Checked) => (byte)0x01,
+                (TokenKind.MinusMinus,
+                    BoundIntegerOverflowBehavior.Checked) => (byte)0x02,
+                (TokenKind.PlusPlus,
+                    BoundIntegerOverflowBehavior.Wrapping) => (byte)0x05,
+                (TokenKind.MinusMinus,
+                    BoundIntegerOverflowBehavior.Wrapping) => (byte)0x06,
+                _ => throw Unsupported(
+                    "A direct NativeOutput array index update has an unsupported overflow policy."),
+            };
+            var payload = (ushort)(valueRegister | (15 << 4)
+                | (valueRegister << 8) | (15 << 12));
+            currentCode.Add(0xC0);
+            currentCode.Add(operation);
+            currentCode.Add(unchecked((byte)payload));
+            currentCode.Add((byte)(payload >> 8));
+            AppendStoreHome(valueRegister, sourceHome);
+        }
+
         void EmitCall(BoundCall call)
         {
             if (!callIndexByExpression.TryGetValue(call,
@@ -1957,9 +2171,16 @@ public static partial class TrRmExecutableCompiler
                 if (placeSelectionRecordsByCallFormal.TryGetValue(
                         (callIndex, formal), out var placeSelections))
                 {
-                    foreach (var (recordIndex, destinationRegister)
+                    foreach (var (recordIndex, destinationRegister,
+                                 indexUpdate, captureHome, updateRegister)
                         in placeSelections)
                     {
+                        if (indexUpdate is not null)
+                        {
+                            AppendNativeOutputIndexUpdate(indexUpdate,
+                                captureHome, updateRegister);
+                        }
+
                         currentCode.Add(0xD8);
                         currentCode.Add(destinationRegister);
                         currentCode.Add((byte)recordIndex);
