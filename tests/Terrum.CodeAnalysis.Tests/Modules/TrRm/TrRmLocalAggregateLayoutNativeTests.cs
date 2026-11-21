@@ -1146,6 +1146,76 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
     }
 
     [Test]
+    public async Task L1PointerLoadsPreserveDirectScalarWidthsThroughStandardJitAndAotAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+
+        const string moduleIdentity = "l1p-direct-scalar-widths";
+        const string l1pSchemaIdentity
+            = "trrm/1-draft-local-aggregate-layout-execution-pointer-loads-1";
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            public int32 Main() {
+                mut uint8 byteValue = 0xA5;
+                mut uint16 wordValue = 0xBEEF;
+                mut uint32 dwordValue = 0x89ABCDEF;
+                mut uint64 qwordValue = 0xFEDCBA9876543210;
+                unsafe {
+                    ptr<uint8> byteSource = &byteValue;
+                    ptr<uint16> wordSource = &wordValue;
+                    ptr<uint32> dwordSource = &dwordValue;
+                    ptr<uint64> qwordSource = &qwordValue;
+                    uint8 byteRead = *byteSource;
+                    uint16 wordRead = *wordSource;
+                    uint32 dwordRead = *dwordSource;
+                    uint64 qwordRead = *qwordSource;
+                    if (byteRead != uint8(0xA5)) { return -1; }
+                    if (wordRead != uint16(0xBEEF)) { return -2; }
+                    if (dwordRead != uint32(0x89ABCDEF)) { return -3; }
+                    if (qwordRead != uint64(0xFEDCBA9876543210)) { return -4; }
+                    return 42;
+                }
+            }
+            """), new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, l1pSchemaIdentity,
+            moduleTargetRequirement: 1);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(l1pSchemaIdentity, artifact),
+            moduleIdentity, []);
+        var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
+            moduleIdentity + "-reemitted", l1pSchemaIdentity,
+            moduleTargetRequirement: 1);
+        var reemittedIdentity = moduleIdentity + "-reemitted";
+        var reemittedInput = new TrRmStandardArtifactInput(
+            l1pSchemaIdentity, reemitted);
+        Assert.That(NativeModuleCompiler.ExecuteStandard(reemittedInput,
+            reemittedIdentity, [], NativeRuntimePolicy.FailFast),
+            Is.EqualTo(42));
+        var image = NativeModuleCompiler.EmitStandardExecutable(
+            reemittedInput, reemittedIdentity, [],
+            NativeRuntimePolicy.FailFast);
+        var directory = TestArtifactPaths.CreateDirectory(
+            "terrum-l1p-direct-scalar-widths-");
+        try
+        {
+            await AssertNativeImageExitCodeAsync(image,
+                Path.Combine(directory, "program.exe"),
+                reemittedIdentity, 42).ConfigureAwait(true);
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
     public async Task L1PointerLoadSnapshotsLocalAggregateThroughStandardJitAndAotAsync()
     {
         Assume.That(OperatingSystem.IsWindows()
