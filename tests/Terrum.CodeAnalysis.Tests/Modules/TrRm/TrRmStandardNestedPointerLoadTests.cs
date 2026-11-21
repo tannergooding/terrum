@@ -24,6 +24,8 @@ internal sealed class TrRmStandardNestedPointerLoadTests
         = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-pointer-loads-1";
     private const string InitializationReferenceSchemaIdentity
         = "trrm/1-draft-init-reference-bodies-1";
+    private const string GeneralPredicateGraphsSchemaIdentity
+        = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-1";
 
     public static IEnumerable<TestCaseData> PointerLoadScalarTypeCases()
     {
@@ -131,6 +133,33 @@ internal sealed class TrRmStandardNestedPointerLoadTests
                         providerSchemaIdentity,
                         providerArtifact),
                 ]));
+    }
+
+    [TestCase(PointerLoadsSchemaIdentity,
+        InitializationReferenceSchemaIdentity)]
+    [TestCase(GeneralPredicateGraphsPointerLoadsSchemaIdentity,
+        GeneralPredicateGraphsSchemaIdentity)]
+    public void PointerLoadsRejectUnamendedSchema(
+        string pointerLoadSchemaIdentity, string unamendedSchemaIdentity)
+    {
+        const string moduleIdentity = "pointer-load-unamended-schema";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public unsafe int32 Read(ptr<int32> value)
+            {
+                unsafe { return *value; }
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, pointerLoadSchemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(unamendedSchemaIdentity,
+                    artifact),
+                moduleIdentity, []));
     }
 
     [TestCase(PointerLoadsSchemaIdentity)]
