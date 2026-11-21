@@ -89,10 +89,16 @@ internal sealed class TrRmStandardNestedPointerLoadTests
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int ReadRunePointerFunction(nint pointer);
 
-    [TestCase(PointerLoadsSchemaIdentity)]
-    [TestCase(GeneralPredicateGraphsPointerLoadsSchemaIdentity)]
+    [TestCase(PointerLoadsSchemaIdentity,
+        InitializationReferenceSchemaIdentity)]
+    [TestCase(GeneralPredicateGraphsPointerLoadsSchemaIdentity,
+        InitializationReferenceSchemaIdentity)]
+    [TestCase(PointerLoadsSchemaIdentity,
+        GeneralPredicateGraphsPointerLoadsSchemaIdentity)]
+    [TestCase(GeneralPredicateGraphsPointerLoadsSchemaIdentity,
+        PointerLoadsSchemaIdentity)]
     public void PointerLoadSuccessorRejectsUnusedProviderWithDifferentSchema(
-        string schemaIdentity)
+        string schemaIdentity, string providerSchemaIdentity)
     {
         const string rootModuleIdentity = "pointer-load-root";
         const string providerModuleIdentity = "pointer-load-unused-provider";
@@ -114,7 +120,7 @@ internal sealed class TrRmStandardNestedPointerLoadTests
                 providerCompilation.Diagnostics));
         var providerArtifact = TrRmExecutableCompiler.EmitStandard(
             providerCompilation.Program!, providerModuleIdentity,
-            InitializationReferenceSchemaIdentity,
+            providerSchemaIdentity,
             TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
 
         Assert.Throws<NotSupportedException>(() =>
@@ -122,7 +128,7 @@ internal sealed class TrRmStandardNestedPointerLoadTests
                 new TrRmStandardArtifactInput(schemaIdentity, rootArtifact),
                 rootModuleIdentity, [
                     new TrRmStandardArtifactInput(
-                        InitializationReferenceSchemaIdentity,
+                        providerSchemaIdentity,
                         providerArtifact),
                 ]));
     }
