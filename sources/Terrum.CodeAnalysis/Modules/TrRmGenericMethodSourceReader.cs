@@ -130,6 +130,11 @@ public static partial class TrRmExecutableCompiler
                 .UsesForeignNativeInterface()
                     ? [.. context.ForeignNativeInterfacePointerTypes]
                     : [.. context.GenericNominalPointerTypes],
+            nativeFunctionPointerSignatures: context.Schema
+                .UsesForeignNativeInterface()
+                    ? [.. context
+                        .ForeignNativeInterfaceFunctionPointerSignatures]
+                    : [],
             genericNominalTypeDefinitions:
                 context.GenericNominalTypeDefinitions.ToImmutable(),
             genericNominalTypeInstances:

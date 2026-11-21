@@ -8944,7 +8944,8 @@ public static partial class TrRmExecutableCompiler
         List<NativePointerTypeDefinition> nativePointerTypeDefinitions,
         int[] signatureIndexByAnchorMethod, int[] structureTypeByTypeDef,
         IReadOnlyDictionary<int, PrimitiveType>? arrayTypeByTypeSpecRow = null,
-        TrRmImportTableReader imports = default)
+        TrRmImportTableReader imports = default,
+        int[]? signatureIndexByAnchorTypeSpec = null)
     {
         var signatureRow = methods.GetSignature(methodRow);
         var (first, count) = signatures.GetParamRange(signatureRow);
@@ -8957,11 +8958,15 @@ public static partial class TrRmExecutableCompiler
                 nativePointerTypeDefinitions, signatureIndexByAnchorMethod,
                 structureTypeByTypeDef,
                 imports,
-                arrayTypeByTypeSpecRow: arrayTypeByTypeSpecRow);
+                arrayTypeByTypeSpecRow: arrayTypeByTypeSpecRow,
+                signatureIndexByAnchorTypeSpec:
+                    signatureIndexByAnchorTypeSpec);
             var isFixedArray = NativeFixedArrayTypes.IsType(type);
+            var isFunctionPointer = signatureIndexByAnchorTypeSpec is not null
+                && NativeFunctionPointerTypes.IsType(type);
             if (parameters.GetMode(parameterRow) != 0
                 || (!IsForeignInvocationValueType(type, allowVoid: false)
-                    && !isFixedArray))
+                    && !isFixedArray && !isFunctionPointer))
             {
                 throw Unsupported(
                     "The source-free loader supports scalar, typed-pointer and selected fixed-array parameters.");
@@ -9536,7 +9541,8 @@ public static partial class TrRmExecutableCompiler
         List<NativePointerTypeDefinition> nativePointerTypeDefinitions,
         int[] signatureIndexByAnchorMethod, int[] structureTypeByTypeDef,
         TrRmImportTableReader imports = default,
-        IReadOnlyDictionary<int, PrimitiveType>? arrayTypeByTypeSpecRow = null)
+        IReadOnlyDictionary<int, PrimitiveType>? arrayTypeByTypeSpecRow = null,
+        int[]? signatureIndexByAnchorTypeSpec = null)
     {
         var reference = typeSpecs.GetTypeSpecRef(typeSpecRef);
         if (reference.IsRow && reference.Form == 0x11
@@ -9547,9 +9553,37 @@ public static partial class TrRmExecutableCompiler
             return fixedArrayType;
         }
 
+        if (signatureIndexByAnchorTypeSpec is not null
+            && typeSpecs.TryGetNativePointerPointeeTypeSpecRef(typeSpecRef,
+                out var pointeeTypeSpecRef))
+        {
+            var pointeeType = ReadForeignInvocationType(typeSpecs,
+                pointeeTypeSpecRef, nativePointerTypeDefinitions,
+                signatureIndexByAnchorMethod, structureTypeByTypeDef,
+                imports, arrayTypeByTypeSpecRow,
+                signatureIndexByAnchorTypeSpec);
+            var isWritable = (reference.Qualifiers & 1) != 0;
+            return GetNativePointerType(nativePointerTypeDefinitions,
+                pointeeType, isWritable);
+        }
+
         var type = typeSpecs.GetTypeSpecBytes(typeSpecRef);
         if (type.Length == 7 && type[0] == 0x0D)
         {
+            if (signatureIndexByAnchorTypeSpec is not null)
+            {
+                if (!reference.IsRow
+                    || reference.Row >= signatureIndexByAnchorTypeSpec.Length
+                    || signatureIndexByAnchorTypeSpec[reference.Row] < 0)
+                {
+                    throw Invalid(
+                        "Invalid native function-pointer TypeSpec anchor.");
+                }
+
+                return NativeFunctionPointerTypes.Type(
+                    signatureIndexByAnchorTypeSpec[reference.Row]);
+            }
+
             var anchorMethodRow = checked((int)
                 BinaryPrimitives.ReadUInt32LittleEndian(type[3..]));
             if (type[1] != 0

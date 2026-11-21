@@ -574,6 +574,86 @@ internal sealed class NativeCoreRegistrationTests
     }
 
     [Test]
+    public void StandardForeignNativeInterfaceFunctionPointerAnchorsRoundTrip()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-native-interface-parameter-surface-1";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            using Terrum.Interop;
+            [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+            [ForeignNativeInterface(VTableByteOffset: uint32(0))]
+            public interface IProbe {
+                public unsafe int32 Apply(
+                    [NativeCallConv(NativeCallingConvention.Cdecl)]
+                    fnptr<int32, int32> callback);
+            }
+            """), new CompilationOptions {
+            NativeCoreRegistration = CreateRegistration(
+                includeForeignNativeInterface: true),
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program
+            ?? throw new AssertionException("Expected a bound program.");
+        var definition = program.Interfaces.Single();
+        var member = definition.Members.Single();
+        var typeExport = new TrRmSourceTypeExport("", "IProbe",
+            "provider/IProbe") {
+            GenericArity = 0,
+            InterfaceMethodExports = [
+                new TrRmSourceInterfaceMethodExport(
+                    member.SourceInputOrdinal, member.SourceDeclarationSpan,
+                    "provider/IProbe.Apply"),
+            ],
+        };
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "provider.module", schemaIdentity, 1, [typeExport]);
+        var schema
+            = TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft;
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(new TrRmArtifactIndex(artifact,
+                schema));
+        var anchorTypeSpecRows = new List<int>();
+        for (var typeSpecRow = 1;
+            typeSpecRow <= tables.TypeSpecs.Count; typeSpecRow++)
+        {
+            if (tables.NativeFunctionPointerAnchors
+                .HasAnchorForTypeSpec(typeSpecRow))
+            {
+                anchorTypeSpecRows.Add(typeSpecRow);
+            }
+        }
+        Assert.That(anchorTypeSpecRows, Has.Count.EqualTo(1));
+        Assert.That(tables.NativeFunctionPointerAnchors.GetCallingConvention(
+            anchorTypeSpecRows[0]), Is.EqualTo((byte)
+                NativeCallingConvention.Cdecl));
+
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            "provider.module", []);
+        var signature = reference.NativeFunctionPointerSignatures.Single();
+        Assert.That(signature.CallingConvention,
+            Is.EqualTo(NativeCallingConvention.Cdecl));
+        Assert.That(signature.ReturnType, Is.EqualTo(PrimitiveType.Int32));
+        Assert.That(signature.ParameterTypes,
+            Is.EqualTo(new[] { PrimitiveType.Int32 }));
+        var callbackType = reference.Interfaces.Single().Members.Single()
+            .Parameters.Single().Type.PrimitiveType;
+        Assert.That(NativeFunctionPointerTypes.IsType(callbackType), Is.True);
+
+        var caller = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            using Terrum.Interop;
+            int32 Invoke(ptr<void> receiver,
+                [NativeCallConv(NativeCallingConvention.Cdecl)]
+                fnptr<int32, int32> callback) {
+                unsafe { return IProbe.Apply(receiver, callback); }
+            }
+            """), reference);
+        Assert.That(caller.HasErrors, Is.False,
+            string.Join(Environment.NewLine, caller.Diagnostics));
+    }
+
+    [Test]
     public void StandardForeignNativeInterfaceParameterProducerRetainsDefaultSurface()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""

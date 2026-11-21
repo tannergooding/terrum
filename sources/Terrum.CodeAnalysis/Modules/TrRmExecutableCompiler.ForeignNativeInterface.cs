@@ -42,7 +42,6 @@ public static partial class TrRmExecutableCompiler
             || !program.StandardClassDeclarations.IsEmpty
             || !program.InterfaceWitnesses.IsEmpty
             || !program.EnumDefinitions.IsEmpty
-            || !program.NativeFunctionPointerSignatures.IsEmpty
             || !ForeignNativeInterfaceContract.IsValidTable(program))
         {
             throw Unsupported(
@@ -73,6 +72,11 @@ public static partial class TrRmExecutableCompiler
         var hasNativeOutputs = program.Interfaces.Any(static definition =>
             definition.Members.Any(static member =>
                 !member.NativeOutputContracts.IsDefaultOrEmpty));
+        var hasFunctionPointerPredicates
+            = GetForeignNativeFunctionPointerSignatureIndexes(
+                program.Interfaces, program).Any(index =>
+                !program.NativeFunctionPointerSignatures[index]
+                    .Selectors.IsEmpty);
         var hasScalarDefaults = schema
             .UsesForeignNativeInterfaceParameterSurface()
             && program.Interfaces.Any(static definition =>
@@ -87,6 +91,10 @@ public static partial class TrRmExecutableCompiler
         if (hasNativeOutputs)
         {
             featureRows.Add(TrRmFeatureRow.NativeOutputCellsCandidate);
+            featureRows.Add(TrRmFeatureRow.PublishedPredicates);
+        }
+        else if (hasFunctionPointerPredicates)
+        {
             featureRows.Add(TrRmFeatureRow.PublishedPredicates);
         }
         if (hasScalarDefaults)

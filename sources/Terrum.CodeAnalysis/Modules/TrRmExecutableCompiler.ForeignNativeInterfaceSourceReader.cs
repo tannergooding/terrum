@@ -47,9 +47,15 @@ public static partial class TrRmExecutableCompiler
         var signatureIndexByAnchorMethod
             = new int[tables.Methods.Count + 1];
         Array.Fill(signatureIndexByAnchorMethod, -1);
+        var signatureIndexByAnchorTypeSpec
+            = new int[tables.TypeSpecs.Count + 1];
+        Array.Fill(signatureIndexByAnchorTypeSpec, -1);
         var structureTypeByTypeDef
             = new int[tables.TypeDefs.Count + 1];
         Array.Fill(structureTypeByTypeDef, -1);
+        ReadForeignNativeInterfaceFunctionPointerAnchors(tables, context,
+            moduleRow, pointerTypeIndexes, signatureIndexByAnchorMethod,
+            signatureIndexByAnchorTypeSpec, structureTypeByTypeDef);
         var foreignInterfaceRowsByOwner
             = new Dictionary<int, int>(tables.ForeignNativeInterfaces.Count);
         for (var foreignInterfaceRow = 1;
@@ -150,6 +156,7 @@ public static partial class TrRmExecutableCompiler
                         usedImportRows, foreignInterfaceRow,
                         context.ForeignNativeInterfacePointerTypes,
                         signatureIndexByAnchorMethod,
+                        signatureIndexByAnchorTypeSpec,
                         structureTypeByTypeDef, firstMethod, methodCount);
                 if (!context.InterfaceDefinitionsByTypeDef.TryAdd(
                         (artifactIndex, moduleRow, typeDef), providerView))
@@ -219,7 +226,8 @@ public static partial class TrRmExecutableCompiler
                 context, interfaceDef, typeDef, foreignInterfaceRow,
                 qualifiedName, typeExportKey, targetRequirement,
                 runtimePolicy, methodKeys, pointerTypeIndexes,
-                signatureIndexByAnchorMethod, structureTypeByTypeDef,
+                signatureIndexByAnchorMethod,
+                signatureIndexByAnchorTypeSpec, structureTypeByTypeDef,
                 tables.Modules.GetIdentity(moduleRow));
             if (!context.InterfaceDefinitionsByTypeDef.TryAdd(
                     (artifactIndex, moduleRow, typeDef), definition))
@@ -309,8 +317,9 @@ public static partial class TrRmExecutableCompiler
         GenericInterfaceImportRows importRows,
         HashSet<int> usedImportRows, int foreignInterfaceRow,
         List<NativePointerTypeDefinition> nativePointerTypeDefinitions,
-        int[] signatureIndexByAnchorMethod, int[] structureTypeByTypeDef,
-        int firstMethod, int methodCount)
+        int[] signatureIndexByAnchorMethod,
+        int[] signatureIndexByAnchorTypeSpec,
+        int[] structureTypeByTypeDef, int firstMethod, int methodCount)
     {
         _ = usedImportRows.Add(typeImportRow);
         var typeModuleRef = tables.Imports.GetModuleRefForImportRow(
@@ -485,7 +494,8 @@ public static partial class TrRmExecutableCompiler
             qualifiedName, selectedType.ExportKey,
             selectedType.TargetRequirement, selectedType.RuntimePolicy,
             methodExportKeys, nativePointerTypeDefinitions,
-            signatureIndexByAnchorMethod, structureTypeByTypeDef,
+            signatureIndexByAnchorMethod,
+            signatureIndexByAnchorTypeSpec, structureTypeByTypeDef,
             selectedType.ProducerIdentity);
         ValidateForeignNativeInterfaceProviderContract(expected,
             providerInterface, providerMembersByKey);
@@ -636,6 +646,286 @@ public static partial class TrRmExecutableCompiler
         return true;
     }
 
+    private static void ReadForeignNativeInterfaceFunctionPointerAnchors(
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+        GenericMethodReadContext context, int moduleRow,
+        List<NativePointerTypeDefinition> nativePointerTypeDefinitions,
+        int[] signatureIndexByAnchorMethod,
+        int[] signatureIndexByAnchorTypeSpec,
+        int[] structureTypeByTypeDef)
+    {
+        var typeStates = new byte[tables.TypeSpecs.Count + 1];
+        var anchorStates = new byte[tables.TypeSpecs.Count + 1];
+
+        void EnsureTypeSpec(uint typeSpecRef, int depth)
+        {
+            if (depth > SemanticVerifier.MaximumDepth)
+            {
+                throw Unsupported(
+                    "The ForeignNativeInterface function-pointer type closure exceeds the supported depth.");
+            }
+
+            var reference = tables.TypeSpecs.GetTypeSpecRef(typeSpecRef);
+            if (reference.IsRow && reference.Form == 0x0D)
+            {
+                EnsureAnchor(reference.Row, depth + 1);
+                return;
+            }
+
+            if (!tables.TypeSpecs.TryGetNativePointerPointeeTypeSpecRef(
+                    typeSpecRef, out var pointeeTypeSpecRef)
+                || !tables.TypeSpecs.GetTypeSpecRef(typeSpecRef).IsRow)
+            {
+                return;
+            }
+
+            var row = reference.Row;
+            if (typeStates[row] == 1)
+            {
+                throw Invalid(
+                    "A ForeignNativeInterface function-pointer TypeSpec is cyclic.");
+            }
+            if (typeStates[row] == 2)
+            {
+                return;
+            }
+
+            typeStates[row] = 1;
+            EnsureTypeSpec(pointeeTypeSpecRef, depth + 1);
+            typeStates[row] = 2;
+        }
+
+        void EnsureAnchor(int typeSpecRow, int depth)
+        {
+            if (depth > SemanticVerifier.MaximumDepth)
+            {
+                throw Unsupported(
+                    "The ForeignNativeInterface function-pointer anchor graph exceeds the supported depth.");
+            }
+
+            if (anchorStates[typeSpecRow] == 1)
+            {
+                throw Invalid(
+                    "A ForeignNativeInterface function-pointer anchor is cyclic.");
+            }
+            if (anchorStates[typeSpecRow] == 2)
+            {
+                return;
+            }
+
+            anchorStates[typeSpecRow] = 1;
+            var methodRow = tables.NativeFunctionPointerAnchors
+                .GetAnchorMethodDefRow(typeSpecRow);
+            var signatureRow = tables.Methods.GetSignature(methodRow);
+            var (firstParameter, parameterCount)
+                = tables.Signatures.GetParamRange(signatureRow);
+            for (var ordinal = 0; ordinal < parameterCount; ordinal++)
+            {
+                EnsureTypeSpec(tables.Parameters.GetTypeSpec(
+                    firstParameter + ordinal), depth + 1);
+            }
+            EnsureTypeSpec(tables.Signatures.GetResultTypeSpec(
+                signatureRow), depth + 1);
+
+            var parameterTypes = ReadForeignInvocationParameterTypes(
+                methodRow, tables.Methods, tables.Signatures,
+                tables.Parameters, tables.TypeSpecs,
+                nativePointerTypeDefinitions, signatureIndexByAnchorMethod,
+                structureTypeByTypeDef, imports: tables.Imports,
+                signatureIndexByAnchorTypeSpec:
+                    signatureIndexByAnchorTypeSpec);
+            var resultType = ReadForeignInvocationType(tables.TypeSpecs,
+                tables.Signatures.GetResultTypeSpec(signatureRow),
+                nativePointerTypeDefinitions, signatureIndexByAnchorMethod,
+                structureTypeByTypeDef, imports: tables.Imports,
+                signatureIndexByAnchorTypeSpec:
+                    signatureIndexByAnchorTypeSpec);
+            var predicateContracts
+                = tables.Contracts.GetPredicateGraphContracts(methodRow);
+            var selectors
+                = ImmutableArray.CreateBuilder<
+                    NativeFunctionPointerSelector>(
+                    predicateContracts.Length);
+            var selectorOrdinalByGraphRow
+                = new Dictionary<int, uint>(predicateContracts.Length);
+            foreach (var predicate in predicateContracts)
+            {
+                if (predicate.PhaseTag != 3)
+                {
+                    throw Invalid(
+                        "A ForeignNativeInterface function-pointer anchor contains an unsupported predicate phase.");
+                }
+
+                var rootNode = tables.PredicateGraphs.GetRootNodeRow(
+                    predicate.PredicateGraphRow);
+                var nodeKind = tables.PredicateNodes.GetNodeKind(rootNode);
+                if (nodeKind > byte.MaxValue
+                    || !selectorOrdinalByGraphRow.TryAdd(
+                        predicate.PredicateGraphRow,
+                        predicate.PhaseLocalOrdinal))
+                {
+                    throw Invalid(
+                        "A ForeignNativeInterface function-pointer selector is malformed.");
+                }
+
+                selectors.Add(new NativeFunctionPointerSelector(
+                    predicate.PhaseTag, predicate.PhaseLocalOrdinal,
+                    checked((byte)nodeKind)));
+            }
+
+            var outputStates
+                = ImmutableArray.CreateBuilder<
+                    NativeFunctionPointerOutputState>();
+            foreach (var outputState in tables.Contracts
+                         .GetOutputStateContracts(methodRow))
+            {
+                if (!selectorOrdinalByGraphRow.TryGetValue(
+                        outputState.PredicateGraphRow,
+                        out var selectorOrdinal))
+                {
+                    throw Invalid(
+                        "A ForeignNativeInterface function-pointer output state has no selector.");
+                }
+
+                outputStates.Add(new NativeFunctionPointerOutputState(
+                    checked((uint)outputState.ParameterOrdinal),
+                    selectorOrdinal, outputState.State));
+            }
+
+            var nativeParameters = tables.Contracts.GetNativeParameters(
+                methodRow);
+            if (!nativeParameters.IsEmpty)
+            {
+                throw Unsupported(
+                    "Standard FNI function-pointer anchors do not admit NativeParameter.");
+            }
+
+            var signature = new NativeFunctionPointerSignatureDefinition(
+                (NativeCallingConvention)tables.NativeFunctionPointerAnchors
+                    .GetCallingConvention(typeSpecRow),
+                resultType, parameterTypes) {
+                EffectsMask = tables.Contracts.GetEffectsMask(methodRow),
+                Selectors = selectors.MoveToImmutable(),
+                OutputStates = outputStates.MoveToImmutable(),
+                Dependencies = [.. tables.Contracts
+                    .GetDependencyContracts(methodRow)
+                    .Select(static dependency =>
+                        new NativeFunctionPointerDependency(
+                            dependency.DestinationKind,
+                            dependency.SourceKind,
+                            dependency.Relationship,
+                            dependency.Phase,
+                            dependency.DestinationOrdinal,
+                            dependency.SourceOrdinal))],
+            };
+
+            var signatureIndex = -1;
+            for (var index = 0;
+                index < context
+                    .ForeignNativeInterfaceFunctionPointerSignatures.Count;
+                index++)
+            {
+                if (NativeFunctionPointerContract.AreEquivalent(
+                        context
+                            .ForeignNativeInterfaceFunctionPointerSignatures[
+                                index], signature))
+                {
+                    signatureIndex = index;
+                    break;
+                }
+            }
+
+            if (signatureIndex < 0)
+            {
+                var candidateSignatures = context
+                    .ForeignNativeInterfaceFunctionPointerSignatures
+                    .Append(signature).ToImmutableArray();
+                if (!NativeFunctionPointerContract.IsValidTable(
+                        candidateSignatures)
+                    || !NativePointerTypeContract.IsValidTable(
+                        [.. nativePointerTypeDefinitions], [],
+                        candidateSignatures))
+                {
+                    throw Invalid(
+                        "A ForeignNativeInterface function-pointer anchor has an invalid signature.");
+                }
+
+                signatureIndex = context
+                    .ForeignNativeInterfaceFunctionPointerSignatures.Count;
+                context.ForeignNativeInterfaceFunctionPointerSignatures.Add(
+                    signature);
+            }
+
+            signatureIndexByAnchorTypeSpec[typeSpecRow] = signatureIndex;
+            if (signatureIndexByAnchorMethod[methodRow] == -1)
+            {
+                signatureIndexByAnchorMethod[methodRow] = signatureIndex;
+            }
+            else if (signatureIndexByAnchorMethod[methodRow] != signatureIndex)
+            {
+                signatureIndexByAnchorMethod[methodRow] = -2;
+            }
+            anchorStates[typeSpecRow] = 2;
+        }
+
+        var foreignInterfaceOwners = new HashSet<int>(
+            tables.ForeignNativeInterfaces.Count);
+        for (var foreignInterfaceRow = 1;
+            foreignInterfaceRow <= tables.ForeignNativeInterfaces.Count;
+            foreignInterfaceRow++)
+        {
+            var interfaceDef = checked((int)tables.ForeignNativeInterfaces
+                .GetOwnerInterfaceDef(foreignInterfaceRow));
+            var typeDef = tables.Interfaces.GetOwnerTypeDef(interfaceDef);
+            if (tables.TypeDefs.GetOwnerModule(typeDef) == moduleRow)
+            {
+                _ = foreignInterfaceOwners.Add(interfaceDef);
+            }
+        }
+
+        var (typeDefStart, typeDefEnd)
+            = tables.Modules.GetTypeDefRange(moduleRow);
+        for (var typeDef = typeDefStart; typeDef < typeDefEnd; typeDef++)
+        {
+            var interfaceDef
+                = tables.Interfaces.GetInterfaceDefForTypeDef(typeDef);
+            if (interfaceDef == 0
+                || !foreignInterfaceOwners.Contains(interfaceDef))
+            {
+                continue;
+            }
+
+            var (firstMethod, methodCount)
+                = tables.Interfaces.GetMethodRange(interfaceDef);
+            for (var methodOrdinal = 0; methodOrdinal < methodCount;
+                methodOrdinal++)
+            {
+                var methodRow = tables.InterfaceMethods.GetMethodDefRow(
+                    firstMethod + methodOrdinal);
+                var signatureRow = tables.Methods.GetSignature(methodRow);
+                var (firstParameter, parameterCount)
+                    = tables.Signatures.GetParamRange(signatureRow);
+                for (var ordinal = 0; ordinal < parameterCount; ordinal++)
+                {
+                    EnsureTypeSpec(tables.Parameters.GetTypeSpec(
+                        firstParameter + ordinal), 0);
+                }
+                EnsureTypeSpec(tables.Signatures.GetResultTypeSpec(
+                    signatureRow), 0);
+            }
+        }
+
+        if (context.ForeignNativeInterfaceFunctionPointerSignatures.Count
+            != 0
+            && !NativeFunctionPointerContract.IsValidTable(context
+                .ForeignNativeInterfaceFunctionPointerSignatures.ToImmutableArray()))
+        {
+            throw Invalid(
+                "The selected FNI modules contain an invalid function-pointer signature table.");
+        }
+
+    }
+
     private static BoundInterfaceDefinition
         ReadForeignNativeInterfaceDefinition(
         TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
@@ -644,8 +934,9 @@ public static partial class TrRmExecutableCompiler
         uint targetRequirement, uint runtimePolicy,
         ImmutableArray<string>[] methodExportKeys,
         List<NativePointerTypeDefinition> nativePointerTypeDefinitions,
-        int[] signatureIndexByAnchorMethod, int[] structureTypeByTypeDef,
-        string moduleIdentity)
+        int[] signatureIndexByAnchorMethod,
+        int[] signatureIndexByAnchorTypeSpec,
+        int[] structureTypeByTypeDef, string moduleIdentity)
     {
         var (fieldStart, fieldEnd)
             = tables.TypeDefs.GetFieldRange(typeDef);
@@ -678,7 +969,9 @@ public static partial class TrRmExecutableCompiler
                 methodRow, tables.Methods, tables.Signatures,
                 tables.Parameters, tables.TypeSpecs,
                 nativePointerTypeDefinitions, signatureIndexByAnchorMethod,
-                structureTypeByTypeDef, imports: tables.Imports);
+                structureTypeByTypeDef, imports: tables.Imports,
+                signatureIndexByAnchorTypeSpec:
+                    signatureIndexByAnchorTypeSpec);
             var (firstParameter, parameterCount)
                 = tables.Signatures.GetParamRange(signatureRow);
             var parameters = ImmutableArray.CreateBuilder<
@@ -751,7 +1044,9 @@ public static partial class TrRmExecutableCompiler
             var resultType = ReadForeignInvocationType(tables.TypeSpecs,
                 resultTypeSpec, nativePointerTypeDefinitions,
                 signatureIndexByAnchorMethod, structureTypeByTypeDef,
-                imports: tables.Imports);
+                imports: tables.Imports,
+                signatureIndexByAnchorTypeSpec:
+                    signatureIndexByAnchorTypeSpec);
             var boundResultType = CreateForeignNativeInterfaceType(
                 tables.TypeSpecs, resultTypeSpec, resultType,
                 nativePointerTypeDefinitions);
@@ -803,12 +1098,6 @@ public static partial class TrRmExecutableCompiler
         PrimitiveType primitiveType,
         List<NativePointerTypeDefinition> nativePointerTypeDefinitions)
     {
-        if (NativeFunctionPointerTypes.IsType(primitiveType))
-        {
-            throw Unsupported(
-                "F+I source-free references do not yet decode function-pointer anchors.");
-        }
-
         var isWritable = NativePointerTypes.IsType(primitiveType)
             ? nativePointerTypeDefinitions[
                 NativePointerTypes.Index(primitiveType)].IsWritable

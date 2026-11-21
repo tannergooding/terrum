@@ -1310,9 +1310,21 @@ not retry another method. The mandatory verifier evaluates the receiver first,
 revalidates member/layout/convention/output identity, and carries receiver and
 formal dependencies through result-correlated output publication. Source-call
 and output-flow regressions are added but unverified under the active hold.
-Standard/private identity persistence, provider replacement, dispatch and
-lowering remain open; the proposal remains unapproved. General aggregate
-output Bodies and native-interface execution remain incomplete.
+Under the same unapproved candidates, Standard F+I and F+I+SF1+PS1 now emit
+imported TypeDef/InterfaceDef/MethodDef expected views and PS1 surfaces.
+Source-free loading binds those expectations to the selected provider and
+checks owner, slot, ABI/convention, unsafe/no-return, NativeOutput and
+dependency contracts while allowing parameter label/default changes for
+fresh source. Standard `0x0D` function-pointer anchors now emit and load
+recursive scalar/pointer signatures, convention, Effects, phase-3 selectors,
+OutputState and Dependency contracts. Provider ABI rejection and callback
+round-trip/call-binding regressions are added but unverified under the active
+hold. Complete Import/Export/PS1/Contract/graph row remapping, aggregate
+pointee TypeDef/Layout closure, FNI call Body/CallSite emission,
+dispatch/native lowering, private persistence, CLI transport and runtime
+remain open. NativeParameter is not admitted on these methods or anchors, and
+neither FNI proposal is approved. General aggregate output Bodies and
+native-interface execution remain incomplete.
 [CG-004](implementation/conformance-gaps.md#cg-004) owns
 the detailed composition and qualification gates. Earlier TRRM NativeOutput
 clauses and ScalarInitOutput encoding are prototype artifacts, not a fallback

@@ -5694,6 +5694,24 @@ public static partial class TrRmExecutableCompiler
         var nativePointerTypeRows = new Dictionary<PrimitiveType, int>();
         var structureTypeDefRows = new Dictionary<int, int>();
         var typeDefTypeSpecRows = new Dictionary<int, int>();
+        var foreignFunctionPointerSignatureIndexes
+            = foreignNativeInterface
+                ? GetForeignNativeFunctionPointerSignatureIndexes(
+                    emissions.Select(static emission =>
+                        emission.Definition), program)
+                : ImmutableArray<int>.Empty;
+        var foreignFunctionPointerAnchorMethodRows
+            = new Dictionary<int, int>(
+                foreignFunctionPointerSignatureIndexes.Length);
+        var nextForeignFunctionPointerAnchorMethodRow = checked(methodCount
+            + emissions.Sum(static emission =>
+                emission.Definition.Members.Length) + 1);
+        foreach (var signatureIndex
+            in foreignFunctionPointerSignatureIndexes)
+        {
+            foreignFunctionPointerAnchorMethodRows.Add(signatureIndex,
+                nextForeignFunctionPointerAnchorMethodRow++);
+        }
         var foreignReceiverTypeSpecRows = new Dictionary<bool, uint>();
         if (foreignNativeInterface)
         {
@@ -5729,6 +5747,31 @@ public static partial class TrRmExecutableCompiler
                 primitive => checked((int)GetBuiltInTypeSpecRef(primitive,
                     builtInTypeSpecRows, typeSpecRows)));
             return checked((uint)row);
+        }
+
+        foreach (var signatureIndex
+            in foreignFunctionPointerSignatureIndexes)
+        {
+            var signature = program.NativeFunctionPointerSignatures[
+                signatureIndex];
+            if (signature.CallingConvention is not (
+                    NativeCallingConvention.Unmanaged
+                    or NativeCallingConvention.Cdecl
+                    or NativeCallingConvention.Stdcall
+                    or NativeCallingConvention.Vectorcall))
+            {
+                throw Unsupported(
+                    "Standard FNI function-pointer anchors require an explicit registered convention.");
+            }
+
+            var typeSpecRow = checked((uint)typeSpecRows.Count + 1);
+            typeSpecRows.Add(TrRmTypeSpecTableWriter.NativeFunctionPointer(
+                (byte)signature.CallingConvention,
+                checked((uint)foreignFunctionPointerAnchorMethodRows[
+                    signatureIndex])));
+            nativeFunctionPointerTypeRows.Add(
+                NativeFunctionPointerTypes.Type(signatureIndex),
+                checked((int)typeSpecRow));
         }
 
         uint GetForeignNativeInterfaceReceiverTypeSpecRef(
@@ -6125,6 +6168,36 @@ public static partial class TrRmExecutableCompiler
                 AppendUInt32(layoutBytes, 0);
                 AppendUInt32(layoutBytes, 0);
             }
+        }
+
+        if (foreignNativeInterface
+            && !foreignFunctionPointerSignatureIndexes.IsEmpty)
+        {
+            AddForeignNativeFunctionPointerAnchors(program,
+                foreignFunctionPointerSignatureIndexes,
+                foreignFunctionPointerAnchorMethodRows,
+                type => type == PrimitiveType.Void
+                    ? GetBuiltInTypeSpecRef(PrimitiveType.Void,
+                        builtInTypeSpecRows, typeSpecRows)
+                    : checked((uint)NativeValueTypeRow(type,
+                        nativeRawPointerTypeRow,
+                        nativeFunctionPointerTypeRows, typeSpecRows,
+                        nativePointerTypeRows, program.NativePointerTypes,
+                        structureTypeDefRows, typeDefTypeSpecRows,
+                        primitive => checked((int)GetBuiltInTypeSpecRef(
+                            primitive, builtInTypeSpecRows, typeSpecRows)))),
+                methodCount, signatureCount, parameterCount,
+                contractCount, ref emittedMethods, ref emittedSignatures,
+                ref emittedParameters, names, methodBytes, signatureBytes,
+                parameterBytes, foreignInterfaceContractRows,
+                foreignInterfacePredicateGraphs,
+                foreignInterfacePredicateFootprints,
+                foreignInterfacePredicateRoots,
+                foreignInterfacePredicateNodes,
+                foreignInterfacePredicateOperands,
+                GetCount(sections, 0x0037), GetCount(sections, 0x0038),
+                GetCount(sections, 0x0039), GetCount(sections, 0x003B),
+                GetCount(sections, 0x003C), schema);
         }
 
         var rewrittenStrings = TrRmStringTableWriter.EncodeTextRows(names);
@@ -6575,6 +6648,24 @@ public static partial class TrRmExecutableCompiler
             = new Dictionary<int, int>();
         var foreignNativeTypeDefTypeSpecRows
             = new Dictionary<int, int>();
+        var foreignFunctionPointerSignatureIndexes
+            = foreignNativeInterface
+                ? GetForeignNativeFunctionPointerSignatureIndexes(
+                    emissions.Select(static emission =>
+                        emission.Definition), program)
+                : ImmutableArray<int>.Empty;
+        var foreignFunctionPointerAnchorMethodRows
+            = new Dictionary<int, int>(
+                foreignFunctionPointerSignatureIndexes.Length);
+        var nextForeignFunctionPointerAnchorMethodRow = checked(methodCount
+            + emissions.Sum(static emission =>
+                emission.Definition.Members.Length) + 1);
+        foreach (var signatureIndex
+            in foreignFunctionPointerSignatureIndexes)
+        {
+            foreignFunctionPointerAnchorMethodRows.Add(signatureIndex,
+                nextForeignFunctionPointerAnchorMethodRow++);
+        }
         var foreignNativeRawPointerTypeRow = 0;
         var hasForeignNativeRawPointerSignatureType
             = foreignNativeInterface && emissions.Any(static emission =>
@@ -6583,7 +6674,19 @@ public static partial class TrRmExecutableCompiler
                         == PrimitiveType.NativeRawPointer
                     || member.Parameters.Any(static parameter =>
                         parameter.Type.PrimitiveType
-                            == PrimitiveType.NativeRawPointer)));
+                            == PrimitiveType.NativeRawPointer)))
+                || foreignNativeInterface
+                    && foreignFunctionPointerSignatureIndexes.Any(
+                        signatureIndex =>
+                        {
+                            var signature
+                                = program.NativeFunctionPointerSignatures[
+                                    signatureIndex];
+                            return signature.ReturnType
+                                    == PrimitiveType.NativeRawPointer
+                                || signature.ParameterTypes.Contains(
+                                    PrimitiveType.NativeRawPointer);
+                        });
         if (foreignNativeInterface
             && (hasForeignNativeRawPointerSignatureType
                 || program.NativePointerTypes.Any(static pointer =>
@@ -6622,6 +6725,31 @@ public static partial class TrRmExecutableCompiler
                 primitive => checked((int)GetBuiltInTypeSpecRef(primitive,
                     builtInTypeSpecRows, typeSpecRows)));
             return checked((uint)row);
+        }
+
+        foreach (var signatureIndex
+            in foreignFunctionPointerSignatureIndexes)
+        {
+            var signature = program.NativeFunctionPointerSignatures[
+                signatureIndex];
+            if (signature.CallingConvention is not (
+                    NativeCallingConvention.Unmanaged
+                    or NativeCallingConvention.Cdecl
+                    or NativeCallingConvention.Stdcall
+                    or NativeCallingConvention.Vectorcall))
+            {
+                throw Unsupported(
+                    "Standard FNI function-pointer anchors require an explicit registered convention.");
+            }
+
+            var typeSpecRow = checked((uint)typeSpecRows.Count + 1);
+            typeSpecRows.Add(TrRmTypeSpecTableWriter.NativeFunctionPointer(
+                (byte)signature.CallingConvention,
+                checked((uint)foreignFunctionPointerAnchorMethodRows[
+                    signatureIndex])));
+            foreignNativeFunctionPointerTypeRows.Add(
+                NativeFunctionPointerTypes.Type(signatureIndex),
+                checked((int)typeSpecRow));
         }
 
         uint GetForeignNativeInterfaceReceiverTypeSpecRef(
@@ -7055,6 +7183,38 @@ public static partial class TrRmExecutableCompiler
             }
 
             emissionOrdinal++;
+        }
+
+        if (foreignNativeInterface
+            && !foreignFunctionPointerSignatureIndexes.IsEmpty)
+        {
+            AddForeignNativeFunctionPointerAnchors(program,
+                foreignFunctionPointerSignatureIndexes,
+                foreignFunctionPointerAnchorMethodRows,
+                type => type == PrimitiveType.Void
+                    ? GetBuiltInTypeSpecRef(PrimitiveType.Void,
+                        builtInTypeSpecRows, typeSpecRows)
+                    : checked((uint)NativeValueTypeRow(type,
+                        foreignNativeRawPointerTypeRow,
+                        foreignNativeFunctionPointerTypeRows, typeSpecRows,
+                        foreignNativePointerTypeRows,
+                        program.NativePointerTypes,
+                        foreignNativeStructureTypeDefRows,
+                        foreignNativeTypeDefTypeSpecRows,
+                        primitive => checked((int)GetBuiltInTypeSpecRef(
+                            primitive, builtInTypeSpecRows, typeSpecRows)))),
+                methodCount, signatureCount, parameterCount,
+                contractCount, ref emittedMethods, ref emittedSignatures,
+                ref emittedParameters, names, methodBytes, signatureBytes,
+                parameterBytes, foreignInterfaceContractRows,
+                foreignInterfacePredicateGraphs,
+                foreignInterfacePredicateFootprints,
+                foreignInterfacePredicateRoots,
+                foreignInterfacePredicateNodes,
+                foreignInterfacePredicateOperands,
+                GetCount(sections, 0x0037), GetCount(sections, 0x0038),
+                GetCount(sections, 0x0039), GetCount(sections, 0x003B),
+                GetCount(sections, 0x003C), schema);
         }
 
         var rewrittenStrings = TrRmStringTableWriter.EncodeTextRows(names);
@@ -7990,6 +8150,268 @@ public static partial class TrRmExecutableCompiler
             payload[8] = state;
             contractRows.Add(new TrRmContractRow(methodOwner, 2, payload));
         }
+    }
+
+    private static ImmutableArray<int>
+        GetForeignNativeFunctionPointerSignatureIndexes(
+        IEnumerable<BoundInterfaceDefinition> definitions,
+        BoundProgram program)
+    {
+        var signatures = program.NativeFunctionPointerSignatures;
+        var pointerTypes = program.NativePointerTypes;
+        var states = new byte[signatures.Length];
+        var retained = new SortedSet<int>();
+
+        void Visit(PrimitiveType type, int depth)
+        {
+            if (depth > SemanticVerifier.MaximumDepth)
+            {
+                throw Unsupported(
+                    "The ForeignNativeInterface function-pointer type closure exceeds the supported depth.");
+            }
+
+            if (NativePointerTypes.IsType(type))
+            {
+                var pointerIndex = NativePointerTypes.Index(type);
+                if ((uint)pointerIndex >= (uint)pointerTypes.Length)
+                {
+                    throw Unsupported(
+                        "A ForeignNativeInterface signature references an invalid native pointer type.");
+                }
+
+                Visit(pointerTypes[pointerIndex].PointeeType, depth + 1);
+                return;
+            }
+
+            if (!NativeFunctionPointerTypes.IsType(type))
+            {
+                return;
+            }
+
+            var signatureIndex = NativeFunctionPointerTypes.Index(type);
+            if ((uint)signatureIndex >= (uint)signatures.Length)
+            {
+                throw Unsupported(
+                    "A ForeignNativeInterface signature references an invalid function-pointer anchor.");
+            }
+
+            if (states[signatureIndex] == 1)
+            {
+                throw Unsupported(
+                    "A ForeignNativeInterface function-pointer signature contains a cycle.");
+            }
+            if (states[signatureIndex] == 2)
+            {
+                return;
+            }
+
+            states[signatureIndex] = 1;
+            var signature = signatures[signatureIndex];
+            Visit(signature.ReturnType, depth + 1);
+            foreach (var parameterType in signature.ParameterTypes)
+            {
+                Visit(parameterType, depth + 1);
+            }
+            states[signatureIndex] = 2;
+            _ = retained.Add(signatureIndex);
+        }
+
+        foreach (var definition in definitions)
+        {
+            foreach (var member in definition.Members)
+            {
+                if (member.ResultType is BoundInterfaceType resultType)
+                {
+                    Visit(resultType.PrimitiveType, 0);
+                }
+                foreach (var parameter in member.Parameters)
+                {
+                    Visit(parameter.Type.PrimitiveType, 0);
+                }
+            }
+        }
+
+        return [.. retained];
+    }
+
+    private static void AddForeignNativeFunctionPointerAnchors(
+        BoundProgram program, ImmutableArray<int> signatureIndexes,
+        IReadOnlyDictionary<int, int> anchorMethodRows,
+        Func<PrimitiveType, uint> typeSpecRef,
+        int methodCount, int signatureCount, int parameterCount,
+        int contractCount, ref int emittedMethods, ref int emittedSignatures,
+        ref int emittedParameters, List<(string Text, int Encoding)> names,
+        List<byte> methodBytes, List<byte> signatureBytes,
+        List<byte> parameterBytes, List<TrRmContractRow> contractRows,
+        List<TrRmPredicateGraphRow> predicateGraphs,
+        List<TrRmPredicateReadFootprintRow> predicateFootprints,
+        List<TrRmPredicateReadRootRow> predicateRoots,
+        List<TrRmPredicateNodeRow> predicateNodes,
+        List<TrRmPredicateNodeOperandRow> predicateOperands,
+        int predicateGraphBaseCount, int predicateFootprintBaseCount,
+        int predicateRootBaseCount, int predicateNodeBaseCount,
+        int predicateOperandBaseCount, TrRmArtifactSchema schema)
+    {
+        var usedNames = names.Select(static name => name.Text)
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (var signatureIndex in signatureIndexes)
+        {
+            var methodRow = checked(methodCount + emittedMethods + 1);
+            if (!anchorMethodRows.TryGetValue(signatureIndex,
+                    out var expectedMethodRow)
+                || methodRow != expectedMethodRow)
+            {
+                throw Invalid(
+                    "The Standard FNI function-pointer anchor row order changed during emission.");
+            }
+
+            var signature
+                = program.NativeFunctionPointerSignatures[signatureIndex];
+            if (!signature.NativeParameters.IsDefaultOrEmpty
+                || signature.EffectsMask is not (0 or 2 or 4 or 6)
+                || signature.Selectors.IsDefault
+                || signature.OutputStates.IsDefault
+                || signature.Dependencies.IsDefault
+                || signature.Selectors.Any(static selector =>
+                    selector.PhaseTag != 3 || selector.NodeKind is < 1 or > 6))
+            {
+                throw Unsupported(
+                    "A Standard FNI function-pointer anchor contains an unselected contract.");
+            }
+
+            var signatureRow
+                = checked(signatureCount + emittedSignatures + 1);
+            var firstParameter = signature.ParameterTypes.IsEmpty
+                ? 0
+                : checked(parameterCount + emittedParameters + 1);
+            for (var ordinal = 0;
+                ordinal < signature.ParameterTypes.Length; ordinal++)
+            {
+                AppendUInt32(parameterBytes, checked((uint)signatureRow));
+                AppendUInt32(parameterBytes, checked((uint)ordinal));
+                AppendUInt32(parameterBytes,
+                    typeSpecRef(signature.ParameterTypes[ordinal]));
+                AppendUInt32(parameterBytes, 0);
+                emittedParameters++;
+            }
+
+            AppendUInt32(signatureBytes,
+                typeSpecRef(signature.ReturnType));
+            AppendUInt32(signatureBytes, 0);
+            AppendUInt32(signatureBytes, checked((uint)firstParameter));
+            AppendUInt32(signatureBytes,
+                checked((uint)signature.ParameterTypes.Length));
+            AppendUInt32(signatureBytes, 0);
+            AppendUInt32(signatureBytes, 0);
+
+            var owner = 0x1600_0000u | checked((uint)methodRow);
+            var firstContractIndex = contractRows.Count;
+            if (signature.EffectsMask != 0)
+            {
+                var effectsPayload = new byte[sizeof(uint)];
+                BinaryPrimitives.WriteUInt32LittleEndian(effectsPayload,
+                    signature.EffectsMask);
+                contractRows.Add(new TrRmContractRow(owner, 1,
+                    effectsPayload));
+            }
+
+            var graphRowsByOrdinal = new Dictionary<uint, int>(
+                signature.Selectors.Length);
+            foreach (var selector in signature.Selectors.OrderBy(
+                         static selector => selector.PhaseLocalOrdinal))
+            {
+                var graphRow = checked(predicateGraphBaseCount
+                    + predicateGraphs.Count + 1);
+                var footprintRow = checked(predicateFootprintBaseCount
+                    + predicateFootprints.Count + 1);
+                var rootRow = checked(predicateRootBaseCount
+                    + predicateRoots.Count + 1);
+                var nodeRow = checked(predicateNodeBaseCount
+                    + predicateNodes.Count + 1);
+                var operandRow = checked(predicateOperandBaseCount
+                    + predicateOperands.Count + 1);
+                predicateGraphs.Add(new TrRmPredicateGraphRow(nodeRow,
+                    footprintRow));
+                predicateFootprints.Add(
+                    new TrRmPredicateReadFootprintRow(rootRow, 1, 0, 0));
+                predicateRoots.Add(new TrRmPredicateReadRootRow(5, 0));
+                predicateNodes.Add(new TrRmPredicateNodeRow(
+                    selector.NodeKind, 0xF200_0001,
+                    checked((uint)operandRow), 1));
+                predicateOperands.Add(new TrRmPredicateNodeOperandRow(1,
+                    checked((uint)rootRow)));
+                var payload = new byte[12];
+                payload[0] = 3;
+                BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(4),
+                    selector.PhaseLocalOrdinal);
+                BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(8),
+                    checked((uint)graphRow));
+                contractRows.Add(new TrRmContractRow(owner, 0x0B,
+                    payload));
+                graphRowsByOrdinal.Add(selector.PhaseLocalOrdinal,
+                    graphRow);
+            }
+
+            contractRows.Add(new TrRmContractRow(owner, 0x10,
+                NativeAbiPayload(3)));
+            foreach (var outputState in signature.OutputStates)
+            {
+                if (!graphRowsByOrdinal.TryGetValue(
+                        outputState.SelectorOrdinal, out var graphRow))
+                {
+                    throw Invalid(
+                        "A Standard FNI function-pointer output state has no selector graph.");
+                }
+
+                var payload = new byte[12];
+                BinaryPrimitives.WriteUInt32LittleEndian(payload,
+                    outputState.FormalOrdinal);
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    payload.AsSpan(4), checked((uint)graphRow));
+                payload[8] = outputState.State;
+                contractRows.Add(new TrRmContractRow(owner, 2, payload));
+            }
+
+            foreach (var dependency in signature.Dependencies)
+            {
+                var payload = new byte[12];
+                payload[0] = dependency.DestinationKind;
+                payload[1] = dependency.SourceKind;
+                payload[2] = dependency.Relationship;
+                payload[3] = dependency.Phase;
+                BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(4),
+                    dependency.DestinationOrdinal);
+                BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(8),
+                    dependency.SourceOrdinal);
+                contractRows.Add(new TrRmContractRow(owner, 4, payload));
+            }
+
+            var contractFirst = checked(contractCount
+                + firstContractIndex + 1);
+            var contractCountForMethod
+                = contractRows.Count - firstContractIndex;
+            var nameOrdinal = signatureIndex + 1;
+            var name = $"__trrm_fni_fnptr_anchor_{nameOrdinal}";
+            while (!usedNames.Add(name))
+            {
+                name = $"__trrm_fni_fnptr_anchor_{++nameOrdinal}";
+            }
+
+            var nameStringRow = names.Count + 1;
+            names.Add((name, 1));
+            AppendUInt32(methodBytes, 0);
+            AppendUInt32(methodBytes, checked((uint)nameStringRow));
+            AppendUInt32(methodBytes, checked((uint)signatureRow));
+            AppendUInt32(methodBytes, 0);
+            AppendUInt32(methodBytes, checked((uint)contractFirst));
+            AppendUInt32(methodBytes,
+                checked((uint)contractCountForMethod));
+            AppendUInt32(methodBytes, 0);
+            emittedMethods++;
+            emittedSignatures++;
+        }
+
+        _ = schema;
     }
 
     private static int AddForeignNativeInterfaceDependencyContracts(
