@@ -1080,6 +1080,9 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
         });
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Program!.Structures.Single(
+            static structure => structure.Name == "Snapshot").Size,
+            Is.GreaterThan(16));
         var artifact = TrRmExecutableCompiler.EmitStandard(
             compilation.Program!, moduleIdentity, l1pSchemaIdentity,
             moduleTargetRequirement: 1);
@@ -1152,20 +1155,23 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
         const string l1pSchemaIdentity
             = "trrm/1-draft-local-aggregate-layout-execution-pointer-loads-1";
         var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Union)]
+            struct RawWord {
+                public mut uint32 Narrow;
+                public mut uint64 Wide;
+            }
             [Blittable] [Layout(LayoutKind.Sequential)]
             struct Snapshot {
+                public mut RawWord Value;
                 public mut int32 First;
                 public mut int32 Second;
                 public mut int32 Third;
-                public mut int32 Fourth;
-                public mut int32 Fifth;
-                public Snapshot(int32 first, int32 second, int32 third,
-                    int32 fourth, int32 fifth) {
+                public Snapshot(uint64 wide, int32 first, int32 second,
+                    int32 third) {
+                    Value.Wide = wide;
                     First = first;
                     Second = second;
                     Third = third;
-                    Fourth = fourth;
-                    Fifth = fifth;
                 }
             }
             unsafe ptr<Snapshot> GetSnapshotAddress(
@@ -1176,7 +1182,7 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
                 unsafe { return *GetSnapshotAddress(source); }
             }
             int32 Capture(int32 selector) {
-                mut Snapshot value = new Snapshot(42, 1, 2, 3, 4);
+                mut Snapshot value = new Snapshot(42, 1, 2, 3);
                 unsafe {
                     ptr<Snapshot> source = &value;
                     mut Snapshot captured;
@@ -1185,8 +1191,8 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
                     } else {
                         captured = ReadSnapshot(source);
                     }
-                    value.First = 99;
-                    return captured.First;
+                    value.Value.Wide = 99;
+                    return int32(captured.Value.Wide);
                 }
             }
             public int32 Main() { return Capture(0) + Capture(1); }
@@ -1196,6 +1202,9 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
         });
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Program!.Structures.Single(
+            static structure => structure.Name == "Snapshot").Size,
+            Is.GreaterThan(16));
         var artifact = TrRmExecutableCompiler.EmitStandard(
             compilation.Program!, moduleIdentity, l1pSchemaIdentity,
             moduleTargetRequirement: 1);
