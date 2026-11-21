@@ -87,7 +87,9 @@ pointee distinction; Standard Bodies require Feature 1/2. The unapproved
 [typed raw-pointer-load proposal](proposals/standard-native-pointer-load.md)
 has provisional B+I+P and B+I+G+P producers: kind `01` encodes typed loads
 with `0x1B`; earlier identities and compact-indexed kind `08` remain
-unsupported. Source production is limited to a source-ordered declaration/
+unsupported. Provider admission requires that every supplied provider,
+including an unused provider, select the same exact P successor as the root.
+Source production is limited to a source-ordered declaration/
 assignment prefix, value-formal calls, a single-return Body and typed raw loads
 in source order, with at most one total conversion. Straight-line pointer-cell
 provenance now records each read before later stores; control-flow/call-effect

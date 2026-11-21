@@ -4629,6 +4629,16 @@ public static partial class TrRmExecutableCompiler
             throw Unsupported(
                 "The initialization-reference field-layout profile requires the exact schema selection for the root and every provider artifact.");
         }
+        var pointerLoadsSchemaIdentity = schemaIdentities.FirstOrDefault(
+            IsSelectedNativePointerLoadsSchemaIdentity);
+        if (pointerLoadsSchemaIdentity is not null
+            && schemaIdentities.Any(schemaIdentity =>
+                !StringComparer.Ordinal.Equals(schemaIdentity,
+                    pointerLoadsSchemaIdentity)))
+        {
+            throw Unsupported(
+                "The typed raw-pointer-load profile requires the exact schema selection for the root and every supplied provider artifact.");
+        }
 
         var exactFProviderClosure
             = IsExactForeignInvocationSchemaSet(schemaIdentities);

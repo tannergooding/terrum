@@ -21,9 +21,49 @@ internal sealed class TrRmStandardNestedPointerLoadTests
         = "trrm/1-draft-init-reference-bodies-pointer-loads-1";
     private const string GeneralPredicateGraphsPointerLoadsSchemaIdentity
         = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-pointer-loads-1";
+    private const string InitializationReferenceSchemaIdentity
+        = "trrm/1-draft-init-reference-bodies-1";
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int ReadNestedPointerFunction(nint pointer);
+
+    [TestCase(PointerLoadsSchemaIdentity)]
+    [TestCase(GeneralPredicateGraphsPointerLoadsSchemaIdentity)]
+    public void PointerLoadSuccessorRejectsUnusedProviderWithDifferentSchema(
+        string schemaIdentity)
+    {
+        const string rootModuleIdentity = "pointer-load-root";
+        const string providerModuleIdentity = "pointer-load-unused-provider";
+        var rootCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public unsafe int32 Read(ptr<int32> value) {
+                unsafe { return *value; }
+            }
+            """));
+        Assert.That(rootCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, rootCompilation.Diagnostics));
+        var rootArtifact = TrRmExecutableCompiler.EmitStandard(
+            rootCompilation.Program!, rootModuleIdentity, schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+
+        var providerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("public void Unused() {}"));
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerCompilation.Program!, providerModuleIdentity,
+            InitializationReferenceSchemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+
+        Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity, rootArtifact),
+                rootModuleIdentity, [
+                    new TrRmStandardArtifactInput(
+                        InitializationReferenceSchemaIdentity,
+                        providerArtifact),
+                ]));
+    }
 
     [TestCase(PointerLoadsSchemaIdentity)]
     [TestCase(GeneralPredicateGraphsPointerLoadsSchemaIdentity)]
