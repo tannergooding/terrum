@@ -491,6 +491,38 @@ internal sealed class NativeCoreRegistrationTests
             changedProviderProgram, "provider.module",
             "trrm/1-draft-foreign-native-interface-parameter-surface-1", 1,
             [changedProviderExport]);
+        var incompatibleProviderCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(providerSource.Replace(
+                "int32 Count(int32 count = 1)",
+                "int32 Count(int64 count = 1)",
+                StringComparison.Ordinal)), options);
+        Assert.That(incompatibleProviderCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                incompatibleProviderCompilation.Diagnostics));
+        var incompatibleProviderProgram
+            = incompatibleProviderCompilation.Program
+                ?? throw new AssertionException(
+                    "Expected an incompatible replacement provider.");
+        var incompatibleProviderMember
+            = incompatibleProviderProgram.Interfaces.Single().Members
+                .Single(static member => member.Name == "Count");
+        var incompatibleProviderExport = new TrRmSourceTypeExport("", "IProbe",
+            "provider/IProbe") {
+            GenericArity = 0,
+            InterfaceMethodExports = [.. incompatibleProviderProgram
+                .Interfaces.Single().Members.Select(member =>
+                    new TrRmSourceInterfaceMethodExport(
+                        member.SourceInputOrdinal,
+                        member.SourceDeclarationSpan,
+                        $"provider/IProbe.{member.Name}"))],
+        };
+        var incompatibleProviderArtifact
+            = TrRmExecutableCompiler.EmitStandard(
+                incompatibleProviderProgram, "provider.module",
+                "trrm/1-draft-foreign-native-interface-parameter-surface-1",
+                1, [incompatibleProviderExport]);
+        Assert.That(incompatibleProviderMember.Parameters.Single().Type
+            .PrimitiveType, Is.EqualTo(PrimitiveType.Int64));
 
         var importOnlyCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse(""), reference);
@@ -530,6 +562,15 @@ internal sealed class NativeCoreRegistrationTests
             Is.EqualTo("limit"));
         Assert.That(countMember.Parameters.Single().DefaultValue,
             Is.Not.Null);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(
+                    "trrm/1-draft-foreign-native-interface-parameter-surface-1",
+                    importerArtifact), "consumer.module", [
+                new TrRmStandardArtifactInput(
+                    "trrm/1-draft-foreign-native-interface-parameter-surface-1",
+                    incompatibleProviderArtifact),
+            ]));
     }
 
     [Test]
