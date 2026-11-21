@@ -1341,10 +1341,10 @@ correlated publication rules. PE-emission regressions cover reordered formals,
 slot 1, the high offset path and an imported aggregate view; they remain
 unverified under the active hold. Standard FNI Bodies now emit and source-free
 decode bounded receiver-first MethodMap CallSites for direct non-void return
-calls and direct void calls
-followed by void returns, using parameter-read receiver/ordinary inputs. One
-non-void call may reserve distinct local `init` Homes for each NativeOutput
-formal; source-use 6
+calls and direct void calls followed by void returns. Ordinary inputs may be
+read from caller parameters or scalar locals initialized from a direct
+parameter read; the receiver is a direct parameter. One non-void call may
+reserve distinct local `init` Homes for each NativeOutput formal; source-use 6
 and reservation records use the receiver-first flattened ordinal
 (`formal n` maps to input `n+1`). Source-free decoding restores the
 `BoundNativeOutputReservation`, unsafe assertion, exact MethodDef/Import
@@ -1354,7 +1354,7 @@ PublishedPredicates prerequisite. Local MethodDefs and imported MethodDef
 Imports are mapped by exact member identity; regressions cover local and
 imported output reservations, provider load/re-emission and malformed
 MethodMap target rejection, but remain unverified under the hold. Reading
-output locals under result-correlated flow, staged or side-effecting arguments,
+output locals under result-correlated flow, side-effecting argument expressions,
 defaults/constants, multiple calls, other Body control-flow shapes,
 nonreturning calls and reservation cancellation remain open. Supervised native
 execution, private persistence, CLI transport and dependent runtime work

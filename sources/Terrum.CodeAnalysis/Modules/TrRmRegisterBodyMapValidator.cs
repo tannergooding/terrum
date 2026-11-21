@@ -8677,6 +8677,30 @@ internal static class TrRmRegisterBodyMapValidator
                 }
                 ValidateConstructionContextPlaceUse(body, instruction,
                     opcode, registerTypes);
+                if (body.Schema.UsesForeignNativeInterface()
+                    && !body.UsesNativePointerLoads
+                    && opcode == 0xD6
+                    && ReadByte(body, instruction, 1) >> 4 == 1)
+                {
+                    var sourceRegister
+                        = ReadByte(body, instruction, 1) & 0x0F;
+                    var homeIndex = ReadUInt16(body, instruction, 2);
+                    var home = GetHomeMapEntry(body, homeIndex);
+                    if (sourceRegister >= 14
+                        || ReadByte(body, home, 0) != 3
+                        || !MatchesRegisterType(body,
+                            GetRegisterTypeState(body, registerTypes,
+                                sourceRegister),
+                            GetTypeMapTypeSpecRef(body,
+                                GetHomeTypeMapIndex(body, homeIndex)),
+                            ownerModule, types, typeSpecs, genericParams,
+                            imports, constantValues,
+                            nativeFunctionPointerAnchors))
+                    {
+                        throw InvalidMap();
+                    }
+                }
+
                 var recordIndex = opcode switch
                 {
                     0x90 => ReadByte(body, instruction, 1),

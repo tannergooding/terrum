@@ -362,6 +362,11 @@ internal sealed class NativeCoreRegistrationTests
                 int32 Invoke(ptr<void> receiver, int32 value) {
                     unsafe { return IProbe.Read(receiver, value); }
                 }
+
+                int32 InvokeStaged(ptr<void> receiver, int32 value) {
+                    int32 staged = value;
+                    unsafe { return IProbe.Read(receiver, staged); }
+                }
                 """), new CompilationOptions {
                 NativeCoreRegistration = CreateRegistration(
                     includeForeignNativeInterface: true),
@@ -398,15 +403,35 @@ internal sealed class NativeCoreRegistrationTests
         Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
                 localBody.MethodMap) >> 24,
             Is.EqualTo(0x16u));
+        var localStagedRow = Enumerable.Range(1, providerTables.Methods.Count)
+            .Single(row =>
+                providerTables.Methods.GetName(row) == "InvokeStaged");
+        var localStagedBody = providerTables.Bodies.GetRegisterBody(
+            providerTables.Methods.GetBodyRow(localStagedRow),
+            providerTables.Contracts.Count);
+        Assert.That(localStagedBody.GetRecord(1)[24], Is.EqualTo((byte)2));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+            localStagedBody.GetRecord(1)[26..]), Is.EqualTo((ushort)2));
+        Assert.That(localStagedBody.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] {
+            0x11, 0x11, 0xD6, 0x11, 2, 0,
+                0x90, 1, 0x17, 0,
+            }));
         var loadedProvider = TrRmExecutableCompiler.LoadStandard(
             providerInput, "provider.module", []);
-        AssertForeignInterfaceTarget(loadedProvider);
+        AssertForeignInterfaceTarget(loadedProvider, "Invoke", 1);
+        AssertForeignInterfaceTarget(loadedProvider, "InvokeStaged", 2);
         var reference = TrRmExecutableCompiler.CreateStandardReference(
             providerInput, "provider.module", []);
         var consumerCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse("""
                 int32 Invoke(ptr<void> receiver, int32 value) {
                     unsafe { return IProbe.Read(receiver, value); }
+                }
+
+                int32 InvokeStaged(ptr<void> receiver, int32 value) {
+                    int32 staged = value;
+                    unsafe { return IProbe.Read(receiver, staged); }
                 }
                 """), reference);
         Assert.That(consumerCompilation.HasErrors, Is.False,
@@ -444,6 +469,17 @@ internal sealed class NativeCoreRegistrationTests
         Assert.That((callSite[24], callSite[25],
                 BinaryPrimitives.ReadUInt16LittleEndian(callSite[26..])),
             Is.EqualTo(((byte)2, (byte)1, (ushort)1)));
+        var stagedInvokeRow
+            = Enumerable.Range(1, tables.Methods.Count).Single(row =>
+                tables.Methods.GetName(row) == "InvokeStaged");
+        var stagedBody = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(stagedInvokeRow),
+            tables.Contracts.Count);
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+            stagedBody.MethodMap) >> 24, Is.EqualTo(0x1Cu));
+        Assert.That(stagedBody.GetRecord(1)[24], Is.EqualTo((byte)2));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+            stagedBody.GetRecord(1)[26..]), Is.EqualTo((ushort)2));
 
         var providers = new[] { providerInput };
         var malformedIndex = new TrRmArtifactIndex(consumerArtifact,
@@ -480,18 +516,21 @@ internal sealed class NativeCoreRegistrationTests
         var loaded = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(schemaIdentity,
                 consumerArtifact), "consumer.module", providers);
-        AssertForeignInterfaceTarget(loaded);
+        AssertForeignInterfaceTarget(loaded, "Invoke", 1);
+        AssertForeignInterfaceTarget(loaded, "InvokeStaged", 2);
         var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(loaded,
             "consumer.module", schemaIdentity, 1, []);
         var reloaded = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(schemaIdentity,
                 reemittedArtifact), "consumer.module", providers);
-        AssertForeignInterfaceTarget(reloaded);
+        AssertForeignInterfaceTarget(reloaded, "Invoke", 1);
+        AssertForeignInterfaceTarget(reloaded, "InvokeStaged", 2);
 
-        static void AssertForeignInterfaceTarget(BoundProgram program)
+        static void AssertForeignInterfaceTarget(BoundProgram program,
+            string functionName, int expectedArgumentVariable)
         {
-            var invoke = program.Functions.Single(static function =>
-                function.Name == "Invoke");
+            var invoke = program.Functions.Single(function =>
+                function.Name == functionName);
             BoundCall? foreignCall = null;
             Assert.That(BoundTreeTraversal.VisitExpressions(invoke.Body,
                 expression =>
@@ -514,6 +553,8 @@ internal sealed class NativeCoreRegistrationTests
                 ?.Receiver.Type, Is.EqualTo(PrimitiveType.NativeRawPointer));
             Assert.That(foreignCall?.Arguments.Single().Type,
                 Is.EqualTo(PrimitiveType.Int32));
+            Assert.That(((BoundRead)foreignCall!.Arguments.Single()).Variable,
+                Is.EqualTo(expectedArgumentVariable));
             Assert.That(foreignCall?.IsUnsafeAuthorized, Is.True);
         }
     }
