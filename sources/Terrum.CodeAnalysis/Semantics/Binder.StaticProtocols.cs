@@ -9211,13 +9211,25 @@ internal sealed partial class Binder
             {
                 return null;
             }
-            return optionalPayload.Kind
-                    == BoundGenericMethodTypeTermKind.Concrete
-                ? optionalPayload
-                : new BoundGenericMethodTypeTerm(
-                    BoundGenericMethodTypeTermKind.OptionalValue,
-                    PrimitiveType.Void, -1, -1, [optionalPayload],
-                    false, false, false, false);
+            if (optionalPayload.Kind
+                == BoundGenericMethodTypeTermKind.Concrete)
+            {
+                if (!ManagedClassTypes.IsOptional(
+                        optionalPayload.ConcreteType))
+                {
+                    return optionalPayload;
+                }
+
+                optionalPayload = new BoundGenericMethodTypeTerm(
+                    BoundGenericMethodTypeTermKind.Concrete,
+                    ManagedClassTypes.Required(
+                        optionalPayload.ConcreteType),
+                    -1, -1, [], false, false, false, false);
+            }
+            return new BoundGenericMethodTypeTerm(
+                BoundGenericMethodTypeTermKind.OptionalValue,
+                PrimitiveType.Void, -1, -1, [optionalPayload],
+                false, false, false, false);
         }
 
         if (name == "option" && typeArguments.Length == 1)
