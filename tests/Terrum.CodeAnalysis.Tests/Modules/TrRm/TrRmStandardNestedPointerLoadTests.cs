@@ -266,6 +266,16 @@ internal sealed class TrRmStandardNestedPointerLoadTests
             TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
         var loadedProvider = TrRmExecutableCompiler.LoadStandard(
             providerInput, providerIdentity, []);
+        var providerFunction = loadedProvider.Functions.Single(
+            static candidate => candidate.Name == "ReadOuter");
+        var providerValue = GetSingleReturnValue(providerFunction);
+        if (providerValue is BoundUnsafeExpression unsafeProviderValue)
+        {
+            providerValue = unsafeProviderValue.Expression;
+        }
+        Assert.That(providerValue, Is.TypeOf<BoundNativePointerRead>());
+        Assert.That(((BoundNativePointerRead)providerValue).Type,
+            Is.EqualTo(providerFunction.ReturnType));
         var reemittedProvider = TrRmExecutableCompiler.EmitStandard(
             loadedProvider, providerIdentity, schemaIdentity,
             TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
