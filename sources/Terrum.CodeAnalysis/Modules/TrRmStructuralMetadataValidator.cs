@@ -293,6 +293,112 @@ public static class TrRmStructuralMetadataValidator
         internal TrRmArtifactSchema Schema { get; }
         internal TrRmA3LayoutResourceLedger? A3LayoutResourceLedger { get; }
 
+        internal void ValidateForeignNativeInterfaceAggregateOutputTypes()
+        {
+            if (!Schema.UsesForeignNativeInterfaceAggregateOutputConsumption())
+            {
+                return;
+            }
+
+            for (var module = 1; module <= Modules.Count; module++)
+            {
+                A3LayoutResourceLedger?.ConsumeWork();
+                var closure = TrRmExecutableCompiler
+                    .GetForeignNativeInterfaceStructureTypeDefClosure(
+                        this, module, rootTypeDefRows: null,
+                        out _);
+                if (closure.Count == 0)
+                {
+                    continue;
+                }
+
+                RequireLayoutQueriesFeature(module);
+                foreach (var typeDefRow in closure)
+                {
+                    A3LayoutResourceLedger?.ConsumeWork();
+                    RequireLayoutQueriesFeature(
+                        TypeDefs.GetOwnerModule(typeDefRow));
+                }
+            }
+
+            for (var foreignInterface = 1;
+                foreignInterface <= ForeignNativeInterfaces.Count;
+                foreignInterface++)
+            {
+                A3LayoutResourceLedger?.ConsumeWork();
+                var interfaceDef = checked((int)
+                    ForeignNativeInterfaces.GetOwnerInterfaceDef(
+                        foreignInterface));
+                var (methodFirst, methodCount)
+                    = Interfaces.GetMethodRange(interfaceDef);
+                for (var methodOrdinal = 0;
+                    methodOrdinal < methodCount;
+                    methodOrdinal++)
+                {
+                    A3LayoutResourceLedger?.ConsumeWork();
+                    var method = InterfaceMethods.GetMethodDefRow(
+                        methodFirst + methodOrdinal);
+                    var signature = Methods.GetSignature(method);
+                    var methodModule = Methods.GetOwnerModule(method);
+                    var (parameterFirst, _) = Signatures.GetParamRange(signature);
+                    foreach (var output in Contracts.GetNativeOutputs(method))
+                    {
+                        A3LayoutResourceLedger?.ConsumeWork();
+                        var parameterTypeSpec = Parameters.GetTypeSpec(
+                            parameterFirst + output.ParameterOrdinal);
+                        if (TrRmNativeImportTypeContract
+                            .TryGetBlittableAggregateParameterTypeDef(
+                                TypeSpecs, parameterTypeSpec, Layouts,
+                                true, TypeDefs, Imports,
+                                out var typeDefRow))
+                        {
+                            ValidateAggregateTypeClosure(methodModule,
+                                typeDefRow);
+                        }
+                    }
+                }
+            }
+        }
+
+        private void ValidateAggregateTypeClosure(int usingModule,
+            int typeDefRow)
+        {
+            var layout = TrRmFixedArrayLayoutValidator
+                .CalculateTypeDefLayoutAndTypeDefRows(this, typeDefRow,
+                    rejectRawUnion: true);
+            RequireAggregateOutputFeatures(usingModule);
+            foreach (var closureTypeDef in layout.TypeDefRows)
+            {
+                A3LayoutResourceLedger?.ConsumeWork();
+                RequireAggregateOutputFeatures(
+                    TypeDefs.GetOwnerModule(closureTypeDef));
+            }
+        }
+
+        private void RequireAggregateOutputFeatures(int module)
+        {
+            if (!TrRmFeatureManifestValidator.Requires(Features, Modules,
+                    module,
+                    TrRmFeatureTableReader.RootlessNativeValuesFeatureId,
+                    Schema)
+                || !TrRmFeatureManifestValidator.Requires(Features, Modules,
+                    module, TrRmFeatureTableReader.LayoutQueriesFeatureId,
+                    Schema))
+            {
+                throw InvalidMetadata();
+            }
+        }
+
+        private void RequireLayoutQueriesFeature(int module)
+        {
+            if (!TrRmFeatureManifestValidator.Requires(Features, Modules,
+                    module, TrRmFeatureTableReader.LayoutQueriesFeatureId,
+                    Schema))
+            {
+                throw InvalidMetadata();
+            }
+        }
+
         internal void ValidateRegisterBodyMapsForMethod(int methodDefRow)
         {
             if (Schema is not (TrRmArtifactSchema.Standard
@@ -301,6 +407,7 @@ public static class TrRmStructuralMetadataValidator
                     or TrRmArtifactSchema.ForeignInvocationDraft
                     or TrRmArtifactSchema.ForeignNativeInterfaceDraft
                     or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft
+                    or TrRmArtifactSchema.ForeignNativeInterfaceAggregateOutputConsumptionDraft
                     or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
                     or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
                     or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
@@ -355,8 +462,12 @@ public static class TrRmStructuralMetadataValidator
             }
 
             var body = Bodies.GetRegisterBody(bodyRow, Contracts.Count);
+            var ownerModule = Methods.GetOwnerModule(methodDefRow);
+            var aggregateD5ReadTypeDefRows
+                = Schema.UsesForeignNativeInterfaceAggregateOutputConsumption()
+                    ? new HashSet<int>() : null;
             TrRmRegisterBodyMapValidator.Validate(body,
-                methodDefRow, Methods.GetOwnerModule(methodDefRow), Features,
+                methodDefRow, ownerModule, Features,
                 Modules, TypeDefs, EnumDefs, TypeSpecs, GenericParams,
                 Constraints, Methods, Signatures, Parameters, Fields,
                 FieldPaths, Interfaces, InterfaceMethods,
@@ -365,7 +476,16 @@ public static class TrRmStructuralMetadataValidator
                 FrozenValueNodes,
                 Blobs, Contracts, Imports, NativeFunctionPointerAnchors,
                 StandardNativeImports, ModuleRefs, Layouts, FixedArrayLayouts,
-                TargetProfiles, TransparentConstantDomains);
+                TargetProfiles, TransparentConstantDomains,
+                aggregateD5ReadTypeDefRows);
+            if (aggregateD5ReadTypeDefRows is not null)
+            {
+                foreach (var typeDefRow in aggregateD5ReadTypeDefRows)
+                {
+                    A3LayoutResourceLedger?.ConsumeWork();
+                    ValidateAggregateTypeClosure(ownerModule, typeDefRow);
+                }
+            }
         }
 
         internal void ValidateNonBodyTypeSpecModuleContexts()
@@ -993,7 +1113,10 @@ public static class TrRmStructuralMetadataValidator
         TrRmArtifactIndex index)
         => ValidateCore(index, BodyInspection.None, developmentProfile: false,
             foreignInvocationDraft: true, foreignNativeInterfaceDraft: true,
-            foreignNativeInterfaceParameterSurfaceDraft: true);
+        foreignNativeInterfaceParameterSurfaceDraft: true,
+        foreignNativeInterfaceAggregateOutputConsumptionDraft:
+            index.Schema == TrRmArtifactSchema
+                .ForeignNativeInterfaceAggregateOutputConsumptionDraft);
 
     internal static ValidatedExecutionTables
         ValidateForeignInvocationStorageAddressDraftAndGetExecutionTables(
@@ -1393,6 +1516,7 @@ public static class TrRmStructuralMetadataValidator
         bool copyOriginDraft = false, bool foreignInvocationDraft = false,
         bool foreignNativeInterfaceDraft = false,
         bool foreignNativeInterfaceParameterSurfaceDraft = false,
+        bool foreignNativeInterfaceAggregateOutputConsumptionDraft = false,
         bool developmentFunctionPointerEffectsDraft = false,
         bool developmentNativeConventionsDraft = false,
         bool nominalEnumsDraft = false, bool scalarFrozenValuesDraft = false,
@@ -1463,6 +1587,9 @@ public static class TrRmStructuralMetadataValidator
                     ? TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
                 : foreignInvocationStorageAddressDraft
                     ? TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
+                : foreignNativeInterfaceAggregateOutputConsumptionDraft
+                    ? TrRmArtifactSchema
+                        .ForeignNativeInterfaceAggregateOutputConsumptionDraft
                 : foreignNativeInterfaceParameterSurfaceDraft
                     ? TrRmArtifactSchema
                         .ForeignNativeInterfaceParameterSurfaceDraft
@@ -1509,6 +1636,7 @@ public static class TrRmStructuralMetadataValidator
             |= foreignInvocationStorageFixedArrayEmptyInitializationDraft;
         foreignInvocationDraft |= foreignNativeInterfaceDraft
             || foreignNativeInterfaceParameterSurfaceDraft
+            || foreignNativeInterfaceAggregateOutputConsumptionDraft
             || foreignInvocationStorageAddressDraft
             || foreignInvocationStorageFixedArrayDraft
             || foreignInvocationStorageFixedArrayGenericDraft;
@@ -2823,6 +2951,7 @@ public static class TrRmStructuralMetadataValidator
             index.Schema, selectedA3LayoutResourceLedger);
         executionTables.ValidateAssociatedRelationFeatureUsage();
         executionTables.ValidateNonBodyTypeSpecModuleContexts();
+        executionTables.ValidateForeignNativeInterfaceAggregateOutputTypes();
         if (index.Schema.UsesRawUnionValueCoverage())
         {
             TrRmFixedArrayLayoutValidator

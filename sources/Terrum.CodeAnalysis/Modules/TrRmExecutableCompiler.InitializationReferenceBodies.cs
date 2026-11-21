@@ -1320,7 +1320,8 @@ public static partial class TrRmExecutableCompiler
         }
 
         if (TryGetForeignInterfaceConditionalOutputCallWithFallback(
-                function, program, out var conditionalFallbackCall,
+                function, program, schema,
+                out var conditionalFallbackCall,
                 out var fallbackOutputVariable, out var fallbackStatusVariable,
                 out var fallbackVariable, out var fallbackSuccessOnTrue))
         {
@@ -1701,7 +1702,8 @@ public static partial class TrRmExecutableCompiler
     }
 
     private static bool TryGetForeignInterfaceConditionalOutputCallWithFallback(
-        BoundFunction function, BoundProgram program, out BoundCall call,
+        BoundFunction function, BoundProgram program,
+        TrRmArtifactSchema schema, out BoundCall call,
         out int outputVariable, out int statusVariable,
         out int fallbackVariable, out bool successOnTrue)
     {
@@ -1713,7 +1715,9 @@ public static partial class TrRmExecutableCompiler
         if (function.IsExternal || function.ParameterCount != 3
             || function.Variables.Length != 5
             || function.DoesNotReturn
-            || !DirectNativeImportContract.IsScalar(function.ReturnType)
+            || (!DirectNativeImportContract.IsScalar(function.ReturnType)
+                && !schema
+                    .UsesForeignNativeInterfaceAggregateOutputConsumption())
             || function.Body.RetiredManagedLocals.Length != 0
             || function.Variables[0].Type != PrimitiveType.NativeRawPointer
             || function.Variables[0].IsOut || function.Variables[0].IsInit
@@ -6575,7 +6579,9 @@ public static partial class TrRmExecutableCompiler
             || !HasEmptyEntryState(body, 0)
             || !HasEmptyEntryState(body, 1)
             || !HasEmptyEntryState(body, 2)
-            || !DirectNativeImportContract.IsScalar(function.ReturnType)
+            || (!DirectNativeImportContract.IsScalar(function.ReturnType)
+                && !body.Schema
+                    .UsesForeignNativeInterfaceAggregateOutputConsumption())
             || (!hasFallback && function.ReturnType is not (
                 PrimitiveType.Int32 or PrimitiveType.UInt32))
             || homeTypes[0] != PrimitiveType.NativeRawPointer

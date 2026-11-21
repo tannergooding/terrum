@@ -351,7 +351,8 @@ internal static class TrRmRegisterBodyMapValidator
         TrRmLayoutTableReader layouts,
         TrRmFixedArrayLayoutTableReader fixedArrayLayouts,
         TrRmTargetProfileTableReader targetProfiles,
-        TrRmTransparentConstantDomainTableReader transparentConstantDomains)
+        TrRmTransparentConstantDomainTableReader transparentConstantDomains,
+        HashSet<int>? aggregateD5ReadTypeDefRows = null)
     {
         ConsumeWork(body);
         if (!body.Schema.IsDevelopmentProfile()
@@ -5589,11 +5590,23 @@ internal static class TrRmRegisterBodyMapValidator
 
             var home = GetHomeMapEntry(body, homeIndex);
             var typeMapIndex = ReadUInt16(body, home, 2);
-            if (!IsCopyableRegisterValueType(typeSpecs,
-                    GetTypeMapTypeSpecRef(body, typeMapIndex),
-                    constantValues, body.Schema))
+            var typeSpecRef = GetTypeMapTypeSpecRef(body, typeMapIndex);
+            var isAc1Aggregate = body.Schema
+                    .UsesForeignNativeInterfaceAggregateOutputConsumption()
+                && IsAc1CopyableAggregateValueType(typeSpecs, typeSpecRef,
+                    constantValues);
+            if (!IsCopyableRegisterValueType(typeSpecs, typeSpecRef,
+                    constantValues, body.Schema)
+                && !isAc1Aggregate)
             {
                 throw InvalidMap();
+            }
+            if (isAc1Aggregate
+                && aggregateD5ReadTypeDefRows is not null)
+            {
+                var typeDefRow = typeSpecs.GetNominalTypeDefRow(
+                    typeSpecRef, types, imports);
+                _ = aggregateD5ReadTypeDefRows.Add(typeDefRow);
             }
 
             SetRegisterTypeState(body, registerTypes, destination,
@@ -8620,6 +8633,22 @@ internal static class TrRmRegisterBodyMapValidator
         return type.Form == 0x0D
             || (type.Form == 0x01 && (isAtomicValueType || isPointerFamily))
             || (type.Form is 0x08 or 0x0C && isPointerFamily);
+    }
+
+    private static bool IsAc1CopyableAggregateValueType(
+        TrRmTypeSpecTableReader typeSpecs, uint typeSpecRef,
+        ConstantSourceValueContext constantValues)
+    {
+        var type = typeSpecs.GetTypeSpecRef(typeSpecRef);
+        if (type.Form is not (0x02 or 0x03) || type.Qualifiers != 0)
+        {
+            return false;
+        }
+
+        var typeDefRow = typeSpecs.GetNominalTypeDefRow(typeSpecRef,
+            constantValues.TypeDefs, constantValues.Imports);
+        return constantValues.TypeDefs.GetKind(typeDefRow) == 1
+            && constantValues.TypeDefs.HasDeclaredCopy(typeDefRow);
     }
 
     private static void ValidateCallSiteHomeTypes(TrRmRegisterBodyReader body,

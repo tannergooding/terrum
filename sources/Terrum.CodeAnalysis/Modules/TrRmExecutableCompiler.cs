@@ -83,6 +83,8 @@ public static partial class TrRmExecutableCompiler
         = "trrm/1-draft-foreign-native-interface-contracts-1";
     private const string StandardForeignNativeInterfaceParameterSurfaceSchemaIdentity
         = "trrm/1-draft-foreign-native-interface-parameter-surface-1";
+    private const string StandardForeignNativeInterfaceAggregateOutputConsumptionSchemaIdentity
+        = "trrm/1-draft-foreign-native-interface-aggregate-output-consumption-1";
     private const string StandardForeignInvocationStorageAddressSchemaIdentity
         = "trrm/1-draft-foreign-invocation-storage-addresses-1";
     private const string StandardForeignInvocationStorageFixedArraySchemaIdentity
@@ -353,6 +355,8 @@ public static partial class TrRmExecutableCompiler
                 StandardForeignNativeInterfaceSchemaIdentity)
             || StringComparer.Ordinal.Equals(schemaIdentity,
                 StandardForeignNativeInterfaceParameterSurfaceSchemaIdentity)
+            || StringComparer.Ordinal.Equals(schemaIdentity,
+                StandardForeignNativeInterfaceAggregateOutputConsumptionSchemaIdentity)
             || IsSelectedInitializationReferenceLocalFieldLayoutSchemaIdentity(
                 schemaIdentity)
             || StringComparer.Ordinal.Equals(schemaIdentity,
@@ -366,7 +370,9 @@ public static partial class TrRmExecutableCompiler
         => StringComparer.Ordinal.Equals(schemaIdentity,
                 StandardForeignNativeInterfaceSchemaIdentity)
             || StringComparer.Ordinal.Equals(schemaIdentity,
-                StandardForeignNativeInterfaceParameterSurfaceSchemaIdentity);
+                StandardForeignNativeInterfaceParameterSurfaceSchemaIdentity)
+            || StringComparer.Ordinal.Equals(schemaIdentity,
+                StandardForeignNativeInterfaceAggregateOutputConsumptionSchemaIdentity);
 
     private static bool
         IsSelectedInitializationReferenceLocalFieldLayoutSchemaIdentity(
@@ -529,7 +535,9 @@ public static partial class TrRmExecutableCompiler
         if (StringComparer.Ordinal.Equals(schemaIdentity,
                 StandardForeignNativeInterfaceSchemaIdentity)
             || StringComparer.Ordinal.Equals(schemaIdentity,
-                StandardForeignNativeInterfaceParameterSurfaceSchemaIdentity))
+                StandardForeignNativeInterfaceParameterSurfaceSchemaIdentity)
+            || StringComparer.Ordinal.Equals(schemaIdentity,
+                StandardForeignNativeInterfaceAggregateOutputConsumptionSchemaIdentity))
         {
             return EmitStandardCore(program, moduleIdentity, schemaIdentity,
                 moduleTargetRequirement, typeExportSnapshot);
@@ -1190,6 +1198,7 @@ public static partial class TrRmExecutableCompiler
         if ((schemaIdentity is StandardForeignInvocationSchemaIdentity
                 or StandardForeignNativeInterfaceSchemaIdentity
                 or StandardForeignNativeInterfaceParameterSurfaceSchemaIdentity
+                or StandardForeignNativeInterfaceAggregateOutputConsumptionSchemaIdentity
                 or StandardForeignInvocationStorageAddressSchemaIdentity
                 or StandardForeignInvocationStorageFixedArraySchemaIdentity
                 or StandardForeignInvocationStorageFixedArrayEmptyInitializationSchemaIdentity
@@ -1477,6 +1486,7 @@ public static partial class TrRmExecutableCompiler
                     program, moduleIdentity),
             StandardForeignNativeInterfaceSchemaIdentity
                 or StandardForeignNativeInterfaceParameterSurfaceSchemaIdentity
+                or StandardForeignNativeInterfaceAggregateOutputConsumptionSchemaIdentity
                 => EmitForeignNativeInterfaceDeclarations(program,
                     moduleIdentity, schemaIdentity, moduleTargetRequirement,
                     sourceTypeExports),
@@ -2055,7 +2065,8 @@ public static partial class TrRmExecutableCompiler
                 or TrRmArtifactSchema.InitializationReferencePointerLoadNativeParameterDraft
                 or TrRmArtifactSchema.InitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft
                 or TrRmArtifactSchema.ForeignNativeInterfaceDraft
-                or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft))
+                or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft
+                or TrRmArtifactSchema.ForeignNativeInterfaceAggregateOutputConsumptionDraft))
         {
             throw new ArgumentException(
                 "Initialization-reference Bodies require a selected Standard or GeneralPredicateGraphsDraft profile.",
@@ -2123,7 +2134,8 @@ public static partial class TrRmExecutableCompiler
                 or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
                 or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft
                 or TrRmArtifactSchema.ForeignNativeInterfaceDraft
-                or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft))
+                or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft
+                or TrRmArtifactSchema.ForeignNativeInterfaceAggregateOutputConsumptionDraft))
         {
             throw Unsupported(
                 "Explicit source type exports require an exact Standard schema.");
@@ -2348,7 +2360,8 @@ public static partial class TrRmExecutableCompiler
                 or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft
                 or TrRmArtifactSchema.RegisterExceptionRegionsDraft
                 or TrRmArtifactSchema.ForeignNativeInterfaceDraft
-                or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft)
+                or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft
+                or TrRmArtifactSchema.ForeignNativeInterfaceAggregateOutputConsumptionDraft)
             && (hasRegisteredQueryOperations || hasSourceTypeExports
                 || (schema.UsesForeignNativeInterface()
                     && !blittableStructureIndexes.IsEmpty)
@@ -6493,6 +6506,14 @@ public static partial class TrRmExecutableCompiler
         var requiresStandardNativeBoundaryContracts = false;
         var requiresStandardRootlessNativeValues = false;
         var requiresStandardDirectNativeCalls = false;
+        bool HasAC1DeclaredCopyEvidence(BoundStruct structure)
+            => structure.CleanupMethod is null
+                && (structure.StandardTypeOrigin is null
+                    ? !structure.IsUnique
+                    : structure.DeclaredCopyEvidence == true);
+        var requiresStandardForeignNativeInterfaceAggregateLayoutClosure
+            = schema.UsesForeignNativeInterfaceAggregateOutputConsumption()
+                && !blittableStructureIndexes.IsEmpty;
         var requiresStandardDeclaredCopyEvidence
             = schema.UsesInitializationReferenceLocalFieldLayout()
                 && typeDefStructureIndexes.Any(index =>
@@ -6501,7 +6522,12 @@ public static partial class TrRmExecutableCompiler
                     && !program.Structures[index].IsUnique
                     && program.Structures[index].CleanupMethod is null
                     && (program.Structures[index].IsSequential
-                        || program.Structures[index].IsTransparent));
+                        || program.Structures[index].IsTransparent))
+            || (schema == TrRmArtifactSchema
+                    .ForeignNativeInterfaceAggregateOutputConsumptionDraft
+                && typeDefStructureIndexes.Any(index =>
+                    HasAC1DeclaredCopyEvidence(
+                        program.Structures[index])));
         if (requiresStandardDeclaredCopyEvidence)
         {
             requiresStandardNativeBoundaryContracts = true;
@@ -6617,7 +6643,8 @@ public static partial class TrRmExecutableCompiler
                 or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
                 or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft
                 or TrRmArtifactSchema.ForeignNativeInterfaceDraft
-                or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft)
+                or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft
+                or TrRmArtifactSchema.ForeignNativeInterfaceAggregateOutputConsumptionDraft)
             && (registeredQueryBodyCount != 0
                 || fieldPathRows.Count != 0
                 || standardSourceImportMappings.Any(
@@ -6629,7 +6656,8 @@ public static partial class TrRmExecutableCompiler
                 || requiresStandardNativeBoundaryContracts
                 || requiresStandardRootlessNativeValues
                 || requiresStandardDirectNativeCalls
-                || requiresStandardNativeOutputCells))
+                || requiresStandardNativeOutputCells
+                || requiresStandardForeignNativeInterfaceAggregateLayoutClosure))
         {
             var standardFeatures = new List<TrRmFeatureRow>(6);
             if (requiresStandardNativeBoundaryContracts)
@@ -6660,7 +6688,8 @@ public static partial class TrRmExecutableCompiler
                     static import =>
                         (import.ExpectedDefinitionId >> 24) == 0x14)
                 || sourceTypeExports?.Any(static export =>
-                    !export.FieldExports.IsDefaultOrEmpty) == true)
+                    !export.FieldExports.IsDefaultOrEmpty) == true
+                || requiresStandardForeignNativeInterfaceAggregateLayoutClosure)
             {
                 standardFeatures.Add(TrRmFeatureRow.LayoutQueries);
             }
@@ -6775,7 +6804,8 @@ public static partial class TrRmExecutableCompiler
                     or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
                     or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft
                     or TrRmArtifactSchema.ForeignNativeInterfaceDraft
-                    or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft)
+                    or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft
+                    or TrRmArtifactSchema.ForeignNativeInterfaceAggregateOutputConsumptionDraft)
                 || schema.UsesGeneralPredicateGraphs()
                 || standardNativeParameterProfile)
                 && featureCount != 0
@@ -6873,8 +6903,13 @@ public static partial class TrRmExecutableCompiler
         {
             var structure = TypeDefStructure(type);
             var visibility = structure.IsPrivate ? 0u : structure.IsInternal ? 1u : 2u;
+            var ac1DeclaredCopy
+                = schema
+                    == TrRmArtifactSchema.ForeignNativeInterfaceAggregateOutputConsumptionDraft
+                && HasAC1DeclaredCopyEvidence(structure);
             var declaredCopy
-                = schema.UsesConstructionInitializerCopyEvidence()
+                = ac1DeclaredCopy
+                    || schema.UsesConstructionInitializerCopyEvidence()
                     && (structure.StandardTypeOrigin is null
                         ? !structure.IsUnique
                         : structure.DeclaredCopyEvidence == true)
@@ -7701,6 +7736,7 @@ public static partial class TrRmExecutableCompiler
                     or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft
                     or TrRmArtifactSchema.ForeignNativeInterfaceDraft
                     or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft
+                    or TrRmArtifactSchema.ForeignNativeInterfaceAggregateOutputConsumptionDraft
                     ? TrRmStructuralMetadataValidator
                         .ValidateAndGetExecutionTables(index)
                 : TrRmStructuralMetadataValidator
@@ -7890,7 +7926,8 @@ public static partial class TrRmExecutableCompiler
                 or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
                 or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft
                 or TrRmArtifactSchema.ForeignNativeInterfaceDraft
-                or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft)
+                or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft
+                or TrRmArtifactSchema.ForeignNativeInterfaceAggregateOutputConsumptionDraft)
             || schema.UsesGeneralPredicateGraphs()
             || schema.UsesNativeParameterContracts())
         {

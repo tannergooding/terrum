@@ -1369,10 +1369,14 @@ and success/complement edge orientations.
 Local/imported output
 reservations and conditional reads, provider load/re-emission, and malformed
 MethodMap, success-predicate, branch-target and reservation rejection are
-covered by regressions; they remain unverified under the hold.
-Aggregate output reads/returns now have a concrete unapproved AC1 schema
-recommendation with a provisional implementation direction; producer,
-consumer, remapping, native lowering and qualification work remain open.
+covered by regressions; they remain unverified under the hold. Aggregate
+output consumption is being implemented under the distinct, unapproved AC1
+selection. Its current slice carries nominal Copy evidence, checks closed
+rootless aggregate storage and Feature 2/13 closure, and emits/decodes
+success-correlated aggregate D5 reads with an explicit fallback. A
+local/imported source-free load and re-emission regression is added but remains
+unverified under the hold. Provider schema/replacement binding, complete
+remapping, native lowering and qualification remain open.
 Pointer output reads, other side-effecting argument expressions,
 defaults/constants, multiple calls, other condition expressions and Body
 control-flow shapes, nonreturning-call shapes beyond the terminal subset and

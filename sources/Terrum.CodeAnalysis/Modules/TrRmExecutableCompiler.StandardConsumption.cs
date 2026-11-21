@@ -231,7 +231,9 @@ public static partial class TrRmExecutableCompiler
         if (StringComparer.Ordinal.Equals(input.SchemaIdentity,
                 StandardForeignNativeInterfaceSchemaIdentity)
             || StringComparer.Ordinal.Equals(input.SchemaIdentity,
-                StandardForeignNativeInterfaceParameterSurfaceSchemaIdentity))
+                StandardForeignNativeInterfaceParameterSurfaceSchemaIdentity)
+            || StringComparer.Ordinal.Equals(input.SchemaIdentity,
+                StandardForeignNativeInterfaceAggregateOutputConsumptionSchemaIdentity))
         {
             if (!coreExceptionIdentitySelections.IsDefaultOrEmpty
                 || !coreContractFailureIdentitySelections.IsDefaultOrEmpty)
@@ -4320,6 +4322,9 @@ public static partial class TrRmExecutableCompiler
             StandardForeignNativeInterfaceParameterSurfaceSchemaIdentity
                 => TrRmArtifactSchema
                     .ForeignNativeInterfaceParameterSurfaceDraft,
+            StandardForeignNativeInterfaceAggregateOutputConsumptionSchemaIdentity
+                => TrRmArtifactSchema
+                    .ForeignNativeInterfaceAggregateOutputConsumptionDraft,
             StandardForeignInvocationStorageAddressSchemaIdentity
                 => TrRmArtifactSchema.ForeignInvocationStorageAddressDraft,
             StandardForeignInvocationStorageFixedArraySchemaIdentity
@@ -4870,7 +4875,9 @@ public static partial class TrRmExecutableCompiler
                         schemaIdentities[index]);
                 var supportsForeignNativeInterfaceParameterSurface
                     = StringComparer.Ordinal.Equals(schemaIdentities[index],
-                        StandardForeignNativeInterfaceParameterSurfaceSchemaIdentity);
+                        StandardForeignNativeInterfaceParameterSurfaceSchemaIdentity)
+                    || StringComparer.Ordinal.Equals(schemaIdentities[index],
+                        StandardForeignNativeInterfaceAggregateOutputConsumptionSchemaIdentity);
                 var supportsNativeOutputCells
                     = StringComparer.Ordinal.Equals(schemaIdentities[index],
                         StandardForeignInvocationSchemaIdentity)

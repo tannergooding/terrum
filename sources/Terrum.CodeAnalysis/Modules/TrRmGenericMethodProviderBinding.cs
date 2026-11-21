@@ -670,6 +670,9 @@ public static partial class TrRmExecutableCompiler
                 StandardForeignNativeInterfaceParameterSurfaceSchemaIdentity
                     => TrRmArtifactSchema
                         .ForeignNativeInterfaceParameterSurfaceDraft,
+                StandardForeignNativeInterfaceAggregateOutputConsumptionSchemaIdentity
+                    => TrRmArtifactSchema
+                        .ForeignNativeInterfaceAggregateOutputConsumptionDraft,
                 StandardC1L1R1SchemaIdentity
                     => TrRmArtifactSchema.C1ParameterLabelsReceiverAccessDraft,
                 StandardC1M1L1R1SchemaIdentity

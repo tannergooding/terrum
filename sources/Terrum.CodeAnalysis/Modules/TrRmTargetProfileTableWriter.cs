@@ -37,6 +37,7 @@ public static class TrRmTargetProfileTableWriter
                 or TrRmArtifactSchema.ForeignInvocationDraft
                 or TrRmArtifactSchema.ForeignNativeInterfaceDraft
                 or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft
+                or TrRmArtifactSchema.ForeignNativeInterfaceAggregateOutputConsumptionDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft

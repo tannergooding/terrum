@@ -92,7 +92,26 @@ internal static class TrRmFixedArrayLayoutValidator
     internal static (ulong Size, ulong Alignment, ulong RequiredAlignment)
         CalculateTypeDefLayout(
             TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
-            int typeDefRow)
+            int typeDefRow, bool rejectRawUnion = false)
+    {
+        var layout = CalculateTypeDefLayoutCore(tables, typeDefRow,
+            rejectRawUnion, collectTypeDefRows: false);
+        return (layout.Size, layout.Alignment, layout.RequiredAlignment);
+    }
+
+    internal static (ulong Size, ulong Alignment, ulong RequiredAlignment,
+        ImmutableArray<int> TypeDefRows)
+        CalculateTypeDefLayoutAndTypeDefRows(
+            TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+            int typeDefRow, bool rejectRawUnion = false)
+        => CalculateTypeDefLayoutCore(tables, typeDefRow, rejectRawUnion,
+            collectTypeDefRows: true);
+
+    private static (ulong Size, ulong Alignment, ulong RequiredAlignment,
+        ImmutableArray<int> TypeDefRows)
+        CalculateTypeDefLayoutCore(
+            TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+            int typeDefRow, bool rejectRawUnion, bool collectTypeDefRows)
     {
         if (!tables.TargetProfiles.TryGetProfile(
                 TrRmTargetProfileTableReader.WindowsX64NativeProfileId,
@@ -106,10 +125,18 @@ internal static class TrRmFixedArrayLayoutValidator
             tables.TypeSpecs, tables.TypeDefs, tables.Fields, tables.Layouts,
             tables.LayoutFields, profileRow, tables.Imports, tables.Contracts,
             tables.GenericParams, tables.Constraints, tables.Schema,
-            tables.A3LayoutResourceLedger);
+            tables.A3LayoutResourceLedger, collectTypeDefRows);
         try
         {
-            return validator.CalculateTypeDefLayoutForProvider(typeDefRow);
+            var layout = validator.CalculateTypeDefLayoutForProvider(
+                typeDefRow);
+            if (rejectRawUnion && layout.ContainsRawUnion)
+            {
+                throw InvalidLayout();
+            }
+
+            return (layout.Size, layout.Alignment,
+                layout.RequiredAlignment, layout.TypeDefRows);
         }
         catch (TrRmResourceLimitException)
         {
@@ -434,6 +461,7 @@ internal static class TrRmFixedArrayLayoutValidator
         private readonly Dictionary<(int Module, uint TypeSpecRef), TypeLayout>
             _typeCache;
         private readonly HashSet<(int Module, int TypeDef)> _visitingTypeDefs;
+        private readonly HashSet<int>? _typeDefRows;
         private readonly HashSet<(int Module, int TypeSpecRow)> _visitingArrays;
         private readonly HashSet<string> _activeGenericActuals;
         private readonly GenericVisitBudget _genericVisitBudget;
@@ -451,7 +479,8 @@ internal static class TrRmFixedArrayLayoutValidator
             TrRmGenericParamTableReader genericParams,
             TrRmConstraintTableReader constraints,
             TrRmArtifactSchema schema,
-            TrRmA3LayoutResourceLedger? a3ResourceLedger)
+            TrRmA3LayoutResourceLedger? a3ResourceLedger,
+            bool collectTypeDefRows = false)
         {
             _arrayLayouts = arrayLayouts;
             _typeSpecs = typeSpecs;
@@ -469,6 +498,7 @@ internal static class TrRmFixedArrayLayoutValidator
             _a3ResourceLedger?.ConsumeWork(5);
             _typeCache = [];
             _visitingTypeDefs = [];
+            _typeDefRows = collectTypeDefRows ? [] : null;
             _visitingArrays = [];
             _activeGenericActuals = [];
             _genericVisitBudget = new GenericVisitBudget(
@@ -1854,11 +1884,15 @@ internal static class TrRmFixedArrayLayoutValidator
             }
         }
 
-        internal (ulong Size, ulong Alignment, ulong RequiredAlignment)
+        internal (ulong Size, ulong Alignment, ulong RequiredAlignment,
+            bool ContainsRawUnion, ImmutableArray<int> TypeDefRows)
             CalculateTypeDefLayoutForProvider(int typeDef)
         {
             var layout = CalculateTypeDefLayout(typeDef);
-            return (layout.Size, layout.Alignment, layout.RequiredAlignment);
+            return (layout.Size, layout.Alignment,
+                layout.RequiredAlignment, layout.ContainsRawUnion,
+                _typeDefRows is null ? ImmutableArray<int>.Empty
+                    : [.. _typeDefRows]);
         }
 
         private TypeLayout AddAtomicPayload(TypeLayout layout)
@@ -2948,6 +2982,10 @@ internal static class TrRmFixedArrayLayoutValidator
         {
             using var frame = EnterFrame();
             ConsumeWork();
+            if (_typeDefRows is not null)
+            {
+                _ = _typeDefRows.Add(typeDef);
+            }
             var typeDefModule = _typeDefs.GetOwnerModule(typeDef);
             var genericCount = _typeDefs.GetGenericRange(typeDef).Count;
             if (_typeDefs.GetKind(typeDef) != 1

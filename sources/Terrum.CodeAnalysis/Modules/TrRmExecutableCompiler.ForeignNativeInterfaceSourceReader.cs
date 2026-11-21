@@ -478,6 +478,24 @@ public static partial class TrRmExecutableCompiler
             existingStructureTypeIndexesByTypeDef:
                 existingStructureIndexesByTypeDef);
         var structuresWithOrigins = structures.ToBuilder();
+        foreach (var typeDefRow in includedTypeDefRows)
+        {
+            var structureIndex = structureTypeByTypeDef[typeDefRow];
+            if ((uint)structureIndex >= (uint)structuresWithOrigins.Count)
+            {
+                throw Invalid(
+                    "A ForeignNativeInterface aggregate TypeDef has no loaded structure identity.");
+            }
+
+            structuresWithOrigins[structureIndex]
+                = structuresWithOrigins[structureIndex] with {
+                    DeclaredCopyEvidence
+                        = tables.Schema.SupportsDeclaredCopyEvidence()
+                            ? tables.TypeDefs.HasDeclaredCopy(typeDefRow)
+                            : null,
+                };
+        }
+
         var structureExportKeys = tables.Exports
             .GetExportsForModule(moduleRow)
             .Where(static export => (export.Definition >> 24) == 0x13)
@@ -700,6 +718,66 @@ public static partial class TrRmExecutableCompiler
                         "The selected FNI aggregate provider changes the retained layout or field contract.");
                 }
 
+                if (context.Schema
+                    .UsesForeignNativeInterfaceAggregateOutputConsumption())
+                {
+                    if (!TrRmFeatureManifestValidator.Requires(
+                            providerTables.Features, providerTables.Modules,
+                            providerModuleRow,
+                            TrRmFeatureTableReader.LayoutQueriesFeatureId,
+                            providerTables.Schema))
+                    {
+                        throw Invalid(
+                            "An AC1 aggregate provider Module omits LayoutQueries.");
+                    }
+
+                    foreach (var closureTypeDef in providerIncludedTypeDefRows)
+                    {
+                        var closureModule = providerTables.TypeDefs
+                            .GetOwnerModule(closureTypeDef);
+                        if (!TrRmFeatureManifestValidator.Requires(
+                                providerTables.Features,
+                                providerTables.Modules, closureModule,
+                                TrRmFeatureTableReader.LayoutQueriesFeatureId,
+                                providerTables.Schema))
+                        {
+                            throw Invalid(
+                                "An AC1 aggregate provider closure omits LayoutQueries.");
+                        }
+                    }
+
+                    if (tables.TypeDefs.HasDeclaredCopy(expectedTypeDefRow))
+                    {
+                        var providerLayout
+                            = TrRmFixedArrayLayoutValidator
+                                .CalculateTypeDefLayoutAndTypeDefRows(
+                                    providerTables, providerTypeDefRow,
+                                    rejectRawUnion: true);
+                        foreach (var closureTypeDef in
+                            providerLayout.TypeDefRows)
+                        {
+                            var closureModule = providerTables.TypeDefs
+                                .GetOwnerModule(closureTypeDef);
+                            if (!TrRmFeatureManifestValidator.Requires(
+                                    providerTables.Features,
+                                    providerTables.Modules, closureModule,
+                                    TrRmFeatureTableReader
+                                        .RootlessNativeValuesFeatureId,
+                                    providerTables.Schema)
+                                || !TrRmFeatureManifestValidator.Requires(
+                                    providerTables.Features,
+                                    providerTables.Modules, closureModule,
+                                    TrRmFeatureTableReader
+                                        .LayoutQueriesFeatureId,
+                                    providerTables.Schema))
+                            {
+                                throw Invalid(
+                                    "An AC1 Copy-positive provider closure omits its required Features.");
+                            }
+                        }
+                    }
+                }
+
                 if (expectedStructureIndex != providerStructureIndex)
                 {
                     var expectedStructure
@@ -887,6 +965,8 @@ public static partial class TrRmExecutableCompiler
                 || expected.Fields.Length != provider.Fields.Length
                 || expected.IsPrivate != provider.IsPrivate
                 || expected.IsInternal != provider.IsInternal
+                || (expected.DeclaredCopyEvidence == true
+                    && provider.DeclaredCopyEvidence != true)
                 || expected.IsUnique != provider.IsUnique
                 || expected.CleanupMethod != provider.CleanupMethod
                 || expected.IsSequential != provider.IsSequential
@@ -1545,7 +1625,7 @@ public static partial class TrRmExecutableCompiler
         }
     }
 
-    private static HashSet<int>
+    internal static HashSet<int>
         GetForeignNativeInterfaceStructureTypeDefClosure(
         TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
         int moduleRow, IReadOnlyList<int>? rootTypeDefRows,
