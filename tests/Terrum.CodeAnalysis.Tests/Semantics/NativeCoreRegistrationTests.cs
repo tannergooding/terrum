@@ -3247,6 +3247,102 @@ internal sealed class NativeCoreRegistrationTests
     }
 
     [Test]
+    public void StandardForeignNativeInterfaceRejectsDuplicateOutputSuccessState()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-native-interface-parameter-surface-1";
+        var (native, output) = NativeOutputCoreRegistrationTests
+            .CreateCombinedRegistrations(includeForeignNativeInterface: true);
+        var options = new CompilationOptions {
+            NativeCoreRegistration = native,
+            LayoutCoreRegistration = CreateLayoutRegistration(native),
+            NativeOutputCoreRegistration = output,
+        };
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            using Terrum.Interop;
+            [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+            [ForeignNativeInterface(VTableByteOffset: uint32(0))]
+            public interface IProbe {
+                [param(value): NativeOutput(
+                    When: NativeOutputCondition.NonZero)]
+                public unsafe int32 TryRead(ptr<int32> source,
+                    [Terrum.CodeAnalysis.DependsOn(this, nameof(source))]
+                    [Terrum.CodeAnalysis.ForwardsBacking(
+                        this, nameof(source))]
+                    write ptr<int32> value);
+            }
+            """), options);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program
+            ?? throw new AssertionException("Expected a bound FNI provider.");
+        var member = program.Interfaces.Single().Members.Single();
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "provider.module", schemaIdentity, 1, [
+                new TrRmSourceTypeExport("", "IProbe",
+                    "provider/IProbe") {
+                    GenericArity = 0,
+                    InterfaceMethodExports = [
+                        new TrRmSourceInterfaceMethodExport(
+                            member.SourceInputOrdinal,
+                            member.SourceDeclarationSpan,
+                            "provider/IProbe.TryRead"),
+                    ],
+                },
+            ]);
+        var schema
+            = TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft;
+        var index = new TrRmArtifactIndex(artifact, schema);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(index);
+        var rows = new TrRmContractRow[tables.Contracts.Count];
+        var mutated = false;
+        for (var row = 1; row <= tables.Contracts.Count; row++)
+        {
+            var data = tables.Contracts.GetRow(row);
+            var owner = BinaryPrimitives.ReadUInt32LittleEndian(data);
+            var kind = BinaryPrimitives.ReadUInt16LittleEndian(data[4..]);
+            var payload = data[8..].ToArray();
+            if (owner == 0x1600_0001 && kind == 2 && payload[8] == 0)
+            {
+                payload[8] = 1;
+                mutated = true;
+            }
+            rows[row - 1] = new TrRmContractRow(owner, kind, payload);
+        }
+        Assert.That(mutated, Is.True);
+
+        var malformedContracts
+            = TrRmContractTableWriter.EncodeForeignInvocationDraft(rows,
+                tables.TypeDefs, tables.Methods, tables.Signatures,
+                tables.Parameters, tables.TypeSpecs, tables.Features,
+                tables.Modules, tables.PredicateGraphs.Count, schema);
+        var malformedSections = new TrRmSection[index.SectionCount];
+        for (var sectionIndex = 0; sectionIndex < index.SectionCount;
+            sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var bytes, out var count);
+            malformedSections[sectionIndex] = new TrRmSection(kind, flags,
+                kind == 0x001B
+                    ? checked((uint)rows.Length) : checked((uint)count),
+                kind == 0x001B ? malformedContracts : bytes.ToArray());
+        }
+        var malformedArtifact
+            = TrRmArtifactWriter.Encode(malformedSections, schema);
+        var malformedTables
+            = TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
+                new TrRmArtifactIndex(malformedArtifact, schema));
+        Assert.That(malformedTables.Contracts.GetOutputStateContracts(1)
+            .Select(static state => state.State),
+            Is.EqualTo(new byte[] { 1, 1 }));
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    malformedArtifact), "provider.module", []));
+    }
+
+    [Test]
     public void StandardForeignNativeInterfaceFunctionPointerAnchorsRoundTrip()
     {
         const string schemaIdentity
