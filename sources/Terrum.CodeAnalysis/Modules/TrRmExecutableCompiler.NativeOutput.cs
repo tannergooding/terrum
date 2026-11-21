@@ -440,7 +440,8 @@ public static partial class TrRmExecutableCompiler
                             && leafLayout.ElementStride == address.ElementStride
                             && projections.All(projection =>
                                 projection.Index is BoundRead indexRead
-                                    && indexRead.Type == PrimitiveType.Int32
+                                    && NativeFixedArrayContract.IsIndexType(
+                                        indexRead.Type)
                                     && (uint)indexRead.Variable
                                         < (uint)caller.Variables.Length
                                     && (indexRead.Variable < caller.ParameterCount

@@ -738,4 +738,116 @@ internal sealed class TrRmNativeParameterAggregateBackingTests
                 .ConfigureAwait(true);
         }
     }
+
+    [Test]
+    [TestCase("int64", PrimitiveType.Int64)]
+    [TestCase("uint64", PrimitiveType.UInt64)]
+    public async Task StandardA2NativeOutputPreservesWideArrayIndexAsync(
+        string indexTypeName, PrimitiveType expectedIndexType)
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
+        const string moduleIdentity = "a2-native-output-wide-array-index";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse($$"""
+            [param(buffer): DependsOn(nameof(baseAddress))]
+            [Terrum.Interop.NativeImport("kernel32.dll",
+                "ReadProcessMemory")]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(5, Write, NoEscape, 1)]
+            extern unsafe int32 ReadProcessMemory(
+                ptr<void> process, ptr<int32> baseAddress,
+                [Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                write ptr<int32> buffer, nuint bytesToRead,
+                write ptr<nuint> bytesRead);
+
+            public unsafe int32 Probe(ptr<void> process,
+                write ptr<nuint> bytesRead) {
+                mut [int32; 3] source = [11, 22, 33];
+                {{indexTypeName}} index = 1;
+                nuint bytesToRead = 4;
+                init mut int32 buffer;
+                unsafe {
+                    int32 result = ReadProcessMemory(process,
+                        &source[index], &init buffer, bytesToRead,
+                        bytesRead);
+                    if (result != 0) {
+                        return buffer;
+                    }
+                }
+                return 0;
+            }
+            """), NativeOutputCoreRegistrationTests
+                .CreateRegisteredCompilationOptions());
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity,
+            moduleTargetRequirement: 1);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            moduleIdentity, []);
+        var caller = loaded.Functions.Single(static function =>
+            function.Name == "Probe");
+        BoundNativeStorageAddress? arrayBacking = null;
+        Assert.That(BoundTreeTraversal.VisitExpressions(caller.Body,
+            expression =>
+            {
+                if (expression is BoundNativeStorageAddress address
+                    && NativeFixedArrayTypes.IsType(address.CarrierType))
+                {
+                    arrayBacking = address;
+                }
+            }), Is.True);
+        Assert.That(arrayBacking, Is.Not.Null);
+        Assert.That(arrayBacking!.Index.Type, Is.EqualTo(expectedIndexType));
+
+        var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
+            moduleIdentity, schemaIdentity, moduleTargetRequirement: 1);
+        Assert.That(reemitted, Is.EqualTo(artifact));
+        var reemittedInput = new TrRmStandardArtifactInput(schemaIdentity,
+            reemitted);
+        _ = TrRmExecutableCompiler.LoadStandard(reemittedInput,
+            moduleIdentity, []);
+        var image = NativeModuleCompiler.EmitStandardLibrary(
+            reemittedInput, moduleIdentity, [], ["Probe"],
+            NativeRuntimePolicy.FailFast);
+        var directory = TestArtifactPaths.CreateDirectory(
+            "terrum-a2-native-output-wide-array-index-");
+        try
+        {
+            var imagePath = Path.Combine(directory, "library.dll");
+            await File.WriteAllBytesAsync(imagePath, image)
+                .ConfigureAwait(true);
+            var library = NativeLibrary.Load(imagePath);
+            nint bytesRead = 0;
+            try
+            {
+                bytesRead = Marshal.AllocHGlobal(sizeof(long));
+                Marshal.WriteInt64(bytesRead, 0);
+                var function = Marshal.GetDelegateForFunctionPointer<
+                    ArrayProbeDelegate>(NativeLibrary.GetExport(library,
+                    "Probe"));
+                Assert.That(function(new IntPtr(-1), bytesRead),
+                    Is.EqualTo(22));
+                Assert.That(Marshal.ReadInt64(bytesRead), Is.EqualTo(4));
+            }
+            finally
+            {
+                if (bytesRead != 0)
+                {
+                    Marshal.FreeHGlobal(bytesRead);
+                }
+                NativeLibrary.Free(library);
+            }
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
+                .ConfigureAwait(true);
+        }
+    }
 }
