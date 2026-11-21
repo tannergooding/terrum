@@ -2864,13 +2864,36 @@ internal sealed partial class CliTests
             $"trrm-ac1-ps1-provider-{Guid.NewGuid():N}");
         var providerPath = prefix + "-provider.trrm";
         var consumerPath = prefix + "-consumer.trrm";
+        var invalidLibraryPath = prefix + "-invalid.dll";
         var libraryPath = prefix + ".dll";
+        byte[] retained = [0xA5, 0x5A];
         try
         {
             await File.WriteAllBytesAsync(providerPath, providerArtifact)
                 .ConfigureAwait(true);
             await File.WriteAllBytesAsync(consumerPath, consumerArtifact)
                 .ConfigureAwait(true);
+            await File.WriteAllBytesAsync(invalidLibraryPath, retained)
+                .ConfigureAwait(true);
+            var (invalidBuild, invalidOutput, invalidError) = await RunAsync(
+                [], "build-trrm-library", consumerPath, "--export",
+                "InvokeImportedPoint", "-o", invalidLibraryPath, "--runtime",
+                "fail-fast", "--trrm-schema", ac1SchemaIdentity,
+                "--trrm-module", consumerIdentity, "--trrm-provider",
+                ac1SchemaIdentity, providerPath, "--json")
+                .ConfigureAwait(true);
+            Assert.That(invalidBuild, Is.EqualTo(1),
+                $"{invalidOutput}{Environment.NewLine}{invalidError}");
+            Assert.That(invalidError, Is.Empty);
+            using (var invalidDocument = JsonDocument.Parse(invalidOutput))
+            {
+                Assert.That(invalidDocument.RootElement
+                    .GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM5001"));
+            }
+            Assert.That(await File.ReadAllBytesAsync(invalidLibraryPath)
+                .ConfigureAwait(true), Is.EqualTo(retained));
+
             var (built, buildOutput, buildError) = await RunAsync([],
                 "build-trrm-library", consumerPath, "--export",
                 "InvokeImportedPoint", "-o", libraryPath, "--runtime",
@@ -2901,6 +2924,8 @@ internal sealed partial class CliTests
             await TestFileCleanup.DeleteWithRetryAsync(providerPath)
                 .ConfigureAwait(true);
             await TestFileCleanup.DeleteWithRetryAsync(consumerPath)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(invalidLibraryPath)
                 .ConfigureAwait(true);
             await TestFileCleanup.DeleteWithRetryAsync(libraryPath)
                 .ConfigureAwait(true);
