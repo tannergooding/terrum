@@ -88,10 +88,14 @@ pointee distinction; Standard Bodies require Feature 1/2. The unapproved
 has provisional B+I+P and B+I+G+P producers: kind `01` encodes typed loads
 with `0x1B`; earlier identities and compact-indexed kind `08` remain
 unsupported. Source production is limited to a source-ordered declaration/
-assignment prefix, value-formal calls, a single-return Body and one raw load
-with at most one total conversion. General CFG/effect order, nested
-backing/provenance, optional/aggregate types, provider replacement and broader
-runtime paths remain open.
+assignment prefix, value-formal calls, a single-return Body and typed raw loads
+in source order, with at most one total conversion. Straight-line pointer-cell
+provenance now records each read before later stores; control-flow/call-effect
+provenance remains conservative. Nested pointer-cell source-free/runtime and
+local-backing escape/read-order regressions are added but unverified under the
+active hold. General CFG/effect order, broader nested backing/provenance,
+optional/aggregate types, provider replacement and broader runtime paths
+remain open.
 The separate unapproved [F16 composition proposal](proposals/standard-native-pointer-load-native-parameter-composition.md)
 selects exact B+I+P+F16 and B+I+G+P+F16 successors. Their distinct selectors,
 `000E` producer path and Feature 16/1 closure are implemented without
