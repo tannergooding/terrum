@@ -725,6 +725,22 @@ internal sealed class NativeCoreRegistrationTests
                     [Terrum.CodeAnalysis.ForwardsBacking(
                         this, nameof(source))]
                     write ptr<int32> value);
+
+                [param(value): Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                public unsafe int32 TryReadNonZero(ptr<int32> source,
+                    [Terrum.CodeAnalysis.DependsOn(this, nameof(source))]
+                    [Terrum.CodeAnalysis.ForwardsBacking(
+                        this, nameof(source))]
+                    write ptr<int32> value);
+
+                [param(value): Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                public unsafe uint32 TryReadUInt32(ptr<uint32> source,
+                    [Terrum.CodeAnalysis.DependsOn(this, nameof(source))]
+                    [Terrum.CodeAnalysis.ForwardsBacking(
+                        this, nameof(source))]
+                    write ptr<uint32> value);
             }
 
             int32 Invoke(ptr<void> receiver, ptr<int32> source) {
@@ -742,6 +758,27 @@ internal sealed class NativeCoreRegistrationTests
                     return status;
                 }
             }
+
+            int32 InvokeNonZeroInt32(ptr<void> receiver,
+                ptr<int32> source) {
+                init int32 value;
+                unsafe {
+                    int32 status = IProbe.TryReadNonZero(
+                        receiver, source, &init value);
+                    if (status != 0) { return value; }
+                    return status;
+                }
+            }
+
+            uint32 InvokeNonZero(ptr<void> receiver, ptr<uint32> source) {
+                init uint32 value;
+                unsafe {
+                    uint32 status = IProbe.TryReadUInt32(
+                        receiver, source, &init value);
+                    if (status != 0) { return value; }
+                    return status;
+                }
+            }
             """;
         const string consumerSource = """
             int32 Invoke(ptr<void> receiver, ptr<int32> source) {
@@ -756,6 +793,27 @@ internal sealed class NativeCoreRegistrationTests
                     int32 status = IProbe.TryRead(
                         receiver, source, &init value);
                     if (status >= 0) { return value; }
+                    return status;
+                }
+            }
+
+            int32 InvokeNonZeroInt32(ptr<void> receiver,
+                ptr<int32> source) {
+                init int32 value;
+                unsafe {
+                    int32 status = IProbe.TryReadNonZero(
+                        receiver, source, &init value);
+                    if (status != 0) { return value; }
+                    return status;
+                }
+            }
+
+            uint32 InvokeNonZero(ptr<void> receiver, ptr<uint32> source) {
+                init uint32 value;
+                unsafe {
+                    uint32 status = IProbe.TryReadUInt32(
+                        receiver, source, &init value);
+                    if (status != 0) { return value; }
                     return status;
                 }
             }
@@ -803,12 +861,32 @@ internal sealed class NativeCoreRegistrationTests
         var providerCorrelatedBody = providerTables.Bodies.GetRegisterBody(
             providerTables.Methods.GetBodyRow(providerCorrelatedRow),
             providerTables.Contracts.Count);
-        AssertCorrelatedOutputBody(providerCorrelatedBody);
+        AssertCorrelatedOutputBody(providerCorrelatedBody, 6);
+        var providerNonZeroInt32Row
+            = Enumerable.Range(1, providerTables.Methods.Count).Single(row =>
+                providerTables.Methods.GetName(row) == "InvokeNonZeroInt32");
+        var providerNonZeroInt32Body = providerTables.Bodies.GetRegisterBody(
+            providerTables.Methods.GetBodyRow(providerNonZeroInt32Row),
+            providerTables.Contracts.Count);
+        AssertCorrelatedOutputBody(providerNonZeroInt32Body, 13);
+        var providerNonZeroRow
+            = Enumerable.Range(1, providerTables.Methods.Count).Single(row =>
+                providerTables.Methods.GetName(row) == "InvokeNonZero");
+        var providerNonZeroBody = providerTables.Bodies.GetRegisterBody(
+            providerTables.Methods.GetBodyRow(providerNonZeroRow),
+            providerTables.Contracts.Count);
+        AssertCorrelatedOutputBody(providerNonZeroBody, 13);
 
         var loadedProvider = TrRmExecutableCompiler.LoadStandard(
             providerInput, "provider.module", []);
         AssertForeignOutputCall(loadedProvider, expectedProvider: null);
-        AssertCorrelatedOutputCall(loadedProvider, expectedProvider: null);
+        AssertCorrelatedOutputCall(loadedProvider, null,
+            "InvokeCorrelated", TokenKind.GreaterEquals, PrimitiveType.Int32);
+        AssertCorrelatedOutputCall(loadedProvider, null,
+            "InvokeNonZeroInt32", TokenKind.BangEquals,
+            PrimitiveType.Int32);
+        AssertCorrelatedOutputCall(loadedProvider, null,
+            "InvokeNonZero", TokenKind.BangEquals, PrimitiveType.UInt32);
         var reference = TrRmExecutableCompiler.CreateStandardReference(
             providerInput, "provider.module", []);
         var consumerCompilation = Compilation.CreateLibrary(
@@ -841,7 +919,21 @@ internal sealed class NativeCoreRegistrationTests
         var consumerCorrelatedBody = consumerTables.Bodies.GetRegisterBody(
             consumerTables.Methods.GetBodyRow(consumerCorrelatedRow),
             consumerTables.Contracts.Count);
-        AssertCorrelatedOutputBody(consumerCorrelatedBody);
+        AssertCorrelatedOutputBody(consumerCorrelatedBody, 6);
+        var consumerNonZeroInt32Row
+            = Enumerable.Range(1, consumerTables.Methods.Count).Single(row =>
+                consumerTables.Methods.GetName(row) == "InvokeNonZeroInt32");
+        var consumerNonZeroInt32Body = consumerTables.Bodies.GetRegisterBody(
+            consumerTables.Methods.GetBodyRow(consumerNonZeroInt32Row),
+            consumerTables.Contracts.Count);
+        AssertCorrelatedOutputBody(consumerNonZeroInt32Body, 13);
+        var consumerNonZeroRow
+            = Enumerable.Range(1, consumerTables.Methods.Count).Single(row =>
+                consumerTables.Methods.GetName(row) == "InvokeNonZero");
+        var consumerNonZeroBody = consumerTables.Bodies.GetRegisterBody(
+            consumerTables.Methods.GetBodyRow(consumerNonZeroRow),
+            consumerTables.Contracts.Count);
+        AssertCorrelatedOutputBody(consumerNonZeroBody, 13);
 
         var providers = new[] { providerInput };
         var malformedIndex = new TrRmArtifactIndex(consumerArtifact,
@@ -863,20 +955,32 @@ internal sealed class NativeCoreRegistrationTests
         var loadedConsumer = TrRmExecutableCompiler.LoadStandard(
             consumerInput, "consumer.module", providers);
         AssertForeignOutputCall(loadedConsumer, "provider.module");
-        AssertCorrelatedOutputCall(loadedConsumer, "provider.module");
+        AssertCorrelatedOutputCall(loadedConsumer, "provider.module",
+            "InvokeCorrelated", TokenKind.GreaterEquals, PrimitiveType.Int32);
+        AssertCorrelatedOutputCall(loadedConsumer, "provider.module",
+            "InvokeNonZeroInt32", TokenKind.BangEquals,
+            PrimitiveType.Int32);
+        AssertCorrelatedOutputCall(loadedConsumer, "provider.module",
+            "InvokeNonZero", TokenKind.BangEquals, PrimitiveType.UInt32);
         var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(
             loadedConsumer, "consumer.module", schemaIdentity, 1, []);
         var reloadedConsumer = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(schemaIdentity,
                 reemittedArtifact), "consumer.module", providers);
         AssertForeignOutputCall(reloadedConsumer, "provider.module");
-        AssertCorrelatedOutputCall(reloadedConsumer, "provider.module");
+        AssertCorrelatedOutputCall(reloadedConsumer, "provider.module",
+            "InvokeCorrelated", TokenKind.GreaterEquals, PrimitiveType.Int32);
+        AssertCorrelatedOutputCall(reloadedConsumer, "provider.module",
+            "InvokeNonZeroInt32", TokenKind.BangEquals,
+            PrimitiveType.Int32);
+        AssertCorrelatedOutputCall(reloadedConsumer, "provider.module",
+            "InvokeNonZero", TokenKind.BangEquals, PrimitiveType.UInt32);
 
         static void AssertCorrelatedOutputBody(
-            TrRmRegisterBodyReader body)
+            TrRmRegisterBodyReader body, byte comparison)
         {
             Assert.That(body.BlockCount, Is.EqualTo(3));
-            Assert.That(body.GetBlockCode(0)[19], Is.EqualTo((byte)6));
+            Assert.That(body.GetBlockCode(0)[19], Is.EqualTo(comparison));
             Assert.That(body.GetRecord(1)[5], Is.EqualTo((byte)1));
             Assert.That(body.GetRecord(3)[0], Is.EqualTo((byte)0x06));
             Assert.That(body.GetBlockCode(0)[^4], Is.EqualTo((byte)0xE4));
@@ -970,10 +1074,12 @@ internal sealed class NativeCoreRegistrationTests
         }
 
         static void AssertCorrelatedOutputCall(BoundProgram program,
-            string? expectedProvider)
+            string? expectedProvider, string functionName,
+            TokenKind expectedOperator, PrimitiveType resultType)
         {
-            var invoke = program.Functions.Single(static function =>
-                function.Name == "InvokeCorrelated");
+            var invoke = program.Functions.Single(function =>
+                function.Name == functionName);
+            Assert.That(invoke.ReturnType, Is.EqualTo(resultType));
             BoundCall? foreignCall = null;
             Assert.That(BoundTreeTraversal.VisitExpressions(invoke.Body,
                 expression =>
@@ -992,12 +1098,18 @@ internal sealed class NativeCoreRegistrationTests
                     "Expected the selected FNI call identity.");
             Assert.That(foreignInterfaceCall.NativeOutputContracts
                 .Single().FormalOrdinal, Is.EqualTo(1));
+            Assert.That(foreignInterfaceCall.NativeOutputContracts
+                .Single().SuccessSelector,
+                Is.EqualTo(expectedOperator == TokenKind.BangEquals
+                    ? NativeOutputSelector.NonZero
+                    : NativeOutputSelector.NonNegative));
             Assert.That(selectedCall.Arguments[1],
                 Is.TypeOf<BoundNativeOutputReservation>());
             var reservation = (BoundNativeOutputReservation)
                 selectedCall.Arguments[1];
             Assert.That(invoke.Variables[reservation.Variable]
                 .IsInitializationLocal, Is.True);
+            Assert.That(reservation.PointeeType, Is.EqualTo(resultType));
             var statusLocal = invoke.Body.Statements
                 .OfType<BoundLocal>().Single();
             Assert.That(statusLocal.Initializer,
@@ -1005,18 +1117,22 @@ internal sealed class NativeCoreRegistrationTests
             var branch = invoke.Body.Statements.OfType<BoundIf>().Single();
             Assert.That(branch.Condition, Is.TypeOf<BoundBinary>());
             var condition = (BoundBinary)branch.Condition;
-            Assert.That(condition.Operator, Is.EqualTo(TokenKind.GreaterEquals));
+            Assert.That(condition.Operator, Is.EqualTo(expectedOperator));
             Assert.That(((BoundRead)condition.Left).Variable,
                 Is.EqualTo(statusLocal.Variable));
+            Assert.That(condition.Left.Type, Is.EqualTo(resultType));
+            Assert.That(condition.Right.Type, Is.EqualTo(resultType));
             Assert.That(((BoundConstant)condition.Right).Value, Is.Zero);
             var successReturn = (BoundReturn)((BoundBlock)branch.Then)
                 .Statements.Single();
             Assert.That(((BoundRead)successReturn.Value!).Variable,
                 Is.EqualTo(reservation.Variable));
+            Assert.That(successReturn.Value!.Type, Is.EqualTo(resultType));
             var fallbackReturn = invoke.Body.Statements
                 .OfType<BoundReturn>().Last();
             Assert.That(((BoundRead)fallbackReturn.Value!).Variable,
                 Is.EqualTo(statusLocal.Variable));
+            Assert.That(fallbackReturn.Value!.Type, Is.EqualTo(resultType));
             Assert.That(foreignInterfaceCall.Member.DeclaringInterface
                 .ModuleImport?.ProducerIdentity, Is.EqualTo(expectedProvider));
         }

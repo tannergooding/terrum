@@ -1352,8 +1352,9 @@ target, and selected method's output relations. Terminal FNI
 `DoesNotReturn` calls preserve their output contracts and reservations without
 inventing a normal return, publication or cancellation. FNI emission requires the
 NativeOutput cells Feature for selected methods with outputs, retaining its
-PublishedPredicates prerequisite. A bounded three-block `NonNegative` result
-branch now reads a scalar output only on the success edge and returns the
+PublishedPredicates prerequisite. A bounded three-block result branch now
+supports `NonNegative` `int32` and `NonZero` `int32`/`uint32` status-output
+pairs, reading a scalar output only on the success edge and returning the
 status on the complement edge. Local MethodDefs and imported MethodDef
 Imports are mapped by exact member identity; regressions cover local and
 imported output reservations and conditional reads, provider load/re-emission,
