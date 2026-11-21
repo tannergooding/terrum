@@ -1625,6 +1625,47 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
                     malformed), moduleIdentity, []));
     }
 
+    [TestCase(1)]
+    [TestCase(2)]
+    public void L1StorageAddressRejectsOutOfRangePointerTypeMapIndex(
+        byte sourceKind)
+    {
+        const string moduleIdentity = "l1p-storage-address-type-map";
+        const string l1pSchemaIdentity
+            = "trrm/1-draft-local-aggregate-layout-execution-pointer-loads-1";
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            struct Snapshot {
+                public mut int32 Value;
+                public Snapshot(int32 value) { Value = value; }
+            }
+            public int32 Main() {
+                mut Snapshot snapshot = new Snapshot(42);
+                mut [int32; 3] values = [4, 5, 6];
+                unsafe {
+                    ptr<Snapshot> aggregate = &snapshot;
+                    ptr<int32> element = &values[1];
+                    Snapshot captured = *aggregate;
+                    return captured.Value + *element;
+                }
+            }
+            """), new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, l1pSchemaIdentity,
+            moduleTargetRequirement: 1);
+        var malformed = MutateL1pStorageAddressTypeMapIndex(artifact,
+            l1pSchemaIdentity, "Main", sourceKind);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(l1pSchemaIdentity,
+                    malformed), moduleIdentity, []));
+    }
+
     [TestCase(14)]
     [TestCase(15)]
     public void L1ArrayStorageAddressRejectsReservedPlaceRegisters(
@@ -2822,6 +2863,16 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
             static (bodyBytes, recordStart) =>
                 BinaryPrimitives.WriteUInt32LittleEndian(
                     bodyBytes.AsSpan(recordStart + 12), 2));
+
+    private static byte[] MutateL1pStorageAddressTypeMapIndex(
+        byte[] artifact, string schemaIdentity, string methodName,
+        byte sourceKind)
+        => MutateL1pStorageAddressRecord(artifact, schemaIdentity,
+            methodName, sourceKind,
+            static (bodyBytes, recordStart) =>
+                BinaryPrimitives.WriteUInt16LittleEndian(
+                    bodyBytes.AsSpan(recordStart + 10),
+                    ushort.MaxValue));
 
     private static byte[] MutateL1pStorageAddressSourceRegister(
         byte[] artifact, string schemaIdentity, string methodName,
