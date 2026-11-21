@@ -2076,9 +2076,10 @@ internal sealed class NativePointerModuleTests
         var compilation = CreateLibrary(SyntaxTree.Parse("""
             unsafe ptr<int32> EscapeThroughPointerCell() {
                 int32 value = 1;
+                mut ptr<int32> inner = null;
+                write ptr<ptr<int32>> cell = &inner;
                 unsafe {
-                    mut ptr<int32> inner = &value;
-                    mut ptr<ptr<int32>> cell = &inner;
+                    *cell = &value;
                     return *cell;
                 }
             }
