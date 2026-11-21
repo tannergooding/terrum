@@ -2071,6 +2071,28 @@ internal sealed class NativePointerModuleTests
     }
 
     [Test]
+    public void NativePointerLoadFromNestedPointerCellRetainsLocalBacking()
+    {
+        var compilation = CreateLibrary(SyntaxTree.Parse("""
+            unsafe ptr<int32> EscapeThroughPointerCell() {
+                int32 value = 1;
+                unsafe {
+                    mut ptr<int32> inner = &value;
+                    mut ptr<ptr<int32>> cell = &inner;
+                    return *cell;
+                }
+            }
+            """), LayoutOptions());
+
+        Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3016"
+            && diagnostic.Message.Contains("NativePointer",
+                StringComparison.Ordinal)), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Program, Is.Null);
+    }
+
+    [Test]
     public void InitializationReferenceInitializesPointerCellWithoutInitializingPointee()
     {
         var compilation = Create(SyntaxTree.Parse("""
@@ -2605,6 +2627,28 @@ internal sealed class NativePointerModuleTests
         Assert.That(compilation.Diagnostics.Any(static diagnostic =>
             diagnostic.Code == "TRM3016"
             && diagnostic.Message.Contains("NativePointer", StringComparison.Ordinal)), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Program, Is.Null);
+    }
+
+    [Test]
+    public void NativePointerLoadFromNestedPointerCellRetainsLocalBacking()
+    {
+        var compilation = CreateLibrary(SyntaxTree.Parse("""
+            unsafe ptr<int32> EscapeThroughPointerCell() {
+                int32 value = 1;
+                unsafe {
+                    mut ptr<int32> inner = &value;
+                    mut ptr<ptr<int32>> cell = &inner;
+                    return *cell;
+                }
+            }
+            """), LayoutOptions());
+
+        Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3016"
+            && diagnostic.Message.Contains("NativePointer",
+                StringComparison.Ordinal)), Is.True,
             string.Join(Environment.NewLine, compilation.Diagnostics));
         Assert.That(compilation.Program, Is.Null);
     }
