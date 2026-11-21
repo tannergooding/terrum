@@ -8497,7 +8497,8 @@ internal static class TrRmRegisterBodyMapValidator
                 constantValues.TypeDefs, constantValues.Imports);
             var typeKind = constantValues.TypeDefs.GetKind(typeDefRow);
             return typeKind == 4
-                || (schema == TrRmArtifactSchema.LocalAggregateLayoutDraft
+                || ((schema is TrRmArtifactSchema.LocalAggregateLayoutDraft
+                        or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft)
                     && typeKind == 1
                     && constantValues.TypeDefs.HasDeclaredCopy(
                         typeDefRow));
@@ -9180,8 +9181,9 @@ internal static class TrRmRegisterBodyMapValidator
                     && DirectNativeImportContract.IsScalar(sourceScalar);
                 var sourceTypeRef = typeSpecs.GetTypeSpecRef(sourceType);
                 var sourceIsCopyAggregate
-                    = body.Schema
-                        == TrRmArtifactSchema.LocalAggregateLayoutDraft
+                    = (body.Schema is
+                        TrRmArtifactSchema.LocalAggregateLayoutDraft
+                        or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft)
                     && sourceTypeRef.Qualifiers == 0
                     && sourceTypeRef.Form is 0x02 or 0x03
                     && IsCopyableRegisterValueType(typeSpecs, sourceType,
@@ -9240,6 +9242,16 @@ internal static class TrRmRegisterBodyMapValidator
                 }
             }
         }
+    }
+
+    private static bool IsCopyableStorageAddressAggregate(
+        uint typeSpecRef, TrRmTypeSpecTableReader typeSpecs,
+        TrRmTypeDefTableReader typeDefs, TrRmImportTableReader imports)
+    {
+        var typeDefRow = typeSpecs.GetNominalTypeDefRow(typeSpecRef,
+            typeDefs, imports);
+        return typeDefs.GetKind(typeDefRow) == 1
+            && typeDefs.HasDeclaredCopy(typeDefRow);
     }
 
     private static void ValidateFixedArrayPlaceSelections(

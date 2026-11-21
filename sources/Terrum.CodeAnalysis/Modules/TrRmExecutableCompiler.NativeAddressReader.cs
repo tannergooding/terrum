@@ -3314,7 +3314,7 @@ public static partial class TrRmExecutableCompiler
             callerParameterTypes, callerResultType,
             targetParameterTypes, functionPointerSignatures[0],
             nativePointerTypeDefinitions, signatureIndexByAnchorMethod,
-            structureTypeByTypeDef, directCallTargets);
+            structureTypeByTypeDef, structures, directCallTargets);
         var typeArray = nativePointerTypeDefinitions.ToImmutableArray();
         if (!NativePointerTypeContract.IsValidTable(typeArray, structures,
                 functionPointerSignatures))
@@ -3479,6 +3479,7 @@ public static partial class TrRmExecutableCompiler
         NativeFunctionPointerSignatureDefinition signature,
         List<NativePointerTypeDefinition> nativePointerTypeDefinitions,
         int[] signatureIndexByAnchorMethod, int[] structureTypeByTypeDef,
+        ImmutableArray<BoundStruct> structures,
         IReadOnlyDictionary<int, NativeAddressDirectCallTarget>
             directCallTargets)
     {
@@ -3513,7 +3514,7 @@ public static partial class TrRmExecutableCompiler
                 callerParameterTypes, callerResultType, targetParameterTypes,
                 signature, nativePointerTypeDefinitions,
                 signatureIndexByAnchorMethod, structureTypeByTypeDef,
-                directCallTargets);
+                structures, directCallTargets);
         }
 
         if (body.BlockCount != 1)
@@ -3865,6 +3866,7 @@ public static partial class TrRmExecutableCompiler
             NativeFunctionPointerSignatureDefinition signature,
             List<NativePointerTypeDefinition> nativePointerTypeDefinitions,
             int[] signatureIndexByAnchorMethod, int[] structureTypeByTypeDef,
+            ImmutableArray<BoundStruct> structures,
             IReadOnlyDictionary<int, NativeAddressDirectCallTarget>
                 directCallTargets)
     {
@@ -6733,7 +6735,7 @@ public static partial class TrRmExecutableCompiler
                             || requiredElementCount != 1)
                         {
                             throw Invalid(
-                                "The F+S scalar storage-address Home is invalid.");
+                                "The F+S storage-address Home is invalid.");
                         }
 
                         var sourceTypeMapIndex
@@ -6753,23 +6755,32 @@ public static partial class TrRmExecutableCompiler
                                 || NativeFunctionPointerTypes.IsType(sourceType)
                                 || sourceType
                                     == PrimitiveType.NativeRawPointer;
-                        if ((!sourceIsScalar && !sourceIsPointerCell)
+                        var sourceIsCopyAggregate
+                            = !sourceIsScalar && !sourceIsPointerCell
+                            && DirectNativeImportContract
+                                .IsCopyablePointee(sourceType, structures);
+                        if ((!sourceIsScalar && !sourceIsPointerCell
+                                && !sourceIsCopyAggregate)
                             || (pointerDefinition.PointeeType
                                     != PrimitiveType.Void
                                 && pointerDefinition.PointeeType
                                     != sourceType))
                         {
                             throw Unsupported(
-                                "The F+S source-free reader supports scalar local storage for HomePlace addresses.");
+                                "The F+S source-free reader supports scalar, pointer-cell or Copy aggregate HomePlace addresses.");
                         }
 
                         var stride = sourceIsScalar
-                            ? PrimitiveTypeFacts.ScalarWidth(sourceType)
-                            : sizeof(ulong);
+                            ? checked((ulong)PrimitiveTypeFacts.ScalarWidth(
+                                sourceType))
+                            : sourceIsPointerCell
+                                ? checked((ulong)NativeTargetProfile.PointerSize)
+                                : ValueLayout.Size(sourceType, structures,
+                                    fixedArrayTypes: nativeFixedArrayTypes);
                         if (stride <= 0)
                         {
                             throw Invalid(
-                                "The F+S scalar storage address has no positive stride.");
+                                "The F+S storage address has no positive element stride.");
                         }
 
                         storageFacts = new NativeStorageAddressFacts(
