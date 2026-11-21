@@ -1300,11 +1300,19 @@ x64 scalar, raw/typed-pointer and function-pointer values, with readonly or
 mutable opaque receiver projections and Unmanaged/Cdecl/Stdcall conventions;
 Vectorcall and checked-reference, optional, or non-native by-value forms
 reject. NativeParameter is not admitted on these methods.
-Binding and verifier regressions are added but remain
-unverified under the active hold. Foreign-interface calls, Standard/private
-identity persistence, provider replacement, dispatch and lowering remain
-open; the proposal remains unapproved. General aggregate output Bodies and
-native-interface execution remain incomplete.
+Source binding now accepts the provisional `I.M(receiver, arguments)` form
+only for the exact registered interface and selected method. It ranks the
+complete applicable set by supplied typed arguments and permitted pointer
+access attenuation, treats eligible contextual literals equally, and keeps
+the receiver separate from explicit-formal ordinals. Labels and defaults map
+only the selected method; safety, output-reservation and target failures do
+not retry another method. The mandatory verifier evaluates the receiver first,
+revalidates member/layout/convention/output identity, and carries receiver and
+formal dependencies through result-correlated output publication. Source-call
+and output-flow regressions are added but unverified under the active hold.
+Standard/private identity persistence, provider replacement, dispatch and
+lowering remain open; the proposal remains unapproved. General aggregate
+output Bodies and native-interface execution remain incomplete.
 [CG-004](implementation/conformance-gaps.md#cg-004) owns
 the detailed composition and qualification gates. Earlier TRRM NativeOutput
 clauses and ScalarInitOutput encoding are prototype artifacts, not a fallback

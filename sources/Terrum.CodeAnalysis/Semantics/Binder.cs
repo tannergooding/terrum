@@ -20412,6 +20412,12 @@ internal sealed partial class Binder
                 return BindInterfaceWitnessInvocation(node, left, member,
                     (SyntaxNode)node.Children[1]);
             }
+            if (TryBindForeignNativeInterfaceInvocation(node, left,
+                    member, (SyntaxNode)node.Children[1],
+                    out var foreignInterfaceCall))
+            {
+                return foreignInterfaceCall;
+            }
             var type = KnownType(left);
             string? genericMethodName;
             GenericTemplate? genericMethodTemplate = null;
@@ -22567,6 +22573,11 @@ internal sealed partial class Binder
                 {
                     var left = (SyntaxNode)callee.Children[0];
                     var member = ((SyntaxTokenElement)callee.Children[2]).Token.Name;
+                    if (GetForeignNativeInterfaceInvocationType(node)
+                        is PrimitiveType foreignInterfaceResultType)
+                    {
+                        return foreignInterfaceResultType;
+                    }
                     var receiverType = KnownType(left);
                     if ((receiverType == PrimitiveType.TokenSpan && member == "AdvanceOne")
                         || (member == "AsSpan" && receiverType is PrimitiveType snapshot

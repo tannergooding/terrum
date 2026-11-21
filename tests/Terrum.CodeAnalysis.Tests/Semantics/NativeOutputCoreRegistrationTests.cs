@@ -437,6 +437,107 @@ internal sealed class NativeOutputCoreRegistrationTests
     }
 
     [Test]
+    public void ForeignNativeInterfaceCallStagesReceiverAndPublishesOutputByResult()
+    {
+        var (native, output) = CreateCombinedRegistrations(
+            includeForeignNativeInterface: true);
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeCallable(
+                CallConv: Terrum.Interop.NativeCallingConvention.Cdecl)]
+            [Terrum.Interop.ForeignNativeInterface(
+                VTableByteOffset: uint32(0))]
+            public interface IProbe {
+                [param(value): Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonNegative)]
+                public unsafe int32 TryRead(write ptr<int32> value);
+            }
+
+            int32 Invoke(ptr<void> receiver) {
+                unsafe {
+                    init int32 value;
+                    int32 status = IProbe.TryRead(receiver, &init value);
+                    if (status >= 0) { return value; }
+                }
+                return 0;
+            }
+            """), new CompilationOptions {
+                NativeCoreRegistration = native,
+                LayoutCoreRegistration =
+                    NativeCoreRegistrationTests.CreateLayoutRegistration(native),
+                NativeOutputCoreRegistration = output,
+            });
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program
+            ?? throw new AssertionException("Expected a bound program.");
+        var invoke = program.Functions.Single(static function =>
+            function.Name == "Invoke");
+        BoundCall? foreignCall = null;
+        Assert.That(BoundTreeTraversal.VisitExpressions(invoke.Body,
+            expression =>
+            {
+                if (expression is BoundCall call
+                    && call.ForeignInterfaceCall is not null)
+                {
+                    foreignCall = call;
+                }
+            }), Is.True);
+        Assert.That(foreignCall?.ForeignInterfaceCall
+            ?.NativeOutputContracts.Single().FormalOrdinal, Is.EqualTo(0));
+        Assert.That(foreignCall?.ForeignInterfaceCall?.Receiver.Type,
+            Is.EqualTo(PrimitiveType.NativeRawPointer));
+        SemanticVerifier.VerifyLibrary(program);
+    }
+
+    [Test]
+    public void ForeignNativeInterfaceOutputTargetFailureDoesNotRetryAnotherMember()
+    {
+        var (native, output) = CreateCombinedRegistrations(
+            includeForeignNativeInterface: true);
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeCallable(
+                CallConv: Terrum.Interop.NativeCallingConvention.Cdecl)]
+            [Terrum.Interop.ForeignNativeInterface(
+                VTableByteOffset: uint32(0))]
+            public interface IProbe {
+                [param(value): Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonNegative)]
+                public unsafe int32 Read(write ptr<uint32> value,
+                    write ptr<int32> source);
+
+                [param(value): Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                public unsafe int32 Read(write ptr<int32> value,
+                    ptr<int32> source);
+            }
+
+            int32 Invoke(ptr<void> receiver,
+                write ptr<int32> source) {
+                unsafe {
+                    init int32 value;
+                    return IProbe.Read(receiver, &init value, source);
+                }
+            }
+            """), new CompilationOptions {
+                NativeCoreRegistration = native,
+                LayoutCoreRegistration =
+                    NativeCoreRegistrationTests.CreateLayoutRegistration(native),
+                NativeOutputCoreRegistration = output,
+            });
+
+        Assert.That(compilation.HasErrors, Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3030"), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+            diagnostic.Message.Contains("ambiguous",
+                StringComparison.OrdinalIgnoreCase)), Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Test]
     public void ForeignNativeInterfaceRejectsUnregisteredOrIneligibleOutputs()
     {
         const string output = """

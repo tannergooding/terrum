@@ -156,7 +156,8 @@ internal static class ForeignNativeInterfaceContract
                 program.NativeFunctionPointerSignatures)
             || !TryGetReceiverType(member, program.NativePointerTypes,
                 out var receiverType)
-            || foreignCall.Receiver.Type != receiverType)
+            || !IsNativeValueTypeCompatible(foreignCall.Receiver.Type,
+                receiverType, program.NativePointerTypes, out _))
         {
             return false;
         }
@@ -217,13 +218,66 @@ internal static class ForeignNativeInterfaceContract
                 }
             }
             else if (argument is BoundNativeOutputReservation
-                || argument.Type != parameterType.PrimitiveType)
+                || !IsNativeValueTypeCompatible(argument.Type,
+                    parameterType.PrimitiveType,
+                    program.NativePointerTypes, out _))
             {
                 return false;
             }
         }
 
         return mappedParameters.All(static mapped => mapped);
+    }
+
+    internal static bool IsNativeValueTypeCompatible(
+        PrimitiveType sourceType, PrimitiveType targetType,
+        ImmutableArray<NativePointerTypeDefinition> pointerTypes,
+        out bool accessAttenuation)
+    {
+        accessAttenuation = false;
+        if (sourceType == targetType)
+        {
+            return true;
+        }
+
+        if (sourceType == PrimitiveType.NativeRawPointer
+            && NativePointerTypeContract.IsValidType(targetType,
+                pointerTypes))
+        {
+            var targetPointer = pointerTypes[
+                NativePointerTypes.Index(targetType)];
+            return targetPointer.PointeeType == PrimitiveType.Void
+                && !targetPointer.IsWritable;
+        }
+
+        if (!NativePointerTypeContract.IsValidType(sourceType,
+                pointerTypes))
+        {
+            return false;
+        }
+
+        var sourcePointer = pointerTypes[NativePointerTypes.Index(sourceType)];
+        if (targetType == PrimitiveType.NativeRawPointer)
+        {
+            if (sourcePointer.PointeeType != PrimitiveType.Void)
+            {
+                return false;
+            }
+            accessAttenuation = sourcePointer.IsWritable;
+            return true;
+        }
+        if (!NativePointerTypeContract.IsValidType(targetType,
+                pointerTypes))
+        {
+            return false;
+        }
+
+        var targetDefinition = pointerTypes[
+            NativePointerTypes.Index(targetType)];
+        accessAttenuation = sourcePointer.PointeeType
+                == targetDefinition.PointeeType
+            && sourcePointer.IsWritable && !targetDefinition.IsWritable;
+        return accessAttenuation;
     }
 
     internal static bool TryCreateCallTarget(
@@ -301,6 +355,7 @@ internal static class ForeignNativeInterfaceContract
                 member.SourceDeclarationSpan));
         }
 
+        // This temporary verifier view contains explicit formals only; the receiver is staged separately.
         target = new BoundFunction(member.Name,
             resultType.PrimitiveType, variables.MoveToImmutable(),
             member.Parameters.Length, new BoundBlock([], default), default) {

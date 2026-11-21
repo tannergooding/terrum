@@ -322,6 +322,177 @@ internal sealed class NativeCoreRegistrationTests
     }
 
     [Test]
+    public void ForeignNativeInterfaceCallsKeepExactOwnerAndMapLabelsAndDefaults()
+    {
+        var registration = CreateRegistration(
+            includeForeignNativeInterface: true);
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeCallable]
+            [Terrum.Interop.ForeignNativeInterface(VTableByteOffset: uint32(0))]
+            public interface IProbe {
+                public unsafe int32 Read(int32 value, int32 extra = 1);
+                public unsafe int32 Read(int64 value);
+            }
+
+            [Terrum.Interop.NativeCallable]
+            [Terrum.Interop.ForeignNativeInterface(VTableByteOffset: uint32(0))]
+            public interface IOther {
+                public unsafe int32 Read(int32 value);
+            }
+
+            int32 Invoke(ptr<void> receiver, int32 value) {
+                unsafe { return IProbe.Read(receiver, value: value); }
+            }
+            """), new CompilationOptions {
+                NativeCoreRegistration = registration,
+            });
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program
+            ?? throw new AssertionException("Expected a bound program.");
+        var invoke = program.Functions.Single(static function =>
+            function.Name == "Invoke");
+        BoundCall? foreignCall = null;
+        Assert.That(BoundTreeTraversal.VisitExpressions(invoke.Body,
+            expression =>
+            {
+                if (expression is BoundCall call
+                    && call.ForeignInterfaceCall is not null)
+                {
+                    foreignCall = call;
+                }
+            }), Is.True);
+        Assert.That(foreignCall, Is.Not.Null);
+        Assert.That(foreignCall!.Function,
+            Is.EqualTo(BoundCall.ForeignInterfaceFunction));
+        Assert.That(foreignCall.ForeignInterfaceCall!.Member
+            .DeclaringInterface.NominalName, Is.EqualTo("IProbe"));
+        Assert.That(foreignCall.ForeignInterfaceCall.Member.MemberOrdinal,
+            Is.EqualTo(0));
+        Assert.That(foreignCall.ForeignInterfaceCall.Receiver.Type,
+            Is.EqualTo(PrimitiveType.NativeRawPointer));
+        Assert.That(foreignCall.Arguments.Select(static argument =>
+            argument.Type), Is.EqualTo(
+            [PrimitiveType.Int32, PrimitiveType.Int32]));
+        Assert.That(foreignCall.ArgumentParameterIndices,
+            Is.EqualTo([0, 1]));
+        Assert.That(foreignCall.Arguments[1],
+            Is.TypeOf<BoundConstant>());
+        Assert.That(foreignCall.NestedExpressions[0],
+            Is.SameAs(foreignCall.ForeignInterfaceCall.Receiver));
+        Assert.That(foreignCall.NestedExpressions.Skip(1),
+            Is.EqualTo(foreignCall.Arguments));
+        SemanticVerifier.VerifyLibrary(program);
+
+        var invalidFunction = BoundTreeTraversal.RewriteCalls(invoke,
+            call => call.ForeignInterfaceCall is null
+                ? call : call with { ArgumentParameterIndices = [1, 2] });
+        var invokeIndex = program.Functions.IndexOf(invoke);
+        var invalidProgram = program with {
+            Functions = program.Functions.SetItem(invokeIndex,
+                invalidFunction),
+        };
+        _ = Assert.Throws<ArgumentException>(() =>
+            SemanticVerifier.VerifyLibrary(invalidProgram));
+    }
+
+    [Test]
+    public void ForeignNativeInterfaceCallsDoNotRankContextualLiteralValues()
+    {
+        var registration = CreateRegistration(
+            includeForeignNativeInterface: true);
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeCallable]
+            [Terrum.Interop.ForeignNativeInterface(VTableByteOffset: uint32(0))]
+            public interface IProbe {
+                public unsafe int32 Read(int8 value);
+                public unsafe int32 Read(int64 value);
+            }
+
+            int32 Invoke(ptr<void> receiver) {
+                unsafe { return IProbe.Read(receiver, 300); }
+            }
+            """), new CompilationOptions {
+                NativeCoreRegistration = registration,
+            });
+
+        Assert.That(compilation.HasErrors, Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3011"), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Test]
+    public void ForeignNativeInterfaceCallsRejectCrossedPointerAccessQuality()
+    {
+        var registration = CreateRegistration(
+            includeForeignNativeInterface: true);
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeCallable]
+            [Terrum.Interop.ForeignNativeInterface(VTableByteOffset: uint32(0))]
+            public interface IProbe {
+                public unsafe int32 Read(ptr<int32> first, write ptr<int32> second);
+                public unsafe int32 Read(write ptr<int32> first, ptr<int32> second);
+            }
+
+            int32 Invoke(ptr<void> receiver, write ptr<int32> first,
+                write ptr<int32> second) {
+                unsafe { return IProbe.Read(receiver, first, second); }
+            }
+            """), new CompilationOptions {
+                NativeCoreRegistration = registration,
+            });
+
+        Assert.That(compilation.HasErrors, Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3011"), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Test]
+    public void ForeignNativeInterfaceCallsPreferExactReceiverAccess()
+    {
+        var registration = CreateRegistration(
+            includeForeignNativeInterface: true);
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeCallable]
+            [Terrum.Interop.ForeignNativeInterface(VTableByteOffset: uint32(0))]
+            public interface IProbe {
+                public unsafe int32 Read();
+                public mut unsafe int32 Read();
+            }
+
+            int32 Invoke(write ptr<void> receiver) {
+                unsafe { return IProbe.Read(receiver); }
+            }
+            """), new CompilationOptions {
+                NativeCoreRegistration = registration,
+            });
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var invoke = compilation.Program!.Functions.Single(
+            static function => function.Name == "Invoke");
+        BoundCall? foreignCall = null;
+        Assert.That(BoundTreeTraversal.VisitExpressions(invoke.Body,
+            expression =>
+            {
+                if (expression is BoundCall call
+                    && call.ForeignInterfaceCall is not null)
+                {
+                    foreignCall = call;
+                }
+            }), Is.True);
+        Assert.That(foreignCall?.ForeignInterfaceCall?.Member.MemberOrdinal,
+            Is.EqualTo(1));
+        Assert.That(foreignCall?.ForeignInterfaceCall
+            ?.RequiresMutableReceiver, Is.True);
+    }
+
+    [Test]
     public void ForeignNativeInterfaceRejectsUnsupportedInterfaceShapes()
     {
         var registration = CreateRegistration(

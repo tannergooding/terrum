@@ -24067,6 +24067,7 @@ public static partial class SemanticVerifier
                         throw InvalidEffect(argument.Span, "NativeImport");
                     }
                     else if (target.IsExternal
+                        && call.ForeignInterfaceCall is null
                         && IsNativeUtfZPointer(target.Variables[parameterSlot].Type)
                         && !HasValidNativeStringArgument(argument,
                             target.Variables[parameterSlot].Type, parameterIndex, target, program))
@@ -24262,7 +24263,12 @@ public static partial class SemanticVerifier
                     && !isNativeVTableParameterValue
                     && !isNativeVTableStringPointerArgument
                     && !persistedImplicitReference
-                    && !isSourceImplicitReferenceAdaptation)
+                    && !isSourceImplicitReferenceAdaptation
+                    && !(call.ForeignInterfaceCall is not null
+                        && ForeignNativeInterfaceContract
+                            .IsNativeValueTypeCompatible(argument.Type,
+                                target.Variables[parameterSlot].Type,
+                                program.NativePointerTypes, out _)))
                 {
                     throw Invalid();
                 }

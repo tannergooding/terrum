@@ -582,7 +582,8 @@ internal sealed partial class Binder
     {
         if (_pendingInterfaceNativeCallableConventions.Count == 0)
         {
-            return true;
+            return RefreshForeignNativeInterfaceCallConventions(
+                functions);
         }
         if (_nativeCoreRegistration is not NativeCoreRegistrationSet registration
             || !TryGetBoundEnumType(registration.CallingConventions,
@@ -708,7 +709,65 @@ internal sealed partial class Binder
         }
 
         _pendingInterfaceNativeCallableConventions.Clear();
-        return true;
+        return RefreshForeignNativeInterfaceCallConventions(functions);
+    }
+
+    private bool RefreshForeignNativeInterfaceCallConventions(
+        ImmutableArray<BoundFunction>.Builder functions)
+    {
+        ImmutableArray<BoundInterfaceDefinition> interfaces
+            = [.. _interfaces];
+        var success = true;
+        for (var functionIndex = 0;
+            functionIndex < functions.Count; functionIndex++)
+        {
+            var function = functions[functionIndex];
+            if ((uint)function.SourceInputOrdinal < (uint)_trees.Count)
+            {
+                SetContext(_trees[function.SourceInputOrdinal],
+                    function.SourceDeclarationSpan);
+            }
+
+            functions[functionIndex] = BoundTreeTraversal.RewriteCalls(
+                function, call =>
+                {
+                    if (call.ForeignInterfaceCall is not
+                        BoundForeignInterfaceCall foreignCall)
+                    {
+                        return call;
+                    }
+
+                    if (!BoundInterfaceContract
+                            .TryGetInterfaceMemberDefinition(
+                                foreignCall.Member, interfaces,
+                                static _ => true, out var member,
+                                genericNominalTypeDefinitions:
+                                    [.. _genericNominalTypeDefinitions],
+                                sourceGenericTypeDefinitions:
+                                    [.. _sourceGenericTypeDefinitions])
+                        || member?.NativeCallableConvention is not
+                            NativeCallingConvention convention
+                        || convention is not (
+                            NativeCallingConvention.Unmanaged
+                            or NativeCallingConvention.Cdecl
+                            or NativeCallingConvention.Stdcall))
+                    {
+                        Report("TRM3030",
+                            "A foreign-interface call has no resolved supported NativeCallable convention.",
+                            call.Span);
+                        success = false;
+                        return call;
+                    }
+
+                    return call with {
+                        ForeignInterfaceCall = foreignCall with {
+                            CallingConvention = convention,
+                        },
+                    };
+                });
+        }
+
+        return success && DiagnosticCount == 0;
     }
 
     private bool ResolvePendingInterfaceNativeOutputConditions(
@@ -716,7 +775,8 @@ internal sealed partial class Binder
     {
         if (_pendingInterfaceNativeOutputConditions.Count == 0)
         {
-            return true;
+            return RefreshForeignNativeInterfaceCallOutputContracts(
+                functions);
         }
 
         if (_nativeOutputCoreRegistration is not
@@ -929,7 +989,62 @@ internal sealed partial class Binder
         }
 
         _pendingInterfaceNativeOutputConditions.Clear();
-        return true;
+        return RefreshForeignNativeInterfaceCallOutputContracts(functions);
+    }
+
+    private bool RefreshForeignNativeInterfaceCallOutputContracts(
+        ImmutableArray<BoundFunction>.Builder functions)
+    {
+        ImmutableArray<BoundInterfaceDefinition> interfaces
+            = [.. _interfaces];
+        var success = true;
+        for (var functionIndex = 0;
+            functionIndex < functions.Count; functionIndex++)
+        {
+            var function = functions[functionIndex];
+            if ((uint)function.SourceInputOrdinal < (uint)_trees.Count)
+            {
+                SetContext(_trees[function.SourceInputOrdinal],
+                    function.SourceDeclarationSpan);
+            }
+
+            functions[functionIndex] = BoundTreeTraversal.RewriteCalls(
+                function, call =>
+                {
+                    if (call.ForeignInterfaceCall is not
+                        BoundForeignInterfaceCall foreignCall)
+                    {
+                        return call;
+                    }
+
+                    if (!BoundInterfaceContract
+                            .TryGetInterfaceMemberDefinition(
+                                foreignCall.Member, interfaces,
+                                static _ => true, out var member,
+                                genericNominalTypeDefinitions:
+                                    [.. _genericNominalTypeDefinitions],
+                                sourceGenericTypeDefinitions:
+                                    [.. _sourceGenericTypeDefinitions])
+                        || member is null
+                        || member.NativeOutputContracts.IsDefault)
+                    {
+                        Report("TRM3030",
+                            "A foreign-interface call has no resolved NativeOutput contract table.",
+                            call.Span);
+                        success = false;
+                        return call;
+                    }
+
+                    return call with {
+                        ForeignInterfaceCall = foreignCall with {
+                            NativeOutputContracts =
+                                member.NativeOutputContracts,
+                        },
+                    };
+                });
+        }
+
+        return success && DiagnosticCount == 0;
     }
 
     private bool ValidateForeignNativeInterfaceMethodSignatures()
