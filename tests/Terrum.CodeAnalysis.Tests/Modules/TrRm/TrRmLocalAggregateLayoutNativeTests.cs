@@ -1216,6 +1216,79 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
     }
 
     [Test]
+    public async Task L1PointerLoadPreservesPackedAggregateFieldsThroughStandardJitAndAotAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+
+        const string moduleIdentity = "l1p-packed-aggregate-snapshot";
+        const string l1pSchemaIdentity
+            = "trrm/1-draft-local-aggregate-layout-execution-pointer-loads-1";
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Blittable]
+            [Layout(LayoutKind.Sequential, Packing: 1)]
+            struct Packed {
+                public mut uint8 Tag;
+                public mut uint32 Value;
+                public Packed(uint8 tag, uint32 value) {
+                    Tag = tag;
+                    Value = value;
+                }
+            }
+            public int32 Main() {
+                mut Packed value = new Packed(
+                    uint8(0xA5), uint32(0x12345678));
+                unsafe {
+                    Packed captured = *(&value);
+                    value.Value = 0;
+                    if (captured.Tag != uint8(0xA5)) { return -1; }
+                    if (captured.Value != uint32(0x12345678)) { return -2; }
+                    return 42;
+                }
+            }
+            """), new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Program!.Structures.Single(
+            static structure => structure.Name == "Packed").Size,
+            Is.EqualTo(5));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program, moduleIdentity, l1pSchemaIdentity,
+            moduleTargetRequirement: 1);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(l1pSchemaIdentity, artifact),
+            moduleIdentity, []);
+        var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
+            moduleIdentity + "-reemitted", l1pSchemaIdentity,
+            moduleTargetRequirement: 1);
+        var reemittedIdentity = moduleIdentity + "-reemitted";
+        var reemittedInput = new TrRmStandardArtifactInput(
+            l1pSchemaIdentity, reemitted);
+        Assert.That(NativeModuleCompiler.ExecuteStandard(reemittedInput,
+            reemittedIdentity, [], NativeRuntimePolicy.FailFast),
+            Is.EqualTo(42));
+        var image = NativeModuleCompiler.EmitStandardExecutable(
+            reemittedInput, reemittedIdentity, [],
+            NativeRuntimePolicy.FailFast);
+        var directory = TestArtifactPaths.CreateDirectory(
+            "terrum-l1p-packed-aggregate-");
+        try
+        {
+            await AssertNativeImageExitCodeAsync(image,
+                Path.Combine(directory, "program.exe"),
+                reemittedIdentity, 42).ConfigureAwait(true);
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
     public async Task L1PointerLoadSnapshotsLocalAggregateThroughStandardJitAndAotAsync()
     {
         Assume.That(OperatingSystem.IsWindows()
