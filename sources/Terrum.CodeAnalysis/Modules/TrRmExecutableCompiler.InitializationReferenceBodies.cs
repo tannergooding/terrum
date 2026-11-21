@@ -1306,12 +1306,13 @@ public static partial class TrRmExecutableCompiler
     {
         if (TryGetForeignInterfaceConditionalOutputCall(function, program,
                 out var conditionalCall, out var conditionalOutputVariable,
-                out var conditionalStatusVariable))
+                out var conditionalStatusVariable,
+                out var conditionalSuccessOnTrue))
         {
             return EncodeForeignInterfaceConditionalOutputCallBody(
                 function, program, conditionalCall,
                 conditionalOutputVariable, conditionalStatusVariable, -1,
-                typeSpecRowFor,
+                conditionalSuccessOnTrue, typeSpecRowFor,
                 foreignInterfaceMethodMapTokenForCall
                     ?? throw Unsupported(
                         "A Standard F+I caller Body has no InterfaceMethod MethodMap selection."),
@@ -1321,12 +1322,12 @@ public static partial class TrRmExecutableCompiler
         if (TryGetForeignInterfaceConditionalOutputCallWithFallback(
                 function, program, out var conditionalFallbackCall,
                 out var fallbackOutputVariable, out var fallbackStatusVariable,
-                out var fallbackVariable))
+                out var fallbackVariable, out var fallbackSuccessOnTrue))
         {
             return EncodeForeignInterfaceConditionalOutputCallBody(
                 function, program, conditionalFallbackCall,
                 fallbackOutputVariable, fallbackStatusVariable,
-                fallbackVariable, typeSpecRowFor,
+                fallbackVariable, fallbackSuccessOnTrue, typeSpecRowFor,
                 foreignInterfaceMethodMapTokenForCall
                     ?? throw Unsupported(
                         "A Standard F+I caller Body has no InterfaceMethod MethodMap selection."),
@@ -1394,11 +1395,13 @@ public static partial class TrRmExecutableCompiler
 
     private static bool TryGetForeignInterfaceConditionalOutputCall(
         BoundFunction function, BoundProgram program, out BoundCall call,
-        out int outputVariable, out int statusVariable)
+        out int outputVariable, out int statusVariable,
+        out bool successOnTrue)
     {
         call = null!;
         outputVariable = -1;
         statusVariable = -1;
+        successOnTrue = false;
         if (function.IsExternal || function.ParameterCount != 2
             || function.Variables.Length != 4
             || function.DoesNotReturn
@@ -1470,7 +1473,8 @@ public static partial class TrRmExecutableCompiler
             }
             || condition.Type != PrimitiveType.Bool
             || condition.Operator is not (TokenKind.BangEquals
-                or TokenKind.GreaterEquals)
+                or TokenKind.GreaterEquals or TokenKind.EqualsEquals
+                or TokenKind.Less)
             || condition.Left is not BoundRead {
                 Variable: 3,
             } statusRead
@@ -1481,15 +1485,13 @@ public static partial class TrRmExecutableCompiler
             } zero
             || zero.Type != function.ReturnType
             || thenBlock.Statements[0] is not BoundReturn {
-                Value: BoundRead {
-                    Variable: 2,
-                },
+                Value: BoundRead thenRead,
             }
+            || thenRead.Type != function.ReturnType
             || statements[3] is not BoundReturn {
-                Value: BoundRead {
-                    Variable: 3,
-                },
-            })
+                Value: BoundRead finalRead,
+            }
+            || finalRead.Type != function.ReturnType)
         {
             return false;
         }
@@ -1543,8 +1545,19 @@ public static partial class TrRmExecutableCompiler
         var expectedOperator = GetForeignNativeOutputSuccessOperator(
             outputContract.SuccessSelector,
             outputContract.ComplementSelector, function.ReturnType);
-        if (expectedOperator is not TokenKind comparison
-            || condition.Operator != comparison)
+        var complementOperator = GetForeignNativeOutputComplementOperator(
+            outputContract.SuccessSelector,
+            outputContract.ComplementSelector, function.ReturnType);
+        if (expectedOperator is not TokenKind successOperator
+            || complementOperator is not TokenKind failureOperator)
+        {
+            return false;
+        }
+
+        successOnTrue = condition.Operator == successOperator;
+        if ((!successOnTrue && condition.Operator != failureOperator)
+            || thenRead.Variable != (successOnTrue ? 2 : 3)
+            || finalRead.Variable != (successOnTrue ? 3 : 2))
         {
             return false;
         }
@@ -1568,15 +1581,39 @@ public static partial class TrRmExecutableCompiler
             _ => null,
         };
 
+    private static TokenKind? GetForeignNativeOutputComplementOperator(
+        NativeOutputSelector successSelector,
+        NativeOutputSelector complementSelector, PrimitiveType resultType)
+        => (successSelector, complementSelector, resultType) switch {
+            (NativeOutputSelector.NonZero, NativeOutputSelector.Zero,
+                PrimitiveType.Int32 or PrimitiveType.UInt32)
+                => TokenKind.EqualsEquals,
+            (NativeOutputSelector.NonNegative,
+                NativeOutputSelector.Negative, PrimitiveType.Int32)
+                => TokenKind.Less,
+            _ => null,
+        };
+
+    private static byte? GetForeignNativeOutputComparisonOpcode(
+        TokenKind? comparison)
+        => comparison switch {
+            TokenKind.BangEquals => 13,
+            TokenKind.GreaterEquals => 6,
+            TokenKind.EqualsEquals => 2,
+            TokenKind.Less => 1,
+            _ => null,
+        };
+
     private static bool TryGetForeignInterfaceConditionalOutputCallWithFallback(
         BoundFunction function, BoundProgram program, out BoundCall call,
         out int outputVariable, out int statusVariable,
-        out int fallbackVariable)
+        out int fallbackVariable, out bool successOnTrue)
     {
         call = null!;
         outputVariable = -1;
         statusVariable = -1;
         fallbackVariable = -1;
+        successOnTrue = false;
         if (function.IsExternal || function.ParameterCount != 3
             || function.Variables.Length != 5
             || function.DoesNotReturn
@@ -1653,7 +1690,8 @@ public static partial class TrRmExecutableCompiler
             }
             || condition.Type != PrimitiveType.Bool
             || condition.Operator is not (TokenKind.BangEquals
-                or TokenKind.GreaterEquals)
+                or TokenKind.GreaterEquals or TokenKind.EqualsEquals
+                or TokenKind.Less)
             || condition.Left is not BoundRead {
                 Variable: 4,
             } statusRead
@@ -1664,15 +1702,13 @@ public static partial class TrRmExecutableCompiler
             } zero
             || zero.Type != statusLocal.Initializer.Type
             || thenBlock.Statements[0] is not BoundReturn {
-                Value: BoundRead {
-                    Variable: 3,
-                },
+                Value: BoundRead thenRead,
             }
+            || thenRead.Type != function.ReturnType
             || statements[3] is not BoundReturn {
-                Value: BoundRead {
-                    Variable: 2,
-                },
-            })
+                Value: BoundRead finalRead,
+            }
+            || finalRead.Type != function.ReturnType)
         {
             return false;
         }
@@ -1725,8 +1761,19 @@ public static partial class TrRmExecutableCompiler
         var expectedOperator = GetForeignNativeOutputSuccessOperator(
             outputContract.SuccessSelector,
             outputContract.ComplementSelector, target.ReturnType);
-        if (expectedOperator is not TokenKind comparison
-            || condition.Operator != comparison)
+        var complementOperator = GetForeignNativeOutputComplementOperator(
+            outputContract.SuccessSelector,
+            outputContract.ComplementSelector, target.ReturnType);
+        if (expectedOperator is not TokenKind successOperator
+            || complementOperator is not TokenKind failureOperator)
+        {
+            return false;
+        }
+
+        successOnTrue = condition.Operator == successOperator;
+        if ((!successOnTrue && condition.Operator != failureOperator)
+            || thenRead.Variable != (successOnTrue ? 3 : 2)
+            || finalRead.Variable != (successOnTrue ? 2 : 3))
         {
             return false;
         }
@@ -2163,6 +2210,7 @@ public static partial class TrRmExecutableCompiler
     private static byte[] EncodeForeignInterfaceConditionalOutputCallBody(
         BoundFunction function, BoundProgram program, BoundCall call,
         int outputVariable, int statusVariable, int fallbackVariable,
+        bool successOnTrue,
         Func<PrimitiveType, int> typeSpecRowFor,
         Func<BoundInterfaceMemberIdentity, uint>
             methodMapTokenForForeignInterface,
@@ -2191,14 +2239,17 @@ public static partial class TrRmExecutableCompiler
             target.ParameterCount + 1];
         inputs[0] = new TrRmRegisterBodyCallInput(2, 1, 0);
         var outputContract = target.NativeOutputContracts.Single();
-        var comparisonOperator = GetForeignNativeOutputSuccessOperator(
-            outputContract.SuccessSelector,
-            outputContract.ComplementSelector, target.ReturnType) switch {
-                TokenKind.BangEquals => (byte)13,
-                TokenKind.GreaterEquals => (byte)6,
-                _ => throw Unsupported(
-                    "The Standard F+I conditional-output result selector is outside the selected subset."),
-            };
+        var sourceOperator = successOnTrue
+            ? GetForeignNativeOutputSuccessOperator(
+                outputContract.SuccessSelector,
+                outputContract.ComplementSelector, target.ReturnType)
+            : GetForeignNativeOutputComplementOperator(
+                outputContract.SuccessSelector,
+                outputContract.ComplementSelector, target.ReturnType);
+        var comparisonOpcode
+            = GetForeignNativeOutputComparisonOpcode(sourceOperator)
+                ?? throw Unsupported(
+                    "The Standard F+I conditional-output result selector is outside the selected subset.");
         for (var sourceArgument = 0;
             sourceArgument < call.Arguments.Length; sourceArgument++)
         {
@@ -2244,7 +2295,9 @@ public static partial class TrRmExecutableCompiler
                 checked((ushort)outputVariable),
                 checked((uint)(outputContract.FormalOrdinal + 1))));
         var edgeRecordIndex = checked((ushort)records.Count);
-        records.Add(TrRmRegisterBodyRecordWriter.EncodeConditionalEdge(1, 2));
+        records.Add(TrRmRegisterBodyRecordWriter.EncodeConditionalEdge(
+            checked((ushort)(successOnTrue ? 1 : 2)),
+            checked((ushort)(successOnTrue ? 2 : 1))));
         var entryCode = new List<byte>(26) {
             0xDF, 0, (byte)outputReservationRecordIndex,
             (byte)(outputReservationRecordIndex >> 8),
@@ -2261,7 +2314,7 @@ public static partial class TrRmExecutableCompiler
         entryCode.Add((byte)comparisonPayload);
         entryCode.Add((byte)(comparisonPayload >> 8));
         entryCode.Add(0xC3);
-        entryCode.Add(comparisonOperator);
+        entryCode.Add(comparisonOpcode);
         entryCode.Add(0);
         entryCode.Add(0xFF);
         entryCode.Add(0xE4);
@@ -6352,16 +6405,21 @@ public static partial class TrRmExecutableCompiler
         }
 
         var outputContract = member.NativeOutputContracts[0];
-        var expectedOperator = GetForeignNativeOutputSuccessOperator(
+        var successOperator = GetForeignNativeOutputSuccessOperator(
             outputContract.SuccessSelector,
             outputContract.ComplementSelector, statusType);
-        var expectedComparison = expectedOperator switch {
-            TokenKind.BangEquals => 13,
-            TokenKind.GreaterEquals => 6,
-            _ => 0,
-        };
-        if (expectedComparison == 0
-            || entryCode[19] != expectedComparison
+        var complementOperator = GetForeignNativeOutputComplementOperator(
+            outputContract.SuccessSelector,
+            outputContract.ComplementSelector, statusType);
+        var successComparison
+            = GetForeignNativeOutputComparisonOpcode(successOperator);
+        var complementComparison
+            = GetForeignNativeOutputComparisonOpcode(complementOperator);
+        var successOnTrue = successComparison is byte successCode
+            && entryCode[19] == successCode;
+        if ((!successOnTrue
+                && (complementComparison is not byte complementCode
+                    || entryCode[19] != complementCode))
             || homeTypes[statusVariable] != statusType
             || (!hasFallback && statusType != function.ReturnType))
         {
@@ -6388,8 +6446,10 @@ public static partial class TrRmExecutableCompiler
 
         var edgeRecord = body.GetRecord(edgeRecordIndex);
         if (edgeRecord[0] != 0x06
-            || BinaryPrimitives.ReadUInt16LittleEndian(edgeRecord[4..]) != 1
-            || BinaryPrimitives.ReadUInt16LittleEndian(edgeRecord[6..]) != 2)
+            || BinaryPrimitives.ReadUInt16LittleEndian(edgeRecord[4..])
+                != (successOnTrue ? 1 : 2)
+            || BinaryPrimitives.ReadUInt16LittleEndian(edgeRecord[6..])
+                != (successOnTrue ? 2 : 1))
         {
             throw Invalid(
                 "The Standard F+I conditional-output Body has invalid branch targets.");
@@ -6499,10 +6559,16 @@ public static partial class TrRmExecutableCompiler
         };
         var statusRead = new BoundRead(statusHomeVariable, statusType,
             default);
-        var conditionOperator = expectedOperator
-            ?? throw Invalid(
+        var conditionOperator = successOnTrue
+            ? successOperator
+            : complementOperator;
+        if (conditionOperator is not TokenKind selectedOperator)
+        {
+            throw Invalid(
                 "The Standard F+I output comparison has no selected result predicate.");
-        var condition = new BoundBinary(conditionOperator,
+        }
+
+        var condition = new BoundBinary(selectedOperator,
             statusRead, new BoundConstant(0, statusType, default),
             PrimitiveType.Bool, default);
         var outputRead = new BoundRead(outputHomeVariable,
@@ -6510,14 +6576,16 @@ public static partial class TrRmExecutableCompiler
         var complementValue = fallbackVariable >= 0
             ? new BoundRead(fallbackVariable, function.ReturnType, default)
             : statusRead;
+        var thenValue = successOnTrue ? outputRead : complementValue;
+        var finalValue = successOnTrue ? complementValue : outputRead;
         return [
             new BoundVacantLocal(outputVariable, default),
             new BoundLocal(statusHomeVariable,
                 new BoundUnsafeExpression(call, default), default),
             new BoundIf(condition, new BoundBlock([
-                new BoundReturn(outputRead, default),
+                new BoundReturn(thenValue, default),
             ], default), null, default),
-            new BoundReturn(complementValue, default),
+            new BoundReturn(finalValue, default),
         ];
 
         static bool HasEmptyEntryState(TrRmRegisterBodyReader body,

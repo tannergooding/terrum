@@ -1356,17 +1356,19 @@ PublishedPredicates prerequisite. A bounded three-block result branch now
 supports `NonNegative` `int32` and `NonZero` `int32`/`uint32` call results,
 reading a scalar output only on the success edge. Bodies can return a
 same-typed status on the complement edge or use an explicit scalar fallback
-when the output and call-result types differ. Local MethodDefs and imported
-MethodDef Imports are mapped by exact member identity; regressions cover
+when the output and call-result types differ. The result predicate may branch
+on either the success or complementary comparison, with the success edge
+retargeted accordingly. Local MethodDefs and imported MethodDef Imports are
+mapped by exact member identity; regressions cover
 `int32`/`uint32` result predicates, a differing `float64` output with an
 explicit fallback, local/imported output reservations and conditional reads,
 provider load/re-emission, and malformed MethodMap, success-predicate,
 branch-target and reservation rejection. They remain unverified under the
 hold.
-Other result selectors/flow shapes, side-effecting argument expressions,
-defaults/constants, multiple calls, other Body control-flow shapes,
-nonreturning-call shapes beyond the terminal subset and reservation
-cancellation remain open.
+Aggregate and pointer output reads, side-effecting argument expressions,
+defaults/constants, multiple calls, other condition expressions and Body
+control-flow shapes, nonreturning-call shapes beyond the terminal subset and
+reservation cancellation remain open.
 Supervised native
 execution, private persistence, CLI transport and dependent runtime work
 remain open. NativeParameter is not admitted on these methods or anchors, and
