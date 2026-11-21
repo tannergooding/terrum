@@ -45,7 +45,7 @@ public static partial class TrRmExecutableCompiler
                 "L1 executable Body emission requires local rootless Copy layouts and a fail-fast entry point.");
         }
 
-        var requiresPointerLoadFeatures = usesNativePointerLoads
+        var requiresNativePointerFeatures = usesNativePointerLoads
             && !program.NativePointerTypes.IsEmpty;
         var methodImportEdgesByFunction
             = new Dictionary<int, BoundStandardMethodProviderEdge>();
@@ -796,7 +796,7 @@ public static partial class TrRmExecutableCompiler
                     TrRmFeatureRow.RawUnionValueCoverageCandidate);
             }
         }
-        if (requiresPointerLoadFeatures)
+        if (requiresNativePointerFeatures)
         {
             if (!featureRows.Contains(TrRmFeatureRow.NativeBoundaryContracts))
             {
@@ -1171,6 +1171,22 @@ public static partial class TrRmExecutableCompiler
                 _ = GetLocalAggregateTypeSpecRef(program, typeSpecs,
                     typeSpecRows, result, variable.Type);
             }
+            if (usesNativePointerLoads && function.Body is not null
+                && !BoundTreeTraversal.VisitExpressions(function.Body,
+                    expression => {
+                        if (NativePointerTypes.IsType(expression.Type)
+                            || expression.Type
+                                == PrimitiveType.NativeRawPointer)
+                        {
+                            _ = GetLocalAggregateTypeSpecRef(program,
+                                typeSpecs, typeSpecRows, result,
+                                expression.Type);
+                        }
+                    }))
+            {
+                throw Unsupported(
+                    "L1 Body pointer TypeSpec traversal is incomplete.");
+            }
         }
 
         return result;
@@ -1495,7 +1511,6 @@ public static partial class TrRmExecutableCompiler
                         break;
                     case BoundIndirectCall:
                     case BoundNativeFunctionAddress:
-                    case BoundNativePointerAddress:
                     case BoundNativeFixedArrayPointerAddress:
                     case BoundNativeStorageAddress:
                         throw Unsupported(
@@ -2969,6 +2984,54 @@ public static partial class TrRmExecutableCompiler
                         code.Add(0x10);
                         code.Add(destination);
                     }
+                    return;
+                case BoundNativePointerAddress pointerAddress:
+                    if (!pointerAddress.IsUnsafeAuthorized
+                        || destination >= 14
+                        || !NativePointerTypeContract.IsValidType(
+                            pointerAddress.Type, program.NativePointerTypes)
+                        || (uint)pointerAddress.Variable
+                            >= (uint)function.Variables.Length
+                        || pointerAddress.Variable < function.ParameterCount)
+                    {
+                        throw Unsupported(
+                            "L1 storage addresses require an authorized local source and a registered typed pointer.");
+                    }
+
+                    var sourceVariable
+                        = function.Variables[pointerAddress.Variable];
+                    var sourceHome = HomeForVariable(
+                        pointerAddress.Variable);
+                    var pointerDefinition = program.NativePointerTypes[
+                        NativePointerTypes.Index(pointerAddress.Type)];
+                    if (sourceVariable.Type
+                            != pointerDefinition.PointeeType
+                        || !NativePointerTypeContract.IsSourcePointee(
+                            sourceVariable.Type, program.Structures,
+                            program.CheckedReferenceTypes,
+                            program.NativeLoweringAgreement,
+                            program.NativeFixedArrayTypes)
+                        || (pointerDefinition.IsWritable
+                            && !sourceVariable.IsMutable)
+                        || sourceHome < 0
+                        || sourceHome >= formalHomeStart
+                        || !currentMustLiveHomes.Contains(sourceHome)
+                        || homeMap[sourceHome * 8] != 3)
+                    {
+                        throw Unsupported(
+                            "L1 storage-address Homes must identify a live complete local pointee with matching access.");
+                    }
+
+                    var addressRecordIndex = checked((ushort)records.Count);
+                    records.Add(
+                        TrRmRegisterBodyRecordWriter.EncodeStorageAddress(
+                            2, 1, checked((ushort)sourceHome), destination,
+                            typeMap.GetIndex(TypeToken(pointerAddress.Type)),
+                            1));
+                    code.Add(0xEC);
+                    code.Add(0);
+                    code.Add(unchecked((byte)addressRecordIndex));
+                    code.Add((byte)(addressRecordIndex >> 8));
                     return;
                 case BoundNativePointerRead pointerRead:
                     if (!usesNativePointerLoads

@@ -481,7 +481,7 @@ internal static class TrRmRegisterBodyMapValidator
             nativeFunctionPointerAnchors);
         ConsumeWork(body);
         ValidateStorageAddressRecords(body, ownerModule, features, modules,
-            typeSpecs, layouts, constantValues.FixedArrayLayouts);
+            typeSpecs, layouts, constantValues);
         ConsumeWork(body);
         ValidateFixedArrayPlaceSelections(body, ownerModule, features,
             modules, types, fields, methods, methodDefRow, imports,
@@ -9119,13 +9119,14 @@ internal static class TrRmRegisterBodyMapValidator
         TrRmFeatureTableReader features, TrRmModuleTableReader modules,
         TrRmTypeSpecTableReader typeSpecs,
         TrRmLayoutTableReader layouts,
-        TrRmFixedArrayLayoutTableReader fixedArrayLayouts)
+        ConstantSourceValueContext constantValues)
     {
         if (!body.Schema.UsesForeignInvocationStorageAddresses())
         {
             return;
         }
 
+        var fixedArrayLayouts = constantValues.FixedArrayLayouts;
         for (var recordIndex = 0; recordIndex < body.RecordCount; recordIndex++)
         {
             ConsumeWork(body);
@@ -9177,9 +9178,18 @@ internal static class TrRmRegisterBodyMapValidator
                     = TrRmNativeImportTypeContract.TryGetScalarType(
                         typeSpecs, sourceType, out var sourceScalar)
                     && DirectNativeImportContract.IsScalar(sourceScalar);
+                var sourceTypeRef = typeSpecs.GetTypeSpecRef(sourceType);
+                var sourceIsCopyAggregate
+                    = body.Schema
+                        == TrRmArtifactSchema.LocalAggregateLayoutDraft
+                    && sourceTypeRef.Qualifiers == 0
+                    && sourceTypeRef.Form is 0x02 or 0x03
+                    && IsCopyableRegisterValueType(typeSpecs, sourceType,
+                        constantValues, body.Schema);
                 if (!sourceIsScalar
                     && !IsNativeDataPointerTypeSpecRef(typeSpecs,
-                        sourceType))
+                        sourceType)
+                    && !sourceIsCopyAggregate)
                 {
                     throw InvalidMap();
                 }
@@ -9211,7 +9221,8 @@ internal static class TrRmRegisterBodyMapValidator
                 || !TrRmNativeImportTypeContract.TryGetNativeParameterPointee(
                     typeSpecs, pointerType,
                     pointerBytes[1] == 1 ? (byte)2 : (byte)1,
-                    layouts, out _))
+                    layouts, constantValues.TypeDefs,
+                    constantValues.Imports, out _))
             {
                 throw InvalidMap();
             }

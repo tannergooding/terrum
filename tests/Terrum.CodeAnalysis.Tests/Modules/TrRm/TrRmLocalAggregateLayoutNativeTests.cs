@@ -1143,6 +1143,124 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
     }
 
     [Test]
+    public async Task L1PointerLoadSnapshotsLocalAggregateThroughStandardJitAndAotAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+
+        const string moduleIdentity = "l1p-local-snapshot-executable";
+        const string l1pSchemaIdentity
+            = "trrm/1-draft-local-aggregate-layout-execution-pointer-loads-1";
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            struct Snapshot {
+                public mut int32 First;
+                public mut int32 Second;
+                public mut int32 Third;
+                public Snapshot(int32 first, int32 second, int32 third) {
+                    First = first;
+                    Second = second;
+                    Third = third;
+                }
+            }
+            Snapshot ReadSnapshot(ptr<Snapshot> source) {
+                unsafe { return *source; }
+            }
+            public int32 Main() {
+                mut Snapshot value = new Snapshot(42, 1, 2);
+                unsafe {
+                    ptr<Snapshot> source = &value;
+                    Snapshot captured = ReadSnapshot(source);
+                    value.First = 99;
+                    return captured.First;
+                }
+            }
+            """), new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, l1pSchemaIdentity,
+            moduleTargetRequirement: 1);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(l1pSchemaIdentity, artifact),
+            moduleIdentity, []);
+        var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
+            moduleIdentity + "-reemitted", l1pSchemaIdentity,
+            moduleTargetRequirement: 1);
+        var reemittedIdentity = moduleIdentity + "-reemitted";
+        var reemittedInput = new TrRmStandardArtifactInput(
+            l1pSchemaIdentity, reemitted);
+        Assert.That(NativeModuleCompiler.ExecuteStandard(reemittedInput,
+            reemittedIdentity, [], NativeRuntimePolicy.FailFast),
+            Is.EqualTo(42));
+        var image = NativeModuleCompiler.EmitStandardExecutable(
+            reemittedInput, reemittedIdentity, [],
+            NativeRuntimePolicy.FailFast);
+        var directory = TestArtifactPaths.CreateDirectory(
+            "terrum-l1p-local-snapshot-executable-");
+        try
+        {
+            await AssertNativeImageExitCodeAsync(image,
+                Path.Combine(directory, "program.exe"),
+                reemittedIdentity, 42).ConfigureAwait(true);
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
+    public void L1StorageAddressRejectsInvalidElementCount()
+    {
+        const string moduleIdentity = "l1p-storage-address-extent";
+        const string l1pSchemaIdentity
+            = "trrm/1-draft-local-aggregate-layout-execution-pointer-loads-1";
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            struct Snapshot {
+                public mut int32 First;
+                public mut int32 Second;
+                public mut int32 Third;
+                public Snapshot(int32 first, int32 second, int32 third) {
+                    First = first;
+                    Second = second;
+                    Third = third;
+                }
+            }
+            Snapshot ReadSnapshot(ptr<Snapshot> source) {
+                unsafe { return *source; }
+            }
+            public int32 Main() {
+                mut Snapshot value = new Snapshot(42, 1, 2);
+                unsafe {
+                    ptr<Snapshot> source = &value;
+                    Snapshot captured = ReadSnapshot(source);
+                    return captured.First;
+                }
+            }
+            """), new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, l1pSchemaIdentity,
+            moduleTargetRequirement: 1);
+        var malformed = MutateL1pStorageAddressElementCount(artifact,
+            l1pSchemaIdentity, "Main");
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(l1pSchemaIdentity,
+                    malformed), moduleIdentity, []));
+    }
+
+    [Test]
     public void NativePointerReadSnapshotsIndirectAggregateBeforeMutation()
     {
         Assume.That(OperatingSystem.IsWindows()
@@ -1935,6 +2053,105 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
         {
             throw new InvalidDataException(
                 "The L1P test method has no typed pointer-load instruction.");
+        }
+
+        var bodyRows = new ReadOnlyMemory<byte>[tables.Bodies.Count];
+        for (var row = 1; row <= bodyRows.Length; row++)
+        {
+            bodyRows[row - 1] = row == bodyRow
+                ? bodyBytes
+                : bodyIndex.GetRow(row).ToArray();
+        }
+
+        return ReplaceSections(index, new Dictionary<ushort, TrRmSection> {
+            [0x0020] = new(0x0020, 0,
+                checked((uint)bodyRows.Length),
+                TrRmVariableTableWriter.EncodeBodies(bodyRows)),
+        });
+    }
+
+    private static byte[] MutateL1pStorageAddressElementCount(
+        byte[] artifact, string schemaIdentity, string methodName)
+    {
+        var index = new TrRmArtifactIndex(artifact,
+            TrRmArtifactSchema.LocalAggregateLayoutDraft,
+            resourceLedger: null, usesNativePointerLoads: true,
+            standardSchemaIdentity: schemaIdentity);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraftAndGetExecutionTables(
+                index);
+        var methodRow = 0;
+        for (var candidate = 1;
+            candidate <= tables.Methods.Count; candidate++)
+        {
+            if (tables.Methods.GetName(candidate) == methodName)
+            {
+                methodRow = candidate;
+                break;
+            }
+        }
+        Assert.That(methodRow, Is.GreaterThan(0));
+        var bodyRow = tables.Methods.GetBodyRow(methodRow);
+        Assert.That(bodyRow, Is.GreaterThan(0));
+        var bodyIndex = new TrRmVariableTableIndex(
+            GetSectionBytes(index, 0x0020), tables.Bodies.Count, 1, 1);
+        var body = tables.Bodies.GetRegisterBody(bodyRow,
+            tables.Contracts.Count);
+        var bodyBytes = bodyIndex.GetRow(bodyRow).ToArray();
+        var codeOffset = bodyBytes.Length - body.Code.Length;
+        if (!bodyBytes.AsSpan(codeOffset).SequenceEqual(body.Code))
+        {
+            throw new InvalidDataException(
+                "The L1P test Body code is not the final variable-row payload.");
+        }
+
+        var foundAddress = false;
+        for (var position = 0; position < body.Code.Length;)
+        {
+            var instructionLength
+                = TrRmRegisterBodyReader.InstructionLength(
+                    body.Code[position], body.Schema,
+                    usesNativePointerLoads: true);
+            if (body.Code[position] == 0xEC)
+            {
+                var recordIndex
+                    = BinaryPrimitives.ReadUInt16LittleEndian(
+                        body.Code[(position + 2)..]);
+                var record = body.GetRecord(recordIndex);
+                Assert.That(record[0], Is.EqualTo(0x0E));
+                Assert.That(record.Length, Is.EqualTo(20));
+
+                var mapCountBytes = 0;
+                for (var mask = body.MapMask; mask != 0; mask >>= 1)
+                {
+                    mapCountBytes += mask & 1;
+                }
+                var mapStart = 5 + (mapCountBytes * sizeof(uint));
+                var blockStart = mapStart + (body.HomeCount * 8)
+                    + (body.TypeCount * sizeof(uint))
+                    + (body.MethodCount * sizeof(uint))
+                    + (body.FieldCount * sizeof(uint))
+                    + (body.ConstantCount * 8);
+                var recordOffsetsStart
+                    = blockStart + (body.BlockCount * 12);
+                var recordDataStart = recordOffsetsStart
+                    + ((body.RecordCount + 1) * sizeof(uint));
+                var recordOffset = BinaryPrimitives
+                    .ReadUInt32LittleEndian(bodyBytes.AsSpan(
+                        recordOffsetsStart + (recordIndex * sizeof(uint))));
+                var recordStart = recordDataStart
+                    + checked((int)recordOffset);
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    bodyBytes.AsSpan(recordStart + 12), 2);
+                foundAddress = true;
+                break;
+            }
+            position += instructionLength;
+        }
+        if (!foundAddress)
+        {
+            throw new InvalidDataException(
+                "The L1P test method has no StorageAddress instruction.");
         }
 
         var bodyRows = new ReadOnlyMemory<byte>[tables.Bodies.Count];

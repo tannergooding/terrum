@@ -1226,6 +1226,102 @@ public static partial class TrRmExecutableCompiler
                         });
                     break;
                 }
+                case 0xEC:
+                {
+                    var storageRecordIndex
+                        = BinaryPrimitives.ReadUInt16LittleEndian(
+                            instruction[2..]);
+                    var storage = body.GetRecord(storageRecordIndex);
+                    if (storage[0] != 0x0E || storage.Length != 20
+                        || storage[4] != 2 || storage[5] is not (1 or 2)
+                        || BinaryPrimitives.ReadUInt32LittleEndian(
+                            storage[12..]) != 1)
+                    {
+                        throw Invalid(
+                            "An L1 storage address must select one complete local Home.");
+                    }
+
+                    var sourceHome
+                        = BinaryPrimitives.ReadUInt16LittleEndian(
+                            storage[6..]);
+                    if (sourceHome >= state.FormalHomeStart
+                        || (uint)sourceHome
+                            >= (uint)state.HomeVariable.Length
+                        || body.HomeMap[sourceHome * 8] != 3)
+                    {
+                        throw Invalid(
+                            "An L1 storage address source is not local role-3 storage.");
+                    }
+
+                    var sourceVariable = state.HomeVariable[sourceHome];
+                    if (sourceVariable < 0
+                        || (!state.UseFixedPointHomeState
+                            && !state.InitializedHomes.Contains(sourceHome)))
+                    {
+                        throw Invalid(
+                            "An L1 storage address source Home is not initialized.");
+                    }
+
+                    var pointerTypeMapIndex
+                        = BinaryPrimitives.ReadUInt16LittleEndian(
+                            storage[10..]);
+                    var pointerType = ReadLocalAggregateType(tables,
+                        ReadLocalAggregateBodyTypeSpec(body,
+                            pointerTypeMapIndex),
+                        typeEnvironment);
+                    if (!NativePointerTypeContract.IsValidType(pointerType,
+                            typeEnvironment.NativePointerTypes))
+                    {
+                        throw Invalid(
+                            "An L1 storage address has an invalid pointer TypeSpec.");
+                    }
+
+                    var pointerDefinition
+                        = typeEnvironment.NativePointerTypes[
+                            NativePointerTypes.Index(pointerType)];
+                    var sourceValue = state.Variables[sourceVariable];
+                    if (pointerDefinition.PointeeType != sourceValue.Type
+                        || !NativePointerTypeContract.IsSourcePointee(
+                            sourceValue.Type, typeEnvironment.Structures, [],
+                            nativeLoweringAgreement: null,
+                            fixedArrayTypes:
+                                typeEnvironment.FixedArrayTypes)
+                        || (pointerDefinition.IsWritable
+                            && (body.HomeMap[sourceHome * 8 + 1] & 1) == 0))
+                    {
+                        throw Invalid(
+                            "An L1 storage address type or access differs from its source Home.");
+                    }
+
+                    var address = new BoundNativePointerAddress(
+                        sourceVariable, pointerType, default) {
+                        IsUnsafeAuthorized = true,
+                    };
+                    var resultKind = storage[5];
+                    var resultIndex
+                        = BinaryPrimitives.ReadUInt16LittleEndian(
+                            storage[8..]);
+                    if (resultKind == 1)
+                    {
+                        if (resultIndex == 15)
+                        {
+                            break;
+                        }
+                        if (resultIndex >= 14)
+                        {
+                            throw Invalid(
+                                "An L1 storage address result uses a reserved register.");
+                        }
+
+                        StoreLocalAggregateRegisterValue(state, resultIndex,
+                            address);
+                    }
+                    else
+                    {
+                        StoreHome(state, resultIndex, address);
+                    }
+                    break;
+                }
                 case 0x17:
                     if (instruction[1] != 0
                         || declaration.ReturnType == PrimitiveType.Void
@@ -3821,6 +3917,31 @@ public static partial class TrRmExecutableCompiler
                     AddLocalAggregateRegisterDefinition(definitions,
                         instruction[1] & 0x0F);
                     break;
+                case 0xEC:
+                {
+                    var storage = body.GetRecord(
+                        BinaryPrimitives.ReadUInt16LittleEndian(
+                            instruction[2..]));
+                    if (storage[0] != 0x0E || storage.Length != 20)
+                    {
+                        throw Invalid(
+                            "An L1 register-flow scan found a malformed StorageAddress.");
+                    }
+
+                    if (storage[4] == 1)
+                    {
+                        AddLocalAggregateRegisterUse(uses, definitions,
+                            BinaryPrimitives.ReadUInt16LittleEndian(
+                                storage[6..]));
+                    }
+                    if (storage[5] == 1)
+                    {
+                        AddLocalAggregateRegisterDefinition(definitions,
+                            BinaryPrimitives.ReadUInt16LittleEndian(
+                                storage[8..]));
+                    }
+                    break;
+                }
                 case 0x14:
                     AddLocalAggregateRegisterUse(uses, definitions,
                         instruction[1] >> 4);
