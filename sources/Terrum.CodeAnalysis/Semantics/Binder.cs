@@ -18656,15 +18656,18 @@ internal sealed partial class Binder
                             == TokenKind.WriteKeyword);
                     if (patternTokens.Length == 0
                         || patternTokens[^1].Token.Kind
-                            != TokenKind.Underscore)
+                            is not (TokenKind.Identifier
+                                or TokenKind.Underscore))
                     {
                         Report("TRM3007",
-                            "Named reference-pattern captures require role-2 backing propagation.",
+                            "A reference pattern requires an identifier or wildcard binding.",
                             patternSyntax.Span);
                         expression = ErrorExpression(node.Span);
                         break;
                     }
-                    if (isMutableBinding)
+                    var bindingToken = patternTokens[^1].Token;
+                    if (isMutableBinding
+                        && bindingToken.Kind == TokenKind.Underscore)
                     {
                         Report("TRM3007",
                             "A mutable reference pattern requires a named descriptor binding.",
@@ -18680,41 +18683,45 @@ internal sealed partial class Binder
                     var subject = BindExpression(
                         (SyntaxNode)node.Children[0], null);
                     if (subject is not BoundRead subjectRead
-                        || !CheckedReferenceTypeContract.IsValidType(
+                        || !CheckedReferenceTypeContract
+                            .IsSupportedReferencePatternType(
                             subjectRead.Type, _checkedReferenceTypes))
                     {
                         Report("TRM3007",
-                            "A reference pattern requires a named checked-reference descriptor.",
+                            "This reference-pattern path requires a named non-optional scalar-reference descriptor.",
                             node.Span);
                         expression = ErrorExpression(node.Span);
                         break;
                     }
 
-                    var subjectReference = _checkedReferenceTypes[
-                        CheckedReferenceTypes.Index(subjectRead.Type)];
-                    if (subjectReference.IsGarbageCollected
-                        || subjectReference.IsInitialization
-                        || subjectReference.IsOptional
-                        || !PrimitiveTypeFacts.IsBuiltInScalar(
-                            subjectReference.ReferentType))
-                    {
-                        Report("TRM3007",
-                            "This reference-pattern path requires a non-optional scalar-reference descriptor.",
-                            node.Span);
-                        expression = ErrorExpression(node.Span);
-                        break;
-                    }
-
+                    var captureVariable
+                        = bindingToken.Kind == TokenKind.Identifier
+                            ? AddVariable(bindingToken.Name,
+                                referencePatternType, isMutableBinding,
+                                bindingToken.Span)
+                            : -1;
                     var matches
                         = CheckedReferenceTypeContract
                             .IsReferencePatternCompatible(
                                 subjectRead.Type, referencePatternType,
                                 _checkedReferenceTypes);
-                    expression = _bindingContractPhase is not null
-                        ? new BoundReferenceTypeTestPattern(subjectRead,
-                            referencePatternType, node.Span)
-                        : new BoundConstant(matches ? 1 : 0,
+                    if (_bindingContractPhase is not null)
+                    {
+                        expression = new BoundReferenceTypeTestPattern(
+                            subjectRead, referencePatternType, node.Span) {
+                                Variable = captureVariable,
+                            };
+                    }
+                    else if (captureVariable >= 0)
+                    {
+                        expression = new BoundIsVariablePattern(subjectRead,
+                            captureVariable, false, node.Span);
+                    }
+                    else
+                    {
+                        expression = new BoundConstant(matches ? 1 : 0,
                             PrimitiveType.Bool, node.Span);
+                    }
                     break;
                 }
 

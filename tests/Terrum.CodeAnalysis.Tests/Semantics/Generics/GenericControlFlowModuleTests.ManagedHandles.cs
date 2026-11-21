@@ -240,6 +240,41 @@ internal sealed partial class GenericControlFlowModuleTests
 
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task ReferencePatternCapturesRoundTripThroughPrivateModulesAsync(
+        NativeRuntimePolicy policy)
+    {
+        const string ProviderSource = """
+            public int32 Check()
+            {
+                mut int32 storage = int32(42);
+                mut write ref<int32> input = ref storage;
+                if (input is mut write ref<int64> incompatible) {
+                    return 100;
+                }
+                if (input is mut ref<int32> captured) {
+                    return *captured;
+                }
+                return 0;
+            }
+            """;
+        const string ConsumerSource = """
+            int32 Main() { return Check(); }
+            """;
+        var providerProgram = Compile(ProviderSource, policy);
+        var producer = ModuleCompiler.CreateProducer(providerProgram,
+            ["Check"]);
+        var consumerProgram = Compile(ConsumerSource, policy,
+            ModuleCompiler.CreateReference(producer), library: false);
+        var consumer = ModuleCompiler.CreateConsumer(consumerProgram,
+            producer);
+        var linked = ModuleCompiler.Link(consumer, producer);
+
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(linked, policy))
+            .ConfigureAwait(true), Is.EqualTo(42));
+    }
+
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task ManagedGenericSampleRunsAndReplacesUnchangedConsumerAsync(NativeRuntimePolicy policy)
     {
         var source = await File.ReadAllTextAsync(Path.Combine(RepositoryRoot(),

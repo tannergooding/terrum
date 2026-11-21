@@ -637,6 +637,20 @@ internal sealed class CheckedReferenceTypeTests
     }
 
     [Test]
+    public void MutableReferencePatternBindingDoesNotAmplifyAccess()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            void Set(write ref<int32> value) {
+                if (value is mut ref<int32> captured) {
+                    *captured = int32(7);
+                }
+            }
+            """));
+
+        Assert.That(compilation.HasErrors, Is.True);
+    }
+
+    [Test]
     public void RejectsWritableReferenceFormationFromImmutablePlaces()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""

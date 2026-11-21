@@ -983,6 +983,10 @@ internal static class BoundTreeTraversal
             BoundTypedValuePattern test => test with {
                 Variable = Variable(test.Variable),
             },
+            BoundReferenceTypeTestPattern test => test with {
+                Variable = test.Variable < 0
+                    ? -1 : Variable(test.Variable),
+            },
             BoundIsInitialized test => test with {
                 Variable = Variable(test.Variable),
             },

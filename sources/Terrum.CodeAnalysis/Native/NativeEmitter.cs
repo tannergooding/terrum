@@ -10213,14 +10213,20 @@ internal sealed partial class PeCompiler
                 break;
             case BoundReferenceTypeTestPattern referenceTypeTest:
                 Expression(referenceTypeTest.Value, spill);
-                _code.Byte(0xB8);
-                _code.Int32(
-                    CheckedReferenceTypeContract
+                var referencePatternMatches
+                    = CheckedReferenceTypeContract
                         .IsReferencePatternCompatible(
                             referenceTypeTest.Value.Type,
                             referenceTypeTest.TestedType,
-                            _program.CheckedReferenceTypes)
-                        ? 1 : 0);
+                            _program.CheckedReferenceTypes);
+                if (referencePatternMatches
+                    && referenceTypeTest.Variable >= 0)
+                {
+                    StoreValue(Slot(referenceTypeTest.Variable),
+                        referenceTypeTest.TestedType);
+                }
+                _code.Byte(0xB8);
+                _code.Int32(referencePatternMatches ? 1 : 0);
                 break;
             case BoundIsSome pattern when IsTaggedOptionalValueType(
                 pattern.Value.Type):
@@ -10328,14 +10334,21 @@ internal sealed partial class PeCompiler
                 if (!ManagedClassTypes.IsOptional(pattern.Value.Type))
                 {
                     Expression(pattern.Value, spill);
-                    if (_program.Functions[_currentFunction]
-                            .Variables[pattern.Variable].Type
-                        != pattern.Value.Type)
+                    var bindingType
+                        = _program.Functions[_currentFunction]
+                            .Variables[pattern.Variable].Type;
+                    var bindingTypeMatches
+                        = bindingType == pattern.Value.Type
+                            || CheckedReferenceTypeContract
+                                .IsReferencePatternCompatible(
+                                    pattern.Value.Type, bindingType,
+                                    _program.CheckedReferenceTypes);
+                    if (!bindingTypeMatches)
                     {
                         _code.Bytes(0x31, 0xC0);
                         break;
                     }
-                    StoreValue(Slot(pattern.Variable), pattern.Value.Type);
+                    StoreValue(Slot(pattern.Variable), bindingType);
                     _code.Bytes(0xB8, 0x01, 0x00, 0x00, 0x00);
                     break;
                 }

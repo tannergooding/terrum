@@ -187,12 +187,31 @@ internal static class CheckedReferenceTypeContract
         CheckedReferenceTypes.IsType(type)
         && (uint)CheckedReferenceTypes.Index(type) < (uint)referenceTypes.Count;
 
+    internal static bool IsSupportedReferencePatternType(
+        PrimitiveType type,
+        IReadOnlyList<CheckedReferenceTypeDefinition> referenceTypes)
+    {
+        if (!IsValidType(type, referenceTypes))
+        {
+            return false;
+        }
+
+        var reference = referenceTypes[CheckedReferenceTypes.Index(type)];
+        return !reference.IsGarbageCollected
+            && !reference.IsInitialization
+            && !reference.IsOptional
+            && !reference.IsReferentWritable
+            && PrimitiveTypeFacts.IsBuiltInScalar(
+                reference.ReferentType);
+    }
+
     internal static bool IsReferencePatternCompatible(
         PrimitiveType sourceType, PrimitiveType patternType,
         IReadOnlyList<CheckedReferenceTypeDefinition> referenceTypes)
     {
-        if (!IsValidType(sourceType, referenceTypes)
-            || !IsValidType(patternType, referenceTypes))
+        if (!IsSupportedReferencePatternType(sourceType, referenceTypes)
+            || !IsSupportedReferencePatternType(patternType,
+                referenceTypes))
         {
             return false;
         }

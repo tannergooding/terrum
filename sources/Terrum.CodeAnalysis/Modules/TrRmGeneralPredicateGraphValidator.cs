@@ -483,7 +483,7 @@ internal static class TrRmGeneralPredicateGraphValidator
             if ((phase == 3 && nodeKind is >= 1 and <= 6)
                 || !ValidateNodeShape(schema, node, nodeKind, childCount,
                     nodes, operands, calls, graph, operations, typeUses,
-                    controls, typePatterns, captures))
+                    typeSpecs, controls, typePatterns, captures))
             {
                 return false;
             }
@@ -497,6 +497,14 @@ internal static class TrRmGeneralPredicateGraphValidator
             }
             if (!ValidateNodeRelation(node, nodeKind, parentNodes[node],
                     parentOrdinals[node], nodes, edges))
+            {
+                return false;
+            }
+            if (nodeKind == 0x13
+                && childCount == 1
+                && !LoadCaptureTypeMatches(node,
+                    edges.GetChildNodeRowByOrdinal(node, 0), nodes,
+                    operands, captures, typeSpecs))
             {
                 return false;
             }
@@ -805,6 +813,7 @@ internal static class TrRmGeneralPredicateGraphValidator
         TrRmPredicateCallTableReader calls, int graph,
         TrRmPredicateOperationTableReader operations,
         TrRmPredicateTypeUseTableReader typeUses,
+        TrRmTypeSpecTableReader typeSpecs,
         TrRmPredicateControlTableReader controls,
         TrRmPredicateTypePatternTableReader typePatterns,
         TrRmPredicateCaptureTableReader captures)
@@ -821,7 +830,9 @@ internal static class TrRmGeneralPredicateGraphValidator
             0x10 or 0x11 => childCount == 0
                 && HasOperandKinds(node, nodes, operands, 1),
             0x12 => childCount == 0
-                && HasOperandKinds(node, nodes, operands, 3),
+                && HasOperandKinds(node, nodes, operands, 3)
+                && CapturePlaceTypeMatches(node, nodes, operands,
+                    captures, typeSpecs),
             0x13 or 0x19 or 0x1A or 0x1B or 0x1D or 0x1E
                 => childCount == 1 && HasNoOperands(node, nodes),
             0x14 => childCount == 0
@@ -891,9 +902,8 @@ internal static class TrRmGeneralPredicateGraphValidator
                 && HasOperandKinds(node, nodes, operands, 3)
                 && CaptureHasRole(node, 0, 1, nodes, operands, captures, graph),
             0x48 => childCount == 0
-                && HasReferencePatternOperands(node, nodes, operands, typePatterns)
-                && (nodes.GetOperandCount(node) == 1
-                    || CaptureHasRole(node, 1, 2, nodes, operands, captures, graph)),
+                && HasReferencePatternOperands(node, nodes, operands,
+                    typePatterns, typeUses, captures, typeSpecs, graph),
             0x49 => childCount == 0
                 && HasGenericPatternOperands(node, nodes, operands, typePatterns)
                 && (nodes.GetOperandCount(node) == 1
@@ -935,6 +945,39 @@ internal static class TrRmGeneralPredicateGraphValidator
         var capture = GetOperandRef(node, operandOrdinal, nodes, operands);
         return captures.GetGraphRow(checked((int)capture)) == graph
             && captures.GetRole(checked((int)capture)) == role;
+    }
+
+    private static bool CapturePlaceTypeMatches(int node,
+        TrRmPredicateNodeTableReader nodes,
+        TrRmPredicateNodeOperandTableReader operands,
+        TrRmPredicateCaptureTableReader captures,
+        TrRmTypeSpecTableReader typeSpecs)
+    {
+        var capture = checked((int)GetOperandRef(
+            node, 0, nodes, operands));
+        return captures.GetRole(capture) != 2
+            || typeSpecs.AreEquivalentTypeSpecRefs(
+                nodes.GetResultTypeSpecRef(node),
+                captures.GetCapturedTypeSpecRef(capture));
+    }
+
+    private static bool LoadCaptureTypeMatches(int loadNode,
+        int placeNode, TrRmPredicateNodeTableReader nodes,
+        TrRmPredicateNodeOperandTableReader operands,
+        TrRmPredicateCaptureTableReader captures,
+        TrRmTypeSpecTableReader typeSpecs)
+    {
+        if (nodes.GetNodeKind(placeNode) != 0x12)
+        {
+            return true;
+        }
+
+        var capture = checked((int)GetOperandRef(
+            placeNode, 0, nodes, operands));
+        return captures.GetRole(capture) != 2
+            || typeSpecs.AreEquivalentTypeSpecRefs(
+                nodes.GetResultTypeSpecRef(loadNode),
+                nodes.GetResultTypeSpecRef(placeNode));
     }
 
     private static bool ControlHasKind(int node,
@@ -992,7 +1035,10 @@ internal static class TrRmGeneralPredicateGraphValidator
     private static bool HasReferencePatternOperands(int node,
         TrRmPredicateNodeTableReader nodes,
         TrRmPredicateNodeOperandTableReader operands,
-        TrRmPredicateTypePatternTableReader patterns)
+        TrRmPredicateTypePatternTableReader patterns,
+        TrRmPredicateTypeUseTableReader typeUses,
+        TrRmPredicateCaptureTableReader captures,
+        TrRmTypeSpecTableReader typeSpecs, int graph)
     {
         var count = nodes.GetOperandCount(node);
         if (count is not (1 or 2)
@@ -1001,11 +1047,68 @@ internal static class TrRmGeneralPredicateGraphValidator
             return false;
         }
 
-        var first = GetOperandRef(node, 0, nodes, operands);
-        return patterns.GetKind(checked((int)first)) is 9 or 10
-            && (count == 1
-                || operands.GetOperandKind(checked((int)(
-                    nodes.GetOperandFirstRow(node) + 1))) == 3);
+        var typePatternRow = checked((int)GetOperandRef(
+            node, 0, nodes, operands));
+        var typePatternKind = patterns.GetKind(typePatternRow);
+        if (typePatternKind is not (9 or 10))
+        {
+            return false;
+        }
+        if (count == 1)
+        {
+            return true;
+        }
+
+        var captureOperandRow = checked((int)(
+            nodes.GetOperandFirstRow(node) + 1));
+        if (operands.GetOperandKind(captureOperandRow) != 3)
+        {
+            return false;
+        }
+
+        var captureRow = checked((int)operands.GetOperandRef(
+            captureOperandRow));
+        if (captures.GetGraphRow(captureRow) != graph
+            || captures.GetRole(captureRow) != 2)
+        {
+            return false;
+        }
+
+        var capturedTypeSpecRef
+            = captures.GetCapturedTypeSpecRef(captureRow);
+        var capturedType = typeSpecs.GetTypeSpecRef(capturedTypeSpecRef);
+        if (capturedType.Qualifiers != (typePatternKind == 10 ? 1 : 0)
+            || !(capturedType.Form == 0x07 && capturedType.IsRow
+                || capturedType.Form == 0x0C
+                    && capturedType.TypeCode == 0x8B
+                    && capturedType.IsRow
+                || capturedType.Form == 0x01
+                    && capturedType.TypeCode == 0x8B))
+        {
+            return false;
+        }
+
+        var capturedReferentTypeSpecRef
+            = TrRmCopyOriginContractValidator.GetReferentTypeSpec(
+                capturedType, typeSpecs);
+        var referentPatternRow = checked((int)patterns.GetArgumentRef(
+            typePatternRow, 0));
+        if (patterns.GetKind(referentPatternRow) != 1)
+        {
+            return true;
+        }
+
+        if (patterns.GetArgumentCount(referentPatternRow) != 0)
+        {
+            return false;
+        }
+
+        var exactTypeUseRow = checked((int)patterns.GetTargetRef(
+            referentPatternRow));
+        var expectedReferentTypeSpecRef
+            = typeUses.GetTypeSpecRef(exactTypeUseRow);
+        return typeSpecs.AreEquivalentTypeSpecRefs(
+            capturedReferentTypeSpecRef, expectedReferentTypeSpecRef);
     }
 
     private static bool HasGenericPatternOperands(int node,

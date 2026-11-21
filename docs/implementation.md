@@ -849,8 +849,10 @@ TypeUse, role-1 capture and Copy initialization on a positive match. Native
 lowering supports both bounded forms, and ordinary source binding also lowers
 these scalar patterns for named values. The producer also emits no-capture
 scalar ReferencePattern `0x48` with PredicateTypePattern `0x0052` kind 9/10;
-NativeEmitter lowers this bounded type/access match, while role-2 capture
-remains open. Producer and emission regressions remain
+the producer emits named role-2 captures, and binding/verification preserve
+their descriptor type and backing/provenance. NativeEmitter lowers the
+bounded type/access match and copies the descriptor only on a compatible
+match. Producer and emission regressions remain
 unverified under the active hold. The phase-1/2 consumer, failure maps,
 provider binding, source-free remapping/re-emission and graph execution remain
 open.

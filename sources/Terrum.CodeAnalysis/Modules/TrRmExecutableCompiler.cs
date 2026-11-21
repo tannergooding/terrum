@@ -3018,7 +3018,8 @@ public static partial class TrRmExecutableCompiler
 
         uint ReferenceTypePatternRowFor(PrimitiveType type)
         {
-            if (!CheckedReferenceTypeContract.IsValidType(type,
+            if (!CheckedReferenceTypeContract
+                .IsSupportedReferencePatternType(type,
                     program.CheckedReferenceTypes))
             {
                 throw Unsupported(
@@ -3027,16 +3028,6 @@ public static partial class TrRmExecutableCompiler
 
             var reference = program.CheckedReferenceTypes[
                 CheckedReferenceTypes.Index(type)];
-            if (reference.IsGarbageCollected
-                || reference.IsInitialization || reference.IsOptional
-                || reference.IsReferentWritable
-                || !PrimitiveTypeFacts.IsBuiltInScalar(
-                    reference.ReferentType))
-            {
-                throw Unsupported(
-                    "Reference-pattern TypePatterns currently require a non-GC, non-initialization scalar referent.");
-            }
-
             var exactTypeUseRow
                 = PredicateTypeUseRowFor(reference.ReferentType);
             var exactTypePatternRow
@@ -3515,7 +3506,7 @@ public static partial class TrRmExecutableCompiler
 
         void AddReferencePatternMatchGraph(int parentNodeRow,
             uint childOrdinal, PrimitiveType subjectType,
-            uint inputRootRow, uint typePatternRow,
+            uint inputRootRow, uint typePatternRow, uint captureRow,
             ref int rootNodeRow)
         {
             var matchNodeRow = checked(predicateNodes.Count + 1);
@@ -3546,9 +3537,16 @@ public static partial class TrRmExecutableCompiler
                 (uint)predicateNodeOperands.Count + 1);
             predicateNodeOperands.Add(
                 new TrRmPredicateNodeOperandRow(0x0B, typePatternRow));
+            var patternOperandCount = 1u;
+            if (captureRow != 0)
+            {
+                predicateNodeOperands.Add(
+                    new TrRmPredicateNodeOperandRow(3, captureRow));
+                patternOperandCount++;
+            }
             predicateNodes.Add(new TrRmPredicateNodeRow(0x48,
                 checked((uint)TypeSpecRowFor(PrimitiveType.Bool)),
-                patternOperandFirstRow, 1));
+                patternOperandFirstRow, patternOperandCount));
             predicateChildEdges.Add(new TrRmPredicateChildEdgeRow(
                 matchNodeRow, 0, checked((int)subjectNodeRow)));
             predicateChildEdges.Add(new TrRmPredicateChildEdgeRow(
@@ -3825,7 +3823,8 @@ public static partial class TrRmExecutableCompiler
                         || function.Variables[referenceRead.Variable].IsInit
                         || function.Variables[referenceRead.Variable]
                             .IsMutable
-                        || !CheckedReferenceTypeContract.IsValidType(
+                        || !CheckedReferenceTypeContract
+                            .IsSupportedReferencePatternType(
                             referenceRead.Type,
                             program.CheckedReferenceTypes)
                         || !rootRowsByIdentity.TryGetValue(
@@ -3836,19 +3835,26 @@ public static partial class TrRmExecutableCompiler
                             "A ReferencePattern graph requires its phase-1/2 checked-reference input root.");
                     }
 
-                    var sourceReference
-                        = program.CheckedReferenceTypes[
-                            CheckedReferenceTypes.Index(
-                                referenceRead.Type)];
-                    if (sourceReference.IsGarbageCollected
-                        || sourceReference.IsInitialization
-                        || sourceReference.IsOptional
-                        || sourceReference.IsReferentWritable
-                        || !PrimitiveTypeFacts.IsBuiltInScalar(
-                            sourceReference.ReferentType))
+                    if (referenceTypeTest.Variable < -1)
                     {
                         throw Unsupported(
-                            "ReferencePattern graphs currently require a non-GC, non-initialization scalar descriptor.");
+                            "A ReferencePattern graph has an invalid capture index.");
+                    }
+                    var referenceCaptureRow = 0u;
+                    if (referenceTypeTest.Variable >= 0)
+                    {
+                        if (!captureRowsByVariable.TryGetValue(
+                                referenceTypeTest.Variable,
+                                out var referenceCapture)
+                            || referenceCapture.Type
+                                != referenceTypeTest.TestedType)
+                        {
+                            throw Unsupported(
+                                "A ReferencePattern graph has no matching role-2 capture.");
+                        }
+
+                        referenceCaptureRow
+                            = referenceCapture.CaptureRow;
                     }
 
                     AddReferencePatternMatchGraph(frame.ParentNodeRow,
@@ -3856,7 +3862,7 @@ public static partial class TrRmExecutableCompiler
                         referenceInputRootRow,
                         ReferenceTypePatternRowFor(
                             referenceTypeTest.TestedType),
-                        ref rootNodeRow);
+                        referenceCaptureRow, ref rootNodeRow);
                     continue;
                 }
 
@@ -4366,6 +4372,41 @@ public static partial class TrRmExecutableCompiler
                         (captureRow, captureOrdinal, capturedType));
                 }
 
+                void AddRoleTwoCapture(int variable,
+                    PrimitiveType capturedType)
+                {
+                    if (variable < function.ParameterCount
+                            + (function.IsConstructor ? 1 : 0)
+                        || variable >= function.Variables.Length
+                        || function.Variables[variable].Type != capturedType
+                        || function.Variables[variable].IsOut
+                        || function.Variables[variable].IsInit
+                        || function.Variables[variable]
+                            .IsInitializationLocal
+                        || !CheckedReferenceTypeContract
+                            .IsSupportedReferencePatternType(capturedType,
+                                program.CheckedReferenceTypes)
+                        || captureRowsByVariable.ContainsKey(variable))
+                    {
+                        throw Unsupported(
+                            "A role-2 graph capture has an invalid owner, type or ordinal.");
+                    }
+
+                    var captureOrdinal
+                        = checked((uint)captureRowsByVariable.Count);
+                    var captureRow
+                        = checked((uint)predicateCaptures.Count + 1);
+                    var capturedTypeSpecRef
+                        = checked((uint)TypeSpecRowFor(capturedType));
+                    var flags = function.Variables[variable].IsMutable
+                        ? (byte)1 : (byte)0;
+                    predicateCaptures.Add(new TrRmPredicateCaptureRow(
+                        graphRow, captureOrdinal, 2, flags,
+                        capturedTypeSpecRef));
+                    captureRowsByVariable.Add(variable,
+                        (captureRow, captureOrdinal, capturedType));
+                }
+
                 var pendingExpressions = new Stack<BoundExpression>();
                 pendingExpressions.Push(clause.Predicate);
                 while (pendingExpressions.Count != 0)
@@ -4583,7 +4624,8 @@ public static partial class TrRmExecutableCompiler
                                 .IsInit
                             || function.Variables[referenceRead.Variable]
                                 .IsMutable
-                            || !CheckedReferenceTypeContract.IsValidType(
+                            || !CheckedReferenceTypeContract
+                                .IsSupportedReferencePatternType(
                                 referenceRead.Type,
                                 program.CheckedReferenceTypes))
                         {
@@ -4591,21 +4633,16 @@ public static partial class TrRmExecutableCompiler
                                 "A reference-pattern graph requires a named checked-reference input formal.");
                         }
 
-                        var sourceReference
-                            = program.CheckedReferenceTypes[
-                                CheckedReferenceTypes.Index(
-                                    referenceRead.Type)];
-                        if (sourceReference.IsGarbageCollected
-                            || sourceReference.IsInitialization
-                            || sourceReference.IsOptional
-                            || sourceReference.IsReferentWritable
-                            || !PrimitiveTypeFacts.IsBuiltInScalar(
-                                sourceReference.ReferentType))
+                        if (referenceTypeTest.Variable < -1)
                         {
                             throw Unsupported(
-                                "Reference-pattern graphs currently require a non-GC, non-initialization scalar descriptor.");
+                                "A reference-pattern graph has an invalid capture index.");
                         }
-
+                        if (referenceTypeTest.Variable >= 0)
+                        {
+                            AddRoleTwoCapture(referenceTypeTest.Variable,
+                                referenceTypeTest.TestedType);
+                        }
                         _ = ReferenceTypePatternRowFor(
                             referenceTypeTest.TestedType);
                         _ = readRoots.Add((2, referenceRead.Variable));
@@ -4617,7 +4654,7 @@ public static partial class TrRmExecutableCompiler
                         if (capturedRead.Type != capture.Type)
                         {
                             throw Unsupported(
-                                "A graph-local role-1 capture read has a mismatched type.");
+                                "A graph-local capture read has a mismatched type.");
                         }
                     }
                     else if (expression is BoundRead formalRead)

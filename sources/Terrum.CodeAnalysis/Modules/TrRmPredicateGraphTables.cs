@@ -594,7 +594,8 @@ public readonly ref struct TrRmPredicateCaptureTableReader
             _resourceLedger?.ConsumeWork();
             if (graph is 0 or > 0xFF_FFFF || graph > (uint)graphCount
                 || role is < 1 or > 3
-                || (role == 1 ? (flags & ~1) != 0 : flags != 0)
+                || (role is 1 or 2
+                    ? (flags & ~1) != 0 : flags != 0)
                 || reserved != 0 || typeSpecRef == 0)
             {
                 throw InvalidPredicateCapture();

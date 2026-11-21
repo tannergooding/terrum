@@ -6193,7 +6193,7 @@ public static partial class SemanticVerifier
                     thenState.SetGenericUniqueProperty(
                         fact.FormalOrdinal, fact.IsUnique);
                 }
-                CopyOptionalReferencePatternFacts(
+                CopyReferencePatternFacts(
                     conditional.Condition, initialized, thenState, program);
                 var thenMasks = (uint[])fieldMasks.Clone();
                 MarkOutMasks(thenState, thenMasks, function, program);
@@ -19504,37 +19504,64 @@ public static partial class SemanticVerifier
                         != referenceTypeRead.Type
                     || function.Variables[referenceTypeRead.Variable].IsOut
                     || function.Variables[referenceTypeRead.Variable].IsInit
-                    || !CheckedReferenceTypeContract.IsValidType(
+                    || !CheckedReferenceTypeContract
+                        .IsSupportedReferencePatternType(
                         referenceTypeRead.Type,
                         program.CheckedReferenceTypes)
-                    || !CheckedReferenceTypeContract.IsValidType(
+                    || !CheckedReferenceTypeContract
+                        .IsSupportedReferencePatternType(
                         referenceTypeTest.TestedType,
                         program.CheckedReferenceTypes))
                 {
                     throw Invalid(referenceTypeTest.Span);
                 }
 
-                var sourceReferenceType = program.CheckedReferenceTypes[
-                    CheckedReferenceTypes.Index(referenceTypeRead.Type)];
-                var patternReferenceType = program.CheckedReferenceTypes[
-                    CheckedReferenceTypes.Index(
-                        referenceTypeTest.TestedType)];
-                if (sourceReferenceType.IsGarbageCollected
-                    || sourceReferenceType.IsInitialization
-                    || sourceReferenceType.IsOptional
-                    || patternReferenceType.IsGarbageCollected
-                    || patternReferenceType.IsInitialization
-                    || patternReferenceType.IsOptional
-                    || !PrimitiveTypeFacts.IsBuiltInScalar(
-                        sourceReferenceType.ReferentType)
-                    || !PrimitiveTypeFacts.IsBuiltInScalar(
-                        patternReferenceType.ReferentType))
+                var referenceCaptureVariable
+                    = referenceTypeTest.Variable;
+                if (referenceCaptureVariable < -1)
                 {
                     throw Invalid(referenceTypeTest.Span);
                 }
+                if (referenceCaptureVariable >= 0
+                    && (referenceCaptureVariable
+                            < function.ParameterCount
+                                + (function.IsConstructor ? 1 : 0)
+                        || referenceCaptureVariable >= initialized.Length
+                        || function.Variables[
+                            referenceCaptureVariable].Type
+                            != referenceTypeTest.TestedType
+                        || function.Variables[
+                            referenceCaptureVariable].IsOut
+                        || function.Variables[
+                            referenceCaptureVariable].IsInit
+                        || function.Variables[
+                            referenceCaptureVariable]
+                            .IsInitializationLocal
+                        || declarations.Contains(
+                            referenceCaptureVariable)))
+                {
+                    throw Invalid(referenceTypeTest.Span);
+                }
+
                 Expression(referenceTypeTest.Value, initialized,
                     fieldMasks, declarations, function, program,
                     ref remaining, depth + 1, failures);
+                if (referenceCaptureVariable >= 0)
+                {
+                    if (CheckedReferenceTypeContract
+                        .IsReferencePatternCompatible(
+                            referenceTypeTest.Value.Type,
+                            referenceTypeTest.TestedType,
+                            program.CheckedReferenceTypes))
+                    {
+                        SetReferencePatternFacts(
+                            referenceTypeTest.Value,
+                            referenceCaptureVariable, initialized,
+                            fieldMasks, function, program,
+                            ref remaining);
+                    }
+                    _ = declarations.Add(referenceCaptureVariable);
+                }
                 break;
             case BoundIsInitialized initializationTest:
                 if (initializationTest.Type != PrimitiveType.Bool
@@ -19653,7 +19680,14 @@ public static partial class SemanticVerifier
                 var supportedValuePattern = patternValue is not null
                     && PrimitiveTypeFacts.IsBuiltInScalar(
                         patternValue.Type);
-                if (patternValue is null || (!optionalPattern && !supportedValuePattern)
+                var supportedReferencePattern = patternValue is not null
+                    && CheckedReferenceTypeContract
+                        .IsSupportedReferencePatternType(
+                            patternValue.Type,
+                            program.CheckedReferenceTypes);
+                if (patternValue is null
+                    || (!optionalPattern && !supportedValuePattern
+                        && !supportedReferencePattern)
                     || (optionalPattern && !pattern.IncludeNull && patternValue is not BoundRead)
                     || pattern.Variable < function.ParameterCount + (function.IsConstructor ? 1 : 0)
                     || pattern.Variable < 0 || pattern.Variable >= initialized.Length
@@ -19676,7 +19710,12 @@ public static partial class SemanticVerifier
                             && (optionalPattern
                                 ? PrimitiveTypeFacts.IsBuiltInScalar(
                                     optionalPayloadType)
-                                : supportedValuePattern));
+                                : supportedValuePattern))
+                    || (supportedReferencePattern
+                        && CheckedReferenceTypeContract
+                            .IsSupportedReferencePatternType(
+                                patternBindingType,
+                                program.CheckedReferenceTypes));
                 if (!validPatternBindingType)
                 {
                     throw Invalid(pattern.Span);
@@ -19696,8 +19735,24 @@ public static partial class SemanticVerifier
                     Expression(patternValue, initialized, fieldMasks, declarations, function, program,
                         ref remaining, depth + 1, failures);
                 }
-                SetOptionalReferencePatternFacts(patternValue, pattern.Variable,
-                    initialized, fieldMasks, function, program, ref remaining);
+                if (supportedReferencePattern)
+                {
+                    if (CheckedReferenceTypeContract
+                        .IsReferencePatternCompatible(patternValue.Type,
+                            patternBindingType,
+                            program.CheckedReferenceTypes))
+                    {
+                        SetReferencePatternFacts(patternValue,
+                            pattern.Variable, initialized, fieldMasks,
+                            function, program, ref remaining);
+                    }
+                }
+                else
+                {
+                    SetOptionalReferencePatternFacts(patternValue,
+                        pattern.Variable, initialized, fieldMasks, function,
+                        program, ref remaining);
+                }
                 _ = declarations.Add(pattern.Variable);
                 break;
             case BoundCast cast:
@@ -25613,6 +25668,24 @@ public static partial class SemanticVerifier
         {
             return;
         }
+        SetReferencePatternFacts(value, variable, initialized, fieldMasks,
+            function, program, ref remaining);
+    }
+
+    private static void SetReferencePatternFacts(
+        BoundExpression value,
+        int variable,
+        InitializationState initialized,
+        uint[] fieldMasks,
+        BoundFunction function,
+        BoundProgram program,
+        ref int remaining)
+    {
+        if (!CheckedReferenceTypeContract.IsValidType(
+                value.Type, program.CheckedReferenceTypes))
+        {
+            throw InvalidEffect(value.Span, "CheckedReference");
+        }
         if (initialized.Dependencies is not BackingDependencies facts)
         {
             throw InvalidEffect(value.Span, "CheckedReference");
@@ -25633,7 +25706,7 @@ public static partial class SemanticVerifier
         facts.SetReferenceBackingSources(variable, referenceValue.BackingSources);
     }
 
-    private static void CopyOptionalReferencePatternFacts(
+    private static void CopyReferencePatternFacts(
         BoundExpression condition,
         InitializationState source,
         InitializationState destination,
@@ -25658,19 +25731,20 @@ public static partial class SemanticVerifier
             var value = expression switch {
                 BoundIsSome pattern => pattern.Value,
                 BoundIsVariablePattern pattern => pattern.Value,
+                BoundReferenceTypeTestPattern pattern
+                    when pattern.Variable >= 0 => pattern.Value,
                 _ => null,
             };
             var variable = expression switch {
                 BoundIsSome pattern => pattern.Variable,
                 BoundIsVariablePattern pattern => pattern.Variable,
+                BoundReferenceTypeTestPattern pattern => pattern.Variable,
                 _ => -1,
             };
             if (value is not null && (uint)variable < (uint)destination.Length
                 && destination[variable]
                 && CheckedReferenceTypeContract.IsValidType(
-                    value.Type, program.CheckedReferenceTypes)
-                && program.CheckedReferenceTypes[
-                    CheckedReferenceTypes.Index(value.Type)].IsOptional)
+                    value.Type, program.CheckedReferenceTypes))
             {
                 destinationFacts.SetReferenceTargets(
                     variable, sourceFacts.ReferenceTargets[variable]
@@ -37661,6 +37735,16 @@ public static partial class SemanticVerifier
             state[pattern.Variable] = result;
             return state;
         }
+        if (expression is BoundReferenceTypeTestPattern referencePattern
+            && referencePattern.Variable >= 0)
+        {
+            VacateNestedOutputs(referencePattern.Value, state,
+                ref remaining);
+            state.InvalidateNativeOutputVariable(
+                referencePattern.Variable);
+            state[referencePattern.Variable] = result;
+            return state;
+        }
         if (expression is BoundCall call)
         {
             var target = (uint)call.Function
@@ -38274,7 +38358,10 @@ public static partial class SemanticVerifier
                 (byte)(OutcomeEffectFact
                     | FlowFacts(test.Value, flowFacts, ref remaining)),
             BoundReferenceTypeTestPattern test =>
-                FlowFacts(test.Value, flowFacts, ref remaining),
+                test.Variable >= 0
+                    ? (byte)(OutcomeEffectFact
+                        | FlowFacts(test.Value, flowFacts, ref remaining))
+                    : FlowFacts(test.Value, flowFacts, ref remaining),
             BoundNativeFixedArrayInitialization fixedArray =>
                 FlowFacts(fixedArray.Elements, flowFacts, ref remaining),
             BoundNativeFixedArrayRepeatInitialization repeat =>

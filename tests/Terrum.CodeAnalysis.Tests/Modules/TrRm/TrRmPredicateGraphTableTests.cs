@@ -24,7 +24,7 @@ internal sealed class TrRmPredicateGraphTableTests
         var captureBytes = TrRmPredicateCaptureTableWriter.Encode([
             new TrRmPredicateCaptureRow(2, 0, 3, 0, 1),
             new TrRmPredicateCaptureRow(1, 1, 1, 1, 0xF200_0008),
-            new TrRmPredicateCaptureRow(1, 0, 2, 0, 1),
+            new TrRmPredicateCaptureRow(1, 0, 2, 1, 1),
         ], graphCount: 2, types: typeSpecs);
         var captures = new TrRmPredicateCaptureTableReader(
             captureBytes, 3, 2, typeSpecs);
@@ -36,6 +36,7 @@ internal sealed class TrRmPredicateGraphTableTests
         Assert.That(captures.GetRole(2), Is.EqualTo((byte)1));
         Assert.That(captures.GetFlags(2), Is.EqualTo((byte)1));
         Assert.That(captures.GetCapturedTypeSpecRef(2), Is.EqualTo(0xF200_0008u));
+        Assert.That(captures.GetFlags(3), Is.EqualTo((byte)1));
         Assert.That(graphs.Count, Is.EqualTo(2));
     }
 
@@ -213,7 +214,7 @@ internal sealed class TrRmPredicateGraphTableTests
             new TrRmPredicateCaptureRow(1, 0, 0, 0, 1),
         ]));
         _ = Assert.Throws<InvalidDataException>(() => EncodeCaptures([
-            new TrRmPredicateCaptureRow(1, 0, 2, 1, 1),
+            new TrRmPredicateCaptureRow(1, 0, 2, 2, 1),
         ]));
         _ = Assert.Throws<InvalidDataException>(() => EncodeCaptures([
             new TrRmPredicateCaptureRow(1, 0, 3, 1, 1),

@@ -5529,6 +5529,237 @@ internal sealed class TrRmStandardInitializationReferenceBodyTests
             Is.EqualTo(((byte)0x01, referentTypeCode)));
     }
 
+    [TestCase("write ref<int32>", "mut ref<int32>", (byte)9,
+        (byte)0x08, (byte)1, (byte)1, (byte)0)]
+    [TestCase("write ref<int32>", "mut write ref<int32>", (byte)10,
+        (byte)0x08, (byte)1, (byte)1, (byte)1)]
+    [TestCase("ref<int32>", "mut write ref<int32>", (byte)10,
+        (byte)0x08, (byte)0, (byte)1, (byte)1)]
+    [TestCase("ref<int32>", "mut ref<int64>", (byte)9,
+        (byte)0x09, (byte)0, (byte)1, (byte)0)]
+    public void Construction2EmitsRoleTwoReferencePatternCaptureGraph(
+        string subjectTypeName, string patternTypeName,
+        byte referencePatternKind, byte referentTypeCode,
+        byte subjectQualifiers, byte captureFlags,
+        byte capturedQualifiers)
+    {
+        const string moduleIdentity = "reference-pattern-capture-producer";
+        var source = $$"""
+            void Check({{subjectTypeName}} value)
+                ensure value is {{patternTypeName}} captured
+            {
+            }
+            """;
+        var failureSelection = new CoreContractFailureIdentitySelection(
+            moduleIdentity,
+            new CoreContractFailureDeclarationIdentity(
+                "core.contracts", "requirement-exception"),
+            new CoreContractFailureDeclarationIdentity(
+                "core.contracts", "postcondition-exception"),
+            new CoreContractFailureDeclarationIdentity(
+                "core.contracts", "require-exception-schema"));
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+            new CompilationOptions {
+                CoreContractFailureIdentitySelection = failureSelection,
+            });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = (BoundProgram)compilation.Program!;
+        var function = program.Functions.Single(
+            static candidate => candidate.Name == "Check");
+        var clause = function.DeclarationContractClauses.Single();
+        Assert.That(clause.Predicate,
+            Is.TypeOf<BoundReferenceTypeTestPattern>());
+        var referencePattern
+            = (BoundReferenceTypeTestPattern)clause.Predicate;
+        Assert.That(referencePattern.Variable, Is.GreaterThanOrEqualTo(1));
+        var captureVariable
+            = function.Variables[referencePattern.Variable];
+        Assert.That(captureVariable.IsMutable, Is.True);
+        var captureType = program.CheckedReferenceTypes[
+            CheckedReferenceTypes.Index(captureVariable.Type)];
+        Assert.That(captureType.IsWritable,
+            Is.EqualTo(referencePatternKind == 10));
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            moduleIdentity, C1M1Construction2SchemaIdentity, 1,
+            out var emittedFailureSelections);
+        Assert.That(emittedFailureSelections, Is.EqualTo([failureSelection]));
+
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex.ForC1M1Construction2Draft(artifact));
+        var predicate = tables.Contracts.GetPredicateGraphContracts(1)
+            .Single();
+        Assert.That(tables.PredicateCaptures.Count, Is.EqualTo(1));
+        const int captureRow = 1;
+        Assert.That(tables.PredicateCaptures.GetGraphRow(captureRow),
+            Is.EqualTo(predicate.PredicateGraphRow));
+        Assert.That(tables.PredicateCaptures.GetOrdinal(captureRow),
+            Is.Zero);
+        Assert.That(tables.PredicateCaptures.GetRole(captureRow),
+            Is.EqualTo((byte)2));
+        Assert.That(tables.PredicateCaptures.GetFlags(captureRow),
+            Is.EqualTo(captureFlags));
+        var capturedTypeSpecRef = tables.PredicateCaptures
+            .GetCapturedTypeSpecRef(captureRow);
+        var capturedType = tables.TypeSpecs.GetTypeSpecRef(
+            capturedTypeSpecRef);
+        Assert.That((capturedType.Form, capturedType.Qualifiers),
+            Is.EqualTo(((byte)0x07, capturedQualifiers)));
+
+        var footprint = tables.PredicateGraphs.GetReadFootprintRow(
+            predicate.PredicateGraphRow);
+        Assert.That(tables.PredicateReadFootprints.GetRootRowCount(footprint),
+            Is.EqualTo(1));
+        var rootRow = checked((int)tables.PredicateReadFootprints
+            .GetRootFirstRow(footprint));
+        Assert.That((tables.PredicateReadRoots.GetRootKind(rootRow),
+                tables.PredicateReadRoots.GetRootIdentity(rootRow)),
+            Is.EqualTo(((byte)2, 0u)));
+
+        var matchNode = tables.PredicateGraphs.GetRootNodeRow(
+            predicate.PredicateGraphRow);
+        var subjectNode = tables.PredicateChildEdges
+            .GetChildNodeRowByOrdinal(matchNode, 0);
+        var subjectType = tables.TypeSpecs.GetTypeSpecRef(
+            tables.PredicateNodes.GetResultTypeSpecRef(subjectNode));
+        Assert.That((subjectType.Form, subjectType.Qualifiers),
+            Is.EqualTo(((byte)0x07, subjectQualifiers)));
+        var patternNode = tables.PredicateChildEdges
+            .GetChildNodeRowByOrdinal(matchNode, 1);
+        Assert.That(tables.PredicateNodes.GetNodeKind(patternNode),
+            Is.EqualTo(0x48u));
+        Assert.That(tables.PredicateNodes.GetOperandCount(patternNode),
+            Is.EqualTo(2u));
+        var patternOperandFirstRow = checked((int)tables.PredicateNodes
+            .GetOperandFirstRow(patternNode));
+        Assert.That(tables.PredicateNodeOperands.GetOperandKind(
+            patternOperandFirstRow), Is.EqualTo((byte)0x0B));
+        var typePatternRow = checked((int)tables.PredicateNodeOperands
+            .GetOperandRef(patternOperandFirstRow));
+        Assert.That(tables.PredicateTypePatterns.GetKind(typePatternRow),
+            Is.EqualTo(referencePatternKind));
+        var captureOperandRow = patternOperandFirstRow + 1;
+        Assert.That(tables.PredicateNodeOperands.GetOperandKind(
+            captureOperandRow), Is.EqualTo((byte)3));
+        Assert.That(tables.PredicateNodeOperands.GetOperandRef(
+                captureOperandRow),
+            Is.EqualTo((uint)captureRow));
+        Assert.That(tables.PredicateTypePatterns.GetArgumentCount(
+            typePatternRow), Is.EqualTo(1u));
+        var exactTypePatternRow = checked((int)tables.PredicateTypePatterns
+            .GetArgumentRef(typePatternRow, 0));
+        var typeUseRow = checked((int)tables.PredicateTypePatterns
+            .GetTargetRef(exactTypePatternRow));
+        var referentType = tables.TypeSpecs.GetTypeSpecRef(
+            tables.PredicateTypeUses.GetTypeSpecRef(typeUseRow));
+        Assert.That((referentType.Form, referentType.TypeCode),
+            Is.EqualTo(((byte)0x01, referentTypeCode)));
+    }
+
+    [Test]
+    public void StructuralValidatorRejectsReferenceCaptureAccessMismatch()
+    {
+        const string moduleIdentity
+            = "reference-pattern-capture-access-validation";
+        const string source = """
+            void Check(write ref<int32> value, ref<int64> other)
+                ensure value is ref<int32> captured
+            {
+            }
+            """;
+        var failureSelection = new CoreContractFailureIdentitySelection(
+            moduleIdentity,
+            new CoreContractFailureDeclarationIdentity(
+                "core.contracts", "requirement-exception"),
+            new CoreContractFailureDeclarationIdentity(
+                "core.contracts", "postcondition-exception"),
+            new CoreContractFailureDeclarationIdentity(
+                "core.contracts", "require-exception-schema"));
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+            new CompilationOptions {
+                CoreContractFailureIdentitySelection = failureSelection,
+            });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = (BoundProgram)compilation.Program!;
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            moduleIdentity, C1M1Construction2SchemaIdentity, 1, out _);
+        var index = TrRmArtifactIndex.ForC1M1Construction2Draft(artifact);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(index);
+        var graph = tables.Contracts.GetPredicateGraphContracts(1)
+            .Single().PredicateGraphRow;
+        var matchNode = tables.PredicateGraphs.GetRootNodeRow(graph);
+        var subjectNode = tables.PredicateChildEdges
+            .GetChildNodeRowByOrdinal(matchNode, 0);
+        var writableSubjectTypeSpecRef = tables.PredicateNodes
+            .GetResultTypeSpecRef(subjectNode);
+        var mismatchedReferentTypeSpecRef = 0u;
+        for (var row = 1; row <= tables.TypeSpecs.Count; row++)
+        {
+            var typeSpecRef = checked((uint)row);
+            var typeSpec = tables.TypeSpecs.GetTypeSpecRef(typeSpecRef);
+            if (typeSpec.Form != 0x07 || typeSpec.Qualifiers != 0)
+            {
+                continue;
+            }
+
+            var typeSpecBytes = tables.TypeSpecs.GetTypeSpecBytes(typeSpecRef);
+            var referentTypeSpecRef
+                = BinaryPrimitives.ReadUInt32LittleEndian(
+                    typeSpecBytes[2..]);
+            if (tables.TypeSpecs.AreEquivalentTypeSpecRefs(
+                    referentTypeSpecRef, 0xF200_0009))
+            {
+                mismatchedReferentTypeSpecRef = typeSpecRef;
+                break;
+            }
+        }
+        Assert.That(mismatchedReferentTypeSpecRef,
+            Is.GreaterThan(0u));
+
+        void AssertMalformedCapture(uint replacementTypeSpecRef)
+        {
+            var malformedArtifact = (byte[])artifact.Clone();
+            var directoryOffset = checked((int)
+                BinaryPrimitives.ReadUInt32LittleEndian(
+                    malformedArtifact.AsSpan(20)));
+            var captureSectionOffset = -1;
+            for (var section = 0; section < index.SectionCount; section++)
+            {
+                var entryOffset = checked(directoryOffset + section * 16);
+                if (BinaryPrimitives.ReadUInt16LittleEndian(
+                        malformedArtifact.AsSpan(entryOffset))
+                    != 0x003E)
+                {
+                    continue;
+                }
+
+                captureSectionOffset = checked((int)
+                    BinaryPrimitives.ReadUInt32LittleEndian(
+                        malformedArtifact.AsSpan(entryOffset + 8)));
+                break;
+            }
+
+            Assert.That(captureSectionOffset, Is.GreaterThanOrEqualTo(32));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                malformedArtifact.AsSpan(captureSectionOffset + 12),
+                replacementTypeSpecRef);
+            Assert.Throws<InvalidDataException>(() =>
+                TrRmStructuralMetadataValidator
+                    .ValidateC1AndGetExecutionTables(
+                        TrRmArtifactIndex.ForC1M1Construction2Draft(
+                            malformedArtifact)));
+        }
+
+        AssertMalformedCapture(writableSubjectTypeSpecRef);
+        AssertMalformedCapture(mismatchedReferentTypeSpecRef);
+    }
+
     [Test]
     public void NativeEmitterEmitsNoCaptureReferencePatternContracts()
     {

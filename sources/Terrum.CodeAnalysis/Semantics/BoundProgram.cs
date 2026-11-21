@@ -3002,6 +3002,8 @@ public sealed record BoundReferenceTypeTestPattern(
     BoundExpression Value, PrimitiveType TestedType, TextSpan Span)
     : BoundExpression(PrimitiveType.Bool, Span)
 {
+    public int Variable { get; init; } = -1;
+
     internal override ImmutableArray<BoundExpression> NestedExpressions => [Value];
     internal override BoundExpression RewriteNestedExpressions(
         Func<BoundExpression, BoundExpression> rewrite) => this with {
