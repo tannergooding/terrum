@@ -1343,7 +1343,9 @@ unverified under the active hold. Standard FNI Bodies now emit and source-free
 decode bounded receiver-first MethodMap CallSites for direct non-void return
 calls and direct void calls followed by void returns. Ordinary inputs may be
 read from caller parameters or scalar locals initialized from a direct
-parameter read; the receiver is a direct parameter. One non-void call may
+parameter read; a single scalar-returning, no-output FNI call may also be
+nested as an outer explicit input, with both MethodMap targets and evaluation
+order preserved. The receiver is a direct parameter. One non-void call may
 reserve distinct local `init` Homes for each NativeOutput formal; source-use 6
 and reservation records use the receiver-first flattened ordinal
 (`formal n` maps to input `n+1`). Source-free decoding restores the
@@ -1368,15 +1370,18 @@ Local/imported output
 reservations and conditional reads, provider load/re-emission, and malformed
 MethodMap, success-predicate, branch-target and reservation rejection are
 covered by regressions; they remain unverified under the hold.
-Aggregate and pointer output reads, side-effecting argument expressions,
+Aggregate output reads/returns now have a concrete unapproved AC1 schema
+recommendation with a provisional implementation direction; producer,
+consumer, remapping, native lowering and qualification work remain open.
+Pointer output reads, other side-effecting argument expressions,
 defaults/constants, multiple calls, other condition expressions and Body
 control-flow shapes, nonreturning-call shapes beyond the terminal subset and
 reservation cancellation remain open.
 Supervised native
 execution, private persistence, CLI transport and dependent runtime work
 remain open. NativeParameter is not admitted on these methods or anchors, and
-neither FNI proposal is approved. General aggregate output Bodies and
-native-interface execution remain incomplete.
+neither FNI proposal is approved. AC1 is also unapproved; native-interface
+execution remains incomplete.
 [CG-004](implementation/conformance-gaps.md#cg-004) owns
 the detailed composition and qualification gates. Earlier TRRM NativeOutput
 clauses and ScalarInitOutput encoding are prototype artifacts, not a fallback
