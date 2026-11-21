@@ -126,10 +126,13 @@ creation and serialization or fall through to the default API. Reject a wrong
 inner producer revision/schema or unsupported required content before affected
 binding/emission; write no partial artifact or replacement output on failure.
 The native command still selects its runtime policy and real image/export
-requirements independently. The private-schema option supplies no nominal
-keys, Core registrations, executing receiver provider or new ABI, and selects
-no new identity/Core manifest schema or extension to those manifests' option
-scope.
+requirements independently. The private-schema option itself supplies no
+nominal keys, Core registrations, executing receiver provider or new ABI. The
+separate, unapproved
+[foreign-interface identity-input proposal](private-foreign-native-interface-identity-inputs.md)
+recommends complete owner/member assignments in identity-manifest v2 and
+explicitly gates that transport on PF111; it does not change this schema's
+exact selector or grant Core-registration authority.
 
 **Absent option:** preserve the existing legacy creation/default-selection
 behavior on each route, including supported 104/106 inputs; do not select PF111
