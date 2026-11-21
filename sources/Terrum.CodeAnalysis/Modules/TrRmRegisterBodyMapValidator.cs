@@ -8857,8 +8857,9 @@ internal static class TrRmRegisterBodyMapValidator
                                 {
                                     if (selectorKind != 2
                                         || nativeParameterAccess != 0
-                                        || !standardNativeImports
-                                            .HasImportForMethod(targetMethod)
+                                        || (!standardNativeImports
+                                                .HasImportForMethod(targetMethod)
+                                            && !foreignNativeInterfaceCall)
                                         || !contracts
                                             .IsNativeOutputCellParameter(
                                                 targetMethod, ordinal)

@@ -1368,13 +1368,19 @@ public static partial class TrRmExecutableCompiler
     {
         call = null!;
         if (function.IsExternal
-            || function.Variables.Length != function.ParameterCount
+            || function.Variables.Length < function.ParameterCount
             || function.Body.RetiredManagedLocals.Length != 0
-            || function.Variables.Any(static variable =>
+            || function.Variables.Take(function.ParameterCount).Any(
+                static variable =>
                 variable.IsOut || variable.IsInit
                 || variable.IsInitializationLocal
                 || variable.IsImplicitRef
                 || variable.IsImplicitReferenceTemporary)
+            || function.Variables.Skip(function.ParameterCount).Any(
+                static variable =>
+                    variable.IsOut || !variable.IsInitializationLocal
+                    || variable.IsImplicitRef
+                    || variable.IsImplicitReferenceTemporary)
             || function.ReturnType == PrimitiveType.Void)
         {
             return false;
@@ -1390,11 +1396,36 @@ public static partial class TrRmExecutableCompiler
             }
             statements = unsafeBlock.Body.Statements;
         }
+        else if (statements.Length != 0
+            && statements[^1] is BoundUnsafe unsafeReturn)
+        {
+            if (unsafeReturn.Body.RetiredManagedLocals.Length != 0
+                || unsafeReturn.Body.Statements.Length != 1
+                || unsafeReturn.Body.Statements[0] is not BoundReturn)
+            {
+                return false;
+            }
 
-        if (statements.Length != 1
-            || statements[0] is not BoundReturn returned)
+            var statementBuilder = statements.ToBuilder();
+            statementBuilder[^1] = unsafeReturn.Body.Statements[0];
+            statements = statementBuilder.ToImmutable();
+        }
+
+        if (statements.IsEmpty
+            || statements[^1] is not BoundReturn returned)
         {
             return false;
+        }
+
+        var vacantLocals = new HashSet<int>();
+        for (var index = 0; index < statements.Length - 1; index++)
+        {
+            if (statements[index] is not BoundVacantLocal vacant
+                || vacant.Variable < function.ParameterCount
+                || !vacantLocals.Add(vacant.Variable))
+            {
+                return false;
+            }
         }
 
         var returnExpression = returned.Value;
@@ -1409,25 +1440,27 @@ public static partial class TrRmExecutableCompiler
                 BoundForeignInterfaceCall foreignCall
             || !boundCall.IsUnsafeAuthorized
             || foreignCall.DoesNotReturn
-            || !foreignCall.NativeOutputContracts.IsEmpty
             || boundCall.Type != function.ReturnType
             || !ForeignNativeInterfaceContract.TryCreateCallTarget(
                 foreignCall, program, out var target)
             || target.ReturnType != function.ReturnType
             || target.ParameterCount != boundCall.Arguments.Length
             || boundCall.Arguments.IsDefault
-            || boundCall.Arguments.Any(static argument =>
-                argument is not BoundRead)
             || foreignCall.Receiver is not BoundRead receiver
             || (uint)receiver.Variable >= (uint)function.ParameterCount
             || function.Variables[receiver.Variable].Type
                 != receiver.Type
             || function.Variables[receiver.Variable].IsOut
-            || function.Variables[receiver.Variable].IsInit)
+            || function.Variables[receiver.Variable].IsInit
+            || function.Variables.Length != function.ParameterCount
+                + target.NativeOutputContracts.Length)
         {
             return false;
         }
 
+        var outputContractsByFormal = target.NativeOutputContracts
+            .ToDictionary(static output => output.FormalOrdinal);
+        var outputVariables = new HashSet<int>();
         var seenParameters = new bool[target.ParameterCount];
         for (var sourceArgument = 0;
             sourceArgument < boundCall.Arguments.Length;
@@ -1435,8 +1468,31 @@ public static partial class TrRmExecutableCompiler
         {
             var formal = boundCall.ParameterIndex(sourceArgument);
             if ((uint)formal >= (uint)target.ParameterCount
-                || seenParameters[formal]
-                || boundCall.Arguments[sourceArgument] is not BoundRead read
+                || seenParameters[formal])
+            {
+                return false;
+            }
+
+            var argument = boundCall.Arguments[sourceArgument];
+            if (outputContractsByFormal.TryGetValue(formal,
+                    out var output))
+            {
+                if (argument is not BoundNativeOutputReservation reservation
+                    || reservation.PointeeType != output.PointeeType
+                    || (uint)reservation.Variable
+                        < (uint)function.ParameterCount
+                    || (uint)reservation.Variable
+                        >= (uint)function.Variables.Length
+                    || function.Variables[reservation.Variable].Type
+                        != output.PointeeType
+                    || !function.Variables[reservation.Variable]
+                        .IsInitializationLocal
+                    || !outputVariables.Add(reservation.Variable))
+                {
+                    return false;
+                }
+            }
+            else if (argument is not BoundRead read
                 || (uint)read.Variable >= (uint)function.ParameterCount
                 || function.Variables[read.Variable].Type
                     != target.Variables[formal].Type
@@ -1449,7 +1505,9 @@ public static partial class TrRmExecutableCompiler
             seenParameters[formal] = true;
         }
 
-        if (seenParameters.Any(static seen => !seen))
+        if (seenParameters.Any(static seen => !seen)
+            || outputVariables.Count != target.NativeOutputContracts.Length
+            || !outputVariables.SetEquals(vacantLocals))
         {
             return false;
         }
@@ -1487,25 +1545,92 @@ public static partial class TrRmExecutableCompiler
         var inputs = new TrRmRegisterBodyCallInput[
             target.ParameterCount + 1];
         inputs[0] = CreateInput(foreignCall.Receiver);
+        var argumentsByFormal = new BoundExpression[target.ParameterCount];
+        var outputContractsByFormal = target.NativeOutputContracts
+            .ToDictionary(static output => output.FormalOrdinal);
+        var outputReservations
+            = new List<(ushort HomeIndex, uint FormalOrdinal)>(
+                outputContractsByFormal.Count);
         for (var sourceArgument = 0;
             sourceArgument < call.Arguments.Length; sourceArgument++)
         {
             var formal = call.ParameterIndex(sourceArgument);
-            inputs[formal + 1] = CreateInput(call.Arguments[sourceArgument]);
+            var argument = call.Arguments[sourceArgument];
+            argumentsByFormal[formal] = argument;
+            if (argument is BoundNativeOutputReservation reservation)
+            {
+                if (!outputContractsByFormal.TryGetValue(formal,
+                        out var output)
+                    || reservation.PointeeType != output.PointeeType
+                    || reservation.Variable < 0
+                    || reservation.Variable >= function.Variables.Length
+                    || function.Variables[reservation.Variable].Type
+                        != output.PointeeType)
+                {
+                    throw Invalid(
+                        "A Standard F+I output reservation does not match its selected formal.");
+                }
+
+                outputReservations.Add((
+                    checked((ushort)reservation.Variable),
+                    checked((uint)(formal + 1))));
+            }
+        }
+
+        for (var formal = 0; formal < argumentsByFormal.Length; formal++)
+        {
+            if (argumentsByFormal[formal]
+                    is BoundNativeOutputReservation reservation)
+            {
+                if (!outputContractsByFormal.TryGetValue(formal,
+                        out var output)
+                    || reservation.PointeeType != output.PointeeType
+                    || reservation.Variable < 0
+                    || reservation.Variable >= function.Variables.Length
+                    || function.Variables[reservation.Variable].Type
+                        != output.PointeeType)
+                {
+                    throw Invalid(
+                        "A Standard F+I output reservation does not match its selected formal.");
+                }
+
+                inputs[formal + 1] = new TrRmRegisterBodyCallInput(2, 6,
+                    checked((ushort)reservation.Variable));
+            }
+            else
+            {
+                inputs[formal + 1] = CreateInput(
+                    argumentsByFormal[formal]);
+            }
         }
 
         var callSite = TrRmRegisterBodyRecordWriter.EncodeCallSite(1, 1,
             maps.GetMethodMapIndex(methodMapToken), 0, inputs, [],
             schema: schema);
-        ReadOnlyMemory<byte>[] records = [
+        var records = new List<ReadOnlyMemory<byte>> {
             new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 },
             new(callSite),
-        ];
-        byte[] code = [0x90, 1, 0x17, 0];
+        };
+        var code = new List<byte>(checked(outputReservations.Count * 4 + 4));
+        foreach (var (homeIndex, formalOrdinal) in outputReservations)
+        {
+            var reservationRecordIndex = checked((ushort)records.Count);
+            records.Add(TrRmRegisterBodyRecordWriter
+                .EncodeNativeOutputReservation(1, homeIndex, formalOrdinal));
+            code.Add(0xDF);
+            code.Add(0);
+            code.Add((byte)reservationRecordIndex);
+            code.Add((byte)(reservationRecordIndex >> 8));
+        }
+
+        code.Add(0x90);
+        code.Add(1);
+        code.Add(0x17);
+        code.Add(0);
         return TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
             maps.MethodMap, default, default,
-            [new TrRmRegisterBodyBlock(0, (uint)code.Length, 0)],
-            records, code, schema: schema,
+            [new TrRmRegisterBodyBlock(0, (uint)code.Count, 0)],
+            records, [.. code], schema: schema,
             generalPredicateGraphsInitializationReferenceBodies
                 : schema.UsesGeneralPredicateGraphs());
 
@@ -3787,7 +3912,9 @@ public static partial class TrRmExecutableCompiler
             || body.HomeCount < function.ParameterCount
             || (body.UsesNativePointerLoads
                 ? body.HomeCount > SemanticVerifier.MaximumVariables
-                : body.HomeCount > function.ParameterCount + 1)
+                : body.Schema.UsesForeignNativeInterface()
+                    ? body.HomeCount > SemanticVerifier.MaximumVariables
+                    : body.HomeCount > function.ParameterCount + 1)
             || body.MethodCount > (body.UsesNativePointerLoads ? 14 : 1))
         {
             throw Unsupported(
@@ -3893,7 +4020,42 @@ public static partial class TrRmExecutableCompiler
         var pointerLoads = 0;
         var conversions = 0;
         var returns = 0;
+        var foreignInterfaceCalls = 0;
+        var foreignInterfaceOutputReservations = 0;
         var forwardedInitializationReference = false;
+        var nativeOutputReservationsByRecord
+            = new Dictionary<int, (int CallSiteRecordIndex, int HomeIndex,
+                uint FormalOrdinal)>();
+        var nativeOutputReservationsByCallSiteFormal
+            = new Dictionary<(int CallSiteRecordIndex, uint FormalOrdinal),
+                int>();
+        for (var recordIndex = 0; recordIndex < body.RecordCount;
+            recordIndex++)
+        {
+            var record = body.GetRecord(recordIndex);
+            if (record[0] != 0x0C)
+            {
+                continue;
+            }
+
+            var payload = record[4..];
+            var callSiteRecordIndex
+                = BinaryPrimitives.ReadUInt16LittleEndian(payload);
+            var homeIndex = BinaryPrimitives.ReadUInt16LittleEndian(
+                payload[2..]);
+            var formalOrdinal = BinaryPrimitives.ReadUInt32LittleEndian(
+                payload[4..]);
+            if (!nativeOutputReservationsByRecord.TryAdd(recordIndex,
+                    (callSiteRecordIndex, homeIndex, formalOrdinal))
+                || !nativeOutputReservationsByCallSiteFormal.TryAdd(
+                    (callSiteRecordIndex, formalOrdinal), recordIndex))
+            {
+                throw Invalid(
+                    "A Standard Body has duplicate NativeOutput reservation identities.");
+            }
+        }
+
+        var activeNativeOutputReservations = new HashSet<int>();
         var code = body.GetBlockCode(0);
 
         for (var position = 0; position < code.Length;)
@@ -4190,6 +4352,40 @@ public static partial class TrRmExecutableCompiler
                     outputPlaceByRegister.Add(destinationRegister, outputPlace);
                     break;
                 }
+                case 0xDF:
+                {
+                    if (!body.Schema.UsesForeignNativeInterface()
+                        || instruction[1] != 0
+                        || !nativeOutputReservationsByRecord.TryGetValue(
+                            BinaryPrimitives.ReadUInt16LittleEndian(
+                                instruction[2..]),
+                            out var reservation)
+                        || !activeNativeOutputReservations.Add(
+                            BinaryPrimitives.ReadUInt16LittleEndian(
+                                instruction[2..]))
+                        || (uint)reservation.HomeIndex
+                            >= (uint)homeVariables.Length
+                        || homeRoles[reservation.HomeIndex] != 3)
+                    {
+                        throw Unsupported(
+                            "The Standard F+I Body supports only activated local NativeOutput reservations.");
+                    }
+
+                    var variable = homeVariables[reservation.HomeIndex];
+                    if (variable < function.ParameterCount
+                        || variable >= variables.Count
+                        || !initializedLocals.Add(variable)
+                        || variables[variable].IsInitializationLocal)
+                    {
+                        throw Invalid(
+                            "A Standard F+I NativeOutput reservation does not select a fresh vacant local.");
+                    }
+
+                    variables[variable] = variables[variable] with {
+                        IsInitializationLocal = true,
+                    };
+                    break;
+                }
                 case 0x90:
                 case 0xE0:
                 {
@@ -4256,12 +4452,27 @@ public static partial class TrRmExecutableCompiler
                                 || member.NativeCallableConvention is not
                                     NativeCallingConvention convention
                                 || member.DoesNotReturn
-                                || !member.NativeOutputContracts.IsEmpty
                                 || inputCount
                                     != (uint)(member.Parameters.Length + 1))
                             {
                                 throw Unsupported(
-                                    "The Standard F+I Body subset requires a normal-returning, no-output direct InterfaceMethod CallSite.");
+                                    "The Standard F+I Body subset requires a normal-returning direct InterfaceMethod CallSite.");
+                            }
+
+                            var outputContractsByFormal
+                                = member.NativeOutputContracts.ToDictionary(
+                                    static output => output.FormalOrdinal);
+                            var reservationsForCallSite
+                                = nativeOutputReservationsByCallSiteFormal
+                                    .Where(reservation =>
+                                        reservation.Key.CallSiteRecordIndex
+                                            == recordIndex)
+                                    .ToArray();
+                            if (reservationsForCallSite.Length
+                                != member.NativeOutputContracts.Length)
+                            {
+                                throw Invalid(
+                                    "A ForeignNativeInterface CallSite does not have one reservation for each NativeOutput formal.");
                             }
 
                             var resultType = resultBoundType.PrimitiveType;
@@ -4356,7 +4567,57 @@ public static partial class TrRmExecutableCompiler
                                 var formalType
                                     = member.Parameters[formal].Type
                                         .PrimitiveType;
-                                if (selectorKind == 1 && sourceUse == 1
+                                if (outputContractsByFormal.TryGetValue(
+                                        formal, out var output))
+                                {
+                                    var callSiteFormalOrdinal
+                                        = checked((uint)(formal + 1));
+                                    if (selectorKind != 2 || sourceUse != 6
+                                        || selectorIndex
+                                            >= homeVariables.Length
+                                        || !nativeOutputReservationsByCallSiteFormal
+                                            .TryGetValue((recordIndex,
+                                                    callSiteFormalOrdinal),
+                                                out var reservationRecordIndex)
+                                        || !activeNativeOutputReservations
+                                            .Remove(reservationRecordIndex)
+                                        || !nativeOutputReservationsByRecord
+                                            .TryGetValue(
+                                                reservationRecordIndex,
+                                                out var reservation)
+                                        || reservation.CallSiteRecordIndex
+                                            != recordIndex
+                                        || reservation.FormalOrdinal
+                                            != callSiteFormalOrdinal
+                                        || reservation.HomeIndex
+                                            != selectorIndex
+                                        || homeRoles[selectorIndex] != 3)
+                                    {
+                                        throw Invalid(
+                                            "A ForeignNativeInterface NativeOutput input does not match an active reservation.");
+                                    }
+
+                                    var outputVariable
+                                        = homeVariables[selectorIndex];
+                                    if (outputVariable
+                                            < function.ParameterCount
+                                        || !initializedLocals.Contains(
+                                            outputVariable)
+                                        || !variables[outputVariable]
+                                            .IsInitializationLocal
+                                        || variables[outputVariable].Type
+                                            != output.PointeeType)
+                                    {
+                                        throw Invalid(
+                                            "A ForeignNativeInterface NativeOutput input does not select a matching vacant local.");
+                                    }
+
+                                    arguments.Add(
+                                        new BoundNativeOutputReservation(
+                                            outputVariable,
+                                            output.PointeeType, default));
+                                }
+                                else if (selectorKind == 1 && sourceUse == 1
                                     && selectorIndex < 14
                                     && valueByRegister.TryGetValue(
                                         selectorIndex,
@@ -4393,6 +4654,14 @@ public static partial class TrRmExecutableCompiler
                                 inputOffset += 4;
                             }
 
+                            if (reservationsForCallSite.Any(reservation =>
+                                    activeNativeOutputReservations.Contains(
+                                        reservation.Value)))
+                            {
+                                throw Invalid(
+                                    "A ForeignNativeInterface CallSite leaves an activated NativeOutput reservation unused.");
+                            }
+
                             var call = new BoundCall(
                                 BoundCall.ForeignInterfaceFunction,
                                 arguments.MoveToImmutable(), resultType,
@@ -4422,6 +4691,10 @@ public static partial class TrRmExecutableCompiler
                             }
 
                             calls++;
+                            foreignInterfaceCalls++;
+                            foreignInterfaceOutputReservations = checked(
+                                foreignInterfaceOutputReservations
+                                + member.NativeOutputContracts.Length);
                             break;
                         }
                     }
@@ -5064,6 +5337,12 @@ public static partial class TrRmExecutableCompiler
             position += instructionLength;
         }
 
+        if (activeNativeOutputReservations.Count != 0)
+        {
+            throw Invalid(
+                "A Standard F+I Body ends with an unconsumed NativeOutput reservation.");
+        }
+
         var voidStore = function.ReturnType == PrimitiveType.Void
             && stores > 0 && calls == 0 && pointerLoads == 0
             && initializedLocals.Count == 0;
@@ -5078,6 +5357,14 @@ public static partial class TrRmExecutableCompiler
         var valueCall = function.ReturnType != PrimitiveType.Void
             && stores == 0 && calls == 1 && pointerLoads == 0
             && initializedLocals.Count == 1;
+        var foreignInterfaceValueCall
+            = function.ReturnType != PrimitiveType.Void
+                && stores == 0 && calls == 1 && foreignInterfaceCalls == 1
+                && pointerLoads == 0
+                && initializedLocals.Count
+                    == foreignInterfaceOutputReservations
+                && variables.Count == function.ParameterCount
+                    + foreignInterfaceOutputReservations;
         var pointerLoadCallCount = 0;
         var pointerLoadExpressionCount = 0;
         foreach (var statement in statements)
@@ -5118,7 +5405,8 @@ public static partial class TrRmExecutableCompiler
                 : body.MethodCount > 0
                     );
         var simpleInitializationBody = voidStore || voidForwardingCall
-            || voidInitializationCall || valueCall;
+            || voidInitializationCall || valueCall
+            || foreignInterfaceValueCall;
         if (returns != 1
             || !(simpleInitializationBody || valuePointerLoad))
         {

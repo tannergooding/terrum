@@ -6473,6 +6473,13 @@ public static partial class TrRmExecutableCompiler
             : TrRmStringTableWriter.EncodeNames(names);
         var strings = new TrRmStringTableReader(stringsBytes, names.Count);
         var hasOutputFeatures = outputFeatures.Any(static enabled => enabled);
+        var requiresStandardNativeOutputCells
+            = schema.UsesForeignNativeInterface()
+                && !program.Interfaces.IsDefaultOrEmpty
+                && program.Interfaces.Any(static definition =>
+                    !definition.Members.IsDefaultOrEmpty
+                    && definition.Members.Any(static member =>
+                        !member.NativeOutputContracts.IsEmpty));
         var featureRows = new List<TrRmDevelopmentFeatureRow>(8);
         var standardInitializationBodyFeatureProfile
             = standardInitializationReferenceBodies
@@ -6621,9 +6628,10 @@ public static partial class TrRmExecutableCompiler
                 || predicateGraphs.Count != 0
                 || requiresStandardNativeBoundaryContracts
                 || requiresStandardRootlessNativeValues
-                || requiresStandardDirectNativeCalls))
+                || requiresStandardDirectNativeCalls
+                || requiresStandardNativeOutputCells))
         {
-            var standardFeatures = new List<TrRmFeatureRow>(4);
+            var standardFeatures = new List<TrRmFeatureRow>(6);
             if (requiresStandardNativeBoundaryContracts)
             {
                 standardFeatures.Add(
@@ -6636,6 +6644,11 @@ public static partial class TrRmExecutableCompiler
             if (requiresStandardDirectNativeCalls)
             {
                 standardFeatures.Add(TrRmFeatureRow.DirectNativeCalls);
+            }
+            if (requiresStandardNativeOutputCells)
+            {
+                standardFeatures.Add(
+                    TrRmFeatureRow.NativeOutputCellsCandidate);
             }
             if (predicateGraphs.Count != 0)
             {

@@ -1341,13 +1341,20 @@ correlated publication rules. PE-emission regressions cover reordered formals,
 slot 1, the high offset path and an imported aggregate view; they remain
 unverified under the active hold. Standard FNI Bodies now emit and source-free
 decode a bounded receiver-first MethodMap CallSite for a direct non-void
-return with no NativeOutput and receiver/formal inputs read from caller
-parameters. Local MethodDefs and imported MethodDef Imports are mapped by
-exact member identity; regressions cover a local provider Body, an imported
-consumer Body, imported-provider load/re-emission and malformed MethodMap
-target rejection, but remain unverified under the hold. Output reservations,
-staged or side-effecting arguments, other Body control-flow shapes, and
-void/unit results remain open. Supervised native
+return with direct parameter-read receiver/ordinary inputs. One call may
+reserve distinct local `init` Homes for each NativeOutput formal; source-use 6
+and reservation records use the receiver-first flattened ordinal
+(`formal n` maps to input `n+1`). Source-free decoding restores the
+`BoundNativeOutputReservation`, unsafe assertion, exact MethodDef/Import
+target, and selected method's output relations. FNI emission requires the
+NativeOutput cells Feature for selected methods with outputs, retaining its
+PublishedPredicates prerequisite. Local MethodDefs and imported MethodDef
+Imports are mapped by exact member identity; regressions cover local and
+imported output reservations, provider load/re-emission and malformed
+MethodMap target rejection, but remain unverified under the hold. Reading
+output locals under result-correlated flow, staged or side-effecting arguments,
+defaults/constants, multiple calls, other Body control-flow shapes,
+void/unit results and reservation cancellation remain open. Supervised native
 execution, private persistence, CLI transport and dependent runtime work
 remain open. NativeParameter is not admitted on these methods or anchors, and
 neither FNI proposal is approved. General aggregate output Bodies and
