@@ -2133,6 +2133,8 @@ internal sealed class NativePointerModuleTests
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(compilation.Program!,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(42));
     }
 
     [Test]
