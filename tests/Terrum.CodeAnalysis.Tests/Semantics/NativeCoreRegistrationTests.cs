@@ -2105,8 +2105,85 @@ internal sealed class NativeCoreRegistrationTests
         await AssertAggregatePointOutputAsync(providerImage, "InvokePoint")
             .ConfigureAwait(true);
 
-        var providerReference = TrRmExecutableCompiler.CreateStandardReference(
-            providerInput, "provider.module", []);
+        const string parameterSurfaceSchemaIdentity
+            = "trrm/1-draft-foreign-native-interface-parameter-surface-1";
+        var parameterSurfaceCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Terrum.Interop;
+                [Blittable] [Layout(LayoutKind.Sequential)]
+                public struct Point {
+                    public int64 X;
+                    public int64 Y;
+                }
+                [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+                [ForeignNativeInterface(VTableByteOffset: uint32(0))]
+                public interface IProbe {
+                    [param(value): NativeOutput(
+                        When: NativeOutputCondition.NonZero)]
+                    public unsafe int32 TryReadPoint(ptr<int32> source,
+                        [Terrum.CodeAnalysis.DependsOn(this, nameof(source))]
+                        [Terrum.CodeAnalysis.ForwardsBacking(
+                            this, nameof(source))]
+                        write ptr<Point> value);
+                }
+                """), options);
+        Assert.That(parameterSurfaceCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                parameterSurfaceCompilation.Diagnostics));
+        var parameterSurfaceProgram = parameterSurfaceCompilation.Program
+            ?? throw new AssertionException(
+                "Expected a bodyless PS1 FNI provider.");
+        var parameterSurfaceMember
+            = parameterSurfaceProgram.Interfaces.Single().Members.Single();
+        var parameterSurfaceArtifact = TrRmExecutableCompiler.EmitStandard(
+            parameterSurfaceProgram, "parameter-surface.module",
+            parameterSurfaceSchemaIdentity, 1, [
+                new TrRmSourceTypeExport("", "Point", "provider/Point") {
+                    FieldExports = [
+                        new TrRmSourceFieldExport("X", "provider/Point.X"),
+                        new TrRmSourceFieldExport("Y", "provider/Point.Y"),
+                    ],
+                },
+                new TrRmSourceTypeExport("", "IProbe",
+                    "provider/IProbe") {
+                    GenericArity = 0,
+                    InterfaceMethodExports = [
+                        new TrRmSourceInterfaceMethodExport(
+                            parameterSurfaceMember.SourceInputOrdinal,
+                            parameterSurfaceMember.SourceDeclarationSpan,
+                            "provider/IProbe.TryReadPoint"),
+                    ],
+                },
+            ]);
+        var parameterSurfaceSchema
+            = TrRmArtifactSchema
+                .ForeignNativeInterfaceParameterSurfaceDraft;
+        var parameterSurfaceTables
+            = TrRmStructuralMetadataValidator
+                .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
+                    parameterSurfaceArtifact, parameterSurfaceSchema));
+        var parameterSurfacePointTypeDef
+            = Enumerable.Range(1, parameterSurfaceTables.TypeDefs.Count)
+                .Single(row => parameterSurfaceTables.TypeDefs.GetName(row)
+                    == "Point");
+        Assert.That(parameterSurfaceTables.TypeDefs.HasDeclaredCopy(
+            parameterSurfacePointTypeDef), Is.True);
+        Assert.That(TrRmFeatureManifestValidator.Requires(
+            parameterSurfaceTables.Features,
+            parameterSurfaceTables.Modules, 1,
+            TrRmFeatureTableReader.LayoutQueriesFeatureId,
+            parameterSurfaceSchema), Is.True);
+        Assert.That(parameterSurfaceTables.InterfaceMethods.Count,
+            Is.EqualTo(1));
+        var parameterSurfaceMethodDef
+            = parameterSurfaceTables.InterfaceMethods.GetMethodDefRow(1);
+        Assert.That(parameterSurfaceTables.Methods.GetBodyRow(
+            parameterSurfaceMethodDef), Is.Zero);
+        var parameterSurfaceInput = new TrRmStandardArtifactInput(
+            parameterSurfaceSchemaIdentity, parameterSurfaceArtifact);
+        var providerReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                parameterSurfaceInput, "parameter-surface.module", []);
         var consumerCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse("""
                 Point InvokeImportedPoint(ptr<void> receiver,
@@ -2155,7 +2232,7 @@ internal sealed class NativeCoreRegistrationTests
             "InvokeImportedPoint");
         AssertAggregateOutputBody(consumerBody, 0x1C);
 
-        var providers = new[] { providerInput };
+        var providers = new[] { parameterSurfaceInput };
         var malformedD5Artifact = RewriteD5Home(consumerArtifact, schema,
             "InvokeImportedPoint", 1, 2);
         Assert.Throws<InvalidDataException>(() =>
