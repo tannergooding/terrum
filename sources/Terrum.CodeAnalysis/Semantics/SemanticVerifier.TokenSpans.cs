@@ -6159,12 +6159,16 @@ public static partial class SemanticVerifier
         }
 
         var expressionsAreStraightLine = true;
+        var hasConditionalExpressions = false;
+        var hasNativePointerWrites = false;
         if (!BoundTreeTraversal.VisitExpressions(body, expression =>
         {
+            hasConditionalExpressions |= expression is BoundConditional;
+            hasNativePointerWrites |= expression is BoundNativePointerWrite;
             if (expression is not (BoundConstant or BoundNull
                 or BoundRead or BoundNativePointerAddress
                 or BoundNativePointerRead or BoundNativePointerWrite
-                or BoundUnsafeExpression))
+                or BoundUnsafeExpression or BoundConditional))
             {
                 expressionsAreStraightLine = false;
             }
@@ -6173,7 +6177,8 @@ public static partial class SemanticVerifier
             return false;
         }
 
-        return expressionsAreStraightLine;
+        return expressionsAreStraightLine
+            && !(hasConditionalExpressions && hasNativePointerWrites);
     }
 
     private static BackingDependencies? CreateBackingDependencies(int functionActivation,

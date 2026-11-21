@@ -2115,6 +2115,27 @@ internal sealed class NativePointerModuleTests
     }
 
     [Test]
+    public void NativePointerConditionalOverwriteReplacesPriorBacking()
+    {
+        var compilation = CreateLibrary(SyntaxTree.Parse("""
+            int32 Main() {
+                int32 live = 42;
+                bool choose = true;
+                mut ptr<int32> pointer = null;
+                {
+                    int32 retired = 1;
+                    unsafe { pointer = &retired; }
+                    unsafe { pointer = choose ? &live : &live; }
+                }
+                unsafe { return *pointer; }
+            }
+            """), LayoutOptions());
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Test]
     public void InitializationReferenceInitializesPointerCellWithoutInitializingPointee()
     {
         var compilation = Create(SyntaxTree.Parse("""
