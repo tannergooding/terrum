@@ -779,6 +779,260 @@ internal sealed class NativeCoreRegistrationTests
     }
 
     [Test]
+    public void StandardForeignNativeInterfaceBindsImportedAggregatePointee()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-native-interface-parameter-surface-1";
+        const string providerSource = """
+            using Terrum.Interop;
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Coordinates {
+                public int32 X;
+                public int32 Y;
+            }
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Point {
+                public Coordinates Position;
+            }
+            [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+            [ForeignNativeInterface(VTableByteOffset: uint32(0))]
+            public interface IProbe {
+                public unsafe int32 Read(ptr<Point> point);
+            }
+            """;
+        var registration = CreateRegistration(
+            includeForeignNativeInterface: true);
+        var options = new CompilationOptions {
+            NativeCoreRegistration = registration,
+            LayoutCoreRegistration = CreateLayoutRegistration(registration),
+        };
+        byte[] EmitProvider(string source)
+        {
+            var providerCompilation = Compilation.CreateLibrary(
+                SyntaxTree.Parse(source), options);
+            Assert.That(providerCompilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine,
+                    providerCompilation.Diagnostics));
+            var providerProgram = providerCompilation.Program
+                ?? throw new AssertionException(
+                    "Expected a bound aggregate provider.");
+            var providerMember = providerProgram.Interfaces.Single()
+                .Members.Single();
+            return TrRmExecutableCompiler.EmitStandard(providerProgram,
+                "provider.module", schemaIdentity, 1, [
+                    new TrRmSourceTypeExport("", "Coordinates",
+                        "provider/Coordinates") {
+                        FieldExports = [
+                            new TrRmSourceFieldExport("X",
+                                "provider/Coordinates.X"),
+                            new TrRmSourceFieldExport("Y",
+                                "provider/Coordinates.Y"),
+                        ],
+                    },
+                    new TrRmSourceTypeExport("", "Point",
+                        "provider/Point") {
+                        FieldExports = [
+                            new TrRmSourceFieldExport("Position",
+                                "provider/Point.Position"),
+                        ],
+                    },
+                    new TrRmSourceTypeExport("", "IProbe",
+                        "provider/IProbe") {
+                        GenericArity = 0,
+                        InterfaceMethodExports = [
+                            new TrRmSourceInterfaceMethodExport(
+                                providerMember.SourceInputOrdinal,
+                                providerMember.SourceDeclarationSpan,
+                                "provider/IProbe.Read"),
+                        ],
+                    },
+                ]);
+        }
+
+        var providerArtifact = EmitProvider(providerSource);
+        const string relocatedProviderSource = """
+            using Terrum.Interop;
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Point {
+                public Coordinates Position;
+            }
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Coordinates {
+                public int32 X;
+                public int32 Y;
+            }
+            [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+            [ForeignNativeInterface(VTableByteOffset: uint32(0))]
+            public interface IProbe {
+                public unsafe int32 Read(ptr<Point> point);
+            }
+            """;
+        var relocatedProviderArtifact
+            = EmitProvider(relocatedProviderSource);
+        var providerTables = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
+                providerArtifact,
+                TrRmArtifactSchema
+                    .ForeignNativeInterfaceParameterSurfaceDraft));
+        var relocatedProviderTables = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
+                relocatedProviderArtifact,
+                TrRmArtifactSchema
+                    .ForeignNativeInterfaceParameterSurfaceDraft));
+        Assert.That(providerTables.Exports.TryGetDefinitionForKey(1,
+                "provider/Point", out var originalPointDefinition),
+            Is.True);
+        Assert.That(relocatedProviderTables.Exports.TryGetDefinitionForKey(1,
+                "provider/Point", out var relocatedPointDefinition),
+            Is.True);
+        Assert.That(relocatedPointDefinition, Is.Not.EqualTo(
+            originalPointDefinition));
+        var providerReference = TrRmExecutableCompiler
+            .CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    providerArtifact), "provider.module", []);
+        var consumerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                int32 Invoke(ptr<void> receiver, ptr<Point> point) {
+                    unsafe { return IProbe.Read(receiver, point); }
+                }
+                """), providerReference);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            consumerCompilation.Program
+                ?? throw new AssertionException("Expected a bound consumer."),
+            "consumer.module", schemaIdentity, 1, []);
+        var consumerTables = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
+                consumerArtifact,
+                TrRmArtifactSchema
+                    .ForeignNativeInterfaceParameterSurfaceDraft));
+        var structureImportRow = Enumerable.Range(1,
+                consumerTables.Imports.Count)
+            .Single(importRow => {
+                var definitionId = consumerTables.Imports
+                    .GetExpectedDefinitionForImportRow(importRow);
+                return (definitionId >> 24) == 0x13
+                    && consumerTables.TypeDefs.GetKind(checked((int)(
+                        definitionId & 0x00FF_FFFF))) == 1
+                    && consumerTables.Imports.GetBindingForImportRow(
+                        importRow).ExportKey == "provider/Point";
+            });
+        Assert.That(consumerTables.Imports.GetBindingForImportRow(
+                structureImportRow).ExportKey,
+            Is.EqualTo("provider/Point"));
+        Assert.That(Enumerable.Range(1, consumerTables.Imports.Count)
+            .Where(importRow => (consumerTables.Imports
+                .GetExpectedDefinitionForImportRow(importRow) >> 24)
+                    == 0x13
+                && consumerTables.TypeDefs.GetKind(checked((int)(
+                    consumerTables.Imports.GetExpectedDefinitionForImportRow(
+                        importRow) & 0x00FF_FFFF))) == 1)
+            .Select(importRow => consumerTables.Imports
+                .GetBindingForImportRow(importRow).ExportKey)
+            .OrderBy(static exportKey => exportKey, StringComparer.Ordinal),
+            Is.EqualTo(new[] { "provider/Coordinates", "provider/Point" }));
+
+        var reboundReference = TrRmExecutableCompiler
+            .CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    consumerArtifact), "consumer.module", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        relocatedProviderArtifact),
+                ]);
+        var reboundPoint = reboundReference.Structures.Single(
+            static structure => structure.Name == "Point"
+                && structure.StandardTypeOrigin?.IsLookupRoot == true);
+        Assert.That(reboundPoint.StandardTypeOrigin?.Provider.ModuleIdentity,
+            Is.EqualTo("provider.module"));
+        Assert.That(reboundReference.Structures.Count(
+            static structure => structure.StandardLayoutOnly),
+            Is.EqualTo(2));
+        var reboundConsumer = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                int32 Invoke(ptr<void> receiver, ptr<Point> point) {
+                    unsafe { return IProbe.Read(receiver, point); }
+                }
+                """), reboundReference);
+        Assert.That(reboundConsumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, reboundConsumer.Diagnostics));
+        var reemissionCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(""), reboundReference);
+        Assert.That(reemissionCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                reemissionCompilation.Diagnostics));
+        var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(
+            reemissionCompilation.Program
+                ?? throw new AssertionException(
+                    "Expected a source-free FNI consumer."),
+            "forwarder.module", schemaIdentity, 1, []);
+        var reemittedTables = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
+                reemittedArtifact,
+                TrRmArtifactSchema
+                    .ForeignNativeInterfaceParameterSurfaceDraft));
+        var reemittedStructureImportRow = Enumerable.Range(1,
+                reemittedTables.Imports.Count)
+            .Single(importRow => {
+                var definitionId = reemittedTables.Imports
+                    .GetExpectedDefinitionForImportRow(importRow);
+                return (definitionId >> 24) == 0x13
+                    && reemittedTables.TypeDefs.GetKind(checked((int)(
+                        definitionId & 0x00FF_FFFF))) == 1
+                    && reemittedTables.Imports.GetBindingForImportRow(
+                        importRow).ExportKey == "provider/Point";
+            });
+        Assert.That(reemittedTables.Imports.GetBindingForImportRow(
+                reemittedStructureImportRow).ExportKey,
+            Is.EqualTo("provider/Point"));
+        Assert.That(Enumerable.Range(1, reemittedTables.Imports.Count)
+            .Where(importRow => (reemittedTables.Imports
+                .GetExpectedDefinitionForImportRow(importRow) >> 24)
+                    == 0x13
+                && reemittedTables.TypeDefs.GetKind(checked((int)(
+                    reemittedTables.Imports.GetExpectedDefinitionForImportRow(
+                        importRow) & 0x00FF_FFFF))) == 1)
+            .Select(importRow => reemittedTables.Imports
+                .GetBindingForImportRow(importRow).ExportKey)
+            .OrderBy(static exportKey => exportKey, StringComparer.Ordinal),
+            Is.EqualTo(new[] { "provider/Coordinates", "provider/Point" }));
+        var reloadedReference = TrRmExecutableCompiler
+            .CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    reemittedArtifact), "forwarder.module", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        relocatedProviderArtifact),
+                ]);
+        Assert.That(reloadedReference.Interfaces, Has.Length.EqualTo(1));
+        Assert.That(reloadedReference.Structures.Any(
+            static structure => structure.Name == "Point"
+                && structure.StandardTypeOrigin?.IsLookupRoot == true),
+            Is.True);
+        var reloadedConsumer = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                int32 Invoke(ptr<void> receiver, ptr<Point> point) {
+                    unsafe { return IProbe.Read(receiver, point); }
+                }
+                """), reloadedReference);
+        Assert.That(reloadedConsumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                reloadedConsumer.Diagnostics));
+
+        var incompatibleArtifact = EmitProvider(
+            relocatedProviderSource.Replace("public int32 X;",
+                "public int64 X;", StringComparison.Ordinal));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    consumerArtifact), "consumer.module", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        incompatibleArtifact),
+                ]));
+    }
+
+    [Test]
     public void StandardForeignNativeInterfaceParameterProducerRetainsDefaultSurface()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""

@@ -1321,11 +1321,16 @@ OutputState and Dependency contracts. Provider ABI rejection and callback
 round-trip/call-binding regressions are added but unverified under the active
 hold. Local aggregate pointees now carry explicit source TypeDef/FieldDef keys,
 Blittable Layout and Feature 13 through FNI emission; source-free loading
-reconstructs the selected local layouts. This bounded producer/consumer slice
-supports scalar, raw-pointer and inline-struct fields, with a regression added
-but unverified under the active hold. Imported aggregate TypeDef expectations
-and provider replacement, typed-pointer/function-pointer aggregate fields,
-and full Import/Export/PS1/Contract/graph row remapping remain open. FNI call
+reconstructs local layouts and emits TypeDef Imports for imported aggregate
+views. Source-free loading binds those expectations to the selected provider,
+compares the retained layout and field contract, and uses the selected
+provider's structure identity in the FNI ABI view. This bounded
+producer/consumer slice supports scalar, raw-pointer and inline-struct fields;
+nested inline-struct provider TypeDefs, compatible provider TypeDef-row
+relocation, incompatible-layout replacement and source-free re-emission
+regressions are added but unverified under the active hold.
+Typed-pointer/function-pointer aggregate fields and full
+Import/Export/PS1/Contract/graph row remapping remain open. FNI call
 Body/CallSite emission, dispatch/native lowering, private persistence, CLI
 transport and runtime remain open. NativeParameter is not admitted on these
 methods or anchors, and neither FNI proposal is approved. General aggregate

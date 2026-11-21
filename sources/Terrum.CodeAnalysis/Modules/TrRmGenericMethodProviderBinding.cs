@@ -72,6 +72,13 @@ public static partial class TrRmExecutableCompiler
             ForeignNativeInterfacePointerTypes { get; } = [];
         internal List<BoundStruct> ForeignNativeInterfaceStructures
             { get; } = [];
+        internal HashSet<(int ArtifactIndex, int ModuleRow)>
+            ForeignNativeInterfaceStructureModulesLoaded { get; } = [];
+        internal HashSet<(int ArtifactIndex, int ImportRow)>
+            ForeignNativeInterfaceStructureImportsBeingBound { get; } = [];
+        internal Dictionary<(int ArtifactIndex, int ModuleRow, int TypeDefRow),
+            int> ForeignNativeInterfaceStructureIndexesByTypeDef
+                { get; } = [];
         internal List<NativeFunctionPointerSignatureDefinition>
             ForeignNativeInterfaceFunctionPointerSignatures { get; } = [];
         internal List<CheckedReferenceTypeDefinition>

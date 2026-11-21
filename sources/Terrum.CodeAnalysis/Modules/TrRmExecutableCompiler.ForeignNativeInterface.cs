@@ -117,9 +117,14 @@ public static partial class TrRmExecutableCompiler
                 nameof(sourceTypeExports));
         }
 
+        var foreignNativeInterfaces = program.Interfaces.Where(
+                static definition =>
+                    definition.ForeignNativeInterface is not null)
+            .ToArray();
         var requiredStructureIndexes
             = GetForeignNativeInterfaceStructureIndexes(
-                localInterfaces, program, out var exportedStructureIndexes);
+                foreignNativeInterfaces, program,
+                out var exportedStructureIndexes);
         var structureTypeExportNames = structureTypeExports.Select(
                 static export => string.IsNullOrEmpty(export.Namespace)
                     ? export.Name
@@ -127,14 +132,23 @@ public static partial class TrRmExecutableCompiler
             .ToHashSet(StringComparer.Ordinal);
         foreach (var structureIndex in exportedStructureIndexes)
         {
-            if (program.Structures[structureIndex].StandardTypeOrigin
-                    is not null)
+            var structure = program.Structures[structureIndex];
+            if (structure.StandardTypeOrigin is
+                BoundStandardTypeOrigin origin)
             {
-                throw Unsupported(
-                    "F+I source emission does not yet compose imported aggregate pointee Types.");
+                if (!StringComparer.Ordinal.Equals(
+                        origin.Provider.SchemaIdentity, schemaIdentity)
+                    || origin.ExportKeys.IsDefaultOrEmpty
+                    || origin.Provider.TargetRequirement
+                        != TrRmModuleTableReader
+                            .WindowsX64NativeTargetRequirement
+                    || origin.Provider.RuntimePolicy != 0)
+                {
+                    throw Unsupported(
+                        "An imported F+I aggregate pointee has no complete exact-schema provider origin.");
+                }
             }
-            if (!structureTypeExportNames.Contains(
-                    program.Structures[structureIndex].Name))
+            else if (!structureTypeExportNames.Contains(structure.Name))
             {
                 throw new ArgumentException(
                     "An F+I aggregate pointee requires an explicit source TypeDef ExportKey.",
@@ -159,7 +173,7 @@ public static partial class TrRmExecutableCompiler
         }
 
         if (!schema.UsesForeignNativeInterfaceParameterSurface()
-            && program.Interfaces.Any(static definition =>
+            && foreignNativeInterfaces.Any(static definition =>
                 definition.Members.Any(static member =>
                     !member.Parameters.IsEmpty)))
         {
@@ -168,17 +182,18 @@ public static partial class TrRmExecutableCompiler
         }
 
         SemanticVerifier.Verify(program);
-        var hasNativeOutputs = program.Interfaces.Any(static definition =>
-            definition.Members.Any(static member =>
-                !member.NativeOutputContracts.IsDefaultOrEmpty));
+        var hasNativeOutputs = foreignNativeInterfaces.Any(
+            static definition => definition.Members.Any(
+                static member =>
+                    !member.NativeOutputContracts.IsDefaultOrEmpty));
         var hasFunctionPointerPredicates
             = GetForeignNativeFunctionPointerSignatureIndexes(
-                program.Interfaces, program).Any(index =>
+                foreignNativeInterfaces, program).Any(index =>
                 !program.NativeFunctionPointerSignatures[index]
                     .Selectors.IsEmpty);
         var hasScalarDefaults = schema
             .UsesForeignNativeInterfaceParameterSurface()
-            && program.Interfaces.Any(static definition =>
+            && foreignNativeInterfaces.Any(static definition =>
                 definition.Members.Any(static member =>
                     member.Parameters.Any(static parameter =>
                         parameter.DefaultValue is not null)));
@@ -249,6 +264,8 @@ public static partial class TrRmExecutableCompiler
             moduleIdentity, moduleTargetRequirement, sourceMethodExports,
             interfaceTypeExports, schema, baseSchema: schema,
             baseArtifact: shell,
+            foreignNativeInterfaceStructureIndexes: structureIndexes,
+            standardSchemaIdentity: schemaIdentity,
             frozenScalarValueBuilder: schema
                 .UsesForeignNativeInterfaceParameterSurface()
                     ? new TrRmFrozenScalarValueBuilder() : null);
@@ -430,12 +447,10 @@ public static partial class TrRmExecutableCompiler
     {
         foreach (var structureIndex in structureIndexes)
         {
-            if ((uint)structureIndex >= (uint)program.Structures.Length
-                || program.Structures[structureIndex].StandardTypeOrigin
-                    is not null)
+            if ((uint)structureIndex >= (uint)program.Structures.Length)
             {
                 throw Unsupported(
-                    "The F+I structure producer currently requires local aggregate TypeDefs.");
+                    "The F+I aggregate TypeDef is outside the checked program.");
             }
         }
     }
@@ -488,8 +503,13 @@ public static partial class TrRmExecutableCompiler
             var structure = program.Structures[structureIndex];
             var fields = structure.Fields.Select(field => field with {
                 Type = RemapStructureFieldType(field.Type),
+                StandardFieldOrigin = null,
             }).ToImmutableArray();
-            structures.Add(structure with { Fields = fields });
+            structures.Add(structure with {
+                Fields = fields,
+                StandardTypeOrigin = null,
+                StandardLayoutOnly = false,
+            });
         }
         var selectedStructures = structures.MoveToImmutable();
         var sourceTypeDeclarations = program.SourceTypeDeclarations.IsDefault

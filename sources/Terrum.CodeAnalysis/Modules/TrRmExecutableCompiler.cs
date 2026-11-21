@@ -11468,7 +11468,9 @@ public static partial class TrRmExecutableCompiler
         HashSet<int>? includedTypeDefRows = null,
         bool allowDuplicateImportedViews = false,
         IReadOnlyDictionary<uint, PrimitiveType>?
-            nominalClassTypesByTypeSpecReference = null)
+            nominalClassTypesByTypeSpecReference = null,
+        IReadOnlyDictionary<int, int>?
+            existingStructureTypeIndexesByTypeDef = null)
     {
         fixedArrayTypes ??= ImmutableArray<BoundNativeFixedArrayType>.Empty;
         if (!targetProfiles.TryGetProfile(1, 1, out var windowsX64ProfileRow))
@@ -11493,6 +11495,21 @@ public static partial class TrRmExecutableCompiler
                     && !includedTypeDefRows.Contains(row))
                 || !layouts.HasBlittableLayout(row, 1, 1))
             {
+                continue;
+            }
+
+            if (existingStructureTypeIndexesByTypeDef is not null
+                && existingStructureTypeIndexesByTypeDef.TryGetValue(row,
+                    out var existingStructureIndex))
+            {
+                if ((uint)existingStructureIndex
+                    >= (uint)optionalStructures.Length)
+                {
+                    throw Invalid(
+                        "A prior native Blittable-layout TypeDef map is inconsistent.");
+                }
+
+                structureTypeByTypeDef[row] = existingStructureIndex;
                 continue;
             }
 

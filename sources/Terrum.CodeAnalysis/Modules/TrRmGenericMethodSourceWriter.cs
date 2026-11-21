@@ -67,7 +67,9 @@ public static partial class TrRmExecutableCompiler
         SourceClassExports? sourceClassExports = null,
         IReadOnlyList<C1M1SourceClassMethodGenericFormalPlan>?
             sourceClassMethodGenericFormalPlans = null,
-        string? standardSchemaIdentity = null)
+        string? standardSchemaIdentity = null,
+        ImmutableArray<int> foreignNativeInterfaceStructureIndexes =
+            default)
     {
         if (program.GenericMethodDefinitions.IsDefault)
         {
@@ -263,7 +265,8 @@ public static partial class TrRmExecutableCompiler
                 methodParameterSurfaceValues,
                 out exportedInterfaceTypeSpecRows,
                 out exportedInterfaceMethodDefRows,
-                out exportedInterfaceAssociatedTypeDefRows);
+                out exportedInterfaceAssociatedTypeDefRows,
+                foreignNativeInterfaceStructureIndexes);
         }
         if (emissionRows.Count != 0
             || !sourceClassMethodGenericPlans.IsEmpty
@@ -273,7 +276,8 @@ public static partial class TrRmExecutableCompiler
                 interfaceMetadataProgram, schema,
                 methodParameterSurfaceValues,
                 out importedInterfaceAssociatedTypeImportRows,
-                standardSchemaIdentity);
+                standardSchemaIdentity,
+                foreignNativeInterfaceStructureIndexes);
         }
         if (emissionRows.Count != 0)
         {
@@ -5547,7 +5551,9 @@ public static partial class TrRmExecutableCompiler
         out Dictionary<(
             string QualifiedName, int Arity, int MemberOrdinal,
             string DeclarationKey), uint>
-            exportedInterfaceAssociatedTypeDefRows)
+            exportedInterfaceAssociatedTypeDefRows,
+        ImmutableArray<int> foreignNativeInterfaceStructureIndexes =
+            default)
     {
         exportedInterfaceTypeSpecRows = [];
         exportedInterfaceMethodDefRows = [];
@@ -5696,7 +5702,8 @@ public static partial class TrRmExecutableCompiler
         var typeDefTypeSpecRows = new Dictionary<int, int>();
         if (foreignNativeInterface && typeDefCount != 0)
         {
-            MapForeignNativeInterfaceStructureTypeDefRows(program, strings,
+            MapForeignNativeInterfaceStructureTypeDefRows(program,
+                foreignNativeInterfaceStructureIndexes, strings,
                 GetSection(sections, 0x0001).Bytes.Span,
                 moduleRefCount, typeDefBytes.ToArray(), typeDefCount,
                 methodCount, sourceFileCount, fieldCount,
@@ -6445,7 +6452,9 @@ public static partial class TrRmExecutableCompiler
         TrRmFrozenScalarValueBuilder? methodParameterSurfaceValues,
         out Dictionary<GenericImportedInterfaceAssociatedTypeKey, uint>
             importedInterfaceAssociatedTypeImportRows,
-        string? standardSchemaIdentity = null)
+        string? standardSchemaIdentity = null,
+        ImmutableArray<int> foreignNativeInterfaceStructureIndexes =
+            default)
     {
         importedInterfaceAssociatedTypeImportRows = [];
         var emissions = CaptureImportedGenericInterfaceEmissions(program,
@@ -6580,31 +6589,35 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
-        int GetModuleRefRow(BoundModuleImport import)
+        int GetOrAddModuleRefRow(string producerIdentity,
+            uint targetRequirement, uint runtimePolicy)
         {
             if (moduleRefRowsByProvider.TryGetValue(
-                    import.ProducerIdentity, out var existing))
+                    producerIdentity, out var existing))
             {
-                if (existing.TargetRequirement != import.TargetRequirement
-                    || existing.RuntimePolicy != import.RuntimePolicy)
+                if (existing.TargetRequirement != targetRequirement
+                    || existing.RuntimePolicy != runtimePolicy)
                 {
                     throw Unsupported(
-                        "An imported interface and an existing ModuleRef disagree on provider requirements.");
+                        "An imported FNI declaration and an existing ModuleRef disagree on provider requirements.");
                 }
 
                 return existing.Row;
             }
 
             var providerStringRow = names.Count + 1;
-            names.Add((import.ProducerIdentity, 1));
+            names.Add((producerIdentity, 1));
             var moduleRefRow = moduleRefRows.Count + 1;
             moduleRefRows.Add(new TrRmModuleRefRow(providerStringRow,
-                import.TargetRequirement, import.RuntimePolicy));
-            moduleRefRowsByProvider.Add(import.ProducerIdentity,
-                (moduleRefRow, import.TargetRequirement,
-                    import.RuntimePolicy));
+                targetRequirement, runtimePolicy));
+            moduleRefRowsByProvider.Add(producerIdentity,
+                (moduleRefRow, targetRequirement, runtimePolicy));
             return moduleRefRow;
         }
+
+        int GetModuleRefRow(BoundModuleImport import)
+            => GetOrAddModuleRefRow(import.ProducerIdentity,
+                import.TargetRequirement, import.RuntimePolicy);
 
         var typeDefCount = GetCount(sections, 0x0013);
         var interfaceDefCount = GetCount(sections, 0x0025);
@@ -6660,7 +6673,8 @@ public static partial class TrRmExecutableCompiler
             = new Dictionary<int, int>();
         if (foreignNativeInterface && typeDefCount != 0)
         {
-            MapForeignNativeInterfaceStructureTypeDefRows(program, strings,
+            MapForeignNativeInterfaceStructureTypeDefRows(program,
+                foreignNativeInterfaceStructureIndexes, strings,
                 GetSection(sections, 0x0001).Bytes.Span,
                 moduleRefRows.Count, typeDefBytes.ToArray(), typeDefCount,
                 methodCount, sourceFileCount, fieldCount,
@@ -6668,6 +6682,53 @@ public static partial class TrRmExecutableCompiler
                 featureCount, schema,
                 foreignNativeStructureTypeDefRows);
         }
+        if (foreignNativeInterface
+            && !foreignNativeInterfaceStructureIndexes.IsDefaultOrEmpty)
+        {
+            foreach (var structureIndex
+                in foreignNativeInterfaceStructureIndexes)
+            {
+                var structure = program.Structures[structureIndex];
+                if (structure.StandardTypeOrigin
+                    is not BoundStandardTypeOrigin origin)
+                {
+                    continue;
+                }
+                if (standardSchemaIdentity is null
+                    || !StringComparer.Ordinal.Equals(
+                        origin.Provider.SchemaIdentity,
+                        standardSchemaIdentity)
+                    || origin.ExportKeys.IsDefaultOrEmpty
+                    || !foreignNativeStructureTypeDefRows.TryGetValue(
+                        structureIndex, out var typeDefRow))
+                {
+                    throw Unsupported(
+                        "An imported FNI aggregate TypeDef has no exact provider view or expected local row.");
+                }
+
+                var moduleRefRow = GetOrAddModuleRefRow(
+                    origin.Provider.ModuleIdentity,
+                    origin.Provider.TargetRequirement,
+                    origin.Provider.RuntimePolicy);
+                var expectedDefinitionId = 0x1300_0000u
+                    | checked((uint)typeDefRow);
+                var exportKey = origin.ExportKeys[0];
+                if (string.IsNullOrEmpty(exportKey)
+                    || exportKey.Contains('\0', StringComparison.Ordinal)
+                    || !importTriples.Add((moduleRefRow, exportKey,
+                        expectedDefinitionId)))
+                {
+                    throw Invalid(
+                        "An FNI aggregate TypeDef Import has an invalid or duplicate ExportKey.");
+                }
+
+                var exportKeyStringRow = names.Count + 1;
+                names.Add((exportKey, 1));
+                importRows.Add(new TrRmImportRow(moduleRefRow,
+                    exportKeyStringRow, expectedDefinitionId));
+            }
+        }
+
         var foreignFunctionPointerSignatureIndexes
             = foreignNativeInterface
                 ? GetForeignNativeFunctionPointerSignatureIndexes(
@@ -8255,7 +8316,9 @@ public static partial class TrRmExecutableCompiler
     }
 
     private static void MapForeignNativeInterfaceStructureTypeDefRows(
-        BoundProgram program, TrRmStringTableReader strings,
+        BoundProgram program,
+        ImmutableArray<int> structureIndexes,
+        TrRmStringTableReader strings,
         ReadOnlySpan<byte> moduleBytes, int moduleRefCount,
         byte[] typeDefBytes, int typeDefCount, int methodCount,
         int sourceFileCount, int fieldCount, int genericParameterCount,
@@ -8263,41 +8326,52 @@ public static partial class TrRmExecutableCompiler
         TrRmArtifactSchema schema,
         Dictionary<int, int> structureTypeDefRows)
     {
+        if (structureIndexes.IsDefaultOrEmpty)
+        {
+            return;
+        }
+        if (structureIndexes.Length > typeDefCount)
+        {
+            throw Invalid(
+                "The F+I structure TypeDef range is incomplete.");
+        }
+
         var modules = new TrRmModuleTableReader(moduleBytes, 1, strings,
             moduleRefCount, typeDefCount, methodCount, sourceFileCount,
             featureCount);
         var typeDefs = new TrRmTypeDefTableReader(typeDefBytes,
             typeDefCount, strings, modules, fieldCount,
             genericParameterCount, layoutCount, contractCount, schema);
-        var typeDefRowsByName = new Dictionary<string, int>(
-            StringComparer.Ordinal);
-        for (var typeDef = 1; typeDef <= typeDefCount; typeDef++)
+        for (var structureOrdinal = 0;
+            structureOrdinal < structureIndexes.Length; structureOrdinal++)
         {
-            if (typeDefs.GetKind(typeDef) != 1)
-            {
-                continue;
-            }
-
-            var namespaceName = typeDefs.GetNamespace(typeDef);
-            var name = typeDefs.GetName(typeDef);
-            var qualifiedName = namespaceName.Length == 0 ? name
-                : string.Concat(namespaceName, ".", name);
-            if (!typeDefRowsByName.TryAdd(qualifiedName, typeDef))
+            var structureIndex = structureIndexes[structureOrdinal];
+            if ((uint)structureIndex >= (uint)program.Structures.Length)
             {
                 throw Invalid(
-                    "The F+I base artifact contains duplicate structure TypeDefs.");
+                    "The F+I structure index is outside the checked program.");
             }
-        }
 
-        for (var structureIndex = 0;
-            structureIndex < program.Structures.Length; structureIndex++)
-        {
+            var typeDefRow = structureOrdinal + 1;
             var structure = program.Structures[structureIndex];
-            if (structure.StandardTypeOrigin is null
-                && typeDefRowsByName.TryGetValue(structure.Name,
-                    out var typeDefRow))
+            var namespaceSeparator = structure.Name.LastIndexOf('.',
+                StringComparison.Ordinal);
+            var namespaceName = namespaceSeparator < 0
+                ? string.Empty
+                : structure.Name[..namespaceSeparator];
+            var name = namespaceSeparator < 0
+                ? structure.Name
+                : structure.Name[(namespaceSeparator + 1)..];
+            if (typeDefs.GetKind(typeDefRow) != 1
+                || !StringComparer.Ordinal.Equals(
+                    typeDefs.GetNamespace(typeDefRow), namespaceName)
+                || !StringComparer.Ordinal.Equals(
+                    typeDefs.GetName(typeDefRow), name)
+                || !structureTypeDefRows.TryAdd(structureIndex,
+                    typeDefRow))
             {
-                structureTypeDefRows.Add(structureIndex, typeDefRow);
+                throw Invalid(
+                    "The F+I structure TypeDef map differs from its ordered closure.");
             }
         }
     }
