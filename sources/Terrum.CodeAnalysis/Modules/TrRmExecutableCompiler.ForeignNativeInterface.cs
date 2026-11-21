@@ -120,6 +120,11 @@ public static partial class TrRmExecutableCompiler
         var requiredStructureIndexes
             = GetForeignNativeInterfaceStructureIndexes(
                 localInterfaces, program, out var exportedStructureIndexes);
+        var structureTypeExportNames = structureTypeExports.Select(
+                static export => string.IsNullOrEmpty(export.Namespace)
+                    ? export.Name
+                    : string.Concat(export.Namespace, ".", export.Name))
+            .ToHashSet(StringComparer.Ordinal);
         foreach (var structureIndex in exportedStructureIndexes)
         {
             if (program.Structures[structureIndex].StandardTypeOrigin
@@ -128,13 +133,8 @@ public static partial class TrRmExecutableCompiler
                 throw Unsupported(
                     "F+I source emission does not yet compose imported aggregate pointee Types.");
             }
-            if (!structureTypeExports.Any(export =>
-                    StringComparer.Ordinal.Equals(
-                        string.IsNullOrEmpty(export.Namespace)
-                            ? export.Name
-                            : string.Concat(export.Namespace, ".",
-                                export.Name),
-                        program.Structures[structureIndex].Name)))
+            if (!structureTypeExportNames.Contains(
+                    program.Structures[structureIndex].Name))
             {
                 throw new ArgumentException(
                     "An F+I aggregate pointee requires an explicit source TypeDef ExportKey.",
