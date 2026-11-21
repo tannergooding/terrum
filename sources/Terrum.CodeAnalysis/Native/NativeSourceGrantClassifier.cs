@@ -116,6 +116,9 @@ internal static class NativeSourceGrantClassifier
                         case BoundTypeTestPattern test:
                             expressions.Push(test.Value);
                             break;
+                        case BoundTypedValuePattern test:
+                            expressions.Push(test.Value);
+                            break;
                         case BoundIsSome test:
                             expressions.Push(test.Value);
                             break;

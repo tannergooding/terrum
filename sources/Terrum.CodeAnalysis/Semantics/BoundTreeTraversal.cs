@@ -980,6 +980,9 @@ internal static class BoundTreeTraversal
             BoundIsSome test => test with {
                 Variable = Variable(test.Variable),
             },
+            BoundTypedValuePattern test => test with {
+                Variable = Variable(test.Variable),
+            },
             BoundIsInitialized test => test with {
                 Variable = Variable(test.Variable),
             },
@@ -1899,6 +1902,9 @@ internal static class BoundTreeTraversal
                 },
             BoundTypeTestPattern typeTest => typeTest with {
                 TestedType = rewriteType(typeTest.TestedType),
+            },
+            BoundTypedValuePattern typedValueTest => typedValueTest with {
+                TestedType = rewriteType(typedValueTest.TestedType),
             },
             BoundCall call => call with {
                 Type = type,

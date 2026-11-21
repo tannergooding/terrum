@@ -5019,6 +5019,214 @@ internal sealed class TrRmStandardInitializationReferenceBodyTests
                 out ImmutableArray<CoreContractFailureIdentitySelection> _));
     }
 
+    [TestCase("int32", PrimitiveType.Int32, (byte)0x08, true)]
+    [TestCase("int64", PrimitiveType.Int64, (byte)0x09, false)]
+    public void Construction2EmitsPhase2TypedValueBindPatternGraph(
+        string testedTypeName, PrimitiveType testedType, byte typeCode,
+        bool includesCaptureRead)
+    {
+        const string moduleIdentity = "phase-typed-value-bind-producer";
+        var captureRead = includesCaptureRead
+            ? " && captured > 0" : string.Empty;
+        var source = $$"""
+            void Check(int32? value)
+                ensure value is {{testedTypeName}} captured{{captureRead}}
+            {
+            }
+            """;
+        var failureSelection = new CoreContractFailureIdentitySelection(
+            moduleIdentity,
+            new CoreContractFailureDeclarationIdentity(
+                "core.contracts", "requirement-exception"),
+            new CoreContractFailureDeclarationIdentity(
+                "core.contracts", "postcondition-exception"),
+            new CoreContractFailureDeclarationIdentity(
+                "core.contracts", "require-exception-schema"));
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+            new CompilationOptions {
+                CoreContractFailureIdentitySelection = failureSelection,
+            });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = (BoundProgram)compilation.Program!;
+        var function = program.Functions.Single(
+            static candidate => candidate.Name == "Check");
+        var clause = function.DeclarationContractClauses.Single();
+        Assert.That(clause.Phase,
+            Is.EqualTo(BoundDeclarationContractPhase.NormalPostcondition));
+        var typedValuePredicate = clause.Predicate;
+        if (includesCaptureRead)
+        {
+            Assert.That(clause.Predicate, Is.TypeOf<BoundBinary>());
+            var logical = (BoundBinary)clause.Predicate;
+            Assert.That(logical.Operator,
+                Is.EqualTo(TokenKind.AmpersandAmpersand));
+            typedValuePredicate = logical.Left;
+        }
+        Assert.That(typedValuePredicate,
+            Is.TypeOf<BoundTypedValuePattern>());
+        var typedValuePattern
+            = (BoundTypedValuePattern)typedValuePredicate;
+        Assert.That(typedValuePattern.TestedType, Is.EqualTo(testedType));
+        Assert.That(function.Variables[typedValuePattern.Variable].Type,
+            Is.EqualTo(testedType));
+        Assert.That(function.CheckedOutputStatePredicates.IsDefaultOrEmpty,
+            Is.True);
+        Assert.That(NativeEmitter.EmitLibrary(program, ["Check"],
+            NativeRuntimePolicy.FailFast), Is.Not.Empty);
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            moduleIdentity, C1M1Construction2SchemaIdentity, 1,
+            out var emittedFailureSelections);
+        Assert.That(emittedFailureSelections, Is.EqualTo([failureSelection]));
+
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex.ForC1M1Construction2Draft(artifact));
+        var predicate = tables.Contracts.GetPredicateGraphContracts(1)
+            .Single();
+        Assert.That((predicate.PhaseTag, predicate.PhaseLocalOrdinal),
+            Is.EqualTo(((byte)2, 0u)));
+        Assert.That(tables.PredicateCaptures.Count, Is.EqualTo(1));
+        Assert.That(tables.PredicateTypeUses.Count, Is.EqualTo(1));
+
+        var footprint = tables.PredicateGraphs.GetReadFootprintRow(
+            predicate.PredicateGraphRow);
+        Assert.That(tables.PredicateReadFootprints.GetRootRowCount(footprint),
+            Is.EqualTo(1));
+        var rootRow = checked((int)tables.PredicateReadFootprints
+            .GetRootFirstRow(footprint));
+        Assert.That((tables.PredicateReadRoots.GetRootKind(rootRow),
+                tables.PredicateReadRoots.GetRootIdentity(rootRow)),
+            Is.EqualTo(((byte)2, 0u)));
+
+        var rootNode = tables.PredicateGraphs.GetRootNodeRow(
+            predicate.PredicateGraphRow);
+        Assert.That(tables.PredicateNodes.GetNodeKind(rootNode),
+            Is.EqualTo(includesCaptureRead ? 0x27u : 0x34u));
+        var matchNode = includesCaptureRead
+            ? tables.PredicateChildEdges.GetChildNodeRowByOrdinal(
+                rootNode, 0)
+            : rootNode;
+        Assert.That(tables.PredicateNodes.GetNodeKind(matchNode),
+            Is.EqualTo(0x34u));
+        var subjectNode = tables.PredicateChildEdges
+            .GetChildNodeRowByOrdinal(matchNode, 0);
+        Assert.That(tables.TypeSpecs.GetTypeSpecRef(
+                tables.PredicateNodes.GetResultTypeSpecRef(subjectNode)).Form,
+            Is.EqualTo((byte)0x06));
+        var patternNode = tables.PredicateChildEdges
+            .GetChildNodeRowByOrdinal(matchNode, 1);
+        Assert.That(tables.PredicateNodes.GetNodeKind(patternNode),
+            Is.EqualTo(0x45u));
+        Assert.That(tables.PredicateNodes.GetOperandCount(patternNode),
+            Is.EqualTo(2u));
+        var typeOperand = checked((int)tables.PredicateNodes
+            .GetOperandFirstRow(patternNode));
+        Assert.That(tables.PredicateNodeOperands.GetOperandKind(
+            typeOperand), Is.EqualTo((byte)6));
+        var typeUseRow = checked((int)tables.PredicateNodeOperands
+            .GetOperandRef(typeOperand));
+        var typeUseSpecRef
+            = tables.PredicateTypeUses.GetTypeSpecRef(typeUseRow);
+        Assert.That(typeUseSpecRef, Is.EqualTo(capturedTypeSpecRef));
+        var captureOperand = typeOperand + 1;
+        Assert.That(tables.PredicateNodeOperands.GetOperandKind(
+            captureOperand), Is.EqualTo((byte)3));
+        var captureRow = checked((int)tables.PredicateNodeOperands
+            .GetOperandRef(captureOperand));
+        Assert.That(captureRow, Is.EqualTo(1));
+        Assert.That(tables.PredicateCaptures.GetGraphRow(captureRow),
+            Is.EqualTo(predicate.PredicateGraphRow));
+        Assert.That(tables.PredicateCaptures.GetOrdinal(captureRow),
+            Is.Zero);
+        Assert.That(tables.PredicateCaptures.GetRole(captureRow),
+            Is.EqualTo((byte)1));
+        Assert.That(tables.PredicateCaptures.GetFlags(captureRow),
+            Is.Zero);
+        var capturedTypeSpecRef
+            = tables.PredicateCaptures.GetCapturedTypeSpecRef(captureRow);
+        var capturedType = tables.TypeSpecs.GetTypeSpecRef(
+            capturedTypeSpecRef);
+        Assert.That((capturedType.Form, capturedType.TypeCode),
+            Is.EqualTo(((byte)0x01, typeCode)));
+        Assert.That(typeUseSpecRef, Is.EqualTo(capturedTypeSpecRef));
+
+        if (includesCaptureRead)
+        {
+            var comparisonNode = tables.PredicateChildEdges
+                .GetChildNodeRowByOrdinal(rootNode, 1);
+            Assert.That(tables.PredicateNodes.GetNodeKind(comparisonNode),
+                Is.EqualTo(0x21u));
+            var captureLoad = tables.PredicateChildEdges
+                .GetChildNodeRowByOrdinal(comparisonNode, 0);
+            Assert.That(tables.PredicateNodes.GetNodeKind(captureLoad),
+                Is.EqualTo(0x13u));
+            var capturePlace = tables.PredicateChildEdges
+                .GetChildNodeRowByOrdinal(captureLoad, 0);
+            Assert.That(tables.PredicateNodes.GetNodeKind(capturePlace),
+                Is.EqualTo(0x12u));
+            var capturePlaceOperand = checked((int)tables.PredicateNodes
+                .GetOperandFirstRow(capturePlace));
+            Assert.That(tables.PredicateNodeOperands.GetOperandKind(
+                capturePlaceOperand), Is.EqualTo((byte)3));
+            Assert.That(tables.PredicateNodeOperands.GetOperandRef(
+                    capturePlaceOperand),
+                Is.EqualTo((uint)captureRow));
+        }
+    }
+
+    [Test]
+    public void Construction2RejectsTypedValueCaptureBoundToFormal()
+    {
+        const string moduleIdentity = "phase-typed-value-bind-rejection";
+        const string source = """
+            void Check(int32? value)
+                ensure value is int32 captured
+            {
+            }
+            """;
+        var failureSelection = new CoreContractFailureIdentitySelection(
+            moduleIdentity,
+            new CoreContractFailureDeclarationIdentity(
+                "core.contracts", "requirement-exception"),
+            new CoreContractFailureDeclarationIdentity(
+                "core.contracts", "postcondition-exception"),
+            new CoreContractFailureDeclarationIdentity(
+                "core.contracts", "require-exception-schema"));
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+            new CompilationOptions {
+                CoreContractFailureIdentitySelection = failureSelection,
+            });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = (BoundProgram)compilation.Program!;
+        var function = program.Functions.Single(
+            static candidate => candidate.Name == "Check");
+        var clause = function.DeclarationContractClauses.Single();
+        var typedValuePattern
+            = (BoundTypedValuePattern)clause.Predicate;
+        var malformedFunction = function with {
+            DeclarationContractClauses = [
+                clause with {
+                    Predicate = typedValuePattern with { Variable = 0 },
+                },
+            ],
+        };
+        var malformedProgram = program with {
+            Functions = program.Functions.Select(candidate =>
+                candidate.Name == function.Name
+                    ? malformedFunction : candidate).ToImmutableArray(),
+        };
+
+        Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.EmitStandard(malformedProgram,
+                moduleIdentity, C1M1Construction2SchemaIdentity, 1,
+                out ImmutableArray<CoreContractFailureIdentitySelection> _));
+    }
+
     [Test]
     public void ScalarTypeTestBindsAndEmitsOutsideDeclarationContracts()
     {
@@ -5027,6 +5235,45 @@ internal sealed class TrRmStandardInitializationReferenceBodyTests
             {
                 int32? value = input;
                 return value is int32;
+            }
+            """;
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = (BoundProgram)compilation.Program!;
+        Assert.That(NativeEmitter.EmitLibrary(program, ["Check"],
+            NativeRuntimePolicy.FailFast), Is.Not.Empty);
+    }
+
+    [TestCase("int32")]
+    [TestCase("int64")]
+    public void ScalarTypedValueBindBindsAndEmitsOutsideDeclarationContracts(
+        string testedTypeName)
+    {
+        var source = $$"""
+            bool Check(int32? input)
+            {
+                return input is {{testedTypeName}} captured
+                    && captured > 0;
+            }
+            """;
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = (BoundProgram)compilation.Program!;
+        Assert.That(NativeEmitter.EmitLibrary(program, ["Check"],
+            NativeRuntimePolicy.FailFast), Is.Not.Empty);
+    }
+
+    [Test]
+    public void ScalarTypedValueBindCopiesDirectScalarOutsideDeclarationContracts()
+    {
+        const string source = """
+            bool Check(float32 input)
+            {
+                return input is float32 captured;
             }
             """;
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));

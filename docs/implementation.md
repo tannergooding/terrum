@@ -844,13 +844,16 @@ Under the distinct no-label Construction-2 failure profile, the phase-1/2
 source producer emits bounded scalar clauses, phase-2 initialization tests,
 optional and captured-value patterns, scalar Constant pattern `0x43`, and
 scalar TypeTest pattern `0x44` with exact `PredicateTypeUse` `0x004F` for an
-optional scalar subject. Ordinary source binding and NativeEmitter also
-support this TypeTest for named scalar and optional-scalar values; producer
-and emission regressions remain unverified under the active hold. The phase-1/2 consumer, failure maps, provider binding,
-source-free remapping/re-emission and graph execution remain open.
+optional scalar subject, plus scalar TypedValueBind pattern `0x45` with exact
+TypeUse, role-1 capture and Copy initialization on a positive match. Native
+lowering supports both bounded forms, and ordinary source binding also lowers
+these scalar patterns for named values. Producer and emission regressions
+remain unverified under the active hold. The phase-1/2 consumer, failure maps,
+provider binding, source-free remapping/re-emission and graph execution remain
+open.
 This composition does not select the LayoutQueries source/provider/query-Body
 profile. Other phase-2 forms including checked conversions, bit
-reinterpretation, typed/reference/tuple/union/property patterns, places,
+reinterpretation, non-scalar typed/reference/tuple/union/property patterns, places,
 broader cross-clause value coverage, complete
 dependency/provider replacement remapping and graph execution remain open.
 Native JIT and PE execution also cover

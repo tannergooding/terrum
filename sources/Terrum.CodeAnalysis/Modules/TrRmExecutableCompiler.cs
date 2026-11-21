@@ -3188,6 +3188,7 @@ public static partial class TrRmExecutableCompiler
                 or BoundIsInitialized
                 or BoundIsNull
                 or BoundTypeTestPattern
+                or BoundTypedValuePattern
                 or BoundContractReturnValue
                 or BoundReferenceInitializationTest or BoundIsSome
                 or BoundIsVariablePattern
@@ -3398,6 +3399,51 @@ public static partial class TrRmExecutableCompiler
                 matchNodeRow, 1, checked((int)typeTestPatternNodeRow)));
         }
 
+        void AddTypedValueBindMatchGraph(int parentNodeRow,
+            uint childOrdinal, PrimitiveType subjectType,
+            uint inputRootRow, uint typeUseRow, uint captureRow,
+            ref int rootNodeRow)
+        {
+            var matchNodeRow = checked(predicateNodes.Count + 1);
+            predicateNodes.Add(new TrRmPredicateNodeRow(0x34,
+                checked((uint)TypeSpecRowFor(PrimitiveType.Bool)), 0, 0));
+            if (parentNodeRow == 0)
+            {
+                rootNodeRow = matchNodeRow;
+            }
+            else
+            {
+                predicateChildEdges.Add(new TrRmPredicateChildEdgeRow(
+                    parentNodeRow, childOrdinal, matchNodeRow));
+            }
+
+            var subjectNodeRow = checked((uint)predicateNodes.Count + 1);
+            var subjectOperandFirstRow = checked(
+                (uint)predicateNodeOperands.Count + 1);
+            predicateNodeOperands.Add(
+                new TrRmPredicateNodeOperandRow(1, inputRootRow));
+            predicateNodes.Add(new TrRmPredicateNodeRow(0x11,
+                checked((uint)TypeSpecRowFor(subjectType)),
+                subjectOperandFirstRow, 1));
+
+            var typedValuePatternNodeRow
+                = checked((uint)predicateNodes.Count + 1);
+            var patternOperandFirstRow = checked(
+                (uint)predicateNodeOperands.Count + 1);
+            predicateNodeOperands.Add(
+                new TrRmPredicateNodeOperandRow(6, typeUseRow));
+            predicateNodeOperands.Add(
+                new TrRmPredicateNodeOperandRow(3, captureRow));
+            predicateNodes.Add(new TrRmPredicateNodeRow(0x45,
+                checked((uint)TypeSpecRowFor(PrimitiveType.Bool)),
+                patternOperandFirstRow, 2));
+            predicateChildEdges.Add(new TrRmPredicateChildEdgeRow(
+                matchNodeRow, 0, checked((int)subjectNodeRow)));
+            predicateChildEdges.Add(new TrRmPredicateChildEdgeRow(
+                matchNodeRow, 1,
+                checked((int)typedValuePatternNodeRow)));
+        }
+
         void AddConstantPatternMatchGraph(int parentNodeRow,
             uint childOrdinal, PrimitiveType subjectType,
             uint inputRootRow, BoundConstant constant,
@@ -3598,6 +3644,51 @@ public static partial class TrRmExecutableCompiler
                         typeTestInputRootRow,
                         PredicateTypeUseRowFor(typeTest.TestedType),
                         ref rootNodeRow);
+                    continue;
+                }
+
+                if (frame.Expression
+                    is BoundTypedValuePattern typedValuePattern)
+                {
+                    if (declarationPhase
+                            != BoundDeclarationContractPhase
+                                .NormalPostcondition
+                        || typedValuePattern.Value
+                            is not BoundRead typedValueRead
+                        || typedValueRead.Variable < 0
+                        || typedValueRead.Variable >= function.ParameterCount
+                        || function.Variables[typedValueRead.Variable].Type
+                            != typedValueRead.Type
+                        || function.Variables[typedValueRead.Variable].IsOut
+                        || function.Variables[typedValueRead.Variable].IsInit
+                        || function.Variables[typedValueRead.Variable]
+                            .IsMutable
+                        || (!PrimitiveTypeFacts.IsBuiltInScalar(
+                                typedValueRead.Type)
+                            && !TryGetOptionalBuiltInScalarType(
+                                typedValueRead.Type,
+                                program.CheckedReferenceTypes, out _))
+                        || !generalPredicateScalarTypeRows.ContainsKey(
+                            typedValuePattern.TestedType)
+                        || !captureRowsByVariable.TryGetValue(
+                            typedValuePattern.Variable,
+                            out var typedValueCapture)
+                        || typedValueCapture.Type
+                            != typedValuePattern.TestedType
+                        || !rootRowsByIdentity.TryGetValue(
+                            (2, typedValueRead.Variable),
+                            out var typedValueInputRootRow))
+                    {
+                        throw Unsupported(
+                            "A TypedValueBind graph requires its phase-2 scalar input, TypeUse and graph-local value capture.");
+                    }
+
+                    AddTypedValueBindMatchGraph(frame.ParentNodeRow,
+                        frame.ChildOrdinal, typedValueRead.Type,
+                        typedValueInputRootRow,
+                        PredicateTypeUseRowFor(
+                            typedValuePattern.TestedType),
+                        typedValueCapture.CaptureRow, ref rootNodeRow);
                     continue;
                 }
 
@@ -4079,14 +4170,15 @@ public static partial class TrRmExecutableCompiler
                 var captureRowsByVariable = new Dictionary<int,
                     (uint CaptureRow, uint Ordinal, PrimitiveType Type)>();
                 void AddRoleOneCapture(int variable,
-                    PrimitiveType capturedType)
+                    PrimitiveType capturedType, bool allowMutable = false)
                 {
                     if (variable < function.ParameterCount
                         || variable >= function.Variables.Length
                         || function.Variables[variable].Type != capturedType
                         || function.Variables[variable].IsOut
                         || function.Variables[variable].IsInit
-                        || function.Variables[variable].IsMutable
+                        || (!allowMutable
+                            && function.Variables[variable].IsMutable)
                         || captureRowsByVariable.ContainsKey(variable))
                     {
                         throw Unsupported(
@@ -4261,6 +4353,43 @@ public static partial class TrRmExecutableCompiler
                         AddRoleOneCapture(variablePattern.Variable,
                             captureType);
                         _ = readRoots.Add((2, optionalRead.Variable));
+                    }
+                    else if (expression
+                        is BoundTypedValuePattern typedValuePattern)
+                    {
+                        if (clause.Phase
+                                != BoundDeclarationContractPhase
+                                    .NormalPostcondition
+                            || typedValuePattern.Value
+                                is not BoundRead typedValueRead
+                            || typedValueRead.Variable < 0
+                            || typedValueRead.Variable
+                                >= function.ParameterCount
+                            || function.Variables[typedValueRead.Variable]
+                                .Type != typedValueRead.Type
+                            || function.Variables[typedValueRead.Variable]
+                                .IsOut
+                            || function.Variables[typedValueRead.Variable]
+                                .IsInit
+                            || function.Variables[typedValueRead.Variable]
+                                .IsMutable
+                            || (!PrimitiveTypeFacts.IsBuiltInScalar(
+                                    typedValueRead.Type)
+                                && !TryGetOptionalBuiltInScalarType(
+                                    typedValueRead.Type,
+                                    program.CheckedReferenceTypes,
+                                    out _))
+                            || !generalPredicateScalarTypeRows.ContainsKey(
+                                typedValuePattern.TestedType))
+                        {
+                            throw Unsupported(
+                                "A TypedValueBind graph requires a scalar phase-2 input and supported scalar TypeUse.");
+                        }
+
+                        AddRoleOneCapture(typedValuePattern.Variable,
+                            typedValuePattern.TestedType,
+                            allowMutable: true);
+                        _ = readRoots.Add((2, typedValueRead.Variable));
                     }
                     else if (expression is BoundRead capturedRead
                         && captureRowsByVariable.TryGetValue(

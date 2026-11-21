@@ -2985,6 +2985,18 @@ public sealed record BoundTypeTestPattern(
         };
 }
 
+/// <summary>Tests a scalar value and binds a Copy value on a successful match.</summary>
+public sealed record BoundTypedValuePattern(
+    BoundExpression Value, PrimitiveType TestedType, int Variable,
+    TextSpan Span) : BoundExpression(PrimitiveType.Bool, Span)
+{
+    internal override ImmutableArray<BoundExpression> NestedExpressions => [Value];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this with {
+            Value = rewrite(Value),
+        };
+}
+
 /// <summary>Tests an optional value and snapshots its payload into a scoped variable on success.</summary>
 public sealed record BoundIsSome(BoundExpression Value, int Variable, TextSpan Span) : BoundExpression(PrimitiveType.Bool, Span)
 {

@@ -3294,6 +3294,8 @@ internal sealed partial class PeCompiler
                 return ExpressionSpills(test.Value, ref maximumArguments);
             case BoundTypeTestPattern test:
                 return ExpressionSpills(test.Value, ref maximumArguments);
+            case BoundTypedValuePattern test:
+                return ExpressionSpills(test.Value, ref maximumArguments);
             case BoundIsSome pattern:
                 return ExpressionSpills(pattern.Value, ref maximumArguments);
             case BoundIsVariablePattern pattern:
@@ -3650,6 +3652,9 @@ internal sealed partial class PeCompiler
                     VisitExpression(test.Value);
                     break;
                 case BoundTypeTestPattern test:
+                    VisitExpression(test.Value);
+                    break;
+                case BoundTypedValuePattern test:
                     VisitExpression(test.Value);
                     break;
                 case BoundIsSome pattern:
@@ -9696,6 +9701,11 @@ internal sealed partial class PeCompiler
         int spill)
     {
         var layout = GetOptionalValueLayout(pattern.Value.Type);
+        var bindingType = _program.Functions[_currentFunction]
+            .Variables[pattern.Variable].Type;
+        var bindingTypeMatches = pattern.IncludeNull
+            ? bindingType == pattern.Value.Type
+            : bindingType == layout.PayloadType;
         var sourceRead = pattern.Value as BoundRead;
         var vacant = -1;
         if (sourceRead is not null)
@@ -9718,6 +9728,20 @@ internal sealed partial class PeCompiler
                 TestTaggedOptionalPresence(pattern.Value.Type);
             }
             absent = _code.JumpIf(0x84);
+        }
+
+        if (!bindingTypeMatches)
+        {
+            if (absent >= 0)
+            {
+                _code.PatchRelative(absent, _code.Position);
+            }
+            if (vacant >= 0)
+            {
+                _code.PatchRelative(vacant, _code.Position);
+            }
+            _code.Bytes(0x31, 0xC0);
+            return;
         }
 
         if (pattern.IncludeNull)
@@ -10154,6 +10178,34 @@ internal sealed partial class PeCompiler
                     _code.Bytes(0x31, 0xC0);
                 }
                 break;
+            case BoundTypedValuePattern pattern:
+                var typedOptionalType
+                    = IsOptionalValueType(pattern.Value.Type);
+                var typedValueMatches = typedOptionalType
+                    ? GetOptionalValueLayout(pattern.Value.Type).PayloadType
+                        == pattern.TestedType
+                    : pattern.Value.Type == pattern.TestedType;
+                if (typedOptionalType)
+                {
+                    EmitOptionalValueVariablePattern(
+                        new BoundIsVariablePattern(pattern.Value,
+                            pattern.Variable, false, pattern.Span), spill);
+                    break;
+                }
+
+                Expression(pattern.Value, spill);
+                if (typedValueMatches)
+                {
+                    StoreValue(Slot(pattern.Variable),
+                        pattern.TestedType);
+                    _code.Byte(0xB8);
+                    _code.Int32(1);
+                }
+                else
+                {
+                    _code.Bytes(0x31, 0xC0);
+                }
+                break;
             case BoundIsSome pattern when IsTaggedOptionalValueType(
                 pattern.Value.Type):
                 EmitTaggedOptionalSome(pattern, spill);
@@ -10260,6 +10312,13 @@ internal sealed partial class PeCompiler
                 if (!ManagedClassTypes.IsOptional(pattern.Value.Type))
                 {
                     Expression(pattern.Value, spill);
+                    if (_program.Functions[_currentFunction]
+                            .Variables[pattern.Variable].Type
+                        != pattern.Value.Type)
+                    {
+                        _code.Bytes(0x31, 0xC0);
+                        break;
+                    }
                     StoreValue(Slot(pattern.Variable), pattern.Value.Type);
                     _code.Bytes(0xB8, 0x01, 0x00, 0x00, 0x00);
                     break;

@@ -17567,6 +17567,8 @@ internal sealed partial class Binder
         BoundIsNull test => ContainsAuthorizedExpressionScopeCall(test.Value),
         BoundTypeTestPattern test =>
             ContainsAuthorizedExpressionScopeCall(test.Value),
+        BoundTypedValuePattern test =>
+            ContainsAuthorizedExpressionScopeCall(test.Value),
         BoundIsSome pattern => ContainsAuthorizedExpressionScopeCall(pattern.Value),
         BoundIsVariablePattern pattern => ContainsAuthorizedExpressionScopeCall(pattern.Value),
         _ => false,
@@ -18605,10 +18607,10 @@ internal sealed partial class Binder
                     .OfType<SyntaxNode>()
                     .LastOrDefault();
                 if (patternSyntax?.Kind == SyntaxKind.SwitchTypedBindingPattern
-                    && patternSyntax.Children.Length == 1
-                    && patternSyntax.Children[0] is SyntaxNode {
-                        Kind: SyntaxKind.TypeName,
-                    } typeTestSyntax)
+                    && patternSyntax.Children.OfType<SyntaxNode>()
+                        .FirstOrDefault() is SyntaxNode {
+                            Kind: SyntaxKind.TypeName,
+                        } typeTestSyntax)
                 {
                     var diagnosticsBeforeType = DiagnosticCount;
                     var testedType = BindType(typeTestSyntax,
@@ -18645,8 +18647,75 @@ internal sealed partial class Binder
                         break;
                     }
 
-                    expression = new BoundTypeTestPattern(subject,
-                        testedType, node.Span);
+                    var patternTokens = patternSyntax.Children
+                        .OfType<SyntaxTokenElement>().ToArray();
+                    var isMutable = patternTokens.Any(
+                        static token => token.Token.Kind
+                            == TokenKind.MutKeyword);
+                    var bindingToken = patternTokens.Length > 0
+                        && patternTokens[^1].Token.Kind
+                            == TokenKind.Identifier
+                            ? patternTokens[^1].Token : null;
+                    if (isMutable && bindingToken is null)
+                    {
+                        Report("TRM3007",
+                            "A mutable TypeTest pattern requires a named value binding.",
+                            patternSyntax.Span);
+                        expression = ErrorExpression(node.Span);
+                        break;
+                    }
+
+                    var isOptionalSubject = !PrimitiveTypeFacts
+                        .IsBuiltInScalar(subjectRead.Type);
+                    var matchedSubjectType = subjectRead.Type;
+                    if (isOptionalSubject
+                        && (!TryGetRequiredOptionalType(subjectRead.Type,
+                                out matchedSubjectType)
+                            || !PrimitiveTypeFacts.IsBuiltInScalar(
+                                matchedSubjectType)))
+                    {
+                        Report("TRM3007",
+                            "A TypeTest requires a named scalar or optional scalar value.",
+                            node.Span);
+                        expression = ErrorExpression(node.Span);
+                        break;
+                    }
+
+                    var captureVariable = bindingToken is null
+                        ? -1
+                        : AddVariable(bindingToken.Name, testedType,
+                            isMutable, bindingToken.Span);
+                    if (_bindingContractPhase is not null)
+                    {
+                        expression = captureVariable >= 0
+                            ? new BoundTypedValuePattern(subject,
+                                testedType, captureVariable, node.Span)
+                            : new BoundTypeTestPattern(subject, testedType,
+                                node.Span);
+                    }
+                    else if (captureVariable >= 0)
+                    {
+                        expression = new BoundIsVariablePattern(subject,
+                            captureVariable, false, node.Span);
+                    }
+                    else if (isOptionalSubject)
+                    {
+                        var isNull = new BoundIsNull(subject, node.Span);
+                        expression = matchedSubjectType == testedType
+                            ? new BoundUnary(TokenKind.Bang, isNull,
+                                PrimitiveType.Bool, node.Span)
+                            : new BoundBinary(
+                                TokenKind.AmpersandAmpersand, isNull,
+                                new BoundConstant(0, PrimitiveType.Bool,
+                                    node.Span),
+                                PrimitiveType.Bool, node.Span);
+                    }
+                    else
+                    {
+                        expression = new BoundConstant(
+                            matchedSubjectType == testedType ? 1 : 0,
+                            PrimitiveType.Bool, node.Span);
+                    }
                     break;
                 }
 

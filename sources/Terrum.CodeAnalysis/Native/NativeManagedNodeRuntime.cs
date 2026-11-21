@@ -373,6 +373,9 @@ internal sealed partial class PeCompiler
                 case BoundTypeTestPattern test:
                     CollectExpression(test.Value, spill);
                     break;
+                case BoundTypedValuePattern test:
+                    CollectExpression(test.Value, spill);
+                    break;
                 case BoundIsSome pattern:
                     CollectExpression(pattern.Value, spill);
                     break;
