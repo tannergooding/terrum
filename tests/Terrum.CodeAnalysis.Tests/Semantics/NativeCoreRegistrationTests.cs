@@ -429,6 +429,37 @@ internal sealed class NativeCoreRegistrationTests
             tables.Modules, 1,
             TrRmFeatureTableReader.PublishedPredicatesFeatureId, schema),
             Is.True);
+
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(
+                "trrm/1-draft-foreign-native-interface-parameter-surface-1",
+                artifact), "provider.module", []);
+        var importedInterface = reference.Interfaces.Single();
+        Assert.That(importedInterface.ForeignNativeInterface
+            ?.VTableByteOffset, Is.Zero);
+        Assert.That(importedInterface.ModuleImport?.ExportKey,
+            Is.EqualTo("provider/IProbe"));
+        Assert.That(importedInterface.Members[0].NativeOutputContracts
+            .Single().FormalOrdinal, Is.EqualTo(1));
+        Assert.That(importedInterface.Members[1].Dependencies.Select(
+                static dependency => dependency.Relation),
+            Is.EquivalentTo([
+                BoundDependencyRelation.DependsOn,
+                BoundDependencyRelation.ForwardsBacking,
+            ]));
+
+        var caller = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            int32 Invoke(ptr<void> receiver) {
+                unsafe {
+                    init int32 value;
+                    int32 status = IProbe.TryRead(receiver, &init value);
+                    if (status >= 0) { return value; }
+                }
+                return 0;
+            }
+            """), reference);
+        Assert.That(caller.HasErrors, Is.False,
+            string.Join(Environment.NewLine, caller.Diagnostics));
     }
 
     [Test]

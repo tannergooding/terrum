@@ -50,7 +50,10 @@ internal static class ForeignNativeInterfaceContract
         }
 
         return !hasForeignNativeInterfaces
-            || nativeCoreRegistration?.ForeignNativeInterface is not null;
+            || nativeCoreRegistration?.ForeignNativeInterface is not null
+            || interfaces.Where(static definition =>
+                    definition.ForeignNativeInterface is not null)
+                .All(static definition => definition.ModuleImport is not null);
     }
 
     internal static bool IsValidMethodSignature(

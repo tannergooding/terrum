@@ -7638,6 +7638,48 @@ public static partial class TrRmExecutableCompiler
 
         var rows = new List<TrRmDependencyContract>();
         var refinements = new List<TrRmDependencyContract>();
+        var basePhasesBySource = new Dictionary<(
+            BoundDependencyDestination Destination, int? DestinationOrdinal,
+            BoundDependencySource Source), List<byte>>();
+        foreach (var dependency in dependencies)
+        {
+            if (dependency is null || dependency.Sources.IsDefault)
+            {
+                throw Unsupported(
+                    "F+I member Dependency contracts are uninitialized.");
+            }
+
+            if (dependency.Destination
+                    == BoundDependencyDestination.InitializedOutput
+                || dependency.Relation is not (
+                    BoundDependencyRelation.DependsOn
+                    or BoundDependencyRelation.Captures))
+            {
+                continue;
+            }
+
+            var phase = dependency.Relation switch {
+                BoundDependencyRelation.DependsOn
+                    when dependency.Destination
+                        == BoundDependencyDestination.Result => (byte)1,
+                BoundDependencyRelation.Captures => (byte)2,
+                _ => throw Unsupported(
+                    "F+I member Dependency destination/phase is not representable."),
+            };
+            foreach (var source in dependency.Sources)
+            {
+                var key = (dependency.Destination,
+                    dependency.DestinationOrdinal, source);
+                if (!basePhasesBySource.TryGetValue(key, out var phases))
+                {
+                    phases = [];
+                    basePhasesBySource.Add(key, phases);
+                }
+
+                phases.Add(phase);
+            }
+        }
+
         foreach (var dependency in dependencies)
         {
             if (dependency is null || dependency.Sources.IsDefault)
@@ -7715,60 +7757,52 @@ public static partial class TrRmExecutableCompiler
             {
                 var (sourceKind, sourceOrdinal)
                     = GetForeignNativeInterfaceDependencySource(source);
-                var hasBaseRelationship = false;
-                foreach (var baseDependency in dependencies)
-                {
-                    if (baseDependency is null
-                        || baseDependency.Destination
-                            != dependency.Destination
-                        || baseDependency.DestinationOrdinal
-                            != dependency.DestinationOrdinal
-                        || baseDependency.Relation is not (
-                            BoundDependencyRelation.DependsOn
-                            or BoundDependencyRelation.Captures)
-                        || baseDependency.Sources.IsDefault
-                        || !baseDependency.Sources.Contains(source))
-                    {
-                        continue;
-                    }
-
-                    var phase = baseDependency.Relation switch {
-                        BoundDependencyRelation.DependsOn
-                            when destinationKind == 1 => (byte)1,
-                        BoundDependencyRelation.Captures => (byte)2,
-                        _ => throw Unsupported(
-                            "F+I member Dependency destination/phase is not representable."),
-                    };
-                    refinements.Add(new TrRmDependencyContract(
-                        destinationKind, sourceKind, relationship, phase,
-                        destinationOrdinal, sourceOrdinal));
-                    hasBaseRelationship = true;
-                }
-
-                if (!hasBaseRelationship)
+                if (!basePhasesBySource.TryGetValue((
+                        dependency.Destination,
+                        dependency.DestinationOrdinal, source),
+                        out var phases) || phases.Count == 0)
                 {
                     throw Unsupported(
                         "F+I member Dependency refinement does not refine a declared source.");
                 }
+
+                foreach (var phase in phases)
+                {
+                    refinements.Add(new TrRmDependencyContract(
+                        destinationKind, sourceKind, relationship, phase,
+                        destinationOrdinal, sourceOrdinal));
+                }
+            }
+        }
+
+        var rowIndexes = new Dictionary<(byte DestinationKind,
+            uint DestinationOrdinal, byte Phase, byte SourceKind,
+            uint SourceOrdinal), int>();
+        for (var index = 0; index < rows.Count; index++)
+        {
+            var row = rows[index];
+            var key = (row.DestinationKind, row.DestinationOrdinal,
+                row.Phase, row.SourceKind, row.SourceOrdinal);
+            if (!rowIndexes.TryAdd(key, index))
+            {
+                throw Unsupported(
+                    "F+I member Dependency contracts contain a duplicate occurrence key.");
             }
         }
 
         foreach (var refinement in refinements)
         {
-            var match = rows.FindIndex(row =>
-                row.DestinationKind == refinement.DestinationKind
-                && row.DestinationOrdinal == refinement.DestinationOrdinal
-                && row.Phase == refinement.Phase
-                && row.SourceKind == refinement.SourceKind
-                && row.SourceOrdinal == refinement.SourceOrdinal
-                && row.Relationship == 3);
-            if (match < 0)
+            var key = (refinement.DestinationKind,
+                refinement.DestinationOrdinal, refinement.Phase,
+                refinement.SourceKind, refinement.SourceOrdinal);
+            if (!rowIndexes.TryGetValue(key, out var rowIndex)
+                || rows[rowIndex].Relationship != 3)
             {
                 throw Unsupported(
                     "F+I member Dependency refinements conflict or do not refine a declared source.");
             }
 
-            rows[match] = rows[match] with {
+            rows[rowIndex] = rows[rowIndex] with {
                 Relationship = refinement.Relationship,
             };
         }

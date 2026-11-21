@@ -103,6 +103,7 @@ internal static class NativeOutputContractValidator
         }
 
         var hasOutputs = false;
+        var hasLocalOutputs = false;
         foreach (var definition in interfaces)
         {
             if (definition is null || definition.Members.IsDefault)
@@ -122,6 +123,7 @@ internal static class NativeOutputContractValidator
                 }
 
                 hasOutputs = true;
+                hasLocalOutputs |= definition.ModuleImport is null;
                 if (definition.ForeignNativeInterface is null
                     || member.Kind != BoundInterfaceMemberKind.Callable
                     || member.IsStatic || member.IsExternal || member.HasBody
@@ -185,7 +187,7 @@ internal static class NativeOutputContractValidator
             }
         }
 
-        return !hasOutputs
+        return !hasOutputs || !hasLocalOutputs
             || (nativeCoreRegistration?.ForeignNativeInterface is not null
                 && nativeOutputCoreRegistration
                     is NativeOutputCoreRegistrationSet registration

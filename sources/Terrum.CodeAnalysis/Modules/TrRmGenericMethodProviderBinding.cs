@@ -60,6 +60,8 @@ public static partial class TrRmExecutableCompiler
             ModulesWithValidatedImports { get; } = [];
         internal List<BoundGenericMethodImport> ExpectedTargets { get; } = [];
         internal List<BoundSpanTypeDefinition> SpanTypes { get; } = [];
+        internal List<NativePointerTypeDefinition>
+            ForeignNativeInterfacePointerTypes { get; } = [];
         internal List<CheckedReferenceTypeDefinition>
             CheckedReferenceTypeDefinitions { get; } = [];
         internal ImmutableArray<BoundGenericNominalTypeDefinition>.Builder
@@ -644,6 +646,11 @@ public static partial class TrRmExecutableCompiler
                 StandardGenericMethodCallsParameterLabelsReceiverAccessSchemaIdentity
                     => TrRmArtifactSchema
                         .GenericMethodCallsParameterLabelsReceiverAccessDraft,
+                StandardForeignNativeInterfaceSchemaIdentity
+                    => TrRmArtifactSchema.ForeignNativeInterfaceDraft,
+                StandardForeignNativeInterfaceParameterSurfaceSchemaIdentity
+                    => TrRmArtifactSchema
+                        .ForeignNativeInterfaceParameterSurfaceDraft,
                 StandardC1L1R1SchemaIdentity
                     => TrRmArtifactSchema.C1ParameterLabelsReceiverAccessDraft,
                 StandardC1M1L1R1SchemaIdentity
@@ -750,10 +757,18 @@ public static partial class TrRmExecutableCompiler
                 TrRmStandardModuleSelection>();
             for (var index = 0; index < Artifacts.Length; index++)
             {
-                var tables = TrRmStructuralMetadataValidator
-                    .ValidateGenericMethodCallsDraftAndGetExecutionTables(
-                        new TrRmArtifactIndex(Artifacts[index], Schema));
-                ValidateGenericMethodCallBodies(tables);
+                var artifactIndex = new TrRmArtifactIndex(Artifacts[index],
+                    Schema);
+                var tables = Schema.UsesForeignNativeInterface()
+                    ? TrRmStructuralMetadataValidator
+                        .ValidateAndGetExecutionTables(artifactIndex)
+                    : TrRmStructuralMetadataValidator
+                        .ValidateGenericMethodCallsDraftAndGetExecutionTables(
+                            artifactIndex);
+                if (!Schema.UsesForeignNativeInterface())
+                {
+                    ValidateGenericMethodCallBodies(tables);
+                }
                 for (var moduleRow = 1; moduleRow <= tables.Modules.Count;
                     moduleRow++)
                 {

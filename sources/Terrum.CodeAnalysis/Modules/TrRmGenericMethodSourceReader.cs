@@ -63,10 +63,14 @@ public static partial class TrRmExecutableCompiler
     {
         ArgumentException.ThrowIfNullOrEmpty(moduleIdentity);
         var context = new GenericMethodReadContext(input, providers);
-        var tables = TrRmStructuralMetadataValidator
-            .ValidateGenericMethodCallsDraftAndGetExecutionTables(
-                new TrRmArtifactIndex(context.Artifacts[0],
-                    context.Schema));
+        var inputIndex = new TrRmArtifactIndex(context.Artifacts[0],
+            context.Schema);
+        var tables = context.Schema.UsesForeignNativeInterface()
+            ? TrRmStructuralMetadataValidator
+                .ValidateAndGetExecutionTables(inputIndex)
+            : TrRmStructuralMetadataValidator
+                .ValidateGenericMethodCallsDraftAndGetExecutionTables(
+                    inputIndex);
         var moduleRow = FindGenericMethodModule(tables.Modules,
             moduleIdentity);
         ValidateGenericMethodModuleImports(tables, context, 0, moduleRow);
@@ -122,12 +126,14 @@ public static partial class TrRmExecutableCompiler
             spanTypes: [.. context.SpanTypes],
             checkedReferenceTypes:
                 [.. context.CheckedReferenceTypeDefinitions],
+            nativePointerTypes: context.Schema
+                .UsesForeignNativeInterface()
+                    ? [.. context.ForeignNativeInterfacePointerTypes]
+                    : [.. context.GenericNominalPointerTypes],
             genericNominalTypeDefinitions:
                 context.GenericNominalTypeDefinitions.ToImmutable(),
             genericNominalTypeInstances:
-                context.GenericNominalTypeInstances.ToImmutable(),
-            nativePointerTypes:
-                context.GenericNominalPointerTypes.ToImmutable());
+                context.GenericNominalTypeInstances.ToImmutable());
     }
 
     private static ImmutableArray<BoundInterfaceDefinition>
@@ -141,6 +147,15 @@ public static partial class TrRmExecutableCompiler
                 out var cachedDefinitions))
         {
             return cachedDefinitions;
+        }
+
+        if (context.Schema.UsesForeignNativeInterface())
+        {
+            var foreignDefinitions
+                = CreateExportedForeignNativeInterfaceDefinitions(tables,
+                    context, artifactIndex, moduleRow);
+            context.InterfaceDefinitions.Add(cacheKey, foreignDefinitions);
+            return foreignDefinitions;
         }
 
         if (!context.Schema.UsesGeneralMethodParameterLabels())

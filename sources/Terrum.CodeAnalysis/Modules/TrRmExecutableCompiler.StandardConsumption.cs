@@ -228,6 +228,21 @@ public static partial class TrRmExecutableCompiler
             return CreateGenericMethodCallsDraftReference(input,
                 moduleIdentity, providers, exportKey: null);
         }
+        if (StringComparer.Ordinal.Equals(input.SchemaIdentity,
+                StandardForeignNativeInterfaceSchemaIdentity)
+            || StringComparer.Ordinal.Equals(input.SchemaIdentity,
+                StandardForeignNativeInterfaceParameterSurfaceSchemaIdentity))
+        {
+            if (!coreExceptionIdentitySelections.IsDefaultOrEmpty
+                || !coreContractFailureIdentitySelections.IsDefaultOrEmpty)
+            {
+                throw Unsupported(
+                    "The F+I source reference does not compose Core exception or contract-failure selections.");
+            }
+
+            return CreateGenericMethodCallsDraftReference(input,
+                moduleIdentity, providers, exportKey: null);
+        }
 
         var (artifacts, schemaIdentities, selectedA3LayoutResourceLedger)
             = SnapshotStandardInputsForOperation(input, moduleIdentity,

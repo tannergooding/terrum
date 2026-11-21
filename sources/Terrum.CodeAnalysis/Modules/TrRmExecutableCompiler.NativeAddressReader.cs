@@ -9030,10 +9030,18 @@ public static partial class TrRmExecutableCompiler
             ImmutableArray<PrimitiveType> parameterTypes,
             List<NativePointerTypeDefinition> nativePointerTypeDefinitions,
             TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
-            out ImmutableArray<BoundDependencyContract> boundDependencies)
+            out ImmutableArray<BoundDependencyContract> boundDependencies,
+            bool allowGeneralDependencies = false,
+            PrimitiveType? methodResultType = null)
     {
         var outputStates = tables.Contracts.GetOutputStateContracts(methodRow);
-        var outputFormals = new SortedSet<int>();
+        var declaredOutputs = tables.Contracts.GetNativeOutputs(methodRow);
+        var outputStatesByFormal = outputStates
+            .GroupBy(static output => output.ParameterOrdinal)
+            .ToDictionary(static group => group.Key,
+                static group => group.ToArray());
+        var outputFormals = new SortedSet<int>(
+            outputStatesByFormal.Keys);
         foreach (var outputState in outputStates)
         {
             if (!tables.Contracts.IsNativeOutputCellParameter(methodRow,
@@ -9048,17 +9056,39 @@ public static partial class TrRmExecutableCompiler
 
         var methodDependencies = tables.Contracts.GetDependencyContracts(
             methodRow);
-        if (outputFormals.Count == 0 && !methodDependencies.IsEmpty)
+        var declaredOutputsByFormal = declaredOutputs.ToDictionary(
+            static output => output.ParameterOrdinal);
+        if (declaredOutputsByFormal.Count != outputFormals.Count
+            || !outputFormals.SetEquals(declaredOutputsByFormal.Keys))
+        {
+            throw Invalid(
+                "A NativeOutput clause does not have an exact OutputState pair.");
+        }
+        var outputDependenciesByFormal = methodDependencies
+            .Where(static dependency => dependency.DestinationKind == 2
+                && dependency.Phase == 1)
+            .GroupBy(static dependency => dependency.DestinationOrdinal)
+            .ToDictionary(static group => group.Key,
+                static group => group.OrderBy(
+                    static dependency => dependency.SourceKind)
+                    .ThenBy(static dependency => dependency.SourceOrdinal)
+                    .ToList());
+
+        if (!allowGeneralDependencies
+            && outputFormals.Count == 0 && !methodDependencies.IsEmpty)
         {
             throw Unsupported(
                 "The NativeAddress loader supports only NativeOutput completion dependencies.");
         }
-        foreach (var dependency in methodDependencies)
+        if (!allowGeneralDependencies)
         {
-            if (dependency.DestinationKind != 2 || dependency.Phase != 1)
+            foreach (var dependency in methodDependencies)
             {
-                throw Unsupported(
-                    "The NativeAddress loader supports only NativeOutput completion dependencies.");
+                if (dependency.DestinationKind != 2 || dependency.Phase != 1)
+                {
+                    throw Unsupported(
+                        "The NativeAddress loader supports only NativeOutput completion dependencies.");
+                }
             }
         }
 
@@ -9075,13 +9105,8 @@ public static partial class TrRmExecutableCompiler
 
             TrRmOutputStateContract? successState = null;
             TrRmOutputStateContract? complementState = null;
-            foreach (var outputState in outputStates)
+            foreach (var outputState in outputStatesByFormal[formal])
             {
-                if (outputState.ParameterOrdinal != formal)
-                {
-                    continue;
-                }
-
                 if (outputState.State == 1 && successState is null)
                 {
                     successState = outputState;
@@ -9119,23 +9144,29 @@ public static partial class TrRmExecutableCompiler
                 throw Invalid("A NativeOutput pointer formal is not writable.");
             }
 
-            var outputDependencyRows = new List<TrRmDependencyContract>();
-            foreach (var dependency in methodDependencies)
+            var declaredOutput = declaredOutputsByFormal[formal];
+            var expectedResultCondition
+                = (successSelector, methodResultType) switch {
+                    (NativeOutputSelector.NonZero,
+                        PrimitiveType.Int32) => 1u,
+                    (NativeOutputSelector.NonZero,
+                        PrimitiveType.UInt32) => 2u,
+                    (NativeOutputSelector.NonNegative,
+                        PrimitiveType.Int32) => 3u,
+                    (_, null) => declaredOutput.ResultCondition,
+                    _ => 0u,
+                };
+            if (declaredOutput.PointeeType != pointerType.PointeeType
+                || declaredOutput.FailureDisposition != 1
+                || declaredOutput.ResultCondition != expectedResultCondition)
             {
-                if (dependency.DestinationOrdinal == (uint)formal)
-                {
-                    outputDependencyRows.Add(dependency);
-                }
+                throw Invalid(
+                    "A NativeOutput clause disagrees with its pointee or result selector.");
             }
-            outputDependencyRows.Sort(static (left, right) =>
-            {
-                var kindComparison = left.SourceKind.CompareTo(right.SourceKind);
-                return kindComparison != 0
-                    ? kindComparison
-                    : left.SourceOrdinal.CompareTo(right.SourceOrdinal);
-            });
 
-            if (outputDependencyRows.Count == 0)
+            if (!outputDependenciesByFormal.TryGetValue(
+                    checked((uint)formal), out var outputDependencyRows)
+                || outputDependencyRows.Count == 0)
             {
                 throw Invalid("A NativeOutput has no exact dependency source set.");
             }
@@ -9232,8 +9263,162 @@ public static partial class TrRmExecutableCompiler
                 nativeDependencies.MoveToImmutable()));
         }
 
+        if (allowGeneralDependencies)
+        {
+            boundContracts.AddRange(
+                ReadForeignNativeInterfaceDependencyContracts(
+                    methodDependencies, outputFormals,
+                    parameterTypes.Length));
+        }
+
         boundDependencies = boundContracts.ToImmutable();
         return outputs.MoveToImmutable();
+    }
+
+    private static ImmutableArray<BoundDependencyContract>
+        ReadForeignNativeInterfaceDependencyContracts(
+        ImmutableArray<TrRmDependencyContract> dependencies,
+        SortedSet<int> nativeOutputFormals, int parameterCount)
+    {
+        var contracts
+            = ImmutableArray.CreateBuilder<BoundDependencyContract>();
+        foreach (var group in dependencies
+            .GroupBy(static dependency => (dependency.DestinationKind,
+                dependency.DestinationOrdinal, dependency.Phase))
+            .OrderBy(static group => group.Key.DestinationKind)
+            .ThenBy(static group => group.Key.DestinationOrdinal)
+            .ThenBy(static group => group.Key.Phase))
+        {
+            var destination = group.Key.DestinationKind switch {
+                1 => BoundDependencyDestination.Result,
+                2 => BoundDependencyDestination.InitializedOutput,
+                3 => BoundDependencyDestination.RetainedFormal,
+                4 => BoundDependencyDestination.Receiver,
+                _ => throw Invalid(
+                    "A foreign-interface Dependency has an unknown destination."),
+            };
+            if ((destination is BoundDependencyDestination.Result
+                    or BoundDependencyDestination.Receiver)
+                && group.Key.DestinationOrdinal != 0)
+            {
+                throw Invalid(
+                    "A foreign-interface result or receiver Dependency has a nonzero ordinal.");
+            }
+
+            var destinationOrdinal = destination is
+                BoundDependencyDestination.Result
+                    or BoundDependencyDestination.Receiver
+                ? (int?)null
+                : checked((int)group.Key.DestinationOrdinal);
+            if (destination == BoundDependencyDestination.InitializedOutput
+                && group.Key.Phase == 1
+                && nativeOutputFormals.Contains(
+                    checked((int)group.Key.DestinationOrdinal)))
+            {
+                continue;
+            }
+            if (destinationOrdinal is int formal
+                && ((uint)formal >= (uint)parameterCount
+                    || nativeOutputFormals.Contains(formal)))
+            {
+                throw Invalid(
+                    "A foreign-interface Dependency destination is not an ordinary formal.");
+            }
+
+            var relation = (destination, group.Key.Phase) switch {
+                (BoundDependencyDestination.Result, 1)
+                    => BoundDependencyRelation.DependsOn,
+                (BoundDependencyDestination.InitializedOutput, 1)
+                    => throw Invalid(
+                        "A foreign-interface initialization-output Dependency has no NativeOutput owner."),
+                (_, 2) => BoundDependencyRelation.Captures,
+                _ => throw Unsupported(
+                    "The foreign-interface Dependency phase is unsupported."),
+            };
+            var rows = group.ToArray();
+            var emptySource = rows.Length == 1
+                && rows[0].SourceKind == 0
+                && rows[0].Relationship == 0
+                && rows[0].SourceOrdinal == 0;
+            if (rows.Any(static row => row.SourceKind == 0)
+                && !emptySource)
+            {
+                throw Invalid(
+                    "A foreign-interface empty Dependency source coexists with other sources.");
+            }
+
+            var sources = ImmutableArray.CreateBuilder<
+                BoundDependencySource>(emptySource ? 0 : rows.Length);
+            var borrowedSources = ImmutableArray.CreateBuilder<
+                BoundDependencySource>();
+            var forwardedSources = ImmutableArray.CreateBuilder<
+                BoundDependencySource>();
+            if (!emptySource)
+            {
+                foreach (var row in rows)
+                {
+                    BoundDependencySource source;
+                    switch (row.SourceKind)
+                    {
+                        case 1 when row.SourceOrdinal
+                                < (uint)parameterCount
+                            && !nativeOutputFormals.Contains(
+                                checked((int)row.SourceOrdinal)):
+                            source = new BoundDependencySource(
+                                BoundDependencySourceKind.Formal,
+                                checked((int)row.SourceOrdinal));
+                            break;
+                        case 2 when row.SourceOrdinal == 0:
+                            source = new BoundDependencySource(
+                                BoundDependencySourceKind.Receiver, null);
+                            break;
+                        default:
+                            throw Invalid(
+                                "A foreign-interface Dependency source is invalid.");
+                    }
+
+                    sources.Add(source);
+                    switch (row.Relationship)
+                    {
+                        case 1:
+                            borrowedSources.Add(source);
+                            break;
+                        case 2:
+                            forwardedSources.Add(source);
+                            break;
+                        case 3:
+                            break;
+                        default:
+                            throw Invalid(
+                                "A foreign-interface Dependency relationship is invalid.");
+                    }
+                }
+            }
+
+            static ImmutableArray<BoundDependencySource> OrderedSources(
+                ImmutableArray<BoundDependencySource> values)
+                => [.. values.OrderBy(static source => source.Kind)
+                    .ThenBy(static source => source.FormalOrdinal ?? -1)];
+
+            contracts.Add(new BoundDependencyContract(relation, destination,
+                destinationOrdinal, OrderedSources(sources.ToImmutable())));
+            if (borrowedSources.Count != 0)
+            {
+                contracts.Add(new BoundDependencyContract(
+                    BoundDependencyRelation.BorrowSourceStorage,
+                    destination, destinationOrdinal,
+                    OrderedSources(borrowedSources.ToImmutable())));
+            }
+            if (forwardedSources.Count != 0)
+            {
+                contracts.Add(new BoundDependencyContract(
+                    BoundDependencyRelation.ForwardsBacking,
+                    destination, destinationOrdinal,
+                    OrderedSources(forwardedSources.ToImmutable())));
+            }
+        }
+
+        return contracts.ToImmutable();
     }
 
     private static NativeOutputSelector ReadOutputSelector(
