@@ -25,6 +25,21 @@ internal sealed class NativeCoreRegistrationTests
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int EnumRoundTrip(int value);
 
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int NativeOutputPointFunction(IntPtr receiver,
+        IntPtr source, IntPtr value);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate NativeAggregatePoint NativeAggregatePointFunction(
+        IntPtr receiver, IntPtr source, NativeAggregatePoint fallback);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeAggregatePoint
+    {
+        public long X;
+        public long Y;
+    }
+
     [Test]
     public void RegistrationRetainsSelectedEnumAndSchemaIdentities()
     {
@@ -1985,8 +2000,11 @@ internal sealed class NativeCoreRegistrationTests
     }
 
     [Test]
-    public void StandardForeignNativeInterfaceConsumesAggregateOutputUnderAc1()
+    public async Task StandardForeignNativeInterfaceConsumesAggregateOutputUnderAc1()
     {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+
         const string schemaIdentity
             = "trrm/1-draft-foreign-native-interface-aggregate-output-consumption-1";
         const string providerSource = """
@@ -2084,6 +2102,8 @@ internal sealed class NativeCoreRegistrationTests
         Assert.That(providerImage[..2], Is.EqualTo(new byte[] {
             (byte)'M', (byte)'Z',
         }));
+        await AssertAggregatePointOutputAsync(providerImage, "InvokePoint")
+            .ConfigureAwait(true);
 
         var providerReference = TrRmExecutableCompiler.CreateStandardReference(
             providerInput, "provider.module", []);
@@ -2152,6 +2172,8 @@ internal sealed class NativeCoreRegistrationTests
         Assert.That(consumerImage[..2], Is.EqualTo(new byte[] {
             (byte)'M', (byte)'Z',
         }));
+        await AssertAggregatePointOutputAsync(consumerImage,
+            "InvokeImportedPoint").ConfigureAwait(true);
         var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(
             loadedConsumer, "consumer.module", schemaIdentity, 1, []);
         var reloadedConsumer = TrRmExecutableCompiler.LoadStandard(
@@ -2159,6 +2181,10 @@ internal sealed class NativeCoreRegistrationTests
                 reemittedArtifact), "consumer.module", providers);
         AssertAggregateOutputFunction(reloadedConsumer,
             "InvokeImportedPoint");
+        var reloadedImage = NativeEmitter.EmitLibrary(reloadedConsumer,
+            ["InvokeImportedPoint"], NativeRuntimePolicy.FailFast);
+        await AssertAggregatePointOutputAsync(reloadedImage,
+            "InvokeImportedPoint").ConfigureAwait(true);
 
         Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
@@ -5169,6 +5195,81 @@ internal sealed class NativeCoreRegistrationTests
 
     private static string GetSha256(string path)
         => Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)));
+
+    private static async Task AssertAggregatePointOutputAsync(byte[] image,
+        string functionName)
+    {
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"native-fni-aggregate-output-{Guid.NewGuid():N}.dll");
+        var module = IntPtr.Zero;
+        var receiver = IntPtr.Zero;
+        var vtable = IntPtr.Zero;
+        var source = IntPtr.Zero;
+        NativeOutputPointFunction? callback = null;
+        try
+        {
+            await File.WriteAllBytesAsync(path, image).ConfigureAwait(true);
+            module = NativeLibrary.Load(path);
+            receiver = Marshal.AllocHGlobal(IntPtr.Size);
+            vtable = Marshal.AllocHGlobal(IntPtr.Size);
+            source = Marshal.AllocHGlobal(sizeof(int));
+            callback = (actualReceiver, actualSource, value) => {
+                if (actualReceiver != receiver
+                    || Marshal.ReadInt32(actualSource) == 0)
+                {
+                    return 0;
+                }
+
+                Marshal.WriteInt64(value, 0x1122_3344_5566_7788);
+                Marshal.WriteInt64(value, sizeof(long),
+                    unchecked((long)0x8877_6655_4433_2211));
+                return 1;
+            };
+            Marshal.WriteIntPtr(vtable,
+                Marshal.GetFunctionPointerForDelegate(callback));
+            Marshal.WriteIntPtr(receiver, vtable);
+            Marshal.WriteInt32(source, 1);
+
+            var invoke = Marshal.GetDelegateForFunctionPointer<
+                NativeAggregatePointFunction>(
+                    NativeLibrary.GetExport(module, functionName));
+            var fallback = new NativeAggregatePoint {
+                X = 3,
+                Y = 4,
+            };
+            var result = invoke(receiver, source, fallback);
+            Assert.That(result.X, Is.EqualTo(0x1122_3344_5566_7788));
+            Assert.That(result.Y,
+                Is.EqualTo(unchecked((long)0x8877_6655_4433_2211)));
+
+            Marshal.WriteInt32(source, 0);
+            result = invoke(receiver, source, fallback);
+            Assert.That(result.X, Is.EqualTo(fallback.X));
+            Assert.That(result.Y, Is.EqualTo(fallback.Y));
+            GC.KeepAlive(callback);
+        }
+        finally
+        {
+            if (module != IntPtr.Zero)
+            {
+                NativeLibrary.Free(module);
+            }
+            if (source != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(source);
+            }
+            if (vtable != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(vtable);
+            }
+            if (receiver != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(receiver);
+            }
+            await TestFileCleanup.DeleteWithRetryAsync(path)
+                .ConfigureAwait(true);
+        }
+    }
 
     private static ImmutableArray<string> ReadPeExportNames(byte[] image)
     {
