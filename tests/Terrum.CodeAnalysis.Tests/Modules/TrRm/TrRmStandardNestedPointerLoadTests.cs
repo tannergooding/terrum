@@ -43,8 +43,32 @@ internal sealed class TrRmStandardNestedPointerLoadTests
         }
     }
 
+    public static IEnumerable<TestCaseData> FloatPointerLoadBitCases()
+    {
+        foreach (var schemaIdentity in new[] {
+            PointerLoadsSchemaIdentity,
+            GeneralPredicateGraphsPointerLoadsSchemaIdentity,
+        })
+        {
+            yield return new TestCaseData(schemaIdentity, "float32",
+                0x80000000UL);
+            yield return new TestCaseData(schemaIdentity, "float32",
+                0x7FC00042UL);
+            yield return new TestCaseData(schemaIdentity, "float64",
+                0x8000000000000000UL);
+            yield return new TestCaseData(schemaIdentity, "float64",
+                0x7FF8000000000042UL);
+        }
+    }
+
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int ReadNestedPointerFunction(nint pointer);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate float ReadFloat32PointerFunction(nint pointer);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate double ReadFloat64PointerFunction(nint pointer);
 
     [TestCase(PointerLoadsSchemaIdentity)]
     [TestCase(GeneralPredicateGraphsPointerLoadsSchemaIdentity)]
@@ -211,6 +235,80 @@ internal sealed class TrRmStandardNestedPointerLoadTests
             new TrRmStandardArtifactInput(schemaIdentity, reemitted),
             moduleIdentity + "-reemitted", []);
         AssertDirectPointerLoad(loaded);
+    }
+
+    [TestCaseSource(nameof(FloatPointerLoadBitCases))]
+    public async Task FloatPointerLoadsPreserveExactBitsAsync(
+        string schemaIdentity, string typeName, ulong bits)
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string moduleIdentity = "standard-float-pointer-load";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse($"""
+            public unsafe {typeName} Read(ptr<{typeName}> value)
+            {
+                unsafe { return *value; }
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            moduleIdentity, []);
+        var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
+            moduleIdentity + "-reemitted", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, reemitted),
+            moduleIdentity + "-reemitted", []);
+        var image = NativeEmitter.EmitLibrary(loaded, ["Read"],
+            NativeRuntimePolicy.FailFast);
+        var libraryPath = Path.Combine(Path.GetTempPath(),
+            $"terrum-standard-float-pointer-load-{Guid.NewGuid():N}.dll");
+        nint library = 0;
+        nint backing = 0;
+        try
+        {
+            backing = Marshal.AllocHGlobal(sizeof(long));
+            if (typeName == "float32")
+            {
+                Marshal.WriteInt32(backing, unchecked((int)bits));
+            }
+            else
+            {
+                Marshal.WriteInt64(backing, unchecked((long)bits));
+            }
+
+            await File.WriteAllBytesAsync(libraryPath, image)
+                .ConfigureAwait(false);
+            library = NativeLibrary.Load(libraryPath);
+            var readAddress = NativeLibrary.GetExport(library, "Read");
+            var actualBits = typeName == "float32"
+                ? unchecked((uint)BitConverter.SingleToInt32Bits(
+                    Marshal.GetDelegateForFunctionPointer<
+                        ReadFloat32PointerFunction>(readAddress)(backing)))
+                : unchecked((ulong)BitConverter.DoubleToInt64Bits(
+                    Marshal.GetDelegateForFunctionPointer<
+                        ReadFloat64PointerFunction>(readAddress)(backing)));
+            Assert.That(actualBits, Is.EqualTo(bits));
+        }
+        finally
+        {
+            if (library != 0)
+            {
+                NativeLibrary.Free(library);
+            }
+            if (backing != 0)
+            {
+                Marshal.FreeHGlobal(backing);
+            }
+            await TestFileCleanup.DeleteWithRetryAsync(libraryPath)
+                .ConfigureAwait(false);
+        }
     }
 
     [TestCase(PointerLoadsSchemaIdentity)]
