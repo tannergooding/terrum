@@ -1538,7 +1538,7 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
             = "trrm/1-draft-local-aggregate-layout-execution-pointer-loads-1";
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
             public int32 Read(ptr<int32> source) {
-                    unsafe { return *source; }
+                unsafe { return *source; }
             }
             """));
         Assert.That(compilation.HasErrors, Is.False,
@@ -1552,6 +1552,31 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
             TrRmExecutableCompiler.LoadStandard(
                     new TrRmStandardArtifactInput(l1pSchemaIdentity,
                         malformed), moduleIdentity, []));
+    }
+
+    [Test]
+    public void L1PointerLoadRejectsMismatchedFormalHomeType()
+    {
+        const string moduleIdentity = "l1p-formal-home-type";
+        const string l1pSchemaIdentity
+            = "trrm/1-draft-local-aggregate-layout-execution-pointer-loads-1";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public int32 Read(ptr<int32> source) {
+                int32 one = 1;
+                unsafe { return *source + one; }
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, l1pSchemaIdentity,
+            moduleTargetRequirement: 1);
+        var malformed = MutateL1pFormalHomeTypeMap(artifact,
+            l1pSchemaIdentity, "Read");
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                        new TrRmStandardArtifactInput(l1pSchemaIdentity,
+                            malformed), moduleIdentity, []));
     }
 
     [Test]
@@ -2172,6 +2197,85 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
         {
             bodyRows[row - 1] = row == bodyRow
                 ? truncatedBody
+                : bodyIndex.GetRow(row).ToArray();
+        }
+
+        return ReplaceSections(index, new Dictionary<ushort, TrRmSection> {
+            [0x0020] = new(0x0020, 0,
+                checked((uint)bodyRows.Length),
+                TrRmVariableTableWriter.EncodeBodies(bodyRows)),
+        });
+    }
+
+    private static byte[] MutateL1pFormalHomeTypeMap(
+        byte[] artifact, string schemaIdentity, string methodName)
+    {
+        var index = new TrRmArtifactIndex(artifact,
+            TrRmArtifactSchema.LocalAggregateLayoutDraft,
+            resourceLedger: null, usesNativePointerLoads: true,
+            standardSchemaIdentity: schemaIdentity);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraftAndGetExecutionTables(
+                index);
+        var methodRow = 0;
+        for (var candidate = 1;
+            candidate <= tables.Methods.Count; candidate++)
+        {
+            if (tables.Methods.GetName(candidate) == methodName)
+            {
+                methodRow = candidate;
+                break;
+            }
+        }
+        Assert.That(methodRow, Is.GreaterThan(0));
+        var bodyRow = tables.Methods.GetBodyRow(methodRow);
+        Assert.That(bodyRow, Is.GreaterThan(0));
+        var bodyIndex = new TrRmVariableTableIndex(
+            GetSectionBytes(index, 0x0020), tables.Bodies.Count, 1, 1);
+        var body = tables.Bodies.GetRegisterBody(bodyRow,
+            tables.Contracts.Count);
+        Assert.That(body.HomeCount, Is.GreaterThan(0));
+        var bodyBytes = bodyIndex.GetRow(bodyRow).ToArray();
+
+        var formalHome = body.HomeCount - 1;
+        Assert.That(body.HomeMap[formalHome * 8], Is.EqualTo(2));
+        var homeTypeMapIndex
+            = BinaryPrimitives.ReadUInt16LittleEndian(
+                body.HomeMap[(formalHome * 8 + 2)..]);
+        var homeTypeSpecRef = BinaryPrimitives.ReadUInt32LittleEndian(
+            body.TypeMap[(homeTypeMapIndex * sizeof(uint))..]);
+        var malformedTypeMapIndex = -1;
+        for (var typeMapIndex = 0; typeMapIndex < body.TypeCount;
+            typeMapIndex++)
+        {
+            var candidateTypeSpecRef = BinaryPrimitives
+                .ReadUInt32LittleEndian(
+                    body.TypeMap[(typeMapIndex * sizeof(uint))..]);
+            if (!tables.TypeSpecs.AreEquivalentTypeSpecRefs(
+                    candidateTypeSpecRef, homeTypeSpecRef))
+            {
+                malformedTypeMapIndex = typeMapIndex;
+                break;
+            }
+        }
+        Assert.That(malformedTypeMapIndex,
+            Is.GreaterThanOrEqualTo(0));
+
+        var mapCountBytes = 0;
+        for (var mask = body.MapMask; mask != 0; mask >>= 1)
+        {
+            mapCountBytes += mask & 1;
+        }
+        var mapStart = 5 + (mapCountBytes * sizeof(uint));
+        BinaryPrimitives.WriteUInt16LittleEndian(
+            bodyBytes.AsSpan(mapStart + (formalHome * 8) + 2),
+            checked((ushort)malformedTypeMapIndex));
+
+        var bodyRows = new ReadOnlyMemory<byte>[tables.Bodies.Count];
+        for (var row = 1; row <= bodyRows.Length; row++)
+        {
+            bodyRows[row - 1] = row == bodyRow
+                ? bodyBytes
                 : bodyIndex.GetRow(row).ToArray();
         }
 
