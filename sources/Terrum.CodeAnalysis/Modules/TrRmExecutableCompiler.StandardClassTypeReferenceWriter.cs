@@ -74,10 +74,14 @@ public static partial class TrRmExecutableCompiler
         ImmutableArray<BoundStandardClassLayoutVariant> Layouts);
 
     private sealed record C1M1IndependentClassTypeDefPlan(
-        BoundStandardClassDeclaration Declaration,
         BoundSourceTypeProviderSnapshot Provider,
-        int SourceTypeDefRow, int OutputModuleRow,
-        C1M1TypeDefEmissionView View);
+        uint SourceDefinitionId, int SourceTypeDefRow,
+        int OutputModuleRow, C1M1TypeDefEmissionView View,
+        ImmutableArray<string> ExportKeys);
+
+    private sealed record C1M1SeparateArtifactImportPlan(
+        int SourceIndex, int NewImportRow,
+        int NewModuleRefRow, uint ExpectedDefinitionId, string ExportKey);
 
     private sealed record C1M1MethodEmissionPlan(
         BoundStandardClassTypeView Owner,
@@ -10799,6 +10803,7 @@ public static partial class TrRmExecutableCompiler
             return false;
         }
 
+        // A selected inline-struct root is a root artifact even without a class declaration.
         foreach (var definition in program.GenericNominalTypeDefinitions)
         {
             var isImportedStruct
@@ -11507,10 +11512,11 @@ public static partial class TrRmExecutableCompiler
         for (var index = 0; index < outputSourceModuleRows.Length; index++)
         {
             var sourceModuleRow = outputSourceModuleRows[index];
-            var sourceModuleSnapshot
-                = sourceSnapshotsByModuleRow[sourceModuleRow];
             var outputIdentity = sourceModuleRow == rootModuleRow
-                ? moduleIdentity : sourceModuleSnapshot.ModuleIdentity;
+                ? moduleIdentity
+                : moduleIdentity + ".partition."
+                    + (index + 1).ToString(
+                        System.Globalization.CultureInfo.InvariantCulture);
             if (!outputModuleRowBySourceRow.TryAdd(sourceModuleRow,
                     index + 1)
                 || !outputModuleIdentityBySourceRow.TryAdd(sourceModuleRow,
@@ -11523,12 +11529,6 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
-        var outputModuleIdentityBySourceIdentity
-            = sourceModuleSnapshots.ToDictionary(
-                static snapshot => snapshot.ModuleIdentity,
-                snapshot => outputModuleIdentityBySourceRow[
-                    snapshot.ModuleRow],
-                StringComparer.Ordinal);
         if (moduleValidation.Modules.Any(module =>
                 outputModuleIdentitySet.Contains(module.Identity)
                 && (module.ArtifactIndex != 0
@@ -11598,6 +11598,12 @@ public static partial class TrRmExecutableCompiler
             var typeDefRow = GetTypeDefRow(view.Identity.DefinitionId);
             if (rootTables.TypeDefs.GetOwnerModule(typeDefRow)
                     != view.Provider.ModuleRow
+                || !StringComparer.Ordinal.Equals(
+                    view.Identity.ModuleIdentity,
+                    view.Provider.ModuleIdentity)
+                || !StringComparer.Ordinal.Equals(
+                    view.Identity.ProviderIdentity,
+                    view.Provider.ModuleIdentity)
                 || rootTables.TypeDefs.GetKind(typeDefRow) != 2
                 || rootTables.TypeDefs.GetGenericRange(typeDefRow).Count != 0
                 || rootTables.TypeDefs.GetContractRange(typeDefRow).Count
@@ -12755,8 +12761,8 @@ public static partial class TrRmExecutableCompiler
                 }
 
                 var ownerModuleRow = group.OwnerModule is
-                    BoundSourceTypeProviderSnapshot ownerModule
-                        ? ownerModule.ModuleRow : rootModuleRow;
+                    BoundSourceTypeProviderSnapshot equalityOwnerModule
+                        ? equalityOwnerModule.ModuleRow : rootModuleRow;
                 if (!outputModuleRowBySourceRow.TryGetValue(
                         ownerModuleRow, out var outputOwnerModuleRow))
                 {
@@ -15036,14 +15042,11 @@ public static partial class TrRmExecutableCompiler
         }
         foreach (var moduleRefRow in moduleRefRowsByOldRow)
         {
-            var producerIdentity = rootTables.ModuleRefs
-                .GetProducerIdentity(moduleRefRow);
-            if (outputModuleIdentityBySourceIdentity.TryGetValue(
-                    producerIdentity, out var outputProducerIdentity))
-            {
-                producerIdentity = outputProducerIdentity;
-            }
-
+            var producerIdentity
+                = GetC1M1OutputModuleRefProducerIdentity(rootTables,
+                    moduleRefRow, sourceModuleRowsByIdentity,
+                    outputModuleRowBySourceRow,
+                    outputModuleIdentityBySourceRow, exportKeys);
             AddString(producerIdentity);
         }
         foreach (var binding in bindingsByImportRow.Values)
@@ -15142,18 +15145,7 @@ public static partial class TrRmExecutableCompiler
                 "The retained class Module Feature ranges exceed the metadata row limit.");
         }
 
-        var featureBytes = new byte[checked(
-            featureRows.Count * sizeof(uint) * 2)];
-        for (var index = 0; index < featureRows.Count; index++)
-        {
-            var offset = index * sizeof(uint) * 2;
-            BinaryPrimitives.WriteUInt32LittleEndian(
-                featureBytes.AsSpan(offset),
-                featureRows[index].FeatureId);
-            BinaryPrimitives.WriteUInt32LittleEndian(
-                featureBytes.AsSpan(offset + sizeof(uint)),
-                featureRows[index].RuleRevision);
-        }
+        var featureBytes = EncodeC1M1ModuleFeatureRows(featureRows);
 
         var moduleRows = new TrRmModuleRow[outputSourceModuleRows.Length];
         var moduleRefCursor = 1;
@@ -15252,14 +15244,11 @@ public static partial class TrRmExecutableCompiler
         foreach (var (oldModuleRefRow, newModuleRefRow)
             in moduleRefRowMap)
         {
-            var producerIdentity = rootTables.ModuleRefs
-                .GetProducerIdentity(oldModuleRefRow);
-            if (outputModuleIdentityBySourceIdentity.TryGetValue(
-                    producerIdentity, out var outputProducerIdentity))
-            {
-                producerIdentity = outputProducerIdentity;
-            }
-
+            var producerIdentity
+                = GetC1M1OutputModuleRefProducerIdentity(rootTables,
+                    oldModuleRefRow, sourceModuleRowsByIdentity,
+                    outputModuleRowBySourceRow,
+                    outputModuleIdentityBySourceRow, exportKeys);
             var requirements = rootTables.ModuleRefs.GetRequirements(
                 oldModuleRefRow);
             moduleRefRows[newModuleRefRow - 1] = new TrRmModuleRefRow(
@@ -15518,6 +15507,2674 @@ public static partial class TrRmExecutableCompiler
                 new TrRmArtifactIndex(artifact, schema,
                     standardSchemaIdentity: schemaIdentity));
         return artifact;
+    }
+
+    private static byte[]
+        EmitC1M1MetadataClassTypeReferenceFromSeparateArtifacts(
+            BoundProgram program, string moduleIdentity,
+            uint moduleTargetRequirement, string schemaIdentity,
+            IReadOnlyList<BoundStandardClassDeclaration> rootDeclarations,
+            BoundSourceTypeProviderSnapshot rootSnapshot)
+    {
+        var schema = GetC1M1ClassMetadataSchema(schemaIdentity);
+        if (!IsSelectedClassTypeDefBindingEqualitySchemaIdentity(
+                schemaIdentity)
+            || !StringComparer.Ordinal.Equals(rootSnapshot.SchemaIdentity,
+                schemaIdentity)
+            || rootSnapshot.ModuleRow <= 0
+            || !StringComparer.Ordinal.Equals(rootSnapshot.ModuleIdentity,
+                rootDeclarations[0].Declaration.Identity.ModuleIdentity)
+            || rootSnapshot.RuntimePolicy != (uint)program.RuntimePolicy
+            || rootSnapshot.TargetRequirement != moduleTargetRequirement
+            || !program.Functions.IsEmpty
+            || !program.RetainedGenericMethodRoots.IsEmpty
+            || program.StandardClassDeclarations.Length
+                < rootDeclarations.Count
+            || program.GenericNominalTypeDefinitions.Any(
+                static definition =>
+                    definition.NominalKind is not (1 or 2)
+                    || !definition.Formals.IsEmpty))
+        {
+            throw Unsupported(
+                "Separate-artifact type-only C1M1 re-emission does not retain top-level function roots or generic nominal definitions.");
+        }
+
+        var sourceModules
+            = new List<BoundSourceTypeProviderSnapshot>();
+        int GetSourceModuleIndex(
+            BoundSourceTypeProviderSnapshot provider)
+        {
+            for (var index = 0; index < sourceModules.Count; index++)
+            {
+                if (SourceTypeSnapshotsMatch(sourceModules[index], provider))
+                {
+                    return index;
+                }
+            }
+
+            sourceModules.Add(provider);
+            return sourceModules.Count - 1;
+        }
+
+        foreach (var declaration in rootDeclarations)
+        {
+            _ = GetSourceModuleIndex(declaration.Declaration.Provider);
+        }
+        bool IsRootArtifactSnapshot(
+            BoundSourceTypeProviderSnapshot provider)
+        {
+            foreach (var declaration in rootDeclarations)
+            {
+                var rootProvider = declaration.Declaration.Provider;
+                if (StringComparer.Ordinal.Equals(rootProvider.SchemaIdentity,
+                        provider.SchemaIdentity)
+                    && rootProvider.ArtifactSnapshot.AsSpan()
+                        .SequenceEqual(provider.ArtifactSnapshot.AsSpan()))
+                {
+                    return true;
+                }
+            }
+
+            foreach (var definition in program.GenericNominalTypeDefinitions)
+            {
+                if (definition.SelectedExportKeys.IsEmpty
+                    || definition.Provider is not
+                        BoundSourceTypeProviderSnapshot rootProvider)
+                {
+                    continue;
+                }
+
+                if (StringComparer.Ordinal.Equals(
+                        rootProvider.SchemaIdentity, provider.SchemaIdentity)
+                    && rootProvider.ArtifactSnapshot.AsSpan()
+                        .SequenceEqual(provider.ArtifactSnapshot.AsSpan()))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        foreach (var declaration in program.StandardClassDeclarations)
+        {
+            foreach (var expectation in declaration.Expectations)
+            {
+                _ = GetSourceModuleIndex(expectation.Binding.UsingModule);
+            }
+        }
+        foreach (var definition in program.GenericNominalTypeDefinitions)
+        {
+            if (definition.Provider is
+                    BoundSourceTypeProviderSnapshot provider
+                && IsRootArtifactSnapshot(provider))
+            {
+                _ = GetSourceModuleIndex(provider);
+            }
+
+            foreach (var expectation in definition.ProviderExpectations)
+            {
+                _ = GetSourceModuleIndex(expectation.UsingModule);
+            }
+            foreach (var group in definition.TypeDefBindingEqualityGroups)
+            {
+                if (group.OwnerModule is
+                        BoundSourceTypeProviderSnapshot ownerModule
+                    && IsRootArtifactSnapshot(ownerModule))
+                {
+                    _ = GetSourceModuleIndex(ownerModule);
+                }
+
+                foreach (var endpoint in group.Endpoints)
+                {
+                    if (IsRootArtifactSnapshot(endpoint.OwnerModule))
+                    {
+                        _ = GetSourceModuleIndex(endpoint.OwnerModule);
+                    }
+                }
+            }
+        }
+        foreach (var declaration in program.StandardClassDeclarations)
+        {
+            foreach (var group in declaration.TypeDefBindingEqualityGroups)
+            {
+                if (group.OwnerModule is
+                        BoundSourceTypeProviderSnapshot ownerModule
+                    && IsRootArtifactSnapshot(ownerModule))
+                {
+                    _ = GetSourceModuleIndex(ownerModule);
+                }
+
+                foreach (var endpoint in group.Endpoints)
+                {
+                    if (IsRootArtifactSnapshot(endpoint.OwnerModule))
+                    {
+                        _ = GetSourceModuleIndex(endpoint.OwnerModule);
+                    }
+                }
+            }
+        }
+
+        var rootSourceModuleIndex
+            = GetSourceModuleIndex(rootDeclarations[0].Declaration.Provider);
+        var outputModuleIndices = Enumerable.Range(0, sourceModules.Count)
+            .OrderBy(index => index == rootSourceModuleIndex ? 1 : 0)
+            .ThenBy(static index => index)
+            .ToArray();
+        var outputModuleRowBySourceModuleIndex
+            = new int[sourceModules.Count];
+        var outputModuleIdentityBySourceModuleIndex
+            = new string[sourceModules.Count];
+        var outputModuleIdentitySet = new HashSet<string>(
+            StringComparer.Ordinal);
+        var sourceModuleIdentitySet = new HashSet<string>(
+            StringComparer.Ordinal);
+        for (var outputIndex = 0;
+            outputIndex < outputModuleIndices.Length;
+            outputIndex++)
+        {
+            var sourceIndex = outputModuleIndices[outputIndex];
+            var provider = sourceModules[sourceIndex];
+            if (!sourceModuleIdentitySet.Add(provider.ModuleIdentity))
+            {
+                throw new InvalidDataException(
+                    "Separate-artifact class roots use an ambiguous source Module identity.");
+            }
+
+            var identity = sourceIndex == rootSourceModuleIndex
+                ? moduleIdentity : provider.ModuleIdentity;
+            if (!outputModuleIdentitySet.Add(identity))
+            {
+                throw new ArgumentException(
+                    "The output class Module identity conflicts with a retained Module partition.",
+                    nameof(moduleIdentity));
+            }
+
+            outputModuleRowBySourceModuleIndex[sourceIndex]
+                = outputIndex + 1;
+            outputModuleIdentityBySourceModuleIndex[sourceIndex] = identity;
+        }
+
+        foreach (var provider in sourceModules)
+        {
+            var sourceTables = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                    provider.ArtifactSnapshot.ToArray(), schema,
+                    standardSchemaIdentity: schemaIdentity));
+            if (provider.ModuleRow <= 0
+                || provider.ModuleRow > sourceTables.Modules.Count
+                || !StringComparer.Ordinal.Equals(
+                    sourceTables.Modules.GetIdentity(provider.ModuleRow),
+                    provider.ModuleIdentity)
+                || sourceTables.Modules.GetRequirements(provider.ModuleRow)
+                    != (provider.TargetRequirement, provider.RuntimePolicy)
+                || sourceTables.Modules.GetGoverningRuleEdition(
+                    provider.ModuleRow) != provider.GoverningRuleEdition
+                || sourceTables.Modules.GetEntryMethod(provider.ModuleRow) != 0
+                || !provider.TargetProfiles.IsEmpty
+                || sourceTables.TargetProfiles.Count != 0)
+            {
+                throw new InvalidDataException(
+                    "A separate-artifact class Module context changed its identity, requirements, or target-profile closure.");
+            }
+
+            var (featureStart, featureCount)
+                = sourceTables.Modules.GetFeatureRange(provider.ModuleRow);
+            var actualFeatures
+                = ImmutableArray.CreateBuilder<TrRmFeatureRow>(featureCount);
+            for (var offset = 0; offset < featureCount; offset++)
+            {
+                actualFeatures.Add(sourceTables.Features.GetFeature(
+                    featureStart + offset));
+            }
+
+            var expectedFeatures = provider.Features.Select(
+                static feature => new TrRmFeatureRow(feature.FeatureId,
+                    feature.RuleRevision));
+            if (featureCount != provider.Features.Length
+                || !actualFeatures.ToImmutable().SequenceEqual(
+                    expectedFeatures))
+            {
+                throw new InvalidDataException(
+                    "A separate-artifact class Module context changed its Feature requirements.");
+            }
+        }
+
+        var outputTypeSpecRows
+            = new List<ReadOnlyMemory<byte>>();
+        var typeSpecRowMaps
+            = new Dictionary<int, uint>[sourceModules.Count];
+        var activeTypeSpecRows = new HashSet<int>[sourceModules.Count];
+        for (var sourceIndex = 0; sourceIndex < sourceModules.Count;
+            sourceIndex++)
+        {
+            typeSpecRowMaps[sourceIndex] = new Dictionary<int, uint>();
+            activeTypeSpecRows[sourceIndex] = new HashSet<int>();
+        }
+
+        var typeDefPlans
+            = new List<C1M1IndependentClassTypeDefPlan>();
+        var typeDefImportBindings = new Dictionary<(int SourceIndex,
+            int ImportRow), BoundSourceTypeExpectation>();
+        var fieldImportBindings
+            = new Dictionary<(int SourceIndex, int ImportRow),
+                BoundStandardClassFieldExpectation>();
+        var methodImportBindings
+            = new Dictionary<(int SourceIndex, int ImportRow),
+                BoundStandardClassMethodExpectation>();
+        var methodPlansBySource
+            = new Dictionary<(int SourceIndex, int MethodRow),
+                C1M1MethodEmissionPlan>();
+        var plannedTypeDefs = new HashSet<(int SourceIndex, int Row)>();
+        void AddDirectClassMethodPlans(
+            BoundStandardClassTypeView owner,
+            BoundSourceTypeProviderSnapshot provider)
+        {
+            var sourceIndex = GetSourceModuleIndex(provider);
+            var sourceTables = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                    provider.ArtifactSnapshot.ToArray(), schema,
+                    standardSchemaIdentity: schemaIdentity));
+            var ownerTypeDefRow = GetTypeDefRow(
+                owner.Identity.DefinitionId);
+            foreach (var method in owner.Methods)
+            {
+                var methodRow = GetMethodDefRow(method.DefinitionId);
+                var bodyRow = checked((int)method.BodyRow);
+                if (bodyRow == 0
+                    || (method.DefinitionId >> 24) != 0x16
+                    || sourceTables.Methods.GetOwnerType(methodRow)
+                        != ownerTypeDefRow
+                    || sourceTables.Methods.GetOwnerModule(methodRow)
+                        != provider.ModuleRow
+                    || sourceTables.Methods.GetBodyRow(methodRow)
+                        != method.BodyRow)
+                {
+                    throw new InvalidDataException(
+                        "A separate-artifact local class MethodDef has an invalid owner or Body row.");
+                }
+
+                var body = sourceTables.Bodies.GetRow(bodyRow);
+                if (body.IsEmpty)
+                {
+                    throw new InvalidDataException(
+                        "A separate-artifact local class MethodDef Body is empty.");
+                }
+
+                var key = (sourceIndex, methodRow);
+                var plan = new C1M1MethodEmissionPlan(owner, method, [],
+                    method.ExportKeys, body.ToArray());
+                if (methodPlansBySource.TryGetValue(key,
+                        out var existingPlan))
+                {
+                    if (!StandardClassMethodsMatch(existingPlan.Method,
+                            method)
+                        || existingPlan.Owner.Identity != owner.Identity
+                        || !existingPlan.ExportKeys.AsSpan().SequenceEqual(
+                            method.ExportKeys.AsSpan())
+                        || !existingPlan.Body.Span.SequenceEqual(body))
+                    {
+                        throw new InvalidDataException(
+                            "A separate-artifact local MethodDef has conflicting retained views.");
+                    }
+                }
+                else
+                {
+                    methodPlansBySource.Add(key, plan);
+                }
+            }
+        }
+
+        void AddExpectedClassMethodPlan(
+            BoundStandardClassExpectation expectation,
+            BoundStandardClassMethodExpectation methodExpectation)
+        {
+            var sourceIndex = GetSourceModuleIndex(
+                expectation.Binding.UsingModule);
+            var methodRow = GetMethodDefRow(
+                methodExpectation.ExpectedDefinitionId);
+            var expectedMethod = expectation.ExpectedDeclaration.Methods
+                .SingleOrDefault(method =>
+                    method.DefinitionId
+                        == methodExpectation.ExpectedDefinitionId);
+            if (methodExpectation.ImportRow <= 0
+                || methodExpectation.OwnerImportRow
+                    != expectation.Binding.ImportRow
+                || methodExpectation.ExpectedOwnerDefinitionId
+                    != expectation.Binding.ExpectedDefinitionId
+                || methodExpectation.ProviderOwnerDefinitionId
+                    != expectation.Binding.ProviderDefinitionId
+                || expectedMethod is null
+                || expectedMethod.BodyRow != 0
+                || expectedMethod.GenericParameterCount != 0)
+            {
+                throw Unsupported(
+                    "Separate-artifact expected class MethodDefs must be bodyless nongeneric views with exact TypeDef ownership.");
+            }
+
+            var importKey = (sourceIndex, methodExpectation.ImportRow);
+            if (methodImportBindings.TryGetValue(importKey,
+                    out var existingMethodBinding)
+                && existingMethodBinding != methodExpectation)
+            {
+                throw new InvalidDataException(
+                    "A separate-artifact MethodDef Import has conflicting expected views.");
+            }
+
+            methodImportBindings[importKey] = methodExpectation;
+            var key = (sourceIndex, methodRow);
+            if (methodPlansBySource.TryGetValue(key, out var existingPlan))
+            {
+                if (!StandardClassMethodsMatch(existingPlan.Method,
+                        expectedMethod)
+                    || !StandardClassViewsMatch(
+                        existingPlan.Owner,
+                        expectation.ExpectedDeclaration))
+                {
+                    throw new InvalidDataException(
+                        "One separate-artifact expected MethodDef has conflicting owner views.");
+                }
+
+                if (!existingPlan.Imports.Any(existing =>
+                        existing.ImportRow
+                            == methodExpectation.ImportRow))
+                {
+                    methodPlansBySource[key] = existingPlan with {
+                        Imports = [.. existingPlan.Imports,
+                            methodExpectation],
+                    };
+                }
+            }
+            else
+            {
+                methodPlansBySource.Add(key,
+                    new C1M1MethodEmissionPlan(
+                        expectation.ExpectedDeclaration, expectedMethod,
+                        [methodExpectation], [], ReadOnlyMemory<byte>.Empty));
+            }
+        }
+
+        foreach (var declaration in rootDeclarations)
+        {
+            var view = declaration.Declaration;
+            var provider = view.Provider;
+            var sourceIndex = GetSourceModuleIndex(provider);
+            var sourceIndexTables = new TrRmArtifactIndex(
+                provider.ArtifactSnapshot.ToArray(), schema,
+                standardSchemaIdentity: schemaIdentity);
+            var sourceTables = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(sourceIndexTables);
+            EnsureC1ClassDeclarationTablesSupported(sourceTables);
+            if (provider.ModuleRow <= 0
+                || provider.ModuleRow > sourceTables.Modules.Count)
+            {
+                throw new InvalidDataException(
+                    "A separate-artifact class root has an invalid source Module row.");
+            }
+
+            if (!StringComparer.Ordinal.Equals(
+                    sourceTables.Modules.GetIdentity(provider.ModuleRow),
+                    provider.ModuleIdentity)
+                || !StringComparer.Ordinal.Equals(
+                    provider.SchemaIdentity, schemaIdentity)
+                || !StringComparer.Ordinal.Equals(
+                    view.Identity.ModuleIdentity, provider.ModuleIdentity)
+                || !StringComparer.Ordinal.Equals(
+                    view.Identity.ProviderIdentity, provider.ModuleIdentity)
+                || sourceTables.Modules.GetRequirements(provider.ModuleRow)
+                    != (provider.TargetRequirement, provider.RuntimePolicy)
+                || sourceTables.Modules.GetGoverningRuleEdition(
+                    provider.ModuleRow) != provider.GoverningRuleEdition
+                || sourceTables.Modules.GetEntryMethod(provider.ModuleRow) != 0
+                || !provider.TargetProfiles.IsEmpty
+                || sourceTables.TargetProfiles.Count != 0
+                || !declaration.Expectations.IsEmpty)
+            {
+                throw Unsupported(
+                    "Separate-artifact C1M1 class roots currently require profile-independent layouts.");
+            }
+
+            var (featureStart, featureCount)
+                = sourceTables.Modules.GetFeatureRange(provider.ModuleRow);
+            var actualFeatures
+                = ImmutableArray.CreateBuilder<TrRmFeatureRow>(featureCount);
+            for (var offset = 0; offset < featureCount; offset++)
+            {
+                actualFeatures.Add(sourceTables.Features.GetFeature(
+                    featureStart + offset));
+            }
+            if (!actualFeatures.ToImmutable().SequenceEqual(
+                    provider.Features.Select(static feature =>
+                        new TrRmFeatureRow(feature.FeatureId,
+                            feature.RuleRevision))))
+            {
+                throw new InvalidDataException(
+                    "A separate-artifact class root changed its Module Feature requirements.");
+            }
+
+            var typeDefRow = GetTypeDefRow(view.Identity.DefinitionId);
+            if (sourceTables.TypeDefs.GetOwnerModule(typeDefRow)
+                    != provider.ModuleRow
+                || !StringComparer.Ordinal.Equals(
+                    view.Identity.ModuleIdentity, provider.ModuleIdentity)
+                || !StringComparer.Ordinal.Equals(
+                    view.Identity.ProviderIdentity, provider.ModuleIdentity)
+                || sourceTables.TypeDefs.GetKind(typeDefRow) != 2
+                || sourceTables.TypeDefs.GetGenericRange(typeDefRow).Count
+                    != 0
+                || sourceTables.TypeDefs.GetContractRange(typeDefRow).Count
+                    != 0
+                || !StringComparer.Ordinal.Equals(provider.SchemaIdentity,
+                    schemaIdentity))
+            {
+                throw Unsupported(
+                    "Separate-artifact C1M1 class roots require direct nongeneric TypeDefs without contracts.");
+            }
+
+            var parsedView = CreateStandardClassTypeView(sourceTables,
+                view.Identity, provider, typeDefRow);
+            if (!StandardClassViewsMatch(view, parsedView)
+                || parsedView.Layouts.IsEmpty
+                || !GetStandardTypeExportKeys(sourceTables,
+                        provider.ModuleRow, typeDefRow).AsSpan()
+                    .SequenceEqual(declaration.ExportKeys.AsSpan()))
+            {
+                throw new InvalidDataException(
+                    "A separate-artifact C1M1 class root differs from its checked TypeDef view.");
+            }
+
+            if (parsedView.Layouts.Any(static layout =>
+                    layout.TargetProfileReference != 0
+                    || layout.TargetProfileId != 0
+                    || layout.TargetProfileRuleRevision != 0))
+            {
+                throw Unsupported(
+                    "Separate-artifact C1M1 class roots require profile-independent declared layouts.");
+            }
+
+            var emissionView = ToC1M1TypeDefEmissionView(sourceTables,
+                typeDefRow, parsedView);
+            if (!plannedTypeDefs.Add((sourceIndex, typeDefRow)))
+            {
+                throw new InvalidDataException(
+                    "A separate-artifact class root TypeDef was selected more than once.");
+            }
+
+            typeDefPlans.Add(new C1M1IndependentClassTypeDefPlan(
+                provider, view.Identity.DefinitionId, typeDefRow,
+                outputModuleRowBySourceModuleIndex[sourceIndex],
+                emissionView, declaration.ExportKeys));
+            AddDirectClassMethodPlans(view, provider);
+        }
+
+        foreach (var declaration in program.StandardClassDeclarations)
+        {
+            foreach (var expectation in declaration.Expectations)
+            {
+                var binding = expectation.Binding;
+                var sourceIndex = GetSourceModuleIndex(
+                    binding.UsingModule);
+                var sourceIndexTables = new TrRmArtifactIndex(
+                    binding.UsingModule.ArtifactSnapshot.ToArray(), schema,
+                    standardSchemaIdentity: schemaIdentity);
+                var sourceTables = TrRmStructuralMetadataValidator
+                    .ValidateC1AndGetExecutionTables(sourceIndexTables);
+                EnsureC1ClassDeclarationTablesSupported(sourceTables);
+                var expectedTypeDefRow = GetTypeDefRow(
+                    binding.ExpectedDefinitionId);
+                if (binding.ImportRow <= 0
+                    || binding.ImportRow > sourceTables.Imports.Count
+                    || (binding.ExpectedDefinitionId >> 24) != 0x13
+                    || sourceTables.TypeDefs.GetOwnerModule(
+                        expectedTypeDefRow) != binding.UsingModule.ModuleRow
+                    || sourceTables.TypeDefs.GetKind(expectedTypeDefRow) != 2
+                    || sourceTables.TypeDefs.GetGenericRange(
+                        expectedTypeDefRow).Count != 0
+                    || sourceTables.TypeDefs.GetContractRange(
+                        expectedTypeDefRow).Count != 0
+                    || sourceTables.Imports
+                        .GetExpectedDefinitionForImportRow(binding.ImportRow)
+                        != binding.ExpectedDefinitionId)
+                {
+                    throw new InvalidDataException(
+                        "A separate-artifact class TypeDef Import has an invalid owner or expected view.");
+                }
+
+                var moduleRefRow = sourceTables.Imports
+                    .GetModuleRefForImportRow(binding.ImportRow);
+                var import = sourceTables.Imports
+                    .GetBindingForImportRow(binding.ImportRow);
+                if (sourceTables.ModuleRefs.GetOwnerModule(moduleRefRow)
+                        != binding.UsingModule.ModuleRow
+                    || !StringComparer.Ordinal.Equals(import.ExportKey,
+                        binding.ExportKey)
+                    || !StringComparer.Ordinal.Equals(
+                        sourceTables.ModuleRefs
+                            .GetProducerIdentity(moduleRefRow),
+                        binding.ProducerIdentity)
+                    || sourceTables.ModuleRefs.GetRequirements(moduleRefRow)
+                        != (binding.TargetRequirement,
+                            binding.RuntimePolicy)
+                    || !SourceTypeSnapshotsMatch(binding.Provider,
+                        declaration.Declaration.Provider))
+                {
+                    throw new InvalidDataException(
+                        "A separate-artifact TypeDef Import changed its exact provider or ExportKey.");
+                }
+
+                var parsedView = CreateStandardClassTypeView(sourceTables,
+                    expectation.ExpectedDeclaration.Identity,
+                    binding.UsingModule, expectedTypeDefRow);
+                if (!StandardClassViewsMatch(
+                        expectation.ExpectedDeclaration, parsedView))
+                {
+                    throw new InvalidDataException(
+                        "A separate-artifact class TypeDef Import view differs from its original snapshot.");
+                }
+
+                var importKey = (sourceIndex, binding.ImportRow);
+                if (typeDefImportBindings.TryGetValue(importKey,
+                        out var existingBinding)
+                    && existingBinding != binding)
+                {
+                    throw new InvalidDataException(
+                        "A separate-artifact TypeDef Import has conflicting contextual bindings.");
+                }
+
+                typeDefImportBindings[importKey] = binding;
+                if (plannedTypeDefs.Add((sourceIndex, expectedTypeDefRow)))
+                {
+                    typeDefPlans.Add(
+                        new C1M1IndependentClassTypeDefPlan(
+                            binding.UsingModule,
+                            binding.ExpectedDefinitionId,
+                            expectedTypeDefRow,
+                            outputModuleRowBySourceModuleIndex[sourceIndex],
+                            ToC1M1TypeDefEmissionView(sourceTables,
+                                expectedTypeDefRow, parsedView), []));
+                }
+
+                foreach (var fieldExpectation
+                    in expectation.FieldExpectations)
+                {
+                    var fieldImportRow = fieldExpectation.ImportRow;
+                    var expectedFieldRow = GetFieldDefRow(
+                        fieldExpectation.ExpectedDefinitionId);
+                    var expectedOwnerTypeDefRow = GetTypeDefRow(
+                        fieldExpectation.ExpectedOwnerDefinitionId);
+                    if (fieldImportRow <= 0
+                        || fieldImportRow > sourceTables.Imports.Count
+                        || fieldExpectation.OwnerImportRow
+                            != binding.ImportRow
+                        || fieldExpectation.ExpectedOwnerDefinitionId
+                            != binding.ExpectedDefinitionId
+                        || fieldExpectation.ProviderOwnerDefinitionId
+                            != binding.ProviderDefinitionId
+                        || (fieldExpectation.ExpectedDefinitionId >> 24)
+                            != 0x14
+                        || sourceTables.TypeDefs.GetOwnerModule(
+                            expectedOwnerTypeDefRow)
+                            != binding.UsingModule.ModuleRow
+                        || sourceTables.Fields.GetOwnerTypeDef(
+                            expectedFieldRow) != expectedOwnerTypeDefRow
+                        || sourceTables.Imports
+                            .GetExpectedDefinitionForImportRow(
+                                fieldImportRow)
+                            != fieldExpectation.ExpectedDefinitionId
+                        || !SourceTypeSnapshotsMatch(
+                            fieldExpectation.Provider, binding.Provider))
+                    {
+                        throw new InvalidDataException(
+                            "A separate-artifact class FieldDef Import has an invalid owner or expected view.");
+                    }
+
+                    var fieldModuleRefRow = sourceTables.Imports
+                        .GetModuleRefForImportRow(fieldImportRow);
+                    var fieldImport
+                        = sourceTables.Imports.GetBindingForImportRow(
+                            fieldImportRow);
+                    var fieldRequirements = sourceTables.ModuleRefs
+                        .GetRequirements(fieldModuleRefRow);
+                    if (sourceTables.ModuleRefs.GetOwnerModule(
+                            fieldModuleRefRow)
+                            != binding.UsingModule.ModuleRow
+                        || !StringComparer.Ordinal.Equals(
+                            fieldImport.ExportKey,
+                            fieldExpectation.ExportKey)
+                        || !StringComparer.Ordinal.Equals(
+                            sourceTables.ModuleRefs.GetProducerIdentity(
+                                fieldModuleRefRow),
+                            fieldExpectation.Provider.ModuleIdentity)
+                        || fieldRequirements
+                            != (fieldExpectation.Provider.TargetRequirement,
+                                fieldExpectation.Provider.RuntimePolicy))
+                    {
+                        throw new InvalidDataException(
+                            "A separate-artifact class FieldDef Import changed its provider or ExportKey.");
+                    }
+
+                    var fieldImportKey = (sourceIndex, fieldImportRow);
+                    if (fieldImportBindings.TryGetValue(fieldImportKey,
+                            out var existingFieldBinding)
+                        && existingFieldBinding != fieldExpectation)
+                    {
+                        throw new InvalidDataException(
+                            "A separate-artifact FieldDef Import has conflicting contextual bindings.");
+                    }
+
+                    fieldImportBindings[fieldImportKey] = fieldExpectation;
+                }
+
+                foreach (var methodExpectation
+                    in expectation.MethodExpectations)
+                {
+                    AddExpectedClassMethodPlan(expectation,
+                        methodExpectation);
+                }
+            }
+        }
+        foreach (var definition in program.GenericNominalTypeDefinitions)
+        {
+            if (definition.NominalKind is not (1 or 2)
+                || !definition.Formals.IsEmpty)
+            {
+                throw Unsupported(
+                    "Separate-artifact C1M1 class re-emission requires nongeneric class or inline-struct TypeDefs.");
+            }
+
+            if (definition.Provider is
+                    BoundSourceTypeProviderSnapshot provider
+                && IsRootArtifactSnapshot(provider))
+            {
+                var sourceIndex = GetSourceModuleIndex(provider);
+                var sourceTables = TrRmStructuralMetadataValidator
+                    .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                        provider.ArtifactSnapshot.ToArray(), schema,
+                        standardSchemaIdentity: schemaIdentity));
+                var typeDefRow = GetTypeDefRow(
+                    definition.Identity.DefinitionId);
+                if (sourceTables.TypeDefs.GetOwnerModule(typeDefRow)
+                        != provider.ModuleRow
+                    || sourceTables.TypeDefs.GetKind(typeDefRow)
+                        != definition.NominalKind
+                    || sourceTables.TypeDefs.GetGenericRange(typeDefRow).Count
+                        != 0
+                    || sourceTables.TypeDefs.GetContractRange(typeDefRow)
+                        .Count != 0)
+                {
+                    throw new InvalidDataException(
+                        "A separate-artifact nominal TypeDef changed its owner, kind, or generic contract.");
+                }
+
+                if (plannedTypeDefs.Add((sourceIndex, typeDefRow)))
+                {
+                    var classDeclaration
+                        = program.StandardClassDeclarations.FirstOrDefault(
+                            declaration =>
+                                declaration.Declaration.Identity
+                                    == definition.Identity
+                                && SourceTypeSnapshotsMatch(
+                                    declaration.Declaration.Provider,
+                                    provider)
+                                && declaration.Expectations.IsEmpty);
+                    var view = CreateC1M1TypeDefEmissionView(sourceTables,
+                        provider, typeDefRow);
+                    if (classDeclaration is not null)
+                    {
+                        var classView = CreateStandardClassTypeView(
+                            sourceTables,
+                            classDeclaration.Declaration.Identity,
+                            provider, typeDefRow);
+                        if (!StandardClassViewsMatch(
+                                classDeclaration.Declaration, classView))
+                        {
+                            throw new InvalidDataException(
+                                "A separate-artifact direct class dependency changed its exact source view.");
+                        }
+
+                        view = ToC1M1TypeDefEmissionView(sourceTables,
+                            typeDefRow, classView);
+                    }
+
+                    if (view.Kind != definition.NominalKind)
+                    {
+                        throw new InvalidDataException(
+                            "A separate-artifact nominal view changed its TypeDef kind.");
+                    }
+
+                    typeDefPlans.Add(
+                        new C1M1IndependentClassTypeDefPlan(provider,
+                            definition.Identity.DefinitionId, typeDefRow,
+                            outputModuleRowBySourceModuleIndex[sourceIndex],
+                            view, definition.SelectedExportKeys));
+                    if (classDeclaration is not null)
+                    {
+                        AddDirectClassMethodPlans(
+                            classDeclaration.Declaration, provider);
+                    }
+                }
+            }
+
+            foreach (var binding in definition.ProviderExpectations)
+            {
+                var sourceIndex = GetSourceModuleIndex(binding.UsingModule);
+                var importKey = (sourceIndex, binding.ImportRow);
+                if (typeDefImportBindings.TryGetValue(importKey,
+                        out var existingBinding)
+                    && existingBinding != binding)
+                {
+                    throw new InvalidDataException(
+                        "A separate-artifact nominal TypeDef Import has conflicting contextual bindings.");
+                }
+
+                typeDefImportBindings[importKey] = binding;
+                var sourceTables = TrRmStructuralMetadataValidator
+                    .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                        binding.UsingModule.ArtifactSnapshot.ToArray(), schema,
+                        standardSchemaIdentity: schemaIdentity));
+                var typeDefRow = GetTypeDefRow(binding.ExpectedDefinitionId);
+                if ((binding.ExpectedDefinitionId >> 24) != 0x13
+                    || sourceTables.TypeDefs.GetOwnerModule(typeDefRow)
+                        != binding.UsingModule.ModuleRow
+                    || sourceTables.TypeDefs.GetKind(typeDefRow)
+                        != definition.NominalKind
+                    || sourceTables.TypeDefs.GetGenericRange(typeDefRow).Count
+                        != 0
+                    || sourceTables.TypeDefs.GetContractRange(typeDefRow)
+                        .Count != 0
+                    || sourceTables.Imports
+                        .GetExpectedDefinitionForImportRow(binding.ImportRow)
+                        != binding.ExpectedDefinitionId)
+                {
+                    throw new InvalidDataException(
+                        "A separate-artifact nominal TypeDef Import changed its contextual owner or expected kind.");
+                }
+
+                if (plannedTypeDefs.Add((sourceIndex, typeDefRow)))
+                {
+                    typeDefPlans.Add(
+                        new C1M1IndependentClassTypeDefPlan(
+                            binding.UsingModule,
+                            binding.ExpectedDefinitionId,
+                            typeDefRow,
+                            outputModuleRowBySourceModuleIndex[sourceIndex],
+                            CreateC1M1TypeDefEmissionView(sourceTables,
+                                binding.UsingModule, typeDefRow), []));
+                }
+            }
+        }
+
+        var globalArtifactInputs = new List<byte[]> {
+            rootSnapshot.ArtifactSnapshot.ToArray(),
+        };
+        void AddGlobalArtifact(ReadOnlyMemory<byte> artifact)
+        {
+            foreach (var existing in globalArtifactInputs)
+            {
+                if (existing.AsSpan().SequenceEqual(artifact.Span))
+                {
+                    return;
+                }
+            }
+
+            globalArtifactInputs.Add(artifact.ToArray());
+        }
+
+        foreach (var sourceModule in sourceModules)
+        {
+            AddGlobalArtifact(sourceModule.ArtifactSnapshot);
+        }
+        foreach (var binding in typeDefImportBindings.Values)
+        {
+            AddGlobalArtifact(binding.Provider.ArtifactSnapshot);
+        }
+        foreach (var binding in fieldImportBindings.Values)
+        {
+            AddGlobalArtifact(binding.Provider.ArtifactSnapshot);
+        }
+        foreach (var binding in methodImportBindings.Values)
+        {
+            AddGlobalArtifact(binding.Provider.ArtifactSnapshot);
+        }
+
+        var globalArtifacts = globalArtifactInputs.ToArray();
+        var globalSchemaIdentities = Enumerable.Repeat(schemaIdentity,
+            globalArtifacts.Length).ToArray();
+        var globalModuleValidation = ValidateStandardInputModules(
+            globalArtifacts, globalSchemaIdentities,
+            rootSnapshot.ModuleIdentity, a3LayoutResourceLedger: null);
+        if (globalModuleValidation.RootModuleRow != rootSnapshot.ModuleRow)
+        {
+            throw new InvalidDataException(
+                "A separate-artifact class root Module row changed during provider validation.");
+        }
+        if (globalModuleValidation.Modules
+            .GroupBy(static module => module.Identity,
+                StringComparer.Ordinal)
+            .Any(static group => group.Count() != 1))
+        {
+            throw new InvalidDataException(
+                "Separate-artifact class inputs contain an ambiguous provider Module identity.");
+        }
+
+        int GetGlobalArtifactIndex(ReadOnlySpan<byte> artifact)
+        {
+            for (var index = 0; index < globalArtifacts.Length; index++)
+            {
+                if (globalArtifacts[index].AsSpan().SequenceEqual(artifact))
+                {
+                    return index;
+                }
+            }
+
+            throw new InvalidDataException(
+                "A separate-artifact provider snapshot is absent from the validated input chain.");
+        }
+
+        var validatedTypeBindings
+            = ImmutableArray.CreateBuilder<
+                TrRmStandardTypeProviderBinding>();
+        var validatedMethodBindings
+            = ImmutableArray.CreateBuilder<
+                TrRmStandardMethodProviderBinding>();
+        foreach (var sourceIndex in outputModuleIndices)
+        {
+            var sourceModule = sourceModules[sourceIndex];
+            var localArtifacts = new List<byte[]> {
+                sourceModule.ArtifactSnapshot.ToArray(),
+            };
+            foreach (var binding in typeDefImportBindings
+                .Where(pair => pair.Key.SourceIndex == sourceIndex)
+                .Select(static pair => pair.Value))
+            {
+                var providerArtifact = binding.Provider.ArtifactSnapshot;
+                var alreadyPresent = false;
+                foreach (var artifact in localArtifacts)
+                {
+                    if (artifact.AsSpan().SequenceEqual(
+                            providerArtifact.AsSpan()))
+                    {
+                        alreadyPresent = true;
+                        break;
+                    }
+                }
+
+                if (!alreadyPresent)
+                {
+                    localArtifacts.Add(providerArtifact.ToArray());
+                }
+            }
+            foreach (var binding in fieldImportBindings
+                .Where(pair => pair.Key.SourceIndex == sourceIndex)
+                .Select(static pair => pair.Value))
+            {
+                var providerArtifact = binding.Provider.ArtifactSnapshot;
+                var alreadyPresent = false;
+                foreach (var artifact in localArtifacts)
+                {
+                    if (artifact.AsSpan().SequenceEqual(
+                            providerArtifact.AsSpan()))
+                    {
+                        alreadyPresent = true;
+                        break;
+                    }
+                }
+
+                if (!alreadyPresent)
+                {
+                    localArtifacts.Add(providerArtifact.ToArray());
+                }
+            }
+            foreach (var binding in methodImportBindings
+                .Where(pair => pair.Key.SourceIndex == sourceIndex)
+                .Select(static pair => pair.Value))
+            {
+                var providerArtifact = binding.Provider.ArtifactSnapshot;
+                var alreadyPresent = false;
+                foreach (var artifact in localArtifacts)
+                {
+                    if (artifact.AsSpan().SequenceEqual(
+                            providerArtifact.AsSpan()))
+                    {
+                        alreadyPresent = true;
+                        break;
+                    }
+                }
+
+                if (!alreadyPresent)
+                {
+                    localArtifacts.Add(providerArtifact.ToArray());
+                }
+            }
+
+            var artifacts = localArtifacts.ToArray();
+            var schemaIdentities = Enumerable.Repeat(schemaIdentity,
+                artifacts.Length).ToArray();
+            var localModules = ValidateStandardInputModules(artifacts,
+                schemaIdentities, sourceModule.ModuleIdentity,
+                a3LayoutResourceLedger: null);
+            if (localModules.RootModuleRow != sourceModule.ModuleRow)
+            {
+                throw new InvalidDataException(
+                    "A separate-artifact class root Module row changed during provider validation.");
+            }
+
+            var sourceTables = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                    artifacts[0], schema,
+                    standardSchemaIdentity: schemaIdentity));
+            var providerValidation
+                = TrRmFixedArrayProviderBindingValidator
+                    .ValidateC1M1ClassImports(sourceTables, artifacts,
+                        schemaIdentities, localModules.Modules,
+                        sourceModule.ModuleRow);
+            foreach (var (key, binding) in typeDefImportBindings)
+            {
+                if (key.SourceIndex != sourceIndex)
+                {
+                    continue;
+                }
+
+                var providerBinding = providerValidation.TypeBindings
+                    .SingleOrDefault(candidate =>
+                        candidate.ConsumerArtifactIndex == 0
+                        && candidate.ConsumerModuleRow
+                            == sourceModule.ModuleRow
+                        && candidate.ImportRow == key.ImportRow);
+                if (providerBinding.ImportRow == 0
+                    || providerBinding.ExpectedTypeDefRow
+                        != GetTypeDefRow(binding.ExpectedDefinitionId)
+                    || providerBinding.ProviderModuleRow
+                        != binding.Provider.ModuleRow
+                    || providerBinding.ProviderTypeDefRow
+                        != GetTypeDefRow(binding.ProviderDefinitionId)
+                    || providerBinding.ActualDefinitionId
+                        != binding.ProviderDefinitionId
+                    || providerBinding.TargetRequirement
+                        != binding.TargetRequirement
+                    || providerBinding.RuntimePolicy
+                        != binding.RuntimePolicy
+                    || !StringComparer.Ordinal.Equals(
+                        providerBinding.ProducerIdentity,
+                        binding.ProducerIdentity)
+                    || !StringComparer.Ordinal.Equals(
+                        providerBinding.ExportKey, binding.ExportKey))
+                {
+                    throw new InvalidDataException(
+                        "A separate-artifact class TypeDef Import no longer binds to its exact actual provider view.");
+                }
+
+                validatedTypeBindings.Add(providerBinding with {
+                    ConsumerArtifactIndex = GetGlobalArtifactIndex(
+                        artifacts[providerBinding.ConsumerArtifactIndex]),
+                    ProviderArtifactIndex = GetGlobalArtifactIndex(
+                        artifacts[providerBinding.ProviderArtifactIndex]),
+                });
+            }
+
+            foreach (var (key, binding) in fieldImportBindings)
+            {
+                if (key.SourceIndex != sourceIndex)
+                {
+                    continue;
+                }
+
+                var providerBinding = providerValidation.FieldBindings
+                    .SingleOrDefault(candidate =>
+                        candidate.ConsumerArtifactIndex == 0
+                        && candidate.ConsumerModuleRow
+                            == sourceModule.ModuleRow
+                        && candidate.ImportRow == key.ImportRow);
+                if (providerBinding.ImportRow == 0
+                    || providerBinding.ExpectedFieldDefRow
+                        != GetFieldDefRow(
+                            binding.ExpectedDefinitionId)
+                    || providerBinding.ExpectedOwnerTypeDefRow
+                        != GetTypeDefRow(
+                            binding.ExpectedOwnerDefinitionId)
+                    || providerBinding.OwnerImportRow
+                        != binding.OwnerImportRow
+                    || providerBinding.ProviderModuleRow
+                        != binding.Provider.ModuleRow
+                    || providerBinding.ProviderTypeDefRow
+                        != GetTypeDefRow(
+                            binding.ProviderOwnerDefinitionId)
+                    || providerBinding.ProviderFieldDefRow
+                        != GetFieldDefRow(
+                            binding.ProviderDefinitionId)
+                    || providerBinding.TargetRequirement
+                        != binding.Provider.TargetRequirement
+                    || providerBinding.RuntimePolicy
+                        != binding.Provider.RuntimePolicy
+                    || !StringComparer.Ordinal.Equals(
+                        providerBinding.ProducerIdentity,
+                        binding.Provider.ModuleIdentity)
+                    || !StringComparer.Ordinal.Equals(
+                        providerBinding.ExportKey, binding.ExportKey))
+                {
+                    throw new InvalidDataException(
+                        "A separate-artifact class FieldDef Import no longer binds to its exact actual provider view.");
+                }
+            }
+
+            foreach (var (key, binding) in methodImportBindings)
+            {
+                if (key.SourceIndex != sourceIndex)
+                {
+                    continue;
+                }
+
+                var providerBinding = providerValidation.MethodBindings
+                    .SingleOrDefault(candidate =>
+                        candidate.ConsumerArtifactIndex == 0
+                        && candidate.ConsumerModuleRow
+                            == sourceModule.ModuleRow
+                        && candidate.ImportRow == key.ImportRow);
+                if (providerBinding.ImportRow == 0
+                    || providerBinding.ExpectedMethodDefRow
+                        != GetMethodDefRow(
+                            binding.ExpectedDefinitionId)
+                    || providerBinding.ExpectedOwnerTypeDefRow
+                        != GetTypeDefRow(
+                            binding.ExpectedOwnerDefinitionId)
+                    || providerBinding.OwnerImportRow
+                        != binding.OwnerImportRow
+                    || providerBinding.ProviderModuleRow
+                        != binding.Provider.ModuleRow
+                    || providerBinding.ProviderMethodDefRow
+                        != GetMethodDefRow(
+                            binding.ProviderDefinitionId)
+                    || providerBinding.ProviderTypeDefRow
+                        != GetTypeDefRow(
+                            binding.ProviderOwnerDefinitionId)
+                    || providerBinding.TargetRequirement
+                        != binding.Provider.TargetRequirement
+                    || providerBinding.RuntimePolicy
+                        != binding.Provider.RuntimePolicy
+                    || !StringComparer.Ordinal.Equals(
+                        providerBinding.ProducerIdentity,
+                        binding.Provider.ModuleIdentity)
+                    || !StringComparer.Ordinal.Equals(
+                        providerBinding.ExportKey, binding.ExportKey))
+                {
+                    throw new InvalidDataException(
+                        "A separate-artifact class MethodDef Import no longer binds to its exact actual provider view.");
+                }
+
+                validatedMethodBindings.Add(providerBinding with {
+                    ConsumerArtifactIndex = GetGlobalArtifactIndex(
+                        artifacts[providerBinding.ConsumerArtifactIndex]),
+                    ProviderArtifactIndex = GetGlobalArtifactIndex(
+                        artifacts[providerBinding.ProviderArtifactIndex]),
+                });
+            }
+        }
+
+        ValidateC1M1ClassCarrierBindings(program,
+            globalModuleValidation.Modules, globalArtifacts,
+            globalSchemaIdentities, validatedTypeBindings.ToImmutable(),
+            validatedMethodBindings.ToImmutable());
+        ValidateC1M1StructCarrierBindings(program,
+            globalModuleValidation.Modules, globalArtifacts,
+            globalSchemaIdentities, validatedTypeBindings.ToImmutable());
+
+        if (typeDefPlans.Any(static plan =>
+                plan.View.Layouts.Any(static layout =>
+                    layout.TargetProfileReference != 0
+                    || layout.TargetProfileId != 0
+                    || layout.TargetProfileRuleRevision != 0)))
+        {
+            throw Unsupported(
+                "Separate-artifact C1M1 class re-emission currently requires profile-independent layout closure.");
+        }
+
+        var importRowMaps = new Dictionary<int, int>[sourceModules.Count];
+        var moduleRefRanges = new (int First, int Count)[sourceModules.Count];
+        var outputModuleRefPlans
+            = new List<(int SourceIndex, int OldRow, int NewRow,
+                string ProducerIdentity, uint TargetRequirement,
+                uint RuntimePolicy, ImmutableArray<string> ImportKeys)>();
+        var outputImportPlans
+            = new List<C1M1SeparateArtifactImportPlan>();
+        for (var index = 0; index < sourceModules.Count; index++)
+        {
+            importRowMaps[index] = new Dictionary<int, int>();
+        }
+
+        var nextImportRow = 0;
+        foreach (var sourceIndex in outputModuleIndices)
+        {
+            var provider = sourceModules[sourceIndex];
+            var sourceTables = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                    provider.ArtifactSnapshot.ToArray(), schema,
+                    standardSchemaIdentity: schemaIdentity));
+            var (moduleRefStart, moduleRefEnd)
+                = sourceTables.Modules.GetModuleRefRange(provider.ModuleRow);
+            var outputRefStart = outputModuleRefPlans.Count + 1;
+            for (var oldModuleRefRow = moduleRefStart;
+                oldModuleRefRow < moduleRefEnd; oldModuleRefRow++)
+            {
+                if (sourceTables.ModuleRefs.GetOwnerModule(oldModuleRefRow)
+                    != provider.ModuleRow)
+                {
+                    throw new InvalidDataException(
+                        "A separate-artifact class ModuleRef has the wrong owner Module.");
+                }
+
+                var matchingImports = Enumerable.Range(1,
+                        sourceTables.Imports.Count)
+                    .Where(importRow =>
+                        sourceTables.Imports.GetModuleRefForImportRow(
+                            importRow) == oldModuleRefRow)
+                    .ToArray();
+                if (matchingImports.Length == 0)
+                {
+                    throw Unsupported(
+                        "Separate-artifact class re-emission cannot retain an unused ModuleRef.");
+                }
+
+                var importKeys
+                    = ImmutableArray.CreateBuilder<string>(
+                        matchingImports.Length);
+                var newModuleRefRow = outputModuleRefPlans.Count + 1;
+                foreach (var oldImportRow in matchingImports)
+                {
+                    var importKey = (sourceIndex, oldImportRow);
+                    var hasTypeBinding = typeDefImportBindings.TryGetValue(
+                        importKey, out var typeBinding);
+                    var hasFieldBinding = fieldImportBindings.TryGetValue(
+                        importKey, out var fieldBinding);
+                    var hasMethodBinding = methodImportBindings.TryGetValue(
+                        importKey, out var methodBinding);
+                    var typeBindingValue = typeBinding;
+                    var fieldBindingValue = fieldBinding;
+                    var methodBindingValue = methodBinding;
+                    var expectedDefinitionId
+                        = typeBindingValue?.ExpectedDefinitionId
+                            ?? fieldBindingValue?.ExpectedDefinitionId
+                            ?? methodBindingValue?.ExpectedDefinitionId ?? 0;
+                    var exportKey = typeBindingValue?.ExportKey
+                        ?? fieldBindingValue?.ExportKey
+                        ?? methodBindingValue?.ExportKey ?? string.Empty;
+                    var expectedProvider = typeBindingValue?.Provider
+                        ?? fieldBindingValue?.Provider
+                        ?? methodBindingValue?.Provider;
+                    var bindingCount = (hasTypeBinding ? 1 : 0)
+                        + (hasFieldBinding ? 1 : 0)
+                        + (hasMethodBinding ? 1 : 0);
+                    if (bindingCount != 1
+                        || expectedProvider is null
+                        || sourceTables.Imports
+                            .GetExpectedDefinitionForImportRow(oldImportRow)
+                            != expectedDefinitionId
+                        || (expectedDefinitionId >> 24)
+                            != (hasTypeBinding ? 0x13u
+                                : hasFieldBinding ? 0x14u : 0x16u))
+                    {
+                        throw Unsupported(
+                            "Separate-artifact class re-emission retains only bound TypeDef, FieldDef and MethodDef Imports.");
+                    }
+
+                    var moduleRefRow = sourceTables.Imports
+                        .GetModuleRefForImportRow(oldImportRow);
+                    var import = sourceTables.Imports
+                        .GetBindingForImportRow(oldImportRow);
+                    var requirements = sourceTables.ModuleRefs
+                        .GetRequirements(moduleRefRow);
+                    if (sourceTables.ModuleRefs.GetOwnerModule(moduleRefRow)
+                            != provider.ModuleRow
+                        || (typeBindingValue is not null
+                            && !SourceTypeSnapshotsMatch(
+                                typeBindingValue.UsingModule, provider))
+                        || !StringComparer.Ordinal.Equals(import.ExportKey,
+                            exportKey)
+                        || !StringComparer.Ordinal.Equals(
+                            sourceTables.ModuleRefs.GetProducerIdentity(
+                                moduleRefRow),
+                            expectedProvider.ModuleIdentity)
+                        || requirements
+                            != (expectedProvider.TargetRequirement,
+                                expectedProvider.RuntimePolicy)
+                        || (typeBindingValue is not null
+                            && !program.StandardClassDeclarations.Any(
+                            declaration =>
+                                SourceTypeSnapshotsMatch(
+                                    typeBindingValue.Provider,
+                                    declaration.Declaration.Provider)
+                                && declaration.Expectations.Any(
+                                    expectation =>
+                                        expectation.Binding
+                                            == typeBindingValue))
+                            && !program.GenericNominalTypeDefinitions.Any(
+                                definition => definition.NominalKind == 1
+                                    && definition.ProviderExpectations
+                                        .Contains(typeBindingValue)))
+                        || (methodBindingValue is not null
+                            && !methodPlansBySource.ContainsKey(
+                                (sourceIndex, GetMethodDefRow(
+                                    methodBindingValue
+                                        .ExpectedDefinitionId))))
+                    {
+                        throw new InvalidDataException(
+                            "A separate-artifact class Import no longer matches its exact provider, owner, or ExportKey.");
+                    }
+
+                    if (!importRowMaps[sourceIndex].TryAdd(oldImportRow,
+                            ++nextImportRow))
+                    {
+                        throw new InvalidDataException(
+                            "A separate-artifact class Import row is duplicated.");
+                    }
+
+                    outputImportPlans.Add(
+                        new C1M1SeparateArtifactImportPlan(sourceIndex,
+                            nextImportRow, newModuleRefRow,
+                            expectedDefinitionId, exportKey));
+                    importKeys.Add(import.ExportKey);
+                }
+
+                var refRequirements = sourceTables.ModuleRefs
+                    .GetRequirements(oldModuleRefRow);
+                outputModuleRefPlans.Add((sourceIndex, oldModuleRefRow,
+                    newModuleRefRow,
+                    sourceTables.ModuleRefs.GetProducerIdentity(
+                        oldModuleRefRow),
+                    refRequirements.TargetRequirement,
+                    refRequirements.RuntimePolicy, importKeys.ToImmutable()));
+            }
+
+            moduleRefRanges[outputModuleRowBySourceModuleIndex[sourceIndex]
+                    - 1]
+                = (outputRefStart, moduleRefEnd - moduleRefStart);
+        }
+
+        var outputTypeDefRows
+            = new List<TrRmTypeDefRow>(typeDefPlans.Count);
+        var typeDefNames = new List<(string Namespace, string Name)>(
+            typeDefPlans.Count);
+        var fieldRows = new List<TrRmFieldDefRow>();
+        var fieldNames = new List<string>();
+        var layoutRows = new List<TrRmLayoutRow>();
+        var layoutFieldRows = new List<TrRmLayoutFieldRow>();
+        var exportRows = new List<(uint DefinitionId, string Key)>();
+        var exportKeys = new HashSet<(int ModuleRow, string Key)>();
+        var typeDefCountsByModule = new int[sourceModules.Count];
+        var fieldRowsBySource
+            = new Dictionary<(int SourceIndex, int Row), int>();
+        var typeDefPlanOrder = typeDefPlans
+            .OrderBy(static plan => plan.OutputModuleRow)
+            .ThenBy(static plan => plan.SourceTypeDefRow)
+            .ToArray();
+        var typeDefRowsBySource = new Dictionary<(int SourceIndex, int Row),
+            int>();
+        var typeDefRowMapsBySource = new Dictionary<int, int>[
+            sourceModules.Count];
+        for (var index = 0; index < sourceModules.Count; index++)
+        {
+            typeDefRowMapsBySource[index] = new Dictionary<int, int>();
+        }
+
+        for (var index = 0; index < typeDefPlanOrder.Length; index++)
+        {
+            var plan = typeDefPlanOrder[index];
+            var sourceModuleIndex = GetSourceModuleIndex(plan.Provider);
+            var outputTypeDefRow = index + 1;
+            if (!typeDefRowsBySource.TryAdd(
+                    (sourceModuleIndex, plan.SourceTypeDefRow),
+                    outputTypeDefRow))
+            {
+                throw new InvalidDataException(
+                    "A separate-artifact class TypeDef view was emitted more than once.");
+            }
+
+            typeDefCountsByModule[plan.OutputModuleRow - 1]++;
+        }
+        for (var sourceIndex = 0; sourceIndex < sourceModules.Count;
+            sourceIndex++)
+        {
+            for (var planIndex = 0;
+                planIndex < typeDefPlanOrder.Length;
+                planIndex++)
+            {
+                var plan = typeDefPlanOrder[planIndex];
+                if (!sourceModules[sourceIndex].ArtifactSnapshot.AsSpan()
+                    .SequenceEqual(plan.Provider.ArtifactSnapshot.AsSpan()))
+                {
+                    continue;
+                }
+
+                if (!typeDefRowMapsBySource[sourceIndex].TryAdd(
+                        plan.SourceTypeDefRow, planIndex + 1))
+                {
+                    throw new InvalidDataException(
+                        "A source TypeDef row has more than one remapped context in one artifact.");
+                }
+            }
+        }
+        var methodPlanOrder = methodPlansBySource
+            .OrderBy(pair =>
+                outputModuleRowBySourceModuleIndex[pair.Key.SourceIndex])
+            .ThenBy(static pair => pair.Key.MethodRow)
+            .ToArray();
+        var methodDefRowsBySource
+            = new Dictionary<(int SourceIndex, int Row), int>();
+        var methodDefRowMapsBySource = new Dictionary<int, int>[
+            sourceModules.Count];
+        var methodDefCountsByModule = new int[sourceModules.Count];
+        for (var index = 0; index < sourceModules.Count; index++)
+        {
+            methodDefRowMapsBySource[index] = new Dictionary<int, int>();
+        }
+
+        for (var index = 0; index < methodPlanOrder.Length; index++)
+        {
+            var (key, plan) = methodPlanOrder[index];
+            var sourceModuleIndex = key.SourceIndex;
+            var sourceTables = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                    sourceModules[sourceModuleIndex].ArtifactSnapshot
+                        .ToArray(), schema,
+                    standardSchemaIdentity: schemaIdentity));
+            var oldOwnerTypeDefRow = GetTypeDefRow(
+                plan.Owner.Identity.DefinitionId);
+            if (plan.Method.GenericParameterCount != 0
+                || sourceTables.Methods.GetOwnerType(key.MethodRow)
+                    != oldOwnerTypeDefRow
+                || sourceTables.Methods.GetOwnerModule(key.MethodRow)
+                    != sourceModules[sourceModuleIndex].ModuleRow
+                || sourceTables.Methods.GetBodyRow(key.MethodRow)
+                    != plan.Method.BodyRow
+                || (plan.Imports.IsEmpty
+                    ? plan.Method.BodyRow == 0 || plan.Body.IsEmpty
+                    : plan.Method.BodyRow != 0 || !plan.Body.IsEmpty)
+                || (!plan.Body.IsEmpty
+                    && plan.Body.Span[0] is not
+                        (0x01 or 0x02 or 0x03 or 0x04 or 0x05)))
+            {
+                throw Unsupported(
+                    "Separate-artifact class MethodDef retention currently requires nongeneric MethodDefs with exact TypeDef and Module owners.");
+            }
+
+            var outputMethodRow = index + 1;
+            if (!methodDefRowsBySource.TryAdd(
+                    (sourceModuleIndex, key.MethodRow), outputMethodRow))
+            {
+                throw new InvalidDataException(
+                    "A separate-artifact class MethodDef was retained more than once.");
+            }
+
+            methodDefCountsByModule[
+                outputModuleRowBySourceModuleIndex[sourceModuleIndex] - 1]++;
+        }
+        for (var sourceIndex = 0; sourceIndex < sourceModules.Count;
+            sourceIndex++)
+        {
+            for (var methodIndex = 0;
+                methodIndex < methodPlanOrder.Length;
+                methodIndex++)
+            {
+                var (key, _) = methodPlanOrder[methodIndex];
+                if (!sourceModules[sourceIndex].ArtifactSnapshot.AsSpan()
+                    .SequenceEqual(
+                        sourceModules[key.SourceIndex].ArtifactSnapshot
+                            .AsSpan()))
+                {
+                    continue;
+                }
+
+                if (!methodDefRowMapsBySource[sourceIndex].TryAdd(
+                        key.MethodRow, methodIndex + 1))
+                {
+                    throw new InvalidDataException(
+                        "A source MethodDef row has more than one remapped context in one artifact.");
+                }
+            }
+        }
+
+        var fieldRowMapsBySource = new Dictionary<int, int>[
+            sourceModules.Count];
+        var methodRows = new List<TrRmMethodDefRow>(
+            methodPlanOrder.Length);
+        var methodNames = new List<string>(methodPlanOrder.Length);
+        var methodSignatureRows = new List<TrRmMethodSigRow>();
+        var parameterRows = new List<TrRmParamRow>();
+        var contractRows = new List<TrRmContractRow>();
+        var bodyRows = new List<ReadOnlyMemory<byte>>();
+        var fieldPathRows = new List<TrRmFieldPathRow>();
+        var fieldPathRowMapsBySource = new Dictionary<int, int>[
+            sourceModules.Count];
+        var fieldPathRowsByIdentity
+            = new Dictionary<C1M1FieldPathIdentity, int>();
+        var parameterSurfaceRows = new List<C1M1ParameterSurfaceRow>();
+        var methodParameterLabelRows
+            = new List<(int MethodDefRow, int Ordinal, string Name)>();
+        var frozenScalarValueBuilder = new TrRmFrozenScalarValueBuilder();
+        for (var sourceIndex = 0; sourceIndex < sourceModules.Count;
+            sourceIndex++)
+        {
+            fieldRowMapsBySource[sourceIndex] = new Dictionary<int, int>();
+            fieldPathRowMapsBySource[sourceIndex]
+                = new Dictionary<int, int>();
+        }
+
+        foreach (var plan in typeDefPlanOrder)
+        {
+            var newTypeDefRow = outputTypeDefRows.Count + 1;
+            var sourceModuleIndex = GetSourceModuleIndex(
+                plan.Provider);
+            if (!typeDefRowsBySource.TryGetValue(
+                    (sourceModuleIndex, plan.SourceTypeDefRow),
+                    out var mappedTypeDefRow)
+                || mappedTypeDefRow != newTypeDefRow)
+            {
+                throw new InvalidDataException(
+                    "A separate-artifact class TypeDef map changed during emission.");
+            }
+
+            var fieldFirst = plan.View.Fields.IsEmpty
+                ? 0 : fieldRows.Count + 1;
+            var fieldRowMap = new Dictionary<uint, int>();
+            foreach (var field in plan.View.Fields)
+            {
+                var newFieldRow = fieldRows.Count + 1;
+                if ((field.DefinitionId >> 24) != 0x14
+                    || field.OwnerDefinitionId != plan.SourceDefinitionId
+                    || !fieldRowMap.TryAdd(field.DefinitionId, newFieldRow)
+                    || !fieldRowsBySource.TryAdd(
+                        (sourceModuleIndex,
+                            GetFieldDefRow(field.DefinitionId)),
+                        newFieldRow))
+                {
+                    throw new InvalidDataException(
+                        "A separate-artifact class FieldDef has an invalid owner or duplicate identity.");
+                }
+
+                var sourceIndexTables = new TrRmArtifactIndex(
+                    plan.Provider.ArtifactSnapshot.ToArray(), schema,
+                    standardSchemaIdentity: schemaIdentity);
+                var sourceTables = TrRmStructuralMetadataValidator
+                    .ValidateC1AndGetExecutionTables(sourceIndexTables);
+                var type = sourceTables.TypeSpecs.GetTypeSpecRef(
+                    field.TypeSpecReference);
+                var typeSpecReference = 0u;
+                if (type.IsRow)
+                {
+                    typeSpecReference = RemapC1M1ClassTypeSpec(sourceTables,
+                        field.TypeSpecReference,
+                        typeDefRowMapsBySource[sourceModuleIndex],
+                        importRowMaps[sourceModuleIndex],
+                        outputTypeSpecRows,
+                        typeSpecRowMaps[sourceModuleIndex],
+                        activeTypeSpecRows[sourceModuleIndex], depth: 0);
+                }
+                else if (TryGetC1M1ClassScalarType(sourceTables,
+                             field.TypeSpecReference, out _))
+                {
+                    typeSpecReference = field.TypeSpecReference;
+                }
+                else
+                {
+                    throw Unsupported(
+                        "A separate-artifact class field has an unsupported inline TypeSpec.");
+                }
+
+                fieldRows.Add(new TrRmFieldDefRow(newTypeDefRow, 0,
+                    typeSpecReference, field.Flags));
+                fieldNames.Add(field.Name);
+                foreach (var fieldExportKey in field.ExportKeys)
+                {
+                    if (!exportKeys.Add((plan.OutputModuleRow,
+                            fieldExportKey)))
+                    {
+                        throw new InvalidDataException(
+                            "Separate-artifact class FieldDef ExportKeys conflict within one Module.");
+                    }
+
+                    exportRows.Add((
+                        0x1400_0000u | checked((uint)newFieldRow),
+                        fieldExportKey));
+                }
+            }
+
+            var layoutFirst = layoutRows.Count + 1;
+            foreach (var layout in plan.View.Layouts)
+            {
+                var newLayoutRow = layoutRows.Count + 1;
+                var layoutFieldFirst = layout.FieldDefinitionIds.IsEmpty
+                    ? 0 : layoutFieldRows.Count + 1;
+                for (var ordinal = 0;
+                    ordinal < layout.FieldDefinitionIds.Length; ordinal++)
+                {
+                    var sourceFieldId
+                        = layout.FieldDefinitionIds[ordinal];
+                    if (!fieldRowMap.TryGetValue(sourceFieldId,
+                            out var newFieldRow))
+                    {
+                        throw new InvalidDataException(
+                            "A separate-artifact class Layout refers to a field outside its TypeDef.");
+                    }
+
+                    layoutFieldRows.Add(new TrRmLayoutFieldRow(
+                        newLayoutRow, ordinal, newFieldRow));
+                }
+
+                layoutRows.Add(new TrRmLayoutRow(newTypeDefRow, 0,
+                    layout.Kind, layout.Flags, layout.Alignment,
+                    layout.Pack, layoutFieldFirst,
+                    layout.FieldDefinitionIds.Length));
+            }
+
+            if (plan.View.Fields.Length > 0xFF_FFFF
+                || plan.View.Layouts.IsEmpty
+                || plan.View.Layouts.Length > 0xFF_FFFF)
+            {
+                throw Unsupported(
+                    "Separate-artifact C1M1 class row closure exceeds its schema limits.");
+            }
+
+            foreach (var exportKey in plan.ExportKeys)
+            {
+                if (!exportKeys.Add((plan.OutputModuleRow, exportKey)))
+                {
+                    throw new InvalidDataException(
+                        "Separate-artifact class TypeDef ExportKeys conflict within one Module.");
+                }
+
+                exportRows.Add((
+                    0x1300_0000u | checked((uint)newTypeDefRow), exportKey));
+            }
+
+            outputTypeDefRows.Add(new TrRmTypeDefRow(0, 0,
+                plan.View.TypeDefFlags, fieldFirst, plan.View.Fields.Length,
+                0, 0, layoutFirst, plan.View.Layouts.Length, 0, 0));
+            typeDefNames.Add((plan.View.Namespace, plan.View.Name));
+        }
+
+        for (var sourceIndex = 0; sourceIndex < sourceModules.Count;
+            sourceIndex++)
+        {
+            foreach (var (fieldKey, outputFieldRow) in fieldRowsBySource)
+            {
+                if (!sourceModules[sourceIndex].ArtifactSnapshot.AsSpan()
+                    .SequenceEqual(sourceModules[fieldKey.SourceIndex]
+                        .ArtifactSnapshot.AsSpan()))
+                {
+                    continue;
+                }
+
+                if (!fieldRowMapsBySource[sourceIndex].TryAdd(
+                        fieldKey.Row, outputFieldRow))
+                {
+                    throw new InvalidDataException(
+                        "A source FieldDef row has more than one remapped context in one artifact.");
+                }
+            }
+        }
+
+        foreach (var (key, plan) in methodPlanOrder)
+        {
+            var sourceIndex = key.SourceIndex;
+            var sourceTables = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                    sourceModules[sourceIndex].ArtifactSnapshot.ToArray(),
+                    schema, standardSchemaIdentity: schemaIdentity));
+            var method = plan.Method;
+            var oldMethodRow = key.MethodRow;
+            var oldOwnerTypeDefRow = GetTypeDefRow(
+                plan.Owner.Identity.DefinitionId);
+            if (!typeDefRowsBySource.TryGetValue(
+                    (sourceIndex, oldOwnerTypeDefRow),
+                    out var outputOwnerTypeDefRow))
+            {
+                throw new InvalidDataException(
+                    "A retained class MethodDef has no emitted owner TypeDef.");
+            }
+
+            if (method.ReceiverTypeSpecReference != 0)
+            {
+                var receiver = sourceTables.TypeSpecs.GetTypeSpecRef(
+                    method.ReceiverTypeSpecReference);
+                var mutableReceiver = (receiver.Qualifiers & 1) != 0;
+                if (!receiver.IsRow
+                    || receiver.Form is not (0x02 or 0x03)
+                    || (receiver.Qualifiers & ~0x01) != 0
+                    || (!schema.UsesMethodReceiverAccess()
+                        && !schema.UsesObjectConstruction()
+                        && mutableReceiver)
+                    || (schema.UsesMethodReceiverAccess()
+                        ? ((method.Flags & 4) != 0) != mutableReceiver
+                        : (method.Flags & 4) != 0)
+                    || sourceTables.TypeSpecs.GetNominalTypeDefRow(
+                        method.ReceiverTypeSpecReference,
+                        sourceTables.TypeDefs, sourceTables.Imports)
+                        != oldOwnerTypeDefRow)
+                {
+                    throw Invalid(
+                        "A retained class MethodDef receiver no longer preserves its schema-authorized owner access.");
+                }
+            }
+
+            var oldSignatureRow
+                = sourceTables.Methods.GetSignature(oldMethodRow);
+            var (oldParameterStart, oldParameterCount)
+                = sourceTables.Signatures.GetParamRange(oldSignatureRow);
+            var (oldGenericStart, oldGenericCount)
+                = sourceTables.Signatures.GetGenericRange(oldSignatureRow);
+            if (sourceTables.Methods.GetFlags(oldMethodRow) != method.Flags
+                || sourceTables.Methods.GetBodyRow(oldMethodRow)
+                    != method.BodyRow
+                || sourceTables.Signatures.GetResultTypeSpec(
+                    oldSignatureRow) != method.ReturnTypeSpecReference
+                || sourceTables.Signatures.GetReceiverTypeSpec(
+                    oldSignatureRow) != method.ReceiverTypeSpecReference
+                || oldParameterCount != method.Parameters.Length
+                || method.Parameters.IsDefault
+                || oldGenericCount != 0
+                || oldGenericStart != 0
+                || method.GenericParameterCount != 0
+                || (method.EffectsMask & ~6u) != 0
+                || sourceTables.Contracts.GetEffectsMask(oldMethodRow)
+                    != method.EffectsMask
+                || sourceTables.Contracts.HasConstructionClause(
+                    oldMethodRow) != (method.ConstructionRole != 0))
+            {
+                throw new InvalidDataException(
+                    "A separate-artifact class MethodSig or Param view changed from its source rows.");
+            }
+            var (sourceContractStart, sourceContractCount)
+                = sourceTables.Methods.GetContractRange(oldMethodRow);
+            for (var contractOffset = 0;
+                contractOffset < sourceContractCount;
+                contractOffset++)
+            {
+                var contractKind
+                    = BinaryPrimitives.ReadUInt16LittleEndian(
+                        sourceTables.Contracts.GetRow(
+                            sourceContractStart + contractOffset)[4..]);
+                if (contractKind is not (1 or 3 or 4))
+                {
+                    throw Unsupported(
+                        "Separate-artifact class MethodDef re-emission does not retain this Contract form.");
+                }
+            }
+
+            var outputMethodRow = methodRows.Count + 1;
+            if (methodDefRowsBySource[(sourceIndex, oldMethodRow)]
+                != outputMethodRow)
+            {
+                throw new InvalidDataException(
+                    "The separate-artifact MethodDef map changed during emission.");
+            }
+
+            if (!plan.Imports.IsEmpty)
+            {
+                foreach (var methodImport in plan.Imports)
+                {
+                    if (!methodImportBindings.TryGetValue(
+                            (sourceIndex, methodImport.ImportRow),
+                            out var mappedImport)
+                        || mappedImport != methodImport)
+                    {
+                        throw new InvalidDataException(
+                            "A separate-artifact MethodDef Import lost its exact provider obligation.");
+                    }
+                }
+            }
+
+            var outputSignatureRow = methodSignatureRows.Count + 1;
+            var resultTypeSpec = RemapC1M1ClassTypeSpec(sourceTables,
+                method.ReturnTypeSpecReference,
+                typeDefRowMapsBySource[sourceIndex],
+                importRowMaps[sourceIndex], outputTypeSpecRows,
+                typeSpecRowMaps[sourceIndex],
+                activeTypeSpecRows[sourceIndex], depth: 0);
+            var receiverTypeSpec = method.ReceiverTypeSpecReference == 0
+                ? 0
+                : RemapC1M1ClassTypeSpec(sourceTables,
+                    method.ReceiverTypeSpecReference,
+                    typeDefRowMapsBySource[sourceIndex],
+                    importRowMaps[sourceIndex], outputTypeSpecRows,
+                    typeSpecRowMaps[sourceIndex],
+                    activeTypeSpecRows[sourceIndex], depth: 0);
+            var parameterFirst = method.Parameters.IsEmpty
+                ? 0 : parameterRows.Count + 1;
+            for (var ordinal = 0; ordinal < method.Parameters.Length;
+                ordinal++)
+            {
+                var parameter = method.Parameters[ordinal];
+                var sourceParameterRow = oldParameterStart + ordinal;
+                if (sourceTables.Parameters.GetTypeSpec(sourceParameterRow)
+                        != parameter.TypeSpecReference
+                    || sourceTables.Parameters.GetMode(sourceParameterRow)
+                        != parameter.Mode
+                    || sourceTables.Parameters.GetFlags(sourceParameterRow)
+                        != parameter.Flags
+                    || parameter.Mode != 0
+                    || (parameter.Flags & ~1) != 0
+                    || (parameter.Flags == 1
+                        && !IsC1M1NoOpReadonlyScalarReferenceTypeSpec(
+                            sourceTables.TypeSpecs,
+                            parameter.TypeSpecReference)))
+                {
+                    throw Unsupported(
+                        "Separate-artifact class MethodDef parameters currently require the exact ordinary by-value mode and supported flags.");
+                }
+
+                var remappedTypeSpec = RemapC1M1ClassTypeSpec(sourceTables,
+                    parameter.TypeSpecReference,
+                    typeDefRowMapsBySource[sourceIndex],
+                    importRowMaps[sourceIndex], outputTypeSpecRows,
+                    typeSpecRowMaps[sourceIndex],
+                    activeTypeSpecRows[sourceIndex], depth: 0);
+                parameterRows.Add(new TrRmParamRow(outputSignatureRow,
+                    ordinal, remappedTypeSpec, parameter.Mode,
+                    parameter.Flags));
+                if (schema.UsesClassParameterDefaults())
+                {
+                    uint defaultConstantSourceRow = 0;
+                    if (parameter.DefaultValue is BoundConstant value)
+                    {
+                        if (!TryGetC1M1ClassScalarType(sourceTables,
+                                parameter.TypeSpecReference,
+                                out var parameterType)
+                            || parameterType is PrimitiveType.NativeInt
+                                or PrimitiveType.NativeUInt
+                            || value.Type != parameterType
+                            || value.RepresentationType != parameterType
+                            || !value.Bits.IsCanonicalFor(parameterType))
+                        {
+                            throw Unsupported(
+                                "A retained class MethodDef default must be an exact fixed-width scalar.");
+                        }
+
+                        var frozenValue
+                            = frozenScalarValueBuilder.Add(value);
+                        if (frozenValue.TypeSpecRef != remappedTypeSpec)
+                        {
+                            throw new InvalidDataException(
+                                "A retained class MethodDef default changed its parameter TypeSpec.");
+                        }
+
+                        defaultConstantSourceRow
+                            = frozenValue.ConstantSourceRow;
+                    }
+
+                    parameterSurfaceRows.Add(
+                        new C1M1ParameterSurfaceRow(outputMethodRow,
+                            ordinal, parameter.Name,
+                            defaultConstantSourceRow));
+                }
+                else if (schema.UsesMethodParameterLabels())
+                {
+                    methodParameterLabelRows.Add((outputMethodRow,
+                        ordinal, parameter.Name));
+                }
+            }
+
+            methodSignatureRows.Add(new TrRmMethodSigRow(resultTypeSpec,
+                receiverTypeSpec, parameterFirst, method.Parameters.Length,
+                0, 0));
+
+            var contractFirst = 0;
+            var methodContractCount = 0;
+            var dependencyContractRowMap = new Dictionary<int, int>();
+            if (method.EffectsMask != 0)
+            {
+                contractFirst = contractRows.Count + 1;
+                contractRows.Add(new TrRmContractRow(
+                    0x1600_0000u | checked((uint)outputMethodRow), 1,
+                    s_effectPayloads[method.EffectsMask]));
+                methodContractCount++;
+            }
+
+            if (method.ConstructionRole != 0)
+            {
+                var sourceConstruction = sourceTables.Contracts
+                    .GetConstructionClause(oldMethodRow);
+                if (sourceConstruction.RoleTag != method.ConstructionRole
+                    || method.ConstructionRole is not (1 or 2))
+                {
+                    throw new InvalidDataException(
+                        "A retained class MethodDef Construction contract changed.");
+                }
+
+                byte[] constructionPayload;
+                if (method.ConstructionRole == 1)
+                {
+                    if (method.InitializerMethodDefinitionId != 0
+                        || method.ConstructionPropertyDefinitionId != 0
+                        || method.InitializedMemberDefinitionIds.IsDefault
+                        || !sourceConstruction.InitializedMemberDefIds
+                            .AsSpan().SequenceEqual(
+                                method.InitializedMemberDefinitionIds.AsSpan()))
+                    {
+                        throw new InvalidDataException(
+                            "A class constructor has an uninitialized member contract.");
+                    }
+
+                    var memberRows = new uint[
+                        method.InitializedMemberDefinitionIds.Length];
+                    var seenMembers = new HashSet<uint>();
+                    for (var memberIndex = 0;
+                        memberIndex < memberRows.Length;
+                        memberIndex++)
+                    {
+                        var memberDefinitionId
+                            = method.InitializedMemberDefinitionIds[
+                                memberIndex];
+                        var oldFieldRow = GetFieldDefRow(
+                            memberDefinitionId);
+                        if ((memberDefinitionId >> 24) != 0x14
+                            || !seenMembers.Add(memberDefinitionId)
+                            || sourceTables.Fields.GetOwnerTypeDef(
+                                oldFieldRow) != oldOwnerTypeDefRow
+                            || !fieldRowMapsBySource[sourceIndex].TryGetValue(
+                                oldFieldRow, out var newFieldRow))
+                        {
+                            throw new InvalidDataException(
+                                "A class constructor guarantee refers to an unretained FieldDef.");
+                        }
+
+                        memberRows[memberIndex] = 0x1400_0000u
+                            | checked((uint)newFieldRow);
+                    }
+
+                    constructionPayload = new byte[checked(
+                        8 + (memberRows.Length * sizeof(uint)))];
+                    constructionPayload[0] = 1;
+                    BinaryPrimitives.WriteUInt32LittleEndian(
+                        constructionPayload.AsSpan(4),
+                        checked((uint)memberRows.Length));
+                    for (var memberIndex = 0;
+                        memberIndex < memberRows.Length;
+                        memberIndex++)
+                    {
+                        BinaryPrimitives.WriteUInt32LittleEndian(
+                            constructionPayload.AsSpan(
+                                8 + (memberIndex * sizeof(uint))),
+                            memberRows[memberIndex]);
+                    }
+                }
+                else
+                {
+                    if ((method.InitializerMethodDefinitionId >> 24) != 0x16
+                        || method.ConstructionPropertyDefinitionId != 0
+                        || !method.InitializedMemberDefinitionIds
+                            .IsDefaultOrEmpty)
+                    {
+                        throw new InvalidDataException(
+                            "A class projection has an invalid initializer or member contract.");
+                    }
+
+                    var oldInitializerRow = GetMethodDefRow(
+                        method.InitializerMethodDefinitionId);
+                    if (!methodPlansBySource.TryGetValue(
+                            (sourceIndex, oldInitializerRow),
+                            out var initializerPlan)
+                        || initializerPlan.Method.ConstructionRole != 1
+                        || initializerPlan.Owner.Identity
+                            != plan.Owner.Identity
+                        || sourceTables.Methods.GetOwnerType(
+                            oldInitializerRow) != oldOwnerTypeDefRow
+                        || sourceTables.Methods.GetOwnerModule(
+                            oldInitializerRow)
+                            != sourceModules[sourceIndex].ModuleRow
+                        || sourceConstruction.InitializerMethodDefRow
+                            != (uint)oldInitializerRow
+                        || !methodDefRowsBySource.TryGetValue(
+                            (sourceIndex, oldInitializerRow),
+                            out var newInitializerRow))
+                    {
+                        throw new InvalidDataException(
+                            "A class projection contract has no retained initializer MethodDef.");
+                    }
+
+                    constructionPayload
+                        = EncodeC1M1Construction2ProjectionContract(
+                            newInitializerRow);
+                }
+
+                if (contractFirst == 0)
+                {
+                    contractFirst = contractRows.Count + 1;
+                }
+
+                contractRows.Add(new TrRmContractRow(
+                    0x1600_0000u | checked((uint)outputMethodRow), 3,
+                    constructionPayload));
+                methodContractCount++;
+            }
+
+            var sourceDependencies = sourceTables.Contracts
+                .GetDependencyContractRows(oldMethodRow);
+            var dependencyView = sourceDependencies.Select(
+                static row => new BoundStandardClassMethodDependencyClause(
+                    row.Contract.DestinationKind,
+                    row.Contract.SourceKind,
+                    row.Contract.Relationship,
+                    row.Contract.Phase,
+                    row.Contract.DestinationOrdinal,
+                    row.Contract.SourceOrdinal)).ToArray();
+            if (!dependencyView.AsSpan().SequenceEqual(
+                    method.DependencyClauses.AsSpan()))
+            {
+                throw new InvalidDataException(
+                    "A separate-artifact class MethodDef Dependency view changed.");
+            }
+
+            foreach (var (oldContractRow, dependency) in sourceDependencies)
+            {
+                if (contractFirst == 0)
+                {
+                    contractFirst = contractRows.Count + 1;
+                }
+
+                var payload = new byte[12];
+                payload[0] = dependency.DestinationKind;
+                payload[1] = dependency.SourceKind;
+                payload[2] = dependency.Relationship;
+                payload[3] = dependency.Phase;
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    payload.AsSpan(4), dependency.DestinationOrdinal);
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    payload.AsSpan(8), dependency.SourceOrdinal);
+                contractRows.Add(new TrRmContractRow(
+                    0x1600_0000u | checked((uint)outputMethodRow), 4,
+                    payload));
+                dependencyContractRowMap.Add(oldContractRow,
+                    contractRows.Count);
+                methodContractCount++;
+            }
+            if (methodContractCount != sourceContractCount)
+            {
+                throw new InvalidDataException(
+                    "A separate-artifact class MethodDef lost an input Contract row.");
+            }
+
+            var bodyRow = 0;
+            if (!plan.Body.IsEmpty)
+            {
+                bodyRow = bodyRows.Count + 1;
+                bodyRows.Add(RemapC1M1ClassMethodBody(sourceTables,
+                    plan.Body, typeDefRowMapsBySource[sourceIndex],
+                    methodDefRowMapsBySource[sourceIndex],
+                    fieldRowMapsBySource[sourceIndex],
+                    importRowMaps[sourceIndex],
+                    fieldPathRowMapsBySource[sourceIndex], fieldPathRows,
+                    fieldPathRowsByIdentity, dependencyContractRowMap,
+                    frozenScalarValueBuilder, outputTypeSpecRows,
+                    typeSpecRowMaps[sourceIndex],
+                    activeTypeSpecRows[sourceIndex], schema,
+                    new Dictionary<int, int>()));
+            }
+
+            if (plan.Imports.IsEmpty
+                ? plan.Method.BodyRow == 0 || plan.Body.IsEmpty
+                : plan.Method.BodyRow != 0 || !plan.Body.IsEmpty
+                    || !plan.ExportKeys.IsEmpty)
+            {
+                throw new InvalidDataException(
+                    "A separate-artifact class MethodDef must be a local Body or an expected bodyless Import.");
+            }
+
+            var methodSourceModuleIndex
+                = outputModuleRowBySourceModuleIndex[sourceIndex];
+            foreach (var exportKey in plan.ExportKeys)
+            {
+                if (!exportKeys.Add((methodSourceModuleIndex, exportKey)))
+                {
+                    throw new InvalidDataException(
+                        "Separate-artifact class MethodDef ExportKeys conflict within one Module.");
+                }
+
+                exportRows.Add((
+                    0x1600_0000u | checked((uint)outputMethodRow),
+                    exportKey));
+            }
+
+            methodRows.Add(new TrRmMethodDefRow(outputOwnerTypeDefRow, 0,
+                outputSignatureRow, method.Flags, contractFirst,
+                methodContractCount, bodyRow));
+            methodNames.Add(method.Name);
+        }
+
+        var featureRows = new List<TrRmFeatureRow>();
+        var featureRanges = new (int First, int Count)[sourceModules.Count];
+        for (var outputModuleIndex = 0;
+            outputModuleIndex < outputModuleIndices.Length;
+            outputModuleIndex++)
+        {
+            var sourceModuleIndex = outputModuleIndices[outputModuleIndex];
+            var rows = sourceModules[sourceModuleIndex].Features
+                .Select(static feature => new TrRmFeatureRow(
+                    feature.FeatureId, feature.RuleRevision))
+                .ToArray();
+            featureRanges[outputModuleIndex] = (
+                rows.Length == 0 ? 0 : featureRows.Count + 1, rows.Length);
+            featureRows.AddRange(rows);
+        }
+
+        string GetOutputModuleRefProducerIdentity(
+            (int SourceIndex, int OldRow, int NewRow, string ProducerIdentity,
+                uint TargetRequirement, uint RuntimePolicy,
+                ImmutableArray<string> ImportKeys) moduleRef)
+        {
+            for (var sourceIndex = 0; sourceIndex < sourceModules.Count;
+                sourceIndex++)
+            {
+                if (!StringComparer.Ordinal.Equals(
+                        sourceModules[sourceIndex].ModuleIdentity,
+                        moduleRef.ProducerIdentity))
+                {
+                    continue;
+                }
+
+                var outputModuleRow
+                    = outputModuleRowBySourceModuleIndex[sourceIndex];
+                if (moduleRef.ImportKeys.All(exportKey =>
+                        exportKeys.Contains((outputModuleRow, exportKey))))
+                {
+                    return outputModuleIdentityBySourceModuleIndex[
+                        sourceIndex];
+                }
+            }
+
+            return moduleRef.ProducerIdentity;
+        }
+
+        if (featureRows.Count > 0xFF_FFFF
+            || outputModuleRefPlans.Count > 0xFF_FFFF
+            || outputImportPlans.Count > 0xFF_FFFF
+            || outputTypeDefRows.Count > 0xFF_FFFF
+            || fieldRows.Count > 0xFF_FFFF
+            || layoutRows.Count > 0xFF_FFFF
+            || layoutFieldRows.Count > 0xFF_FFFF
+            || outputTypeSpecRows.Count > 0xFF_FFFF
+            || methodRows.Count > 0xFF_FFFF
+            || methodSignatureRows.Count > 0xFF_FFFF
+            || parameterRows.Count > 0xFF_FFFF
+            || contractRows.Count > 0xFF_FFFF
+            || bodyRows.Count > 0xFF_FFFF
+            || fieldPathRows.Count > 0xFF_FFFF
+            || parameterSurfaceRows.Count > 0xFF_FFFF
+            || methodParameterLabelRows.Count > 0xFF_FFFF)
+        {
+            throw Unsupported(
+                "Separate-artifact C1M1 class metadata exceeds its schema row limits.");
+        }
+
+        var textRows = new List<(string Text, int Encoding)>();
+        var stringRows = new Dictionary<string, int>(StringComparer.Ordinal);
+        int AddString(string text)
+        {
+            if (!stringRows.TryGetValue(text, out var row))
+            {
+                textRows.Add((text, 1));
+                row = textRows.Count;
+                stringRows.Add(text, row);
+            }
+
+            return row;
+        }
+
+        for (var outputModuleIndex = 0;
+            outputModuleIndex < outputModuleIndices.Length;
+            outputModuleIndex++)
+        {
+            var sourceModuleIndex = outputModuleIndices[outputModuleIndex];
+            AddString(sourceModuleIndex == rootSourceModuleIndex
+                ? moduleIdentity
+                : sourceModules[sourceModuleIndex].ModuleIdentity);
+        }
+        foreach (var (namespaceName, typeName) in typeDefNames)
+        {
+            AddString(namespaceName);
+            AddString(typeName);
+        }
+        foreach (var fieldName in fieldNames)
+        {
+            AddString(fieldName);
+        }
+        foreach (var export in exportRows)
+        {
+            AddString(export.Key);
+        }
+        foreach (var moduleRef in outputModuleRefPlans)
+        {
+            AddString(GetOutputModuleRefProducerIdentity(moduleRef));
+        }
+        foreach (var import in outputImportPlans)
+        {
+            AddString(import.ExportKey);
+        }
+        foreach (var methodName in methodNames)
+        {
+            AddString(methodName);
+        }
+        foreach (var surface in parameterSurfaceRows)
+        {
+            AddString(surface.Name);
+        }
+        foreach (var label in methodParameterLabelRows)
+        {
+            AddString(label.Name);
+        }
+
+        var stringBytes = TrRmStringTableWriter.EncodeTextRows(textRows);
+        var strings = new TrRmStringTableReader(stringBytes,
+            textRows.Count);
+        for (var index = 0; index < outputTypeDefRows.Count; index++)
+        {
+            outputTypeDefRows[index] = outputTypeDefRows[index] with {
+                NamespaceStringRow = stringRows[typeDefNames[index].Namespace],
+                NameStringRow = stringRows[typeDefNames[index].Name],
+            };
+        }
+        for (var index = 0; index < fieldRows.Count; index++)
+        {
+            fieldRows[index] = fieldRows[index] with {
+                NameStringRow = stringRows[fieldNames[index]],
+            };
+        }
+        for (var index = 0; index < methodRows.Count; index++)
+        {
+            methodRows[index] = methodRows[index] with {
+                NameStringRow = stringRows[methodNames[index]],
+            };
+        }
+
+        var targetProfiles = new TrRmTargetProfileTableReader([], 0);
+        var moduleRows = new TrRmModuleRow[sourceModules.Count];
+        var nextTypeDefRow = 1;
+        var nextMethodDefRow = 1;
+        for (var outputModuleIndex = 0;
+            outputModuleIndex < outputModuleIndices.Length;
+            outputModuleIndex++)
+        {
+            var sourceModuleIndex = outputModuleIndices[outputModuleIndex];
+            var provider = sourceModules[sourceModuleIndex];
+            var outputModuleRow
+                = outputModuleRowBySourceModuleIndex[sourceModuleIndex];
+            var moduleRefRange = moduleRefRanges[outputModuleRow - 1];
+            moduleRows[outputModuleIndex] = new TrRmModuleRow(
+                stringRows[outputModuleIdentityBySourceModuleIndex[
+                    sourceModuleIndex]],
+                provider.TargetRequirement, provider.RuntimePolicy, 0,
+                moduleRefRange.First,
+                nextTypeDefRow, nextMethodDefRow, 1,
+                featureRanges[outputModuleIndex].First,
+                featureRanges[outputModuleIndex].Count,
+                provider.GoverningRuleEdition);
+            nextTypeDefRow += typeDefCountsByModule[outputModuleIndex];
+            nextMethodDefRow += methodDefCountsByModule[outputModuleIndex];
+        }
+
+        var featureBytes = EncodeC1M1ModuleFeatureRows(featureRows);
+
+        var moduleBytes = TrRmModuleTableWriter.Encode(moduleRows, strings,
+            moduleRefCount: outputModuleRefPlans.Count,
+            typeDefCount: outputTypeDefRows.Count,
+            methodDefCount: methodRows.Count, sourceFileCount: 0,
+            featureCount: featureRows.Count);
+        var modules = new TrRmModuleTableReader(moduleBytes,
+            moduleRows.Length, strings, outputModuleRefPlans.Count,
+            outputTypeDefRows.Count, methodRows.Count, 0,
+            featureRows.Count);
+        var moduleRefRows = outputModuleRefPlans.Select(moduleRef =>
+            new TrRmModuleRefRow(
+                stringRows[GetOutputModuleRefProducerIdentity(moduleRef)],
+                moduleRef.TargetRequirement,
+                moduleRef.RuntimePolicy)).ToArray();
+        var moduleRefBytes = moduleRefRows.Length == 0 ? []
+            : TrRmModuleRefTableWriter.Encode(moduleRefRows, strings,
+                modules);
+        var moduleRefs = moduleRefRows.Length == 0 ? default
+            : new TrRmModuleRefTableReader(moduleRefBytes,
+                moduleRefRows.Length, strings, modules);
+        var typeSpecBytes = outputTypeSpecRows.Count == 0 ? []
+            : TrRmTypeSpecTableWriter.Encode(outputTypeSpecRows,
+                outputTypeDefRows.Count, outputImportPlans.Count, 0, 0,
+                schema, methodDefCount: methodRows.Count);
+        var typeSpecReaderBytes = outputTypeSpecRows.Count == 0
+            ? new byte[sizeof(uint)] : typeSpecBytes;
+        var typeSpecs = new TrRmTypeSpecTableReader(typeSpecReaderBytes,
+            outputTypeSpecRows.Count, outputTypeDefRows.Count,
+            outputImportPlans.Count, 0, 0, schema,
+            methodDefCount: methodRows.Count);
+        var typeDefBytes = TrRmTypeDefTableWriter.Encode(
+            outputTypeDefRows, strings, modules, fieldRows.Count, 0,
+            layoutRows.Count, 0, schema);
+        var typeDefs = new TrRmTypeDefTableReader(typeDefBytes,
+            outputTypeDefRows.Count, strings, modules, fieldRows.Count, 0,
+            layoutRows.Count, 0, schema);
+        var importRows = new TrRmImportRow[outputImportPlans.Count];
+        foreach (var import in outputImportPlans)
+        {
+            var definitionKind = import.ExpectedDefinitionId >> 24;
+            var expectedOutputDefinitionId = 0u;
+            if (definitionKind == 0x13)
+            {
+                var sourceTypeDefRow = GetTypeDefRow(
+                    import.ExpectedDefinitionId);
+                if (!typeDefRowsBySource.TryGetValue(
+                        (import.SourceIndex, sourceTypeDefRow),
+                        out var outputTypeDefRow))
+                {
+                    throw new InvalidDataException(
+                        "A separate-artifact TypeDef Import has no emitted expected view.");
+                }
+
+                expectedOutputDefinitionId
+                    = 0x1300_0000u | checked((uint)outputTypeDefRow);
+            }
+            else if (definitionKind == 0x14)
+            {
+                var sourceFieldRow = GetFieldDefRow(
+                    import.ExpectedDefinitionId);
+                if (!fieldRowsBySource.TryGetValue(
+                        (import.SourceIndex, sourceFieldRow),
+                        out var outputFieldRow))
+                {
+                    throw new InvalidDataException(
+                        "A separate-artifact FieldDef Import has no emitted expected view.");
+                }
+
+                expectedOutputDefinitionId
+                    = 0x1400_0000u | checked((uint)outputFieldRow);
+            }
+            else if (definitionKind == 0x16)
+            {
+                var sourceMethodRow = GetMethodDefRow(
+                    import.ExpectedDefinitionId);
+                if (!methodDefRowsBySource.TryGetValue(
+                        (import.SourceIndex, sourceMethodRow),
+                        out var outputMethodRow))
+                {
+                    throw new InvalidDataException(
+                        "A separate-artifact MethodDef Import has no emitted expected view.");
+                }
+
+                expectedOutputDefinitionId
+                    = 0x1600_0000u | checked((uint)outputMethodRow);
+            }
+            else
+            {
+                throw Unsupported(
+                    "Separate-artifact class re-emission currently retains only TypeDef, FieldDef and MethodDef Imports.");
+            }
+
+            importRows[import.NewImportRow - 1] = new TrRmImportRow(
+                import.NewModuleRefRow,
+                stringRows[import.ExportKey],
+                expectedOutputDefinitionId);
+        }
+        var featureReader = featureRows.Count == 0 ? default
+            : new TrRmFeatureTableReader(featureBytes, featureRows.Count,
+                schema);
+        var typeDefBindingEqualityRows
+            = new List<TrRmTypeDefBindingEqualityRow>();
+        if (IsSelectedClassTypeDefBindingEqualitySchemaIdentity(
+                schemaIdentity))
+        {
+            void AddTypeDefBindingEqualityGroup(
+                BoundStandardTypeDefBindingEqualityGroup group)
+            {
+                if (group.OwnerModule is
+                        BoundSourceTypeProviderSnapshot ownerModule
+                    && !sourceModules.Any(provider =>
+                        SourceTypeSnapshotsMatch(provider, ownerModule)))
+                {
+                    return;
+                }
+
+                var endpointRows = new SortedSet<int>();
+                foreach (var endpoint in group.Endpoints)
+                {
+                    var sourceModuleIndex = -1;
+                    for (var index = 0; index < sourceModules.Count; index++)
+                    {
+                        if (SourceTypeSnapshotsMatch(sourceModules[index],
+                                endpoint.OwnerModule))
+                        {
+                            sourceModuleIndex = index;
+                            break;
+                        }
+                    }
+
+                    var endpointRow = GetTypeDefRow(
+                        endpoint.TypeDefDefinitionId);
+                    if (sourceModuleIndex < 0
+                        || !typeDefRowsBySource.TryGetValue(
+                            (sourceModuleIndex, endpointRow),
+                            out var outputTypeDefRow)
+                        || !endpointRows.Add(outputTypeDefRow))
+                    {
+                        throw new InvalidDataException(
+                            "A separate-artifact class equality endpoint is not an exact emitted TypeDef view.");
+                    }
+                }
+
+                if (endpointRows.Count < 2)
+                {
+                    throw new InvalidDataException(
+                        "A separate-artifact class equality group has fewer than two distinct TypeDefs.");
+                }
+
+                var ownerIndex = rootSourceModuleIndex;
+                if (group.OwnerModule is
+                    BoundSourceTypeProviderSnapshot exactOwner)
+                {
+                    ownerIndex = -1;
+                    for (var index = 0; index < sourceModules.Count; index++)
+                    {
+                        if (SourceTypeSnapshotsMatch(sourceModules[index],
+                                exactOwner))
+                        {
+                            ownerIndex = index;
+                            break;
+                        }
+                    }
+
+                    if (ownerIndex < 0)
+                    {
+                        throw new InvalidDataException(
+                            "A separate-artifact class equality owner has no output Module partition.");
+                    }
+                }
+
+                var outputOwnerModuleRow
+                    = outputModuleRowBySourceModuleIndex[ownerIndex];
+                using var endpointEnumerator = endpointRows.GetEnumerator();
+                _ = endpointEnumerator.MoveNext();
+                var leftTypeDef = checked((uint)endpointEnumerator.Current);
+                while (endpointEnumerator.MoveNext())
+                {
+                    typeDefBindingEqualityRows.Add(
+                        new TrRmTypeDefBindingEqualityRow(
+                            checked((uint)outputOwnerModuleRow), leftTypeDef,
+                            checked((uint)endpointEnumerator.Current)));
+                }
+            }
+
+            foreach (var declaration in program.StandardClassDeclarations)
+            {
+                foreach (var group
+                    in declaration.TypeDefBindingEqualityGroups)
+                {
+                    AddTypeDefBindingEqualityGroup(group);
+                }
+            }
+            foreach (var definition in program.GenericNominalTypeDefinitions)
+            {
+                foreach (var group in definition.TypeDefBindingEqualityGroups)
+                {
+                    AddTypeDefBindingEqualityGroup(group);
+                }
+            }
+
+            typeDefBindingEqualityRows = [.. typeDefBindingEqualityRows
+                .Distinct()
+                .OrderBy(static row => row.OwnerModule)
+                .ThenBy(static row => row.LeftTypeDef)
+                .ThenBy(static row => row.RightTypeDef)];
+        }
+        var typeDefBindingEqualityBytes
+            = typeDefBindingEqualityRows.Count == 0 ? []
+                : TrRmTypeDefBindingEqualityTableWriter.Encode(
+                    typeDefBindingEqualityRows, modules, typeDefs,
+                    allowClassTypeDefs: true);
+        var fieldBytes = fieldRows.Count == 0 ? []
+            : TrRmFieldDefTableWriter.Encode(fieldRows, strings, typeDefs,
+                typeSpecs, schema);
+        var fields = new TrRmFieldDefTableReader(fieldBytes, fieldRows.Count,
+            strings, typeDefs, typeSpecs);
+        var signatureBytes = methodSignatureRows.Count == 0 ? []
+            : TrRmMethodSigTableWriter.Encode(methodSignatureRows, typeSpecs,
+                parameterRows.Count, genericParamCount: 0);
+        var signatures = methodSignatureRows.Count == 0 ? default
+            : new TrRmMethodSigTableReader(signatureBytes,
+                methodSignatureRows.Count, typeSpecs, parameterRows.Count,
+                genericParamCount: 0);
+        var parameterBytes = parameterRows.Count == 0 ? []
+            : TrRmParamTableWriter.Encode(parameterRows, signatures,
+                typeSpecs, schema);
+        var parameters = parameterRows.Count == 0 ? default
+            : new TrRmParamTableReader(parameterBytes, parameterRows.Count,
+                signatures, typeSpecs, schema);
+        var methodBytes = methodRows.Count == 0 ? []
+            : TrRmMethodDefTableWriter.Encode(methodRows, strings, modules,
+                typeDefs, signatures, contractRows.Count, bodyRows.Count,
+                schema);
+        var methodReader = methodRows.Count == 0 ? default
+            : new TrRmMethodDefTableReader(methodBytes, methodRows.Count,
+                strings, modules, typeDefs, signatures, contractRows.Count,
+                bodyRows.Count, schema);
+        var importBytes = importRows.Length == 0 ? []
+            : TrRmImportTableWriter.Encode(importRows, strings, moduleRefs,
+                typeDefs, methodReader, default, default, default, fields,
+                featureReader, modules, schema);
+        var imports = importRows.Length == 0 ? default
+            : new TrRmImportTableReader(importBytes, importRows.Length,
+                strings, moduleRefs, typeDefs, methodReader, default, default,
+                default, fields, featureReader, modules, schema);
+        var contractBytes = contractRows.Count == 0 ? []
+            : schema.UsesConstructionContracts()
+                ? TrRmContractTableWriter
+                    .EncodeConstructionDraftForSchema(contractRows, typeDefs,
+                        methodReader, signatures, parameters, typeSpecs,
+                        fields, default, default, featureReader, modules,
+                        predicateGraphCount: 0, schema: schema)
+                : TrRmContractTableWriter.EncodeWithPredicateGraphs(
+                    contractRows, typeDefs, methodReader, signatures,
+                    parameters, typeSpecs, featureReader, modules,
+                    predicateGraphCount: 0, schema: schema);
+        var bodyBytes = bodyRows.Count == 0 ? []
+            : TrRmVariableTableWriter.EncodeBodies(bodyRows);
+        var fieldPathBytes = fieldPathRows.Count == 0 ? []
+            : TrRmFieldPathTableWriter.Encode(fieldPathRows, typeSpecs,
+                fields, imports);
+        var frozenScalarValueTables
+            = frozenScalarValueBuilder.Encode(typeSpecs);
+        var parameterSurfaceBytes
+            = new byte[checked(parameterSurfaceRows.Count * 16)];
+        for (var index = 0; index < parameterSurfaceRows.Count; index++)
+        {
+            var surface = parameterSurfaceRows[index];
+            var offset = index * 16;
+            Write(parameterSurfaceBytes, offset,
+                checked((uint)surface.MethodDefRow));
+            Write(parameterSurfaceBytes, offset + 4,
+                checked((uint)surface.Ordinal));
+            Write(parameterSurfaceBytes, offset + 8,
+                checked((uint)stringRows[surface.Name]));
+            Write(parameterSurfaceBytes, offset + 12,
+                surface.DefaultConstantSourceRow);
+        }
+        var methodParameterLabelBytes
+            = new byte[checked(methodParameterLabelRows.Count * 12)];
+        for (var index = 0; index < methodParameterLabelRows.Count; index++)
+        {
+            var label = methodParameterLabelRows[index];
+            var offset = index * 12;
+            Write(methodParameterLabelBytes, offset,
+                checked((uint)label.MethodDefRow));
+            Write(methodParameterLabelBytes, offset + 4,
+                checked((uint)label.Ordinal));
+            Write(methodParameterLabelBytes, offset + 8,
+                checked((uint)stringRows[label.Name]));
+        }
+        var layoutBytes = TrRmLayoutTableWriter.Encode(layoutRows, typeDefs,
+            targetProfiles, layoutFieldRows.Count);
+        var layouts = new TrRmLayoutTableReader(layoutBytes,
+            layoutRows.Count, typeDefs, targetProfiles,
+            layoutFieldRows.Count);
+        var layoutFieldBytes = layoutFieldRows.Count == 0 ? []
+            : TrRmLayoutFieldTableWriter.Encode(layoutFieldRows, layouts,
+                typeDefs, fields);
+        var exportBytes = EncodeC1M1Exports(exportRows, stringRows);
+
+        var sections = new List<TrRmSection> {
+            new(0x0001, 0, checked((uint)moduleRows.Length), moduleBytes),
+            new(0x0002, 0, checked((uint)textRows.Count), stringBytes),
+            new(0x0013, 0, checked((uint)outputTypeDefRows.Count),
+                typeDefBytes),
+            new(0x0014, 0, checked((uint)fieldRows.Count), fieldBytes),
+            new(0x0015, 0, checked((uint)layoutRows.Count), layoutBytes),
+            new(0x001D, 0, checked((uint)exportRows.Count), exportBytes),
+            new(0x0023, 0, checked((uint)layoutFieldRows.Count),
+                layoutFieldBytes),
+        };
+        if (importRows.Length != 0)
+        {
+            sections.Add(new TrRmSection(0x0010, 0,
+                checked((uint)importRows.Length), importBytes));
+        }
+        if (moduleRefRows.Length != 0)
+        {
+            sections.Add(new TrRmSection(0x0012, 0,
+                checked((uint)moduleRefRows.Length), moduleRefBytes));
+        }
+        if (typeDefBindingEqualityRows.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x0067, 0,
+                checked((uint)typeDefBindingEqualityRows.Count),
+                typeDefBindingEqualityBytes));
+        }
+        if (featureRows.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x0004, 0,
+                checked((uint)featureRows.Count), featureBytes));
+        }
+        if (methodRows.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x0016, 0,
+                checked((uint)methodRows.Count), methodBytes));
+            sections.Add(new TrRmSection(0x0017, 0,
+                checked((uint)methodSignatureRows.Count), signatureBytes));
+        }
+        if (parameterRows.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x0018, 0,
+                checked((uint)parameterRows.Count), parameterBytes));
+        }
+        if (contractRows.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x001B, 0,
+                checked((uint)contractRows.Count), contractBytes));
+        }
+        if (bodyRows.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x0020, 0,
+                checked((uint)bodyRows.Count), bodyBytes));
+        }
+        if (frozenScalarValueTables.BlobCount != 0)
+        {
+            sections.Add(new TrRmSection(0x0003, 0,
+                checked((uint)frozenScalarValueTables.BlobCount),
+                frozenScalarValueTables.BlobSection));
+        }
+        if (frozenScalarValueTables.ConstantSourceCount != 0)
+        {
+            sections.Add(new TrRmSection(0x0030, 0,
+                checked((uint)frozenScalarValueTables.ConstantSourceCount),
+                frozenScalarValueTables.ConstantSourceSection));
+            sections.Add(new TrRmSection(0x003F, 0,
+                checked((uint)frozenScalarValueTables.FrozenValueNodeCount),
+                frozenScalarValueTables.FrozenValueNodeSection));
+        }
+        if (parameterSurfaceRows.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x0066, 0,
+                checked((uint)parameterSurfaceRows.Count),
+                parameterSurfaceBytes));
+        }
+        else if (methodParameterLabelRows.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x0066, 0,
+                checked((uint)methodParameterLabelRows.Count),
+                methodParameterLabelBytes));
+        }
+        if (fieldPathRows.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x004B, 0,
+                checked((uint)fieldPathRows.Count), fieldPathBytes));
+        }
+        if (outputTypeSpecRows.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x0011, 0,
+                checked((uint)outputTypeSpecRows.Count), typeSpecBytes));
+        }
+
+        sections.Sort(static (left, right) =>
+            left.Kind.CompareTo(right.Kind));
+        var artifact = TrRmArtifactWriter.Encode(sections, schema,
+            standardSchemaIdentity: schemaIdentity);
+        _ = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                new TrRmArtifactIndex(artifact, schema,
+                    standardSchemaIdentity: schemaIdentity));
+        return artifact;
+    }
+
+    private static string GetC1M1OutputModuleRefProducerIdentity(
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+        int moduleRefRow,
+        Dictionary<string, int> sourceModuleRowsByIdentity,
+        Dictionary<int, int> outputModuleRowBySourceRow,
+        Dictionary<int, string> outputModuleIdentityBySourceRow,
+        HashSet<(int ModuleRow, string Key)> outputExportKeys)
+    {
+        var producerIdentity
+            = tables.ModuleRefs.GetProducerIdentity(moduleRefRow);
+        if (!sourceModuleRowsByIdentity.TryGetValue(producerIdentity,
+                out var sourceModuleRow))
+        {
+            return producerIdentity;
+        }
+
+        var outputModuleRow
+            = outputModuleRowBySourceRow[sourceModuleRow];
+        var importWasRetained = false;
+        for (var importRow = 1; importRow <= tables.Imports.Count;
+            importRow++)
+        {
+            if (tables.Imports.GetModuleRefForImportRow(importRow)
+                != moduleRefRow)
+            {
+                continue;
+            }
+
+            importWasRetained = true;
+            var exportKey = tables.Imports
+                .GetBindingForImportRow(importRow).ExportKey;
+            if (!outputExportKeys.Contains((outputModuleRow, exportKey)))
+            {
+                return producerIdentity;
+            }
+        }
+
+        return importWasRetained
+            ? outputModuleIdentityBySourceRow[sourceModuleRow]
+            : producerIdentity;
+    }
+
+    private static byte[] EncodeC1M1ModuleFeatureRows(
+        IReadOnlyList<TrRmFeatureRow> rows)
+    {
+        // Feature ranges are Module-local, so repeated pairs remain distinct.
+        var bytes = new byte[checked(rows.Count * sizeof(uint) * 2)];
+        for (var index = 0; index < rows.Count; index++)
+        {
+            var offset = index * sizeof(uint) * 2;
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                bytes.AsSpan(offset), rows[index].FeatureId);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                bytes.AsSpan(offset + sizeof(uint)),
+                rows[index].RuleRevision);
+        }
+
+        return bytes;
     }
 
     private static byte[] EncodeC1M1MetadataClassNoOpUnitBody(

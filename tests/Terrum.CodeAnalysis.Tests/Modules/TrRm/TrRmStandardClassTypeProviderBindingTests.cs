@@ -407,6 +407,57 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
             "public void Use(Box box, Inner inner) {}"), composed);
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var sourceFreeCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), composed);
+        Assert.That(sourceFreeCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                sourceFreeCompilation.Diagnostics));
+        var reemitted = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)sourceFreeCompilation.Program!,
+            "RootReemitted", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var reemittedTables = ReadTables(reemitted, schemaIdentity);
+        var rootModuleRow = Enumerable.Range(1, reemittedTables.Modules.Count)
+            .Single(row => reemittedTables.Modules.GetIdentity(row)
+                == "RootReemitted");
+        var providerModuleRow
+            = Enumerable.Range(1, reemittedTables.Modules.Count)
+                .Single(row => reemittedTables.Modules.GetIdentity(row)
+                    == "Provider");
+        var leafRows = Enumerable.Range(1,
+                reemittedTables.TypeDefs.Count)
+            .Where(row => reemittedTables.TypeDefs.GetName(row) == "Leaf")
+            .ToArray();
+        Assert.That(leafRows, Has.Length.EqualTo(2));
+        Assert.That(leafRows.Any(row =>
+                reemittedTables.TypeDefs.GetOwnerModule(row)
+                    == (uint)rootModuleRow),
+            Is.True);
+        Assert.That(leafRows.Any(row =>
+                reemittedTables.TypeDefs.GetOwnerModule(row)
+                    == (uint)providerModuleRow),
+            Is.True);
+        var innerRow = Enumerable.Range(1,
+                reemittedTables.TypeDefs.Count)
+            .Single(row => reemittedTables.TypeDefs.GetName(row) == "Inner");
+        Assert.That(reemittedTables.TypeDefs.GetOwnerModule(innerRow),
+            Is.EqualTo((uint)providerModuleRow));
+
+        var reemittedInput = new TrRmStandardArtifactInput(
+            schemaIdentity, reemitted);
+        var reloadedClass = TrRmExecutableCompiler.CreateStandardReference(
+            reemittedInput, "RootReemitted", [], ["BoxKey"]);
+        var reloadedStruct = TrRmExecutableCompiler.CreateStandardReference(
+            reemittedInput, "Provider", [], ["InnerKey"]);
+        var reloadedReference = TrRmExecutableCompiler
+            .CreateStandardReferenceSet([reloadedClass, reloadedStruct]);
+        var reloadedCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("public void Use(Box box, Inner inner) {}"),
+            reloadedReference);
+        Assert.That(reloadedCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                reloadedCompilation.Diagnostics));
     }
 
     [TestCase(
@@ -454,6 +505,77 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
         var reloadedCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse("public void Use(Box box, Leaf leaf) {}"),
             reloadedReference);
+        Assert.That(reloadedCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                reloadedCompilation.Diagnostics));
+
+    }
+
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ClassTypeBindingViews)]
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsClassTypeBindingViews)]
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsClassTypeBindingViews)]
+    public void ReemitsSelectedStructRootsFromSeparateArtifactsWithClassViews(
+        string schemaIdentity)
+    {
+        var classProvider = CreateClassArtifact("ClassProvider", "Box",
+            "BoxKey", 0xF200_0008, schemaIdentity);
+        var structProvider = CreateArtifact("StructProvider", "Leaf",
+            "LeafKey", 0, schemaIdentity, null, null, null,
+            localDependencyTypeName: "Inner");
+        SetTypeDefFlags(structProvider, 0x06, typeDefRow: 1);
+        SetTypeDefFlags(structProvider, 0x06, typeDefRow: 2);
+
+        var classReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, classProvider),
+            "ClassProvider", [], ["BoxKey"]);
+        var structReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    structProvider),
+                "StructProvider", [], ["LeafKey"]);
+        var reference = TrRmExecutableCompiler.CreateStandardReferenceSet(
+            [classReference, structReference]);
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            string.Empty), reference);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)compilation.Program!, "ClassRootReemitted",
+            schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var tables = ReadTables(artifact, schemaIdentity);
+        var typeDefRows = Enumerable.Range(1, tables.TypeDefs.Count).ToArray();
+        Assert.That(typeDefRows.Select(tables.TypeDefs.GetName),
+            Is.EquivalentTo(["Box", "Leaf", "Inner"]));
+        var structModuleRow = Enumerable.Range(1, tables.Modules.Count)
+            .Single(row => tables.Modules.GetIdentity(row)
+                == "StructProvider");
+        foreach (var typeName in new[] { "Leaf", "Inner" })
+        {
+            var typeDefRow = typeDefRows.Single(row =>
+                tables.TypeDefs.GetName(row) == typeName);
+            Assert.That(tables.TypeDefs.GetOwnerModule(typeDefRow),
+                Is.EqualTo((uint)structModuleRow));
+        }
+
+        var artifactInput
+            = new TrRmStandardArtifactInput(schemaIdentity, artifact);
+        var reloadedClass
+            = TrRmExecutableCompiler.CreateStandardReference(artifactInput,
+                "ClassRootReemitted", [], ["BoxKey"]);
+        var reloadedStruct
+            = TrRmExecutableCompiler.CreateStandardReference(artifactInput,
+                "StructProvider", [], ["LeafKey"]);
+        var reloaded = TrRmExecutableCompiler.CreateStandardReferenceSet([
+            reloadedClass, reloadedStruct,
+        ]);
+        var reloadedCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("public void Use(Box box, Leaf leaf) {}"),
+            reloaded);
         Assert.That(reloadedCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine,
                 reloadedCompilation.Diagnostics));
@@ -524,6 +646,1162 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
         StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsClassTypeBindingViews)]
     [TestCase(
         StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsClassTypeBindingViews)]
+    public void ReemitsClassRootsFromDistinctCoLocatedModules(
+        string schemaIdentity)
+    {
+        var provider = CreateRelocatedClassProvider("CoLocated",
+            schemaIdentity);
+        var coLocated = SplitClassRootsAcrossModules(provider,
+            schemaIdentity, "CoLocatedLeaf");
+        var (coLocatedWithDistinctFeatures, distinctFeature)
+            = AddFeatureRequirementToSecondModule(coLocated,
+                schemaIdentity);
+        var input = new TrRmStandardArtifactInput(schemaIdentity,
+            coLocatedWithDistinctFeatures);
+        var prefixReference = TrRmExecutableCompiler.CreateStandardReference(
+            input, "CoLocated", [], ["PrefixKey"]);
+        var leafReference = TrRmExecutableCompiler.CreateStandardReference(
+            input, "CoLocatedLeaf", [], ["LeafKey"]);
+        var selectedRootModules = prefixReference.StandardClassDeclarations
+            .Concat(leafReference.StandardClassDeclarations)
+            .Where(static declaration =>
+                !declaration.SelectedExportKeys.IsEmpty)
+            .Select(static declaration =>
+                declaration.Declaration.Provider.ModuleRow)
+            .Distinct()
+            .ToArray();
+        Assert.That(selectedRootModules, Is.EquivalentTo([1, 2]));
+
+        var reference = TrRmExecutableCompiler.CreateStandardReferenceSet([
+            prefixReference, leafReference,
+        ]);
+        var compilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), reference);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)compilation.Program!,
+            "CoLocatedReemitted", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var tables = ReadTables(artifact, schemaIdentity);
+        Assert.That(tables.Modules.Count, Is.EqualTo(2));
+        var hasReemittedModule = false;
+        var prefixModuleRow = 0;
+        var prefixDefinition = 0u;
+        var leafModuleRow = 0;
+        var leafDefinition = 0u;
+        for (var moduleRow = 1; moduleRow <= tables.Modules.Count;
+            moduleRow++)
+        {
+            hasReemittedModule
+                |= StringComparer.Ordinal.Equals(
+                    tables.Modules.GetIdentity(moduleRow),
+                    "CoLocatedReemitted");
+            foreach (var export in tables.Exports
+                .GetExportsForModule(moduleRow))
+            {
+                if (StringComparer.Ordinal.Equals(export.ExportKey,
+                        "PrefixKey"))
+                {
+                    prefixModuleRow = moduleRow;
+                    prefixDefinition = export.Definition;
+                }
+                else if (StringComparer.Ordinal.Equals(export.ExportKey,
+                             "LeafKey"))
+                {
+                    leafModuleRow = moduleRow;
+                    leafDefinition = export.Definition;
+                }
+            }
+        }
+
+        Assert.That(hasReemittedModule, Is.True);
+        Assert.That(prefixModuleRow, Is.GreaterThan(0));
+        Assert.That(leafModuleRow, Is.GreaterThan(0));
+        Assert.That(prefixModuleRow, Is.Not.EqualTo(leafModuleRow));
+        Assert.That(tables.TypeDefs.Count, Is.EqualTo(2));
+        var prefixModuleIdentity
+            = tables.Modules.GetIdentity(prefixModuleRow);
+        var leafModuleIdentity = tables.Modules.GetIdentity(leafModuleRow);
+        Assert.That(prefixModuleIdentity, Is.Not.EqualTo(leafModuleIdentity));
+        var prefixRow = checked((int)(prefixDefinition
+            & 0x00FF_FFFF));
+        var leafRow = checked((int)(leafDefinition
+            & 0x00FF_FFFF));
+        Assert.That(tables.TypeDefs.GetName(prefixRow),
+            Is.EqualTo("Prefix"));
+        Assert.That(tables.TypeDefs.GetName(leafRow), Is.EqualTo("Leaf"));
+        var (prefixFeatureStart, prefixFeatureCount)
+            = tables.Modules.GetFeatureRange(prefixModuleRow);
+        var (leafFeatureStart, leafFeatureCount)
+            = tables.Modules.GetFeatureRange(leafModuleRow);
+        var prefixFeatures = new List<TrRmFeatureRow>();
+        for (var offset = 0; offset < prefixFeatureCount; offset++)
+        {
+            prefixFeatures.Add(tables.Features.GetFeature(
+                prefixFeatureStart + offset));
+        }
+        var leafFeatures = new List<TrRmFeatureRow>();
+        for (var offset = 0; offset < leafFeatureCount; offset++)
+        {
+            leafFeatures.Add(tables.Features.GetFeature(
+                leafFeatureStart + offset));
+        }
+        Assert.That(prefixFeatures, Does.Not.Contain(distinctFeature));
+        Assert.That(leafFeatures, Does.Contain(distinctFeature));
+        var (leafFieldStart, leafFieldEnd)
+            = tables.TypeDefs.GetFieldRange(leafRow);
+        Assert.That(leafFieldEnd - leafFieldStart, Is.EqualTo(1));
+        Assert.That(tables.Fields.GetName(leafFieldStart),
+            Is.EqualTo("Value"));
+        var (leafLayoutStart, leafLayoutCount)
+            = tables.TypeDefs.GetLayoutRange(leafRow);
+        Assert.That(leafLayoutCount, Is.EqualTo(1));
+        Assert.That(tables.Layouts.GetOwnerTypeDef(leafLayoutStart),
+            Is.EqualTo(leafRow));
+
+        var reemittedInput = new TrRmStandardArtifactInput(schemaIdentity,
+            artifact);
+        var reloadedPrefix = TrRmExecutableCompiler.CreateStandardReference(
+            reemittedInput, prefixModuleIdentity, [], ["PrefixKey"]);
+        var reloadedLeaf = TrRmExecutableCompiler.CreateStandardReference(
+            reemittedInput, leafModuleIdentity, [], ["LeafKey"]);
+        var reloadedReference = TrRmExecutableCompiler.CreateStandardReferenceSet([
+            reloadedPrefix, reloadedLeaf,
+        ]);
+        Assert.That(reloadedReference.StandardClassDeclarations
+                .Where(static declaration =>
+                    !declaration.SelectedExportKeys.IsEmpty)
+                .Select(static declaration => declaration.Declaration.Name),
+            Is.EquivalentTo(["Prefix", "Leaf"]));
+    }
+
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ClassTypeBindingViews)]
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsClassTypeBindingViews)]
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsClassTypeBindingViews)]
+    public void ReemitsDirectClassRootsFromSeparateArtifactsWithExactFeatures(
+        string schemaIdentity)
+    {
+        var rootA = CreateClassArtifact("RootA", "Alpha", "AlphaKey",
+            0xF200_0008, schemaIdentity);
+        var rootB = CreateClassArtifact("RootB", "Beta", "BetaKey",
+            0xF200_0008, schemaIdentity);
+        var (rootBWithFeature, distinctFeature)
+            = AddFeatureRequirementToSingleModule(rootB, schemaIdentity);
+        var rootAInput = new TrRmStandardArtifactInput(schemaIdentity,
+            rootA);
+        var rootBInput = new TrRmStandardArtifactInput(schemaIdentity,
+            rootBWithFeature);
+        var referenceA = TrRmExecutableCompiler.CreateStandardReference(
+            rootAInput, "RootA", [], ["AlphaKey"]);
+        var referenceB = TrRmExecutableCompiler.CreateStandardReference(
+            rootBInput, "RootB", [], ["BetaKey"]);
+        var reference = TrRmExecutableCompiler.CreateStandardReferenceSet([
+            referenceA, referenceB,
+        ]);
+        var compilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), reference);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)compilation.Program!,
+            "SeparateRootsReemitted", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var tables = ReadTables(artifact, schemaIdentity);
+        Assert.That(tables.Modules.Count, Is.EqualTo(2));
+        var alphaModuleRow = 0;
+        var betaModuleRow = 0;
+        var alphaDefinition = 0u;
+        var betaDefinition = 0u;
+        for (var moduleRow = 1; moduleRow <= tables.Modules.Count;
+            moduleRow++)
+        {
+            foreach (var export in tables.Exports
+                .GetExportsForModule(moduleRow))
+            {
+                if (StringComparer.Ordinal.Equals(export.ExportKey,
+                        "AlphaKey"))
+                {
+                    alphaModuleRow = moduleRow;
+                    alphaDefinition = export.Definition;
+                }
+                else if (StringComparer.Ordinal.Equals(export.ExportKey,
+                             "BetaKey"))
+                {
+                    betaModuleRow = moduleRow;
+                    betaDefinition = export.Definition;
+                }
+            }
+        }
+
+        Assert.That(alphaModuleRow, Is.GreaterThan(0));
+        Assert.That(betaModuleRow, Is.GreaterThan(0));
+        Assert.That(alphaModuleRow, Is.Not.EqualTo(betaModuleRow));
+        Assert.That(tables.TypeDefs.Count, Is.EqualTo(2));
+        Assert.That(tables.Fields.Count, Is.EqualTo(2));
+        Assert.That(tables.Layouts.Count, Is.EqualTo(2));
+        var alphaModuleIdentity = tables.Modules.GetIdentity(alphaModuleRow);
+        var betaModuleIdentity = tables.Modules.GetIdentity(betaModuleRow);
+        Assert.That(new[] { alphaModuleIdentity, betaModuleIdentity },
+            Does.Contain("SeparateRootsReemitted"));
+        Assert.That(alphaModuleIdentity is "RootA"
+                or "SeparateRootsReemitted",
+            Is.True);
+        Assert.That(betaModuleIdentity is "RootB"
+                or "SeparateRootsReemitted",
+            Is.True);
+        Assert.That(tables.TypeDefs.GetName(checked((int)(
+                alphaDefinition & 0x00FF_FFFF))),
+            Is.EqualTo("Alpha"));
+        Assert.That(tables.TypeDefs.GetName(checked((int)(
+                betaDefinition & 0x00FF_FFFF))),
+            Is.EqualTo("Beta"));
+        var (alphaFeatureStart, alphaFeatureCount)
+            = tables.Modules.GetFeatureRange(alphaModuleRow);
+        var (betaFeatureStart, betaFeatureCount)
+            = tables.Modules.GetFeatureRange(betaModuleRow);
+        var alphaFeatures = new List<TrRmFeatureRow>();
+        for (var offset = 0; offset < alphaFeatureCount; offset++)
+        {
+            alphaFeatures.Add(tables.Features.GetFeature(
+                alphaFeatureStart + offset));
+        }
+        var betaFeatures = new List<TrRmFeatureRow>();
+        for (var offset = 0; offset < betaFeatureCount; offset++)
+        {
+            betaFeatures.Add(tables.Features.GetFeature(
+                betaFeatureStart + offset));
+        }
+        Assert.That(alphaFeatures, Does.Not.Contain(distinctFeature));
+        Assert.That(betaFeatures, Does.Contain(distinctFeature));
+
+        var reemittedInput = new TrRmStandardArtifactInput(schemaIdentity,
+            artifact);
+        var reloadedAlpha = TrRmExecutableCompiler.CreateStandardReference(
+            reemittedInput, alphaModuleIdentity, [], ["AlphaKey"]);
+        var reloadedBeta = TrRmExecutableCompiler.CreateStandardReference(
+            reemittedInput, betaModuleIdentity, [], ["BetaKey"]);
+        var reloadedReference = TrRmExecutableCompiler.CreateStandardReferenceSet([
+            reloadedAlpha, reloadedBeta,
+        ]);
+        Assert.That(reloadedReference.StandardClassDeclarations
+                .Where(static declaration =>
+                    !declaration.SelectedExportKeys.IsEmpty)
+                .Select(static declaration => declaration.Declaration.Name),
+            Is.EquivalentTo(["Alpha", "Beta"]));
+    }
+
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ClassTypeBindingViews)]
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsClassTypeBindingViews)]
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsClassTypeBindingViews)]
+    public void ReemitsSeparateClassRootImportsWithOwnerRelativeEqualities(
+        string schemaIdentity)
+    {
+        var provider = CreateRelocatedClassProvider("SharedProvider",
+            schemaIdentity, "LeafAliasKey");
+        var rootA = CreateRootArtifactWithTwoClassImports("RootA",
+            "SharedProvider", "AlphaKey", "LeafKey", "LeafAliasKey",
+            schemaIdentity, includeEquality: true);
+        var rootB = CreateRootArtifactWithTwoClassImports("RootB",
+            "SharedProvider", "BetaKey", "LeafKey", "LeafAliasKey",
+            schemaIdentity);
+        var (rootBWithFeature, distinctFeature)
+            = AddFeatureRequirementToSingleModule(rootB, schemaIdentity);
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            provider);
+        var referenceA = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, rootA), "RootA",
+            [providerInput], ["AlphaKey"]);
+        var referenceB = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                rootBWithFeature), "RootB",
+            [providerInput], ["BetaKey"]);
+        var reference = TrRmExecutableCompiler.CreateStandardReferenceSet([
+            referenceA, referenceB,
+        ]);
+        var compilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), reference);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)compilation.Program!,
+            "SeparateImportedRootsReemitted", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var tables = ReadTables(artifact, schemaIdentity);
+        Assert.That(tables.Modules.Count, Is.EqualTo(2));
+        Assert.That(tables.Imports.Count, Is.EqualTo(4));
+        Assert.That(tables.TypeDefBindingEqualities.Count,
+            Is.GreaterThan(0));
+        var alphaOwnerModule = Enumerable.Range(1, tables.Modules.Count)
+            .Single(moduleRow => tables.Exports
+                .GetExportsForModule(moduleRow)
+                .Any(static export => StringComparer.Ordinal.Equals(
+                    export.ExportKey, "AlphaKey")));
+        var equalityOwners = new HashSet<uint>();
+        for (var equalityRow = 1;
+            equalityRow <= tables.TypeDefBindingEqualities.Count;
+            equalityRow++)
+        {
+            var ownerModule
+                = tables.TypeDefBindingEqualities.GetOwnerModule(
+                    equalityRow);
+            Assert.That(ownerModule, Is.InRange(1u,
+                checked((uint)tables.Modules.Count)));
+            _ = equalityOwners.Add(ownerModule);
+            var leftTypeDef = checked((int)
+                tables.TypeDefBindingEqualities.GetLeftTypeDef(equalityRow));
+            var rightTypeDef = checked((int)
+                tables.TypeDefBindingEqualities.GetRightTypeDef(equalityRow));
+            Assert.That(tables.TypeDefs.GetOwnerModule(leftTypeDef),
+                Is.InRange(1, tables.Modules.Count));
+            Assert.That(tables.TypeDefs.GetOwnerModule(rightTypeDef),
+                Is.InRange(1, tables.Modules.Count));
+        }
+        Assert.That(equalityOwners, Does.Contain((uint)alphaOwnerModule));
+
+        var alphaModule = 0;
+        var betaModule = 0;
+        for (var moduleRow = 1; moduleRow <= tables.Modules.Count;
+            moduleRow++)
+        {
+            foreach (var export in tables.Exports
+                .GetExportsForModule(moduleRow))
+            {
+                if (StringComparer.Ordinal.Equals(export.ExportKey,
+                        "AlphaKey"))
+                {
+                    alphaModule = moduleRow;
+                }
+                else if (StringComparer.Ordinal.Equals(export.ExportKey,
+                             "BetaKey"))
+                {
+                    betaModule = moduleRow;
+                }
+            }
+        }
+        Assert.That(alphaModule, Is.GreaterThan(0));
+        Assert.That(betaModule, Is.GreaterThan(0));
+        var (alphaFeatureStart, alphaFeatureCount)
+            = tables.Modules.GetFeatureRange(alphaModule);
+        var alphaFeatures = new List<TrRmFeatureRow>();
+        for (var offset = 0; offset < alphaFeatureCount; offset++)
+        {
+            alphaFeatures.Add(tables.Features.GetFeature(
+                alphaFeatureStart + offset));
+        }
+        var (betaFeatureStart, betaFeatureCount)
+            = tables.Modules.GetFeatureRange(betaModule);
+        var betaFeatures = new List<TrRmFeatureRow>();
+        for (var offset = 0; offset < betaFeatureCount; offset++)
+        {
+            betaFeatures.Add(tables.Features.GetFeature(
+                betaFeatureStart + offset));
+        }
+        Assert.That(alphaFeatures, Does.Not.Contain(distinctFeature));
+        Assert.That(betaFeatures, Does.Contain(distinctFeature));
+        var outputInput = new TrRmStandardArtifactInput(schemaIdentity,
+            artifact);
+        var reloadedA = TrRmExecutableCompiler.CreateStandardReference(
+            outputInput, tables.Modules.GetIdentity(alphaModule),
+            [providerInput],
+            ["AlphaKey"]);
+        var reloadedB = TrRmExecutableCompiler.CreateStandardReference(
+            outputInput, tables.Modules.GetIdentity(betaModule),
+            [providerInput],
+            ["BetaKey"]);
+        var reloadedReference = TrRmExecutableCompiler.CreateStandardReferenceSet([
+            reloadedA, reloadedB,
+        ]);
+        Assert.That(reloadedReference.StandardClassDeclarations
+                .Where(static declaration =>
+                    !declaration.SelectedExportKeys.IsEmpty)
+                .SelectMany(static declaration =>
+                    declaration.SelectedExportKeys),
+            Is.EquivalentTo(["AlphaKey", "BetaKey"]));
+    }
+
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ClassTypeBindingViews)]
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsClassTypeBindingViews)]
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsClassTypeBindingViews)]
+    public void ReemitsCompatibleClassImportRelocationAcrossRootArtifacts(
+        string schemaIdentity)
+    {
+        var providerA = CreateRelocatedClassProvider("ProviderA",
+            schemaIdentity, "LeafAliasKey", includePrefix: true);
+        var providerB = CreateRelocatedClassProvider("ProviderB",
+            schemaIdentity, "LeafAliasKey", includePrefix: false);
+        var rootA = CreateRootArtifactWithTwoClassImports("RootA",
+            "ProviderA", "AlphaKey", "LeafKey", "LeafAliasKey",
+            schemaIdentity);
+        var rootB = CreateRootArtifactWithTwoClassImports("RootB",
+            "ProviderB", "BetaKey", "LeafKey", "LeafAliasKey",
+            schemaIdentity);
+        var providerInputA = new TrRmStandardArtifactInput(schemaIdentity,
+            providerA);
+        var providerInputB = new TrRmStandardArtifactInput(schemaIdentity,
+            providerB);
+        var referenceA = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, rootA), "RootA",
+            [providerInputA], ["AlphaKey"]);
+        var referenceB = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, rootB), "RootB",
+            [providerInputB], ["BetaKey"]);
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            string.Empty), TrRmExecutableCompiler.CreateStandardReferenceSet([
+                referenceA, referenceB,
+            ]));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)compilation.Program!,
+            "RelocatedImportedRootsReemitted", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var tables = ReadTables(artifact, schemaIdentity);
+        Assert.That(tables.Modules.Count, Is.EqualTo(2));
+        Assert.That(tables.Imports.Count, Is.EqualTo(4));
+        Assert.That(tables.TypeDefBindingEqualities.Count,
+            Is.GreaterThan(0));
+        Assert.That(Enumerable.Range(1, tables.ModuleRefs.Count)
+                .Select(tables.ModuleRefs.GetProducerIdentity),
+            Is.EquivalentTo(["ProviderA", "ProviderB"]));
+
+        var moduleByExport = new Dictionary<string, string>(
+            StringComparer.Ordinal);
+        for (var moduleRow = 1; moduleRow <= tables.Modules.Count;
+            moduleRow++)
+        {
+            foreach (var export in tables.Exports
+                .GetExportsForModule(moduleRow))
+            {
+                if (export.ExportKey is "AlphaKey" or "BetaKey")
+                {
+                    moduleByExport.Add(export.ExportKey,
+                        tables.Modules.GetIdentity(moduleRow));
+                }
+            }
+        }
+
+        var outputInput = new TrRmStandardArtifactInput(schemaIdentity,
+            artifact);
+        var reloadedA = TrRmExecutableCompiler.CreateStandardReference(
+            outputInput, moduleByExport["AlphaKey"], [providerInputA],
+            ["AlphaKey"]);
+        var reloadedB = TrRmExecutableCompiler.CreateStandardReference(
+            outputInput, moduleByExport["BetaKey"], [providerInputB],
+            ["BetaKey"]);
+        var reloadedReference = TrRmExecutableCompiler.CreateStandardReferenceSet([
+            reloadedA, reloadedB,
+        ]);
+        Assert.That(reloadedReference.StandardClassDeclarations
+                .Where(static declaration =>
+                    !declaration.SelectedExportKeys.IsEmpty)
+                .SelectMany(static declaration =>
+                    declaration.SelectedExportKeys),
+            Is.EquivalentTo(["AlphaKey", "BetaKey"]));
+    }
+
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ClassTypeBindingViews)]
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsClassTypeBindingViews)]
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsClassTypeBindingViews)]
+    public void RejectsSplitClassProviderAcrossSeparateRootArtifacts(
+        string schemaIdentity)
+    {
+        var providerA = CreateClassArtifact("SharedProvider", "Leaf",
+            "LeafKey", 0xF200_0008, schemaIdentity, layoutKind: 0, pack: 0);
+        var providerB = CreateClassArtifact("SharedProvider", "Leaf",
+            "LeafKey", 0xF200_0009, schemaIdentity, layoutKind: 0, pack: 0);
+        var rootA = CreateArtifact("RootA", "BoxA", "AlphaKey",
+            TrRmTypeSpecTableWriter.Reference(0x03, 1), schemaIdentity,
+            "SharedProvider", "LeafKey",
+            TrRmTypeSpecTableWriter.Builtin(8), layoutKind: 0, pack: 0,
+            importedTypeName: "Leaf");
+        var rootB = CreateArtifact("RootB", "BoxB", "BetaKey",
+            TrRmTypeSpecTableWriter.Reference(0x03, 1), schemaIdentity,
+            "SharedProvider", "LeafKey",
+            TrRmTypeSpecTableWriter.Builtin(9), layoutKind: 0, pack: 0,
+            importedTypeName: "Leaf");
+        var referenceA = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, rootA), "RootA", [
+                new TrRmStandardArtifactInput(schemaIdentity, providerA),
+            ], ["AlphaKey"]);
+        var referenceB = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, rootB), "RootB", [
+                new TrRmStandardArtifactInput(schemaIdentity, providerB),
+            ], ["BetaKey"]);
+
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReferenceSet([
+                referenceA, referenceB,
+            ]));
+    }
+
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ClassTypeBindingViews)]
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsClassTypeBindingViews)]
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsClassTypeBindingViews)]
+    public void RejectsMalformedEqualityOwnerInSeparateRootArtifact(
+        string schemaIdentity)
+    {
+        var provider = CreateRelocatedClassProvider("SharedProvider",
+            schemaIdentity, "LeafAliasKey");
+        var root = CreateRootArtifactWithTwoClassImports("RootA",
+            "SharedProvider", "AlphaKey", "LeafKey", "LeafAliasKey",
+            schemaIdentity);
+        var malformedRoot = AddTypeDefBindingEquality(root, schemaIdentity,
+            ownerModule: 2, leftTypeDef: 2, rightTypeDef: 3);
+
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, malformedRoot),
+                "RootA", [
+                    new TrRmStandardArtifactInput(schemaIdentity, provider),
+                ], ["AlphaKey"]));
+    }
+
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ClassTypeBindingViews)]
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsClassTypeBindingViews)]
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsClassTypeBindingViews)]
+    public void RejectsMalformedProviderViewForSeparateRootArtifact(
+        string schemaIdentity)
+    {
+        var provider = CreateRelocatedClassProvider("SharedProvider",
+            schemaIdentity, "LeafAliasKey", includePrefix: false);
+        SetTypeDefFlags(provider, 0x06);
+        var root = CreateRootArtifactWithTwoClassImports("RootA",
+            "SharedProvider", "AlphaKey", "LeafKey", "LeafAliasKey",
+            schemaIdentity);
+
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, root),
+                "RootA", [
+                    new TrRmStandardArtifactInput(schemaIdentity, provider),
+                ], ["AlphaKey"]));
+    }
+
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ClassTypeBindingViews)]
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsClassTypeBindingViews)]
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsClassTypeBindingViews)]
+    public void ReemitsNestedClassTypeSpecImportsAcrossSeparateArtifacts(
+        string schemaIdentity)
+    {
+        var provider = CreateRelocatedClassProvider("NestedProvider",
+            schemaIdentity, includePrefix: false);
+        var wrappedImportedType = TrRmTypeSpecTableWriter.Wrapped(0x06,
+            TrRmTypeSpecTableWriter.Reference(0x03, 1));
+        var rootA = CreateArtifact("RootA", "BoxA", "BoxAKey",
+            0xF200_0008, schemaIdentity, "NestedProvider", "LeafKey",
+            wrappedImportedType, layoutKind: 0, pack: 0,
+            importedTypeName: "Leaf");
+        var rootB = CreateArtifact("RootB", "BoxB", "BoxBKey",
+            0xF200_0008, schemaIdentity, "NestedProvider", "LeafKey",
+            wrappedImportedType, layoutKind: 0, pack: 0,
+            importedTypeName: "Leaf");
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            provider);
+        var referenceA = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, rootA), "RootA",
+            [providerInput], ["BoxAKey"]);
+        var referenceB = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, rootB), "RootB",
+            [providerInput], ["BoxBKey"]);
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            string.Empty), TrRmExecutableCompiler.CreateStandardReferenceSet([
+                referenceA, referenceB,
+            ]));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)compilation.Program!,
+            "NestedImportsReemitted", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var tables = ReadTables(artifact, schemaIdentity);
+        Assert.That(tables.Modules.Count, Is.EqualTo(2));
+        Assert.That(tables.Imports.Count, Is.EqualTo(2));
+        Assert.That(tables.TypeSpecs.Count, Is.EqualTo(2));
+
+        string? rootAIdentity = null;
+        string? rootBIdentity = null;
+        for (var moduleRow = 1; moduleRow <= tables.Modules.Count;
+            moduleRow++)
+        {
+            var rootExport = tables.Exports.GetExportsForModule(moduleRow)
+                .Single(export => export.ExportKey is "BoxAKey" or "BoxBKey");
+            var rootTypeDefRow = checked((int)(
+                rootExport.Definition & 0x00FF_FFFF));
+            var (fieldStart, fieldEnd)
+                = tables.TypeDefs.GetFieldRange(rootTypeDefRow);
+            Assert.That(fieldEnd - fieldStart, Is.EqualTo(1));
+            var typeSpecReference
+                = tables.Fields.GetTypeSpecRef(fieldStart);
+            var typeSpec = tables.TypeSpecs.GetTypeSpecRef(
+                typeSpecReference);
+            Assert.That(typeSpec.Form, Is.EqualTo(0x06));
+            var row = tables.TypeSpecs.GetRow(typeSpec.Row);
+            var childReference = BinaryPrimitives.ReadUInt32LittleEndian(
+                row[2..]);
+            Assert.That((byte)(childReference >> 24), Is.EqualTo(0x03));
+            var importRow = checked((int)(childReference & 0x00FF_FFFF));
+            Assert.That(tables.Imports
+                    .GetExpectedDefinitionForImportRow(importRow) >> 24,
+                Is.EqualTo(0x13u));
+            Assert.That(tables.ModuleRefs.GetOwnerModule(
+                    tables.Imports.GetModuleRefForImportRow(importRow)),
+                Is.EqualTo(moduleRow));
+            if (StringComparer.Ordinal.Equals(rootExport.ExportKey,
+                    "BoxAKey"))
+            {
+                rootAIdentity = tables.Modules.GetIdentity(moduleRow);
+            }
+            else
+            {
+                rootBIdentity = tables.Modules.GetIdentity(moduleRow);
+            }
+        }
+
+        Assert.That(rootAIdentity, Is.Not.Null);
+        Assert.That(rootBIdentity, Is.Not.Null);
+        var outputInput = new TrRmStandardArtifactInput(schemaIdentity,
+            artifact);
+        var reloadedA = TrRmExecutableCompiler.CreateStandardReference(
+            outputInput, rootAIdentity!, [providerInput], ["BoxAKey"]);
+        var reloadedB = TrRmExecutableCompiler.CreateStandardReference(
+            outputInput, rootBIdentity!, [providerInput], ["BoxBKey"]);
+        var reloadedCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty),
+            TrRmExecutableCompiler.CreateStandardReferenceSet([
+                reloadedA, reloadedB,
+            ]));
+        Assert.That(reloadedCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                reloadedCompilation.Diagnostics));
+
+    }
+
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ClassTypeBindingViews)]
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsClassTypeBindingViews)]
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsClassTypeBindingViews)]
+    public void ReemitsClassMethodBodiesFromSeparateRootArtifacts(
+        string schemaIdentity)
+    {
+        var providerA = CreateRelocatedClassProvider("MethodProviderA",
+            schemaIdentity, includeReadMethod: true, includePrefix: true);
+        var providerB = CreateRelocatedClassProvider("MethodProviderB",
+            schemaIdentity, includeReadMethod: true, includePrefix: false);
+        var inputA = new TrRmStandardArtifactInput(schemaIdentity, providerA);
+        var inputB = new TrRmStandardArtifactInput(schemaIdentity, providerB);
+        var referenceA = TrRmExecutableCompiler.CreateStandardReference(
+            inputA, "MethodProviderA", [], ["LeafKey"]);
+        var referenceB = TrRmExecutableCompiler.CreateStandardReference(
+            inputB, "MethodProviderB", [], ["LeafKey"]);
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            string.Empty), TrRmExecutableCompiler.CreateStandardReferenceSet([
+                referenceA, referenceB,
+            ]));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)compilation.Program!,
+            "MethodRootsReemitted", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var tables = ReadTables(artifact, schemaIdentity);
+        Assert.That(tables.Modules.Count, Is.EqualTo(2));
+        Assert.That(tables.Methods.Count, Is.GreaterThanOrEqualTo(4));
+        Assert.That(tables.Signatures.Count,
+            Is.EqualTo(tables.Methods.Count));
+        Assert.That(tables.Signatures.ParamCount,
+            Is.GreaterThanOrEqualTo(4));
+
+        var rootModuleIdentities = new List<string>();
+        for (var moduleRow = 1; moduleRow <= tables.Modules.Count;
+            moduleRow++)
+        {
+            var leafExport = tables.Exports.GetExportsForModule(moduleRow)
+                .Single(export => export.ExportKey == "LeafKey");
+            var leafTypeDefRow = checked((int)(
+                leafExport.Definition & 0x00FF_FFFF));
+            rootModuleIdentities.Add(tables.Modules.GetIdentity(moduleRow));
+            var ownedMethods = Enumerable.Range(1, tables.Methods.Count)
+                .Where(methodRow =>
+                    tables.Methods.GetOwnerType(methodRow)
+                        == leafTypeDefRow)
+                .ToArray();
+            Assert.That(ownedMethods, Has.Length.EqualTo(2));
+            Assert.That(ownedMethods.All(methodRow =>
+                    tables.Methods.GetBodyRow(methodRow) != 0),
+                Is.True);
+        }
+
+        Assert.That(rootModuleIdentities,
+            Does.Contain("MethodRootsReemitted"));
+        var outputInput = new TrRmStandardArtifactInput(schemaIdentity,
+            artifact);
+        var reloaded = rootModuleIdentities.Select(moduleIdentity =>
+            TrRmExecutableCompiler.CreateStandardReference(outputInput,
+                moduleIdentity, [], ["LeafKey"])).ToArray();
+        var reloadedCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty),
+            TrRmExecutableCompiler.CreateStandardReferenceSet(reloaded));
+        Assert.That(reloadedCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                reloadedCompilation.Diagnostics));
+    }
+
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ClassTypeBindingViews)]
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsClassTypeBindingViews)]
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsClassTypeBindingViews)]
+    public void ReemitsFieldReferenceMethodBodiesAcrossSeparateArtifacts(
+        string schemaIdentity)
+    {
+        var rootA = CreateFieldReferenceClassProvider("ReferenceRootA",
+            schemaIdentity, includePrefix: false);
+        var rootB = CreateFieldReferenceClassProvider("ReferenceRootB",
+            schemaIdentity, includePrefix: true);
+        var referenceA = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, rootA),
+            "ReferenceRootA", [], ["BoxKey"]);
+        var referenceB = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, rootB),
+            "ReferenceRootB", [], ["PrefixKey", "BoxKey"]);
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            string.Empty), TrRmExecutableCompiler.CreateStandardReferenceSet([
+                referenceA, referenceB,
+            ]));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)compilation.Program!,
+            "ReferenceRootsReemitted", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var tables = ReadTables(artifact, schemaIdentity);
+        Assert.That(tables.Modules.Count, Is.EqualTo(2));
+        var boxRows = new List<int>();
+        for (var moduleRow = 1; moduleRow <= tables.Modules.Count;
+            moduleRow++)
+        {
+            var moduleExports = tables.Exports.GetExportsForModule(moduleRow);
+            Assert.That(moduleExports.Select(static export =>
+                    export.ExportKey),
+                Does.Contain("Box.ReadValue").And.Contain(
+                    "Box.ReadReferenceAlias"));
+            var boxExport = moduleExports
+                .Single(export => export.ExportKey == "BoxKey");
+            boxRows.Add(checked((int)(
+                boxExport.Definition & 0x00FF_FFFF)));
+        }
+
+        Assert.That(boxRows, Has.Count.EqualTo(2));
+        foreach (var boxRow in boxRows)
+        {
+            int GetMethodRow(string name)
+                => Enumerable.Range(1, tables.Methods.Count)
+                    .Single(row =>
+                        tables.Methods.GetOwnerType(row) == boxRow
+                        && tables.Methods.GetName(row) == name);
+
+            var identityMethodRow = GetMethodRow("Identity");
+            var identityBody = tables.Bodies.GetRow(
+                tables.Methods.GetBodyRow(identityMethodRow));
+            Assert.That(identityBody[0], Is.EqualTo(0x01));
+
+            var readValueRow = GetMethodRow("ReadValue");
+            var readValueBody = tables.Bodies.GetRow(
+                tables.Methods.GetBodyRow(readValueRow));
+            Assert.That(readValueBody[0], Is.EqualTo(0x02));
+
+            var forwardMethodRow = GetMethodRow("Forward");
+            var forwardBody = tables.Bodies.GetRow(
+                tables.Methods.GetBodyRow(forwardMethodRow));
+            Assert.That(forwardBody[0], Is.EqualTo(0x05));
+            Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                    forwardBody[4..]),
+                Is.EqualTo(0x1600_0000u
+                    | checked((uint)identityMethodRow)));
+
+            var readMethodRow = GetMethodRow("ReadReference");
+            Assert.That(tables.Methods.GetBodyRow(readMethodRow),
+                Is.GreaterThan(0));
+            Assert.That(tables.Contracts.GetEffectsMask(readMethodRow),
+                Is.EqualTo(4u));
+            Assert.That(tables.Contracts.GetDependencyContracts(
+                    readMethodRow),
+                Is.EquivalentTo([
+                    new TrRmDependencyContract(1, 2, 3, 1, 0, 0),
+                ]));
+            var body = tables.Bodies.GetRow(
+                tables.Methods.GetBodyRow(readMethodRow));
+            Assert.That(body[0], Is.EqualTo(0x04));
+            var fieldToken = BinaryPrimitives.ReadUInt32LittleEndian(
+                body[4..]);
+            Assert.That(fieldToken >> 24, Is.EqualTo(0x14u));
+            var fieldRow = checked((int)(fieldToken & 0x00FF_FFFF));
+            Assert.That(tables.Fields.GetOwnerTypeDef(fieldRow),
+                Is.EqualTo(boxRow));
+            Assert.That(tables.Fields.GetName(fieldRow),
+                Is.EqualTo("Value"));
+            var dependencyRow = checked((int)
+                BinaryPrimitives.ReadUInt32LittleEndian(body[8..]));
+            Assert.That(tables.Contracts.GetDependencyContractRows(
+                    readMethodRow).Single().Row,
+                Is.EqualTo(dependencyRow));
+
+            if (Enumerable.Range(1, tables.Methods.Count).Any(row =>
+                    tables.Methods.GetOwnerType(row) == boxRow
+                    && tables.Methods.GetName(row) == "Set"))
+            {
+                var setBody = tables.Bodies.GetRow(
+                    tables.Methods.GetBodyRow(GetMethodRow("Set")));
+                Assert.That(setBody[0], Is.EqualTo(0x03));
+            }
+        }
+
+        var outputInput = new TrRmStandardArtifactInput(schemaIdentity,
+            artifact);
+        var prefixModule = Enumerable.Range(1, tables.Modules.Count)
+            .Single(moduleRow => tables.Exports
+                .GetExportsForModule(moduleRow)
+                .Any(static export => export.ExportKey == "PrefixKey"));
+        var boxOnlyModule = Enumerable.Range(1, tables.Modules.Count)
+            .Single(moduleRow => moduleRow != prefixModule);
+        var reloadedA = TrRmExecutableCompiler.CreateStandardReference(
+            outputInput, tables.Modules.GetIdentity(boxOnlyModule), [],
+            ["BoxKey"]);
+        var reloadedB = TrRmExecutableCompiler.CreateStandardReference(
+            outputInput, tables.Modules.GetIdentity(prefixModule), [],
+            ["PrefixKey", "BoxKey"]);
+
+        var reloadedCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty),
+            TrRmExecutableCompiler.CreateStandardReferenceSet([
+                reloadedA, reloadedB,
+            ]));
+        Assert.That(reloadedCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                reloadedCompilation.Diagnostics));
+    }
+
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ClassTypeBindingViews)]
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsClassTypeBindingViews)]
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsClassTypeBindingViews)]
+    public void ReemitsBodylessMethodImportsFromSeparateRootArtifacts(
+        string schemaIdentity)
+    {
+        var provider = CreateRelocatedClassProvider("MethodImportProvider",
+            schemaIdentity, "LeafAliasKey", includeReadMethod: true);
+        var rootA = CreateRootArtifactWithTwoClassImports("MethodRootA",
+            "MethodImportProvider", "BoxAKey", "LeafKey", "LeafAliasKey",
+            schemaIdentity, firstMethodExportKey: "Leaf.Read",
+            secondMethodExportKey: "Leaf.ReadAlias");
+        var rootB = CreateRootArtifactWithTwoClassImports("MethodRootB",
+            "MethodImportProvider", "BoxBKey", "LeafKey", "LeafAliasKey",
+            schemaIdentity, firstMethodExportKey: "Leaf.Read",
+            secondMethodExportKey: "Leaf.ReadAlias");
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            provider);
+        var referenceA = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, rootA),
+            "MethodRootA", [providerInput], ["BoxAKey"]);
+        var referenceB = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, rootB),
+            "MethodRootB", [providerInput], ["BoxBKey"]);
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            string.Empty), TrRmExecutableCompiler.CreateStandardReferenceSet([
+                referenceA, referenceB,
+            ]));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)compilation.Program!,
+            "MethodImportsReemitted", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var tables = ReadTables(artifact, schemaIdentity);
+        Assert.That(tables.Modules.Count, Is.EqualTo(2));
+        Assert.That(tables.Imports.Count, Is.EqualTo(8));
+        Assert.That(tables.Methods.Count, Is.EqualTo(4));
+        Assert.That(Enumerable.Range(1, tables.Methods.Count)
+                .All(row => tables.Methods.GetBodyRow(row) == 0),
+            Is.True);
+        Assert.That(tables.Signatures.Count, Is.EqualTo(4));
+        Assert.That(tables.Signatures.ParamCount, Is.EqualTo(4));
+        Assert.That(Enumerable.Range(1, tables.Imports.Count)
+                .Where(row => tables.Imports
+                    .GetExpectedDefinitionForImportRow(row) >> 24
+                    == 0x16)
+                .Select(row => tables.Imports
+                    .GetBindingForImportRow(row).ExportKey),
+            Is.EquivalentTo([
+                "Leaf.Read", "Leaf.ReadAlias",
+                "Leaf.Read", "Leaf.ReadAlias",
+            ]));
+
+        string? moduleAIdentity = null;
+        string? moduleBIdentity = null;
+        for (var moduleRow = 1; moduleRow <= tables.Modules.Count;
+            moduleRow++)
+        {
+            foreach (var export in tables.Exports
+                .GetExportsForModule(moduleRow))
+            {
+                if (export.ExportKey == "BoxAKey")
+                {
+                    moduleAIdentity = tables.Modules.GetIdentity(moduleRow);
+                }
+                else if (export.ExportKey == "BoxBKey")
+                {
+                    moduleBIdentity = tables.Modules.GetIdentity(moduleRow);
+                }
+            }
+        }
+        Assert.That(moduleAIdentity, Is.Not.Null);
+        Assert.That(moduleBIdentity, Is.Not.Null);
+        var outputInput = new TrRmStandardArtifactInput(schemaIdentity,
+            artifact);
+        var reloadedA = TrRmExecutableCompiler.CreateStandardReference(
+            outputInput, moduleAIdentity!, [providerInput], ["BoxAKey"]);
+        var reloadedB = TrRmExecutableCompiler.CreateStandardReference(
+            outputInput, moduleBIdentity!, [providerInput], ["BoxBKey"]);
+        var reloadedCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty),
+            TrRmExecutableCompiler.CreateStandardReferenceSet([
+                reloadedA, reloadedB,
+            ]));
+        Assert.That(reloadedCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                reloadedCompilation.Diagnostics));
+
+        var incompatibleProvider = CreateRelocatedClassProvider(
+            "MethodImportProvider", schemaIdentity, "LeafAliasKey",
+            includeReadMethod: false, includePrefix: false);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(outputInput,
+                moduleAIdentity!, [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        incompatibleProvider),
+                ], ["BoxAKey"]));
+    }
+
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsClassTypeBindingViews)]
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsClassTypeBindingViews)]
+    public void ReemitsMethodImportDefaultsAcrossSeparateRootArtifacts(
+        string schemaIdentity)
+    {
+        var provider = CreateRelocatedClassProvider("MethodDefaultsProvider",
+            schemaIdentity, "LeafAliasKey", includeReadMethod: true,
+            readDefaultValue: 9, includePrefix: false);
+        var rootA = CreateRootArtifactWithTwoClassImports("DefaultsRootA",
+            "MethodDefaultsProvider", "DefaultsAKey", "LeafKey",
+            "LeafAliasKey", schemaIdentity,
+            firstMethodExportKey: "Leaf.ReadAlias",
+            secondMethodExportKey: "Leaf.Read",
+            firstMethodDefault: 7, secondMethodDefault: 13);
+        var rootB = CreateRootArtifactWithTwoClassImports("DefaultsRootB",
+            "MethodDefaultsProvider", "DefaultsBKey", "LeafKey",
+            "LeafAliasKey", schemaIdentity,
+            firstMethodExportKey: "Leaf.Read",
+            secondMethodExportKey: "Leaf.ReadAlias",
+            firstMethodDefault: 17, secondMethodDefault: 19);
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            provider);
+        var referenceA = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, rootA),
+            "DefaultsRootA", [providerInput], ["DefaultsAKey"]);
+        var referenceB = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, rootB),
+            "DefaultsRootB", [providerInput], ["DefaultsBKey"]);
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            string.Empty), TrRmExecutableCompiler.CreateStandardReferenceSet([
+                referenceA, referenceB,
+            ]));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)compilation.Program!,
+            "MethodDefaultsReemitted", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var tables = ReadTables(artifact, schemaIdentity);
+        Assert.That(tables.Methods.Count, Is.EqualTo(4));
+        Assert.That(tables.Imports.Count, Is.EqualTo(8));
+        Assert.That(GetSection(artifact, schemaIdentity, 0x0066)
+                .RecordCount,
+            Is.EqualTo(4u));
+        Assert.That(Enumerable.Range(1, tables.Methods.Count)
+                .All(row => tables.Methods.GetBodyRow(row) == 0),
+            Is.True);
+
+        var rootAIdentity = FindModuleIdentityForExport(tables,
+            "DefaultsAKey");
+        var rootBIdentity = FindModuleIdentityForExport(tables,
+            "DefaultsBKey");
+        var outputInput = new TrRmStandardArtifactInput(schemaIdentity,
+            artifact);
+        var reloadedA = TrRmExecutableCompiler.CreateStandardReference(
+            outputInput, rootAIdentity, [providerInput], ["DefaultsAKey"]);
+        var reloadedB = TrRmExecutableCompiler.CreateStandardReference(
+            outputInput, rootBIdentity, [providerInput], ["DefaultsBKey"]);
+        var reloaded = TrRmExecutableCompiler.CreateStandardReferenceSet([
+            reloadedA, reloadedB,
+        ]);
+        var importedLeaf = reloaded.StandardClassDeclarations.Single(
+            static declaration =>
+                declaration.Declaration.Name == "Leaf");
+        Assert.That(importedLeaf.Expectations
+                .Select(expectation =>
+                    expectation.ExpectedDeclaration.Methods.Single(
+                        static method => method.Name == "Read")
+                        .Parameters.Single().DefaultValue!.Value),
+            Is.EquivalentTo([7, 13, 17, 19]));
+        Assert.That(importedLeaf.Expectations.SelectMany(
+                static expectation => expectation.MethodExpectations)
+            .Select(static expectation => expectation.ExportKey),
+            Is.EquivalentTo([
+                "Leaf.Read", "Leaf.ReadAlias",
+                "Leaf.Read", "Leaf.ReadAlias",
+            ]));
+    }
+
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ClassTypeBindingViews)]
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsClassTypeBindingViews)]
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsClassTypeBindingViews)]
+    public void ReemitsClassEqualityOwnedByAnotherCoLocatedModule(
+        string schemaIdentity)
+    {
+        var provider = CreateRelocatedClassProvider("Provider",
+            schemaIdentity, "LeafAliasKey");
+        var root = CreateRootArtifactWithTwoClassImports("Root", "Provider",
+            "BoxKey", "LeafKey", "LeafAliasKey", schemaIdentity,
+            includeEquality: true, uncalledEqualityImports: true);
+        root = MoveClassEqualityOwnerToSecondModule(root, schemaIdentity,
+            "RootEqualityOwner");
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            provider);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, root), "Root",
+            [providerInput], ["BoxKey"]);
+        var leaf = reference.StandardClassDeclarations.Single(
+            static declaration =>
+                declaration.Declaration.Name == "Leaf");
+        Assert.That(leaf.TypeDefBindingEqualityGroups[0].OwnerModule?
+                .ModuleIdentity,
+            Is.EqualTo("RootEqualityOwner"));
+
+        var compilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), reference);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)compilation.Program!,
+            "RootEqualityOwnerReemitted", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var tables = ReadTables(artifact, schemaIdentity);
+        var leafRows = new List<int>();
+        for (var row = 1; row <= tables.TypeDefs.Count; row++)
+        {
+            if (StringComparer.Ordinal.Equals(
+                    tables.TypeDefs.GetName(row), "Leaf"))
+            {
+                leafRows.Add(row);
+            }
+        }
+
+        Assert.That(leafRows, Has.Count.EqualTo(2));
+        foreach (var leafRow in leafRows)
+        {
+            var (fieldStart, fieldEnd)
+                = tables.TypeDefs.GetFieldRange(leafRow);
+            Assert.That(fieldEnd - fieldStart, Is.EqualTo(1));
+            Assert.That(tables.Fields.GetName(fieldStart),
+                Is.EqualTo("Value"));
+            var (layoutStart, layoutCount)
+                = tables.TypeDefs.GetLayoutRange(leafRow);
+            Assert.That(layoutCount, Is.EqualTo(1));
+            Assert.That(tables.Layouts.GetOwnerTypeDef(layoutStart),
+                Is.EqualTo(leafRow));
+        }
+
+        Assert.That(tables.TypeDefBindingEqualities.Count, Is.EqualTo(1));
+        Assert.That(tables.TypeDefBindingEqualities.GetOwnerModule(1),
+            Is.EqualTo(1u));
+        Assert.That(tables.TypeDefBindingEqualities.GetLeftTypeDef(1),
+            Is.EqualTo(2u));
+        Assert.That(tables.TypeDefBindingEqualities.GetRightTypeDef(1),
+            Is.EqualTo(3u));
+
+        var artifactInput = new TrRmStandardArtifactInput(schemaIdentity,
+            artifact);
+        var relocatedProvider = CreateRelocatedClassProvider("Provider",
+            schemaIdentity, "LeafAliasKey", includePrefix: false);
+        var reloadedReference
+            = TrRmExecutableCompiler.CreateStandardReference(artifactInput,
+                "RootEqualityOwnerReemitted", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        relocatedProvider),
+                ], ["BoxKey"]);
+        var reloadedLeaf = reloadedReference.StandardClassDeclarations.Single(
+            static declaration =>
+                declaration.Declaration.Name == "Leaf");
+        Assert.That(reloadedLeaf.TypeDefBindingEqualityGroups,
+            Has.Length.EqualTo(1));
+        Assert.That(reloadedLeaf.TypeDefBindingEqualityGroups[0]
+                .OwnerModule?.ModuleIdentity,
+            Is.EqualTo("RootEqualityOwner"));
+
+        var splitProvider = CreateSplitClassAliasProvider(provider,
+            schemaIdentity, "LeafAliasKey");
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(artifactInput,
+                "RootEqualityOwnerReemitted", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        splitProvider),
+                ], ["BoxKey"]));
+    }
+
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ClassTypeBindingViews)]
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsClassTypeBindingViews)]
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsClassTypeBindingViews)]
     public void PublishesDistinctClassViewsWithExactImportsAndReloads(
         string schemaIdentity)
     {
@@ -578,9 +1856,9 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
                     tables.Imports.GetModuleRefForImportRow(imports[0])),
                 Is.EqualTo("Provider"));
 
-            var (fieldStart, fieldCount)
+            var (fieldStart, fieldEnd)
                 = tables.TypeDefs.GetFieldRange(leafRow);
-            Assert.That(fieldCount, Is.EqualTo(1));
+            Assert.That(fieldEnd - fieldStart, Is.EqualTo(1));
             Assert.That(tables.Fields.GetOwnerTypeDef(fieldStart),
                 Is.EqualTo(leafRow));
             var (layoutStart, layoutCount)
@@ -601,10 +1879,11 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
             Is.EquivalentTo(["LeafKey", "LeafAliasKey"]));
         var boxRow = Enumerable.Range(1, tables.TypeDefs.Count)
             .Single(row => tables.TypeDefs.GetName(row) == "Box");
-        var boxFieldRange = tables.TypeDefs.GetFieldRange(boxRow);
-        Assert.That(boxFieldRange.Count, Is.EqualTo(2));
-        var boxFieldImportRows = Enumerable.Range(boxFieldRange.First,
-                boxFieldRange.Count)
+        var (boxFieldStart, boxFieldEnd)
+            = tables.TypeDefs.GetFieldRange(boxRow);
+        Assert.That(boxFieldEnd - boxFieldStart, Is.EqualTo(2));
+        var boxFieldImportRows = Enumerable.Range(boxFieldStart,
+                boxFieldEnd - boxFieldStart)
             .Select(fieldRow => tables.TypeSpecs.GetTypeSpecRef(
                 tables.Fields.GetTypeSpecRef(fieldRow)))
             .Select(typeSpec => {
@@ -3325,6 +4604,583 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
             [new TrRmStandardArtifactInput(schemaIdentity, provider)],
             ["BoxKey"]);
 
+    private static byte[] SplitClassRootsAcrossModules(byte[] artifact,
+        string schemaIdentity, string secondModuleIdentity)
+    {
+        var tables = ReadTables(artifact, schemaIdentity);
+        if (tables.Modules.Count != 1
+            || tables.TypeDefs.Count != 2
+            || tables.Exports.GetExportsForModule(1).Single(
+                static export => export.ExportKey == "PrefixKey")
+                .Definition != 0x1300_0001u
+            || tables.Exports.GetExportsForModule(1).Single(
+                static export => export.ExportKey == "LeafKey")
+                .Definition != 0x1300_0002u)
+        {
+            throw new InvalidOperationException(
+                "The co-located class-root fixture requires Prefix and Leaf TypeDefs in rows one and two.");
+        }
+
+        var (typeDefStart, _)
+            = tables.Modules.GetTypeDefRange(1);
+        var (methodDefStart, methodDefEnd)
+            = tables.Modules.GetMethodDefRange(1);
+        var secondModuleFirstMethodDef = methodDefEnd;
+        var expectedLeafMethodRow = 0;
+        var validMethodPartition = true;
+        for (var methodRow = methodDefStart; methodRow < methodDefEnd;
+            methodRow++)
+        {
+            var ownerType = tables.Methods.GetOwnerType(methodRow);
+            if (ownerType == 2)
+            {
+                if (secondModuleFirstMethodDef == methodDefEnd)
+                {
+                    secondModuleFirstMethodDef = methodRow;
+                }
+
+                if (methodRow != expectedLeafMethodRow
+                    && expectedLeafMethodRow != 0)
+                {
+                    validMethodPartition = false;
+                }
+
+                expectedLeafMethodRow = methodRow + 1;
+            }
+            else if (secondModuleFirstMethodDef != methodDefEnd)
+            {
+                validMethodPartition = false;
+            }
+            else if (ownerType != 1)
+            {
+                validMethodPartition = false;
+            }
+        }
+
+        if (!validMethodPartition)
+        {
+            throw new InvalidOperationException(
+                "The co-located class-root fixture requires contiguous class-owned MethodDef ranges.");
+        }
+
+        return AddCoLocatedModule(artifact, schemaIdentity,
+            secondModuleIdentity, typeDefStart + 1,
+            secondModuleFirstMethodDef, 0);
+    }
+
+    private static byte[] MoveClassEqualityOwnerToSecondModule(
+        byte[] artifact, string schemaIdentity, string secondModuleIdentity)
+    {
+        var tables = ReadTables(artifact, schemaIdentity);
+        if (tables.Modules.Count != 1
+            || tables.TypeDefBindingEqualities.Count != 1
+            || tables.TypeDefBindingEqualities.GetOwnerModule(1) != 1)
+        {
+            throw new InvalidOperationException(
+                "The co-located equality-owner fixture requires one root-owned equality row.");
+        }
+
+        var (_, typeDefEnd)
+            = tables.Modules.GetTypeDefRange(1);
+        var (_, methodDefEnd)
+            = tables.Modules.GetMethodDefRange(1);
+        return AddCoLocatedModule(artifact, schemaIdentity,
+            secondModuleIdentity, typeDefEnd, methodDefEnd, 2);
+    }
+
+    private static byte[] AddCoLocatedModule(byte[] artifact,
+        string schemaIdentity, string secondModuleIdentity,
+        int secondModuleFirstTypeDef, int secondModuleFirstMethodDef,
+        uint equalityOwnerModule)
+    {
+        var schema = TrRmExecutableCompiler.GetForeignInvocationSchema(
+            schemaIdentity);
+        var index = new TrRmArtifactIndex(artifact, schema,
+            standardSchemaIdentity: schemaIdentity);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(index);
+        if (tables.Modules.Count != 1
+            || !index.TryGetSection(0x0001, out var moduleSection, out _))
+        {
+            throw new InvalidOperationException(
+                "The co-located fixture requires one source Module.");
+        }
+
+        var (moduleRefStart, moduleRefEnd)
+            = tables.Modules.GetModuleRefRange(1);
+        var (typeDefStart, typeDefEnd)
+            = tables.Modules.GetTypeDefRange(1);
+        var (methodDefStart, methodDefEnd)
+            = tables.Modules.GetMethodDefRange(1);
+        var (sourceFileStart, sourceFileEnd)
+            = tables.Modules.GetSourceFileRange(1);
+        var (featureStart, featureCount)
+            = tables.Modules.GetFeatureRange(1);
+        if (secondModuleFirstTypeDef < typeDefStart
+            || secondModuleFirstTypeDef > typeDefEnd
+            || secondModuleFirstMethodDef < methodDefStart
+            || secondModuleFirstMethodDef > methodDefEnd)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(secondModuleFirstTypeDef));
+        }
+
+        var textRows = new List<(string Text, int Encoding)>(
+            tables.Strings.Count + 1);
+        for (var row = 1; row <= tables.Strings.Count; row++)
+        {
+            textRows.Add((tables.Strings.DecodeNamespace(row), 1));
+        }
+
+        textRows.Add((secondModuleIdentity, 1));
+        var stringBytes = TrRmStringTableWriter.EncodeTextRows(textRows);
+        var strings = new TrRmStringTableReader(stringBytes,
+            textRows.Count);
+        var firstModuleIdentityStringRow = checked((int)
+            BinaryPrimitives.ReadUInt32LittleEndian(moduleSection));
+        var (targetRequirement, runtimePolicy)
+            = tables.Modules.GetRequirements(1);
+        var moduleRows = new[] {
+            new TrRmModuleRow(firstModuleIdentityStringRow,
+                targetRequirement, runtimePolicy, 0, moduleRefStart,
+                typeDefStart, methodDefStart, sourceFileStart,
+                featureCount == 0 ? 0 : featureStart, featureCount,
+                tables.Modules.GetGoverningRuleEdition(1)),
+            new TrRmModuleRow(textRows.Count, targetRequirement,
+                runtimePolicy, 0, moduleRefEnd, secondModuleFirstTypeDef,
+                secondModuleFirstMethodDef, sourceFileEnd,
+                featureCount == 0 ? 0 : featureStart,
+                featureCount,
+                tables.Modules.GetGoverningRuleEdition(1)),
+        };
+        var moduleBytes = TrRmModuleTableWriter.Encode(moduleRows, strings,
+            tables.ModuleRefs.Count, tables.TypeDefs.Count,
+            tables.Methods.Count, tables.Modules.SourceFileCount,
+            tables.Features.Count);
+
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var sectionIndex = 0;
+            sectionIndex < index.SectionCount; sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var bytes, out var recordCount);
+            if (kind == 0x0067 && equalityOwnerModule != 0)
+            {
+                var equalityBytes = bytes.ToArray();
+                for (var row = 0; row < recordCount; row++)
+                {
+                    BinaryPrimitives.WriteUInt32LittleEndian(
+                        equalityBytes.AsSpan(row * 12), equalityOwnerModule);
+                }
+
+                sections.Add(new TrRmSection(kind, flags, recordCount,
+                    equalityBytes));
+                continue;
+            }
+
+            sections.Add(kind switch {
+                0x0001 => new TrRmSection(kind, flags, 2, moduleBytes),
+                0x0002 => new TrRmSection(kind, flags,
+                    checked((uint)textRows.Count), stringBytes),
+                _ => new TrRmSection(kind, flags, recordCount,
+                    bytes.ToArray()),
+            });
+        }
+
+        if (equalityOwnerModule != 0
+            && !index.TryGetSection(0x0067, out _, out _))
+        {
+            throw new InvalidOperationException(
+                "The co-located equality-owner fixture lost its equality table.");
+        }
+
+        var result = TrRmArtifactWriter.Encode(sections, schema,
+            standardSchemaIdentity: schemaIdentity);
+        _ = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                new TrRmArtifactIndex(result, schema,
+                    standardSchemaIdentity: schemaIdentity));
+        return result;
+    }
+
+    private static (byte[] Artifact, TrRmFeatureRow Feature)
+        AddFeatureRequirementToSecondModule(byte[] artifact,
+            string schemaIdentity)
+    {
+        var schema = TrRmExecutableCompiler.GetForeignInvocationSchema(
+            schemaIdentity);
+        var index = new TrRmArtifactIndex(artifact, schema,
+            standardSchemaIdentity: schemaIdentity);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(index);
+        if (tables.Modules.Count != 2
+            || !index.TryGetSection(0x0001, out var moduleSection, out _))
+        {
+            throw new InvalidOperationException(
+                "The per-Module Feature fixture requires two co-located Modules.");
+        }
+
+        var (featureStart, featureCount)
+            = tables.Modules.GetFeatureRange(2);
+        var moduleFeatures = new List<TrRmFeatureRow>(featureCount + 1);
+        for (var offset = 0; offset < featureCount; offset++)
+        {
+            moduleFeatures.Add(tables.Features.GetFeature(
+                featureStart + offset));
+        }
+
+        var feature = TrRmFeatureRow.GenericMethodCallsCandidate;
+        if (moduleFeatures.Contains(feature))
+        {
+            throw new InvalidOperationException(
+                "The per-Module Feature fixture already requires GenericMethodCalls.");
+        }
+
+        moduleFeatures.Add(feature);
+        var encodedModuleFeatures
+            = TrRmFeatureTableWriter.Encode(moduleFeatures, schema);
+        var moduleBytes = moduleSection.ToArray();
+        var secondModuleOffset = 48;
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            moduleBytes.AsSpan(secondModuleOffset + 24, 4),
+            checked((uint)(tables.Features.Count + 1)));
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            moduleBytes.AsSpan(secondModuleOffset + 28, 4),
+            checked((uint)moduleFeatures.Count));
+
+        var featureSectionBytes = index.TryGetSection(0x0004,
+                out var featureSection, out _)
+            ? new byte[featureSection.Length + encodedModuleFeatures.Length]
+            : encodedModuleFeatures;
+        if (index.TryGetSection(0x0004, out featureSection, out _))
+        {
+            featureSection.CopyTo(featureSectionBytes);
+            encodedModuleFeatures.CopyTo(featureSectionBytes,
+                featureSection.Length);
+        }
+
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var sectionIndex = 0; sectionIndex < index.SectionCount;
+            sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var bytes, out var recordCount);
+            sections.Add(kind switch {
+                0x0001 => new TrRmSection(kind, flags, 2, moduleBytes),
+                0x0004 => new TrRmSection(kind, flags,
+                    checked((uint)(tables.Features.Count
+                        + moduleFeatures.Count)), featureSectionBytes),
+                _ => new TrRmSection(kind, flags, recordCount,
+                    bytes.ToArray()),
+            });
+        }
+
+        if (!index.TryGetSection(0x0004, out _, out _))
+        {
+            sections.Add(new TrRmSection(0x0004, 0,
+                checked((uint)moduleFeatures.Count), featureSectionBytes));
+            sections.Sort(static (left, right) =>
+                left.Kind.CompareTo(right.Kind));
+        }
+
+        var result = TrRmArtifactWriter.Encode(sections, schema,
+            standardSchemaIdentity: schemaIdentity);
+        _ = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                new TrRmArtifactIndex(result, schema,
+                    standardSchemaIdentity: schemaIdentity));
+        return (result, feature);
+    }
+
+    private static (byte[] Artifact, TrRmFeatureRow Feature)
+        AddFeatureRequirementToSingleModule(byte[] artifact,
+            string schemaIdentity)
+    {
+        var schema = TrRmExecutableCompiler.GetForeignInvocationSchema(
+            schemaIdentity);
+        var index = new TrRmArtifactIndex(artifact, schema,
+            standardSchemaIdentity: schemaIdentity);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(index);
+        if (tables.Modules.Count != 1
+            || !index.TryGetSection(0x0001, out var moduleSection, out _))
+        {
+            throw new InvalidOperationException(
+                "The single-Module Feature fixture requires one Module.");
+        }
+
+        var (featureStart, featureCount)
+            = tables.Modules.GetFeatureRange(1);
+        var moduleFeatures = new List<TrRmFeatureRow>(featureCount + 1);
+        for (var offset = 0; offset < featureCount; offset++)
+        {
+            moduleFeatures.Add(tables.Features.GetFeature(
+                featureStart + offset));
+        }
+
+        var feature = TrRmFeatureRow.GenericMethodCallsCandidate;
+        if (moduleFeatures.Contains(feature))
+        {
+            throw new InvalidOperationException(
+                "The single-Module Feature fixture already requires GenericMethodCalls.");
+        }
+
+        moduleFeatures.Add(feature);
+        var featureBytes = TrRmFeatureTableWriter.Encode(moduleFeatures,
+            schema);
+        var moduleBytes = moduleSection.ToArray();
+        BinaryPrimitives.WriteUInt32LittleEndian(moduleBytes.AsSpan(24),
+            moduleFeatures.Count == 0 ? 0u : 1u);
+        BinaryPrimitives.WriteUInt32LittleEndian(moduleBytes.AsSpan(28),
+            checked((uint)moduleFeatures.Count));
+
+        var sections = new List<TrRmSection>(index.SectionCount + 1);
+        var addedFeatureSection = false;
+        for (var sectionIndex = 0;
+            sectionIndex < index.SectionCount; sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var bytes, out var recordCount);
+            sections.Add(kind switch {
+                0x0001 => new TrRmSection(kind, flags, 1, moduleBytes),
+                0x0004 => AddFeatureRows(ref addedFeatureSection, kind,
+                    flags, featureBytes, moduleFeatures.Count),
+                _ => new TrRmSection(kind, flags, recordCount,
+                    bytes.ToArray()),
+            });
+        }
+
+        if (!addedFeatureSection)
+        {
+            sections.Add(new TrRmSection(0x0004, 0,
+                checked((uint)moduleFeatures.Count), featureBytes));
+        }
+
+        var result = TrRmArtifactWriter.Encode(sections, schema,
+            standardSchemaIdentity: schemaIdentity);
+        _ = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                new TrRmArtifactIndex(result, schema,
+                    standardSchemaIdentity: schemaIdentity));
+        return (result, feature);
+
+        static TrRmSection AddFeatureRows(ref bool added, ushort kind,
+            ushort flags, byte[] bytes, int count)
+        {
+            added = true;
+            return new TrRmSection(kind, flags, checked((uint)count), bytes);
+        }
+    }
+
+    private static byte[] CreateSplitClassAliasProvider(byte[] artifact,
+        string schemaIdentity, string aliasKey)
+    {
+        var schema = TrRmExecutableCompiler.GetForeignInvocationSchema(
+            schemaIdentity);
+        var index = new TrRmArtifactIndex(artifact, schema,
+            standardSchemaIdentity: schemaIdentity);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(index);
+        var leafRow = 0;
+        for (var row = 1; row <= tables.TypeDefs.Count; row++)
+        {
+            if (!StringComparer.Ordinal.Equals(
+                    tables.TypeDefs.GetName(row), "Leaf"))
+            {
+                continue;
+            }
+
+            if (leafRow != 0)
+            {
+                throw new InvalidOperationException(
+                    "The class-view split fixture has multiple Leaf TypeDefs.");
+            }
+
+            leafRow = row;
+        }
+
+        var aliasStringRow = 0;
+        for (var row = 1; row <= tables.Strings.Count; row++)
+        {
+            if (!StringComparer.Ordinal.Equals(
+                    tables.Strings.DecodeName(row), aliasKey))
+            {
+                continue;
+            }
+
+            if (aliasStringRow != 0)
+            {
+                throw new InvalidOperationException(
+                    "The class-view split fixture has duplicate alias strings.");
+            }
+
+            aliasStringRow = row;
+        }
+        if (leafRow == 0 || aliasStringRow == 0)
+        {
+            throw new InvalidOperationException(
+                "The class-view split fixture lost its Leaf or alias String.");
+        }
+        if (!index.TryGetSection(0x0013, out var typeDefSection,
+                out var typeDefCount)
+            || !index.TryGetSection(0x0014, out var fieldSection,
+                out var fieldCount)
+            || !index.TryGetSection(0x0015, out var layoutSection,
+                out var layoutCount)
+            || !index.TryGetSection(0x001D, out var exportSection,
+                out var exportCount)
+            || !index.TryGetSection(0x0023, out var layoutFieldSection,
+                out var layoutFieldCount)
+            || typeDefCount != tables.TypeDefs.Count)
+        {
+            throw new InvalidOperationException(
+                "The class-view split fixture is missing a required metadata table.");
+        }
+
+        var newTypeDefRow = typeDefCount + 1;
+        var (leafFieldStart, leafFieldEnd)
+            = tables.TypeDefs.GetFieldRange(leafRow);
+        var newFieldStart = fieldCount + 1;
+        var newFieldRows = new byte[checked(
+            (leafFieldEnd - leafFieldStart) * 16)];
+        var fieldRowMap = new Dictionary<int, int>();
+        for (var offset = 0; offset < leafFieldEnd - leafFieldStart;
+            offset++)
+        {
+            var oldFieldRow = leafFieldStart + offset;
+            var newFieldRow = newFieldStart + offset;
+            fieldRowMap.Add(oldFieldRow, newFieldRow);
+            fieldSection.Slice((oldFieldRow - 1) * 16, 16)
+                .CopyTo(newFieldRows.AsSpan(offset * 16, 16));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                newFieldRows.AsSpan(offset * 16), checked((uint)newTypeDefRow));
+        }
+
+        var (leafLayoutStart, leafLayoutCount)
+            = tables.TypeDefs.GetLayoutRange(leafRow);
+        var newLayoutStart = layoutCount + 1;
+        var layoutRows = new byte[checked(leafLayoutCount * 28)];
+        var layoutFieldRows
+            = new List<byte[]>(leafLayoutCount);
+        var nextLayoutFieldRow = layoutFieldCount + 1;
+        for (var offset = 0; offset < leafLayoutCount; offset++)
+        {
+            var oldLayoutRow = leafLayoutStart + offset;
+            var newLayoutRow = newLayoutStart + offset;
+            layoutSection.Slice((oldLayoutRow - 1) * 28, 28)
+                .CopyTo(layoutRows.AsSpan(offset * 28, 28));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                layoutRows.AsSpan(offset * 28), checked((uint)newTypeDefRow));
+            var (oldLayoutFieldStart, oldLayoutFieldCount)
+                = tables.Layouts.GetLayoutFieldRange(oldLayoutRow);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                layoutRows.AsSpan((offset * 28) + 20),
+                oldLayoutFieldCount == 0
+                    ? 0 : checked((uint)nextLayoutFieldRow));
+            for (var fieldOffset = 0;
+                fieldOffset < oldLayoutFieldCount;
+                fieldOffset++)
+            {
+                var oldLayoutFieldRow = oldLayoutFieldStart + fieldOffset;
+                var layoutFieldBytes = layoutFieldSection.Slice(
+                    (oldLayoutFieldRow - 1) * 12, 12).ToArray();
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    layoutFieldBytes, checked((uint)newLayoutRow));
+                var oldFieldRow
+                    = tables.LayoutFields.GetFieldDef(oldLayoutFieldRow);
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    layoutFieldBytes.AsSpan(8),
+                    checked((uint)fieldRowMap[oldFieldRow]));
+                layoutFieldRows.Add(layoutFieldBytes);
+                nextLayoutFieldRow++;
+            }
+        }
+
+        var typeDefBytes = new byte[typeDefSection.Length + 44];
+        typeDefSection.CopyTo(typeDefBytes);
+        typeDefSection.Slice((leafRow - 1) * 44, 44)
+            .CopyTo(typeDefBytes.AsSpan(typeDefSection.Length, 44));
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            typeDefBytes.AsSpan(typeDefSection.Length + 12),
+            leafFieldEnd == leafFieldStart
+                ? 0 : checked((uint)newFieldStart));
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            typeDefBytes.AsSpan(typeDefSection.Length + 28),
+            leafLayoutCount == 0 ? 0 : checked((uint)newLayoutStart));
+
+        var fieldBytes = new byte[fieldSection.Length
+            + newFieldRows.Length];
+        fieldSection.CopyTo(fieldBytes);
+        newFieldRows.CopyTo(fieldBytes.AsSpan(fieldSection.Length));
+        var layoutBytes = new byte[layoutSection.Length + layoutRows.Length];
+        layoutSection.CopyTo(layoutBytes);
+        layoutRows.CopyTo(layoutBytes.AsSpan(layoutSection.Length));
+        var layoutFieldBytes = new byte[layoutFieldSection.Length
+            + (layoutFieldRows.Count * 12)];
+        layoutFieldSection.CopyTo(layoutFieldBytes);
+        for (var row = 0; row < layoutFieldRows.Count; row++)
+        {
+            layoutFieldRows[row].CopyTo(layoutFieldBytes.AsSpan(
+                layoutFieldSection.Length + (row * 12), 12));
+        }
+
+        var exportBytes = exportSection.ToArray();
+        var aliasExportCount = 0;
+        for (var row = 0; row < exportCount; row++)
+        {
+            var offset = row * 8;
+            if (BinaryPrimitives.ReadUInt32LittleEndian(
+                    exportBytes.AsSpan(offset + 4))
+                != (uint)aliasStringRow)
+            {
+                continue;
+            }
+
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                exportBytes.AsSpan(offset),
+                0x1300_0000u | checked((uint)newTypeDefRow));
+            aliasExportCount++;
+        }
+        if (aliasExportCount != 1)
+        {
+            throw new InvalidOperationException(
+                "The class-view split fixture requires one exact alias ExportKey.");
+        }
+
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var sectionIndex = 0; sectionIndex < index.SectionCount;
+            sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var bytes, out var recordCount);
+            sections.Add(kind switch {
+                0x0013 => new TrRmSection(kind, flags,
+                    checked((uint)(typeDefCount + 1)), typeDefBytes),
+                0x0014 => new TrRmSection(kind, flags,
+                    checked((uint)(fieldCount + (leafFieldEnd
+                        - leafFieldStart))), fieldBytes),
+                0x0015 => new TrRmSection(kind, flags,
+                    checked((uint)(layoutCount + leafLayoutCount)),
+                    layoutBytes),
+                0x001D => new TrRmSection(kind, flags, recordCount,
+                    exportBytes),
+                0x0023 => new TrRmSection(kind, flags,
+                    checked((uint)(layoutFieldCount
+                        + layoutFieldRows.Count)), layoutFieldBytes),
+                _ => new TrRmSection(kind, flags, recordCount,
+                    bytes.ToArray()),
+            });
+        }
+
+        var result = TrRmArtifactWriter.Encode(sections, schema,
+            standardSchemaIdentity: schemaIdentity);
+        _ = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                new TrRmArtifactIndex(result, schema,
+                    standardSchemaIdentity: schemaIdentity));
+        return result;
+    }
+
     private static byte[] AddTypeDefBindingEquality(byte[] artifact,
         string schemaIdentity, uint ownerModule, uint leftTypeDef,
         uint rightTypeDef)
@@ -3906,7 +5762,9 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
         string? leafAliasKey = null, bool includeReadMethod = false,
         int? readDefaultValue = null, bool includePrefix = true)
     {
-        var prefixText = includePrefix ? "public class Prefix {}" : string.Empty;
+        var prefixText = includePrefix
+            ? "public class Prefix { public Prefix() { } }"
+            : string.Empty;
         var methodDefault = readDefaultValue is int defaultValue
             ? $" = {defaultValue}" : string.Empty;
         var readMethodText = includeReadMethod
@@ -3916,6 +5774,7 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
             {{prefixText}}
             public class Leaf {
                 public int32 Value;
+                public Leaf(int32 value) { Value = value; }
                 {{readMethodText}}
             }
             """);
@@ -3936,18 +5795,16 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
                 static node =>
                     node.Kind == SyntaxKind.FunctionDeclaration)
             : null;
-        var leafIndex = Enumerable.Range(0, program.Classes.Length)
-            .Single(index => program.Classes[index].Name == "Leaf");
         var leafMemberExports
             = ImmutableArray.CreateBuilder<TrRmSourceClassMemberExport>();
-        leafMemberExports.Add(new TrRmSourceClassMemberExport(leafIndex,
+        leafMemberExports.Add(new TrRmSourceClassMemberExport(0,
             leafField.Span, "Leaf.Value"));
         if (readMethod is not null)
         {
             leafMemberExports.Add(new TrRmSourceClassMemberExport(
-                leafIndex, readMethod.Span, "Leaf.Read"));
+                0, readMethod.Span, "Leaf.Read"));
             leafMemberExports.Add(new TrRmSourceClassMemberExport(
-                leafIndex, readMethod.Span, "Leaf.ReadAlias"));
+                0, readMethod.Span, "Leaf.ReadAlias"));
         }
 
         var classExports = new List<TrRmSourceClassExport>();
@@ -3956,20 +5813,105 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
             var prefix = declarations.Single(static declaration =>
                 declaration.Children.OfType<SyntaxTokenElement>().Any(
                     static token => token.Token.Name == "Prefix"));
-            var prefixIndex = Enumerable.Range(0, program.Classes.Length)
-                .Single(index => program.Classes[index].Name == "Prefix");
-            classExports.Add(new TrRmSourceClassExport(program, prefixIndex,
+            classExports.Add(new TrRmSourceClassExport(program, 0,
                 prefix.Span, "PrefixKey"));
         }
 
-        classExports.Add(new TrRmSourceClassExport(program, leafIndex,
+        classExports.Add(new TrRmSourceClassExport(program, 0,
             leaf.Span, "LeafKey", leafMemberExports.ToImmutable()));
         if (leafAliasKey is not null)
         {
-            classExports.Add(new TrRmSourceClassExport(program, leafIndex,
+            classExports.Add(new TrRmSourceClassExport(program, 0,
                 leaf.Span, leafAliasKey));
         }
 
+        return TrRmExecutableCompiler.EmitStandard(program, moduleIdentity,
+            schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], classExports);
+    }
+
+    private static byte[] CreateFieldReferenceClassProvider(
+        string moduleIdentity, string schemaIdentity, bool includePrefix)
+    {
+        var prefixText = includePrefix
+            ? "public class Prefix { public Prefix() { } }"
+            : string.Empty;
+        var mutableClass
+            = TrRmExecutableCompiler.GetForeignInvocationSchema(
+                schemaIdentity).UsesMethodReceiverAccess();
+        var mutableModifier = mutableClass ? "mut " : string.Empty;
+        var setMethod = mutableClass
+            ? "public mut void Set(int32 value) { this.Value = value; }"
+            : string.Empty;
+        var tree = SyntaxTree.Parse($$"""
+            {{prefixText}}
+            public {{mutableModifier}}class Box {
+                public {{mutableModifier}}int32 Value;
+                public Box(int32 value) { Value = value; }
+                public int32 Identity(int32 value) { return value; }
+                public int32 Forward(int32 value) { return Identity(value); }
+                public int32 ReadValue() { return this.Value; }
+                [return: DependsOn(this)]
+                public unsafe ref<int32> ReadReference() {
+                    return ref this.Value;
+                }
+                {{setMethod}}
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var declarations = tree.Root.Children.OfType<SyntaxNode>()
+            .Where(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration).ToArray();
+        var box = declarations.Single(static declaration =>
+            declaration.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "Box"));
+        var boxMembers = box.Children.OfType<SyntaxNode>();
+        var field = boxMembers.Single(static node =>
+            node.Kind == SyntaxKind.FieldDeclaration);
+        SyntaxNode GetFunction(string name)
+            => boxMembers.Single(node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(token =>
+                StringComparer.Ordinal.Equals(token.Token.Name, name)));
+        var members
+            = ImmutableArray.CreateBuilder<TrRmSourceClassMemberExport>();
+        members.Add(new TrRmSourceClassMemberExport(0, field.Span,
+            "Box.Value"));
+        foreach (var methodName in new[] {
+            "Identity", "Forward", "ReadValue", "ReadReference",
+        })
+        {
+            var method = GetFunction(methodName);
+            members.Add(new TrRmSourceClassMemberExport(0,
+                method.Span, "Box." + methodName));
+            if (methodName == "ReadReference")
+            {
+                members.Add(new TrRmSourceClassMemberExport(0,
+                    method.Span, "Box.ReadReferenceAlias"));
+            }
+        }
+        if (mutableClass)
+        {
+            var set = GetFunction("Set");
+            members.Add(new TrRmSourceClassMemberExport(0,
+                set.Span, "Box.Set"));
+        }
+        var classExports = new List<TrRmSourceClassExport>();
+        if (includePrefix)
+        {
+            var prefix = declarations.Single(static declaration =>
+                declaration.Children.OfType<SyntaxTokenElement>().Any(
+                    static token => token.Token.Name == "Prefix"));
+            classExports.Add(new TrRmSourceClassExport(program, 0,
+                prefix.Span, "PrefixKey"));
+        }
+
+        classExports.Add(new TrRmSourceClassExport(program, 0,
+            box.Span, "BoxKey", members.ToImmutable()));
         return TrRmExecutableCompiler.EmitStandard(program, moduleIdentity,
             schemaIdentity,
             TrRmModuleTableReader.WindowsX64NativeTargetRequirement,

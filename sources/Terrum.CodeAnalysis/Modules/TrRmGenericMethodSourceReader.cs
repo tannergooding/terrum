@@ -2389,7 +2389,12 @@ public static partial class TrRmExecutableCompiler
             context.SchemaIdentity,
             targetRequirement,
             runtimePolicy, context.Digests[artifactIndex], definitionId,
-            isMethodDefTarget);
+            isMethodDefTarget) {
+            OwnerModule
+                = TrRmExecutableCompiler.CreateA2SourceTypeProviderSnapshot(
+                    tables, context.Artifacts[artifactIndex],
+                    context.SchemaIdentity, moduleRow),
+        };
         var import = new BoundGenericMethodImport(origin, signature,
             formals.MoveToImmutable(), proofFunction,
             formalTypeOwnerOrdinal, context.SpanTypes,

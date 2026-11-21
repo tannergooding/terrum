@@ -1145,6 +1145,7 @@ internal sealed record BoundGenericMethodImportOrigin(
     bool IsMethodDefTarget = false)
 {
     internal BoundGenericMethodClassOwner? ClassOwner { get; init; }
+    internal BoundSourceTypeProviderSnapshot? OwnerModule { get; init; }
 }
 
 internal sealed record BoundGenericMethodClassOwner(
