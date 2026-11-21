@@ -1366,7 +1366,8 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
         var typeProviderInput = new TrRmStandardArtifactInput(
             schemaIdentity, typeProviderArtifact);
         var typeReference = TrRmExecutableCompiler.CreateStandardReference(
-            typeProviderInput, typeProviderIdentity, [], ["SnapshotKey"]);
+            typeProviderInput, typeProviderIdentity, [],
+            ["SnapshotKey", "InnerKey"]);
         var options = new CompilationOptions {
             RuntimePolicy = BoundRuntimePolicy.FailFast,
             LayoutCoreRegistration =
@@ -1391,7 +1392,7 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
 
                 public int32 Main(ptr<Snapshot> source) {
                     Snapshot captured = Expected(source);
-                    return captured.First;
+                    return captured.Nested.First;
                 }
                 """), typeReference, options);
         Assert.That(rootCompilation.HasErrors, Is.False,
@@ -1418,8 +1419,12 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse($$"""
             {{prefix}}
             [Blittable] [Layout(LayoutKind.Sequential)]
-            public struct Snapshot {
+            public struct Inner {
                 public mut {{firstFieldType}} First;
+            }
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Snapshot {
+                public mut Inner Nested;
                 public mut int32 Second;
                 public mut int32 Third;
             }
@@ -1433,6 +1438,7 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
         return TrRmExecutableCompiler.EmitStandard(compilation.Program!,
             moduleIdentity, schemaIdentity, 1, [
                 new TrRmSourceTypeExport("", "Snapshot", "SnapshotKey"),
+                new TrRmSourceTypeExport("", "Inner", "InnerKey"),
             ]);
     }
 
