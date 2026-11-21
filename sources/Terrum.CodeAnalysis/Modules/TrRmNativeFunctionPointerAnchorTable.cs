@@ -998,7 +998,7 @@ internal readonly ref struct TrRmNativeFunctionPointerAnchorTableReader
         {
             var kind = BinaryPrimitives.ReadUInt16LittleEndian(
                 contracts.GetRow(first + offset)[4..]);
-            if (kind is not (1 or 2 or 4 or 0x0B)
+            if (kind is not (1 or 2 or 4 or 0x0B or 0x10)
                 && !(kind == 0x0E
                     && contracts.Schema.UsesForeignInvocationContracts()))
             {
