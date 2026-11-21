@@ -1723,6 +1723,20 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
     }
 
     [Test]
+    public void SourceRejectsL1PointerLoadOfVoid()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public int32 Read(ptr<void> source) {
+                unsafe { return int32(*source); }
+            }
+            """));
+
+        Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3030"), Is.True,
+            "A void pointer has no positive typed load extent.");
+    }
+
+    [Test]
     public void L1PointerLoadRequiresRootlessNativeValuesFeature()
     {
         const string moduleIdentity = "l1p-feature-closure";
