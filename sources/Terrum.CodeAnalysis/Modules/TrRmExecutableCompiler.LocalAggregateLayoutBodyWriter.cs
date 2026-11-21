@@ -914,7 +914,7 @@ public static partial class TrRmExecutableCompiler
                     methodMapTokenByFunction, importedMethodFunctions,
                     typeSpecRefs, fieldFirstByStructure,
                     declarationTables.FixedArrayLayouts, scalarValues,
-                    contractRows.Count);
+                    contractRows.Count, usesNativePointerLoads);
             }
 
             bodies.Add(body);
@@ -1297,12 +1297,19 @@ public static partial class TrRmExecutableCompiler
     }
 
     private static bool IsLocalAggregateLayoutValueType(BoundProgram program,
-        PrimitiveType type)
+        PrimitiveType type, bool usesNativePointerLoads = false)
     {
         if (NativeFixedArrayTypes.IsType(type))
         {
             return (uint)NativeFixedArrayTypes.Index(type)
                 < (uint)program.NativeFixedArrayTypes.Length;
+        }
+
+        if (usesNativePointerLoads
+            && NativePointerTypeContract.IsValidType(
+                type, program.NativePointerTypes))
+        {
+            return true;
         }
 
         var structureIndex = (int)type - 100;
@@ -1318,11 +1325,12 @@ public static partial class TrRmExecutableCompiler
         int[] fieldFirstByStructure,
         TrRmFixedArrayLayoutTableReader arrayLayouts,
         TrRmFrozenScalarValueBuilder scalarValues,
-        int contractCount)
+        int contractCount, bool usesNativePointerLoads)
     {
         return EncodeLocalAggregateLayoutBodyCore(program, function,
             methodMapTokenByFunction, importedMethodFunctions, typeSpecRefs,
-            fieldFirstByStructure, arrayLayouts, scalarValues, contractCount);
+            fieldFirstByStructure, arrayLayouts, scalarValues, contractCount,
+            usesNativePointerLoads);
     }
 
     private static byte[] EncodeLocalAggregateLayoutBodyCore(
@@ -1332,7 +1340,7 @@ public static partial class TrRmExecutableCompiler
         int[] fieldFirstByStructure,
         TrRmFixedArrayLayoutTableReader arrayLayouts,
         TrRmFrozenScalarValueBuilder scalarValues,
-        int contractCount)
+        int contractCount, bool usesNativePointerLoads)
     {
         var localCount = function.Variables.Length
             - function.ParameterCount;
@@ -1350,8 +1358,8 @@ public static partial class TrRmExecutableCompiler
             {
                 return;
             }
-            if (!IsLocalAggregateLayoutValueType(program,
-                    expression.Type))
+            if (!IsLocalAggregateLayoutValueType(program, expression.Type,
+                    usesNativePointerLoads))
             {
                 throw Unsupported(
                     "L1 Body capture Homes require a supported non-unit value type.");
@@ -1425,6 +1433,13 @@ public static partial class TrRmExecutableCompiler
                     case BoundNativeFixedArrayRepeatInitialization repeat:
                         AddTemporary(repeat);
                         AddTemporary(repeat.Seed);
+                        break;
+                    case BoundNativePointerRead pointerRead:
+                        if (!DirectNativeImportContract.IsScalar(
+                                pointerRead.Type))
+                        {
+                            AddTemporary(pointerRead);
+                        }
                         break;
                     case BoundCall call:
                         if ((uint)call.Function
@@ -2205,6 +2220,11 @@ public static partial class TrRmExecutableCompiler
                     AppendCall(call, 2, checked((ushort)resultHome));
                     return (2, checked((ushort)resultHome), call.Type);
                 }
+                case BoundNativePointerRead pointerRead:
+                {
+                    var valueHome = CaptureValueHome(pointerRead);
+                    return (2, checked((ushort)valueHome), pointerRead.Type);
+                }
                 case BoundNativeFixedArrayInitialization
                     or BoundNativeFixedArrayRepeatInitialization:
                 {
@@ -2950,6 +2970,42 @@ public static partial class TrRmExecutableCompiler
                         code.Add(destination);
                     }
                     return;
+                case BoundNativePointerRead pointerRead:
+                    if (!usesNativePointerLoads
+                        || destination >= 14
+                        || !pointerRead.IsUnsafeAuthorized
+                        || !NativePointerTypeContract.IsValidType(
+                            pointerRead.Address.Type,
+                            program.NativePointerTypes))
+                    {
+                        throw Unsupported(
+                            "L1P pointer reads require an authorized registered typed-pointer source.");
+                    }
+
+                    var pointerType
+                        = program.NativePointerTypes[
+                            NativePointerTypes.Index(
+                                pointerRead.Address.Type)];
+                    if (pointerType.PointeeType == PrimitiveType.Void
+                        || pointerType.PointeeType != pointerRead.Type
+                        || !IsStandardNativePointerLoadPointeeType(
+                            pointerRead.Type, program,
+                            allowAggregatePointees: true)
+                        || !NativePointerTypeContract.IsCopyableSourcePointee(
+                            pointerRead.Type, program.Structures,
+                            program.CheckedReferenceTypes,
+                            program.NativeLoweringAgreement,
+                            program.NativeFixedArrayTypes))
+                    {
+                        throw Unsupported(
+                            "An L1P pointer read has an unsupported or mismatched pointee type.");
+                    }
+
+                    AppendValue(pointerRead.Address, destination);
+                    code.Add(0x1B);
+                    code.Add(checked((byte)((destination << 4)
+                        | destination)));
+                    return;
                 case BoundNativeFixedArrayElement arrayElement:
                     AppendArrayElementRead(arrayElement, destination);
                     return;
@@ -3371,6 +3427,20 @@ public static partial class TrRmExecutableCompiler
                 code.Add(checked((byte)resultHome));
                 return;
             }
+            if (returnStatement.Value is BoundNativePointerRead pointerRead
+                && !DirectNativeImportContract.IsScalar(pointerRead.Type))
+            {
+                var resultHome = CaptureValueHome(pointerRead);
+                if (resultHome > byte.MaxValue)
+                {
+                    throw Unsupported(
+                        "An L1P aggregate pointer-read result exceeds the ReturnHome index domain.");
+                }
+
+                code.Add(0xB8);
+                code.Add(checked((byte)resultHome));
+                return;
+            }
             if (!DirectNativeImportContract.IsScalar(
                     returnStatement.Value.Type))
             {
@@ -3781,6 +3851,7 @@ public static partial class TrRmExecutableCompiler
         return TrRmRegisterBodyWriter.Encode(homeMap, typeMap.Encode(),
             methodMap.Encode(), default, constantMap,
             blocks, records, flattenedCode, contractCount,
-            TrRmArtifactSchema.LocalAggregateLayoutDraft);
+            TrRmArtifactSchema.LocalAggregateLayoutDraft,
+            usesNativePointerLoads: usesNativePointerLoads);
     }
 }

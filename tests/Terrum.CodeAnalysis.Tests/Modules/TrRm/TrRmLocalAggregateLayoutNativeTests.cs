@@ -1089,6 +1089,74 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
     }
 
     [Test]
+    public async Task L1PointerLoadReadsNestedTypedPointerCellsAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+
+        const string moduleIdentity = "l1p-nested-pointer-cells";
+        const string l1pSchemaIdentity
+            = "trrm/1-draft-local-aggregate-layout-execution-pointer-loads-1";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public int32 Main(ptr<ptr<int32>> source) {
+                unsafe {
+                    ptr<int32> inner = *source;
+                    return *inner;
+                }
+            }
+            """), new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, l1pSchemaIdentity,
+            moduleTargetRequirement: 1);
+        var input = new TrRmStandardArtifactInput(l1pSchemaIdentity,
+            artifact);
+        var image = NativeModuleCompiler.EmitStandardLibrary(input,
+            moduleIdentity, [], ["Main"], NativeRuntimePolicy.FailFast);
+
+        var directory = TestArtifactPaths.CreateDirectory(
+            "terrum-l1p-nested-pointer-cells-");
+        try
+        {
+            var imagePath = Path.Combine(directory, "library.dll");
+            await File.WriteAllBytesAsync(imagePath, image)
+                .ConfigureAwait(true);
+            var library = NativeLibrary.Load(imagePath);
+            try
+            {
+                var function = Marshal.GetDelegateForFunctionPointer<
+                    GetPointerValueDelegate>(NativeLibrary.GetExport(library,
+                    "Main"));
+                var source = Marshal.AllocHGlobal(IntPtr.Size);
+                var value = Marshal.AllocHGlobal(sizeof(int));
+                try
+                {
+                    Marshal.WriteInt32(value, 42);
+                    Marshal.WriteIntPtr(source, value);
+                    Assert.That(function(source), Is.EqualTo(42));
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(value);
+                    Marshal.FreeHGlobal(source);
+                }
+            }
+            finally
+            {
+                NativeLibrary.Free(library);
+            }
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
     public async Task L1PointerLoadPreservesImportedAggregateProviderClosureAsync()
     {
         Assume.That(OperatingSystem.IsWindows()
@@ -1374,8 +1442,11 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
                 LayoutCoreRegistrationTestData.Create(),
         };
         var methodProvider = Compilation.CreateLibrary(SyntaxTree.Parse("""
-            public Snapshot Actual(ptr<Snapshot> source) {
-                unsafe { return *source; }
+            public int32 Actual(ptr<Snapshot> source) {
+                unsafe {
+                    Snapshot captured = *source;
+                    return captured.Nested.First;
+                }
             }
             """), typeReference, options);
         Assert.That(methodProvider.HasErrors, Is.False,
@@ -1386,13 +1457,15 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
 
         var rootCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse("""
-                internal Snapshot Expected(ptr<Snapshot> source) {
-                    unsafe { return *source; }
+                internal int32 Expected(ptr<Snapshot> source) {
+                    unsafe {
+                        Snapshot captured = *source;
+                        return captured.Nested.First;
+                    }
                 }
 
                 public int32 Main(ptr<Snapshot> source) {
-                    Snapshot captured = Expected(source);
-                    return captured.Nested.First;
+                    return Expected(source);
                 }
                 """), typeReference, options);
         Assert.That(rootCompilation.HasErrors, Is.False,
