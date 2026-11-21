@@ -519,6 +519,147 @@ internal sealed class NativeCoreRegistrationTests
     }
 
     [Test]
+    public void StandardForeignNativeInterfaceVoidCallBodiesRoundTrip()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-native-interface-contracts-1";
+        const string providerSource = """
+            [Terrum.Interop.NativeCallable]
+            [Terrum.Interop.ForeignNativeInterface(
+                VTableByteOffset: uint32(0))]
+            public interface IProbe {
+                public unsafe void Reset();
+            }
+
+            void Invoke(ptr<void> receiver) {
+                unsafe {
+                    IProbe.Reset(receiver);
+                    return;
+                }
+            }
+            """;
+        const string consumerSource = """
+            void Invoke(ptr<void> receiver) {
+                unsafe {
+                    IProbe.Reset(receiver);
+                    return;
+                }
+            }
+            """;
+        var options = new CompilationOptions {
+            NativeCoreRegistration = CreateRegistration(
+                includeForeignNativeInterface: true),
+        };
+        var providerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(providerSource), options);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+        var providerProgram = providerCompilation.Program
+            ?? throw new AssertionException("Expected a bound provider.");
+        var providerInterface = providerProgram.Interfaces.Single();
+        var typeExport = new TrRmSourceTypeExport("", "IProbe",
+            "provider/IProbe") {
+            GenericArity = 0,
+            InterfaceMethodExports = [.. providerInterface.Members.Select(
+                member => new TrRmSourceInterfaceMethodExport(
+                    member.SourceInputOrdinal,
+                    member.SourceDeclarationSpan,
+                    $"provider/IProbe.{member.Name}"))],
+        };
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerProgram, "provider.module", schemaIdentity, 1,
+            [typeExport]);
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            providerArtifact);
+        var schema = TrRmArtifactSchema.ForeignNativeInterfaceDraft;
+        var providerTables = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
+                providerArtifact, schema));
+        var providerInvokeRow
+            = Enumerable.Range(1, providerTables.Methods.Count).Single(row =>
+                providerTables.Methods.GetName(row) == "Invoke");
+        var providerBody = providerTables.Bodies.GetRegisterBody(
+            providerTables.Methods.GetBodyRow(providerInvokeRow),
+            providerTables.Contracts.Count);
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+            providerBody.MethodMap) >> 24, Is.EqualTo(0x16u));
+        Assert.That(providerBody.GetRecord(1)[5], Is.EqualTo((byte)0));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+            providerBody.GetRecord(1)[12..]), Is.EqualTo(1u));
+        Assert.That(providerBody.GetBlockCode(0).ToArray(), Is.EqualTo(
+            new byte[] { 0x90, 1, 0x18, 0 }));
+
+        var loadedProvider = TrRmExecutableCompiler.LoadStandard(
+            providerInput, "provider.module", []);
+        AssertVoidForeignInterfaceCall(loadedProvider, expectedProvider: null);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            providerInput, "provider.module", []);
+        var consumerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(consumerSource), reference);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            consumerCompilation.Program
+                ?? throw new AssertionException("Expected a bound consumer."),
+            "consumer.module", schemaIdentity, 1, []);
+        var consumerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            consumerArtifact);
+        var consumerTables = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
+                consumerArtifact, schema));
+        var consumerInvokeRow
+            = Enumerable.Range(1, consumerTables.Methods.Count).Single(row =>
+                consumerTables.Methods.GetName(row) == "Invoke");
+        var consumerBody = consumerTables.Bodies.GetRegisterBody(
+            consumerTables.Methods.GetBodyRow(consumerInvokeRow),
+            consumerTables.Contracts.Count);
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+            consumerBody.MethodMap) >> 24, Is.EqualTo(0x1Cu));
+        Assert.That(consumerBody.GetRecord(1)[5], Is.EqualTo((byte)0));
+        Assert.That(consumerBody.GetBlockCode(0).ToArray(), Is.EqualTo(
+            new byte[] { 0x90, 1, 0x18, 0 }));
+
+        var providers = new[] { providerInput };
+        var loadedConsumer = TrRmExecutableCompiler.LoadStandard(
+            consumerInput, "consumer.module", providers);
+        AssertVoidForeignInterfaceCall(loadedConsumer, "provider.module");
+        var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(
+            loadedConsumer, "consumer.module", schemaIdentity, 1, []);
+        var reloadedConsumer = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                reemittedArtifact), "consumer.module", providers);
+        AssertVoidForeignInterfaceCall(reloadedConsumer, "provider.module");
+
+        static void AssertVoidForeignInterfaceCall(BoundProgram program,
+            string? expectedProvider)
+        {
+            var invoke = program.Functions.Single(static function =>
+                function.Name == "Invoke");
+            BoundCall? foreignCall = null;
+            Assert.That(BoundTreeTraversal.VisitExpressions(invoke.Body,
+                expression =>
+                {
+                    if (expression is BoundCall {
+                            ForeignInterfaceCall: not null,
+                        } call)
+                    {
+                        foreignCall = call;
+                    }
+                }), Is.True);
+            var selectedCall = foreignCall
+                ?? throw new AssertionException("Expected an FNI call.");
+            Assert.That(selectedCall.Type, Is.EqualTo(PrimitiveType.Void));
+            Assert.That(selectedCall.Arguments, Is.Empty);
+            Assert.That(selectedCall.ForeignInterfaceCall?.Member
+                .DeclaringInterface.ModuleImport?.ProducerIdentity,
+                Is.EqualTo(expectedProvider));
+            Assert.That(selectedCall.IsUnsafeAuthorized, Is.True);
+        }
+    }
+
+    [Test]
     public void StandardForeignNativeInterfaceCallBodiesRetainOutputReservations()
     {
         const string schemaIdentity

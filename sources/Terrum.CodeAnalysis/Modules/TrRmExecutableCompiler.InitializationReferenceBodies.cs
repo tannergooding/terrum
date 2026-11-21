@@ -1380,8 +1380,7 @@ public static partial class TrRmExecutableCompiler
                 static variable =>
                     variable.IsOut || !variable.IsInitializationLocal
                     || variable.IsImplicitRef
-                    || variable.IsImplicitReferenceTemporary)
-            || function.ReturnType == PrimitiveType.Void)
+                    || variable.IsImplicitReferenceTemporary))
         {
             return false;
         }
@@ -1411,30 +1410,46 @@ public static partial class TrRmExecutableCompiler
             statements = statementBuilder.ToImmutable();
         }
 
-        if (statements.IsEmpty
-            || statements[^1] is not BoundReturn returned)
-        {
-            return false;
-        }
-
         var vacantLocals = new HashSet<int>();
-        for (var index = 0; index < statements.Length - 1; index++)
+        BoundExpression? callExpression;
+        if (function.ReturnType == PrimitiveType.Void)
         {
-            if (statements[index] is not BoundVacantLocal vacant
-                || vacant.Variable < function.ParameterCount
-                || !vacantLocals.Add(vacant.Variable))
+            if (statements.Length != 2
+                || statements[0] is not BoundExpressionStatement callStatement
+                || statements[1] is not BoundReturn { Value: null })
             {
                 return false;
             }
-        }
 
-        var returnExpression = returned.Value;
-        if (returnExpression is BoundUnsafeExpression unsafeExpression)
+            callExpression = callStatement.Expression;
+        }
+        else
         {
-            returnExpression = unsafeExpression.Expression;
+            if (statements.IsEmpty
+                || statements[^1] is not BoundReturn returned)
+            {
+                return false;
+            }
+
+            for (var index = 0; index < statements.Length - 1; index++)
+            {
+                if (statements[index] is not BoundVacantLocal vacant
+                    || vacant.Variable < function.ParameterCount
+                    || !vacantLocals.Add(vacant.Variable))
+                {
+                    return false;
+                }
+            }
+
+            callExpression = returned.Value;
         }
 
-        if (returnExpression is not BoundCall boundCall
+        if (callExpression is BoundUnsafeExpression unsafeExpression)
+        {
+            callExpression = unsafeExpression.Expression;
+        }
+
+        if (callExpression is not BoundCall boundCall
             || boundCall.Function != BoundCall.ForeignInterfaceFunction
             || boundCall.ForeignInterfaceCall is not
                 BoundForeignInterfaceCall foreignCall
@@ -1604,7 +1619,9 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
-        var callSite = TrRmRegisterBodyRecordWriter.EncodeCallSite(1, 1,
+        var hasResult = call.Type != PrimitiveType.Void;
+        var callSite = TrRmRegisterBodyRecordWriter.EncodeCallSite(1,
+            hasResult ? (byte)1 : (byte)0,
             maps.GetMethodMapIndex(methodMapToken), 0, inputs, [],
             schema: schema);
         var records = new List<ReadOnlyMemory<byte>> {
@@ -1625,7 +1642,7 @@ public static partial class TrRmExecutableCompiler
 
         code.Add(0x90);
         code.Add(1);
-        code.Add(0x17);
+        code.Add(hasResult ? (byte)0x17 : (byte)0x18);
         code.Add(0);
         return TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
             maps.MethodMap, default, default,
@@ -4435,15 +4452,11 @@ public static partial class TrRmExecutableCompiler
                                 targetMethodRow, out var foreignTarget))
                         {
                             var member = foreignTarget.Member;
-                            if (resultKind != 1
-                                || resultIndex >= 14
-                                || preparationCount != 0
+                            if (preparationCount != 0
                                 || member.ResultType is not
                                     BoundInterfaceType resultBoundType
                                 || resultBoundType.Kind
                                     != BoundInterfaceTypeKind.Primitive
-                                || resultBoundType.PrimitiveType
-                                    == PrimitiveType.Void
                                 || function.ReturnType
                                     != resultBoundType.PrimitiveType
                                 || foreignTarget.Definition
@@ -4457,6 +4470,20 @@ public static partial class TrRmExecutableCompiler
                             {
                                 throw Unsupported(
                                     "The Standard F+I Body subset requires a normal-returning direct InterfaceMethod CallSite.");
+                            }
+
+                            var resultType = resultBoundType.PrimitiveType;
+                            var hasValueResult
+                                = resultType != PrimitiveType.Void;
+                            if ((hasValueResult
+                                    && (resultKind != 1 || resultIndex >= 14))
+                                || (!hasValueResult
+                                    && (resultKind != 0 || resultIndex != 0
+                                        || !member.NativeOutputContracts
+                                            .IsEmpty)))
+                            {
+                                throw Unsupported(
+                                    "The Standard F+I Body CallSite result does not match its return form.");
                             }
 
                             var outputContractsByFormal
@@ -4475,7 +4502,6 @@ public static partial class TrRmExecutableCompiler
                                     "A ForeignNativeInterface CallSite does not have one reservation for each NativeOutput formal.");
                             }
 
-                            var resultType = resultBoundType.PrimitiveType;
                             var declarationKey = member.DeclarationKey;
                             if (tokenKind == 0x1C)
                             {
@@ -4683,11 +4709,17 @@ public static partial class TrRmExecutableCompiler
                             // The caller-unsafe FNI target makes this CallSite the authored unsafe assertion.
                             var authorizedCall
                                 = new BoundUnsafeExpression(call, default);
-                            if (!valueByRegister.TryAdd(resultIndex,
+                            if (hasValueResult
+                                && !valueByRegister.TryAdd(resultIndex,
                                     authorizedCall))
                             {
                                 throw Invalid(
                                     "A ForeignNativeInterface CallSite overwrites an existing value register.");
+                            }
+                            if (!hasValueResult)
+                            {
+                                statements.Add(new BoundExpressionStatement(
+                                    authorizedCall, default));
                             }
 
                             calls++;
@@ -5354,6 +5386,12 @@ public static partial class TrRmExecutableCompiler
                 == PrimitiveType.Void
             && stores == 0 && calls == 1 && pointerLoads == 0
             && initializedLocals.Count == 1;
+        var foreignInterfaceVoidCall
+            = function.ReturnType == PrimitiveType.Void
+                && stores == 0 && calls == 1 && foreignInterfaceCalls == 1
+                && pointerLoads == 0 && initializedLocals.Count == 0
+                && foreignInterfaceOutputReservations == 0
+                && variables.Count == function.ParameterCount;
         var valueCall = function.ReturnType != PrimitiveType.Void
             && stores == 0 && calls == 1 && pointerLoads == 0
             && initializedLocals.Count == 1;
@@ -5405,7 +5443,7 @@ public static partial class TrRmExecutableCompiler
                 : body.MethodCount > 0
                     );
         var simpleInitializationBody = voidStore || voidForwardingCall
-            || voidInitializationCall || valueCall
+            || voidInitializationCall || foreignInterfaceVoidCall || valueCall
             || foreignInterfaceValueCall;
         if (returns != 1
             || !(simpleInitializationBody || valuePointerLoad))
