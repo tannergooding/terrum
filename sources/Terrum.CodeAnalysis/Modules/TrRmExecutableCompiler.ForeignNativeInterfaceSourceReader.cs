@@ -52,7 +52,9 @@ public static partial class TrRmExecutableCompiler
         Array.Fill(signatureIndexByAnchorTypeSpec, -1);
         var includedTypeDefRows
             = GetForeignNativeInterfaceStructureTypeDefClosure(tables,
-                moduleRow);
+                moduleRow, rootTypeDefRows: null,
+                out var structureImportRows);
+        usedImportRows.UnionWith(structureImportRows);
 
         var structures = LoadBlittableStructures(tables.TypeDefs,
             tables.Fields, tables.Layouts, tables.LayoutFields,
@@ -1036,13 +1038,15 @@ public static partial class TrRmExecutableCompiler
     private static HashSet<int>
         GetForeignNativeInterfaceStructureTypeDefClosure(
         TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
-        int moduleRow)
+        int moduleRow, IReadOnlyList<int>? rootTypeDefRows,
+        out HashSet<int> structureImportRows)
     {
         var typeDefStates = new byte[tables.TypeDefs.Count + 1];
         var typeSpecStates = new byte[tables.TypeSpecs.Count + 1];
         var typeSpecExportStates = new byte[tables.TypeSpecs.Count + 1];
         var methodStates = new byte[tables.Methods.Count + 1];
         var includedTypeDefRows = new HashSet<int>();
+        structureImportRows = [];
         var exportedTypeDefs = tables.Exports.GetExportsForModule(moduleRow)
             .Where(static export => (export.Definition >> 24) == 0x13)
             .Select(static export => export.Definition)
@@ -1077,6 +1081,112 @@ public static partial class TrRmExecutableCompiler
             VisitTypeSpec(tables.Signatures.GetResultTypeSpec(signatureRow),
                 false, true, depth + 1);
             methodStates[methodRow] = 2;
+        }
+
+        void VisitTypeDef(int typeDefRow, bool throughPointer,
+            bool requireExport, int depth)
+        {
+            if (depth > SemanticVerifier.MaximumDepth)
+            {
+                throw Unsupported(
+                    "The F+I aggregate TypeDef closure exceeds the supported depth.");
+            }
+
+            if (tables.TypeDefs.GetKind(typeDefRow) != 1)
+            {
+                return;
+            }
+
+            if (tables.TypeDefs.GetOwnerModule(typeDefRow) != moduleRow)
+            {
+                throw Invalid(
+                    "An F+I aggregate TypeDef is referenced without a consumer-local Import.");
+            }
+
+            var definitionId = 0x1300_0000u
+                | checked((uint)typeDefRow);
+            var isExported = exportedTypeDefs.Contains(definitionId);
+            var structureImportRow = 0;
+            for (var importRow = 1; importRow <= tables.Imports.Count;
+                importRow++)
+            {
+                if (tables.Imports.GetExpectedDefinitionForImportRow(
+                        importRow) != definitionId)
+                {
+                    continue;
+                }
+
+                var moduleRefRow = tables.Imports
+                    .GetModuleRefForImportRow(importRow);
+                if (tables.ModuleRefs.GetOwnerModule(moduleRefRow)
+                    != moduleRow)
+                {
+                    continue;
+                }
+                if (structureImportRow != 0)
+                {
+                    throw Invalid(
+                        "An F+I aggregate TypeDef has duplicate Import expectations.");
+                }
+
+                structureImportRow = importRow;
+            }
+
+            if (requireExport)
+            {
+                if ((tables.TypeDefs.GetFlags(typeDefRow) & 3) != 2)
+                {
+                    throw Invalid(
+                        "A ForeignNativeInterface aggregate pointee is not public.");
+                }
+                if (!isExported && structureImportRow == 0)
+                {
+                    throw Invalid(
+                        "A ForeignNativeInterface aggregate pointee has no local ExportKey or expected Import.");
+                }
+            }
+            if (structureImportRow != 0)
+            {
+                _ = structureImportRows.Add(structureImportRow);
+            }
+
+            if (typeDefStates[typeDefRow] == 1)
+            {
+                if (throughPointer)
+                {
+                    return;
+                }
+                throw Invalid(
+                    "An F+I inline aggregate TypeDef is recursively defined.");
+            }
+            if (typeDefStates[typeDefRow] == 2)
+            {
+                return;
+            }
+            if (!tables.Layouts.HasBlittableLayout(typeDefRow, 1, 1))
+            {
+                throw Unsupported(
+                    "An F+I aggregate pointee has no selected Windows x64 Blittable Layout.");
+            }
+            var (_, genericCount)
+                = tables.TypeDefs.GetGenericRange(typeDefRow);
+            if (genericCount != 0)
+            {
+                throw Unsupported(
+                    "F+I aggregate pointee TypeDefs must be nongeneric.");
+            }
+
+            typeDefStates[typeDefRow] = 1;
+            _ = includedTypeDefRows.Add(typeDefRow);
+            var (firstField, endField)
+                = tables.TypeDefs.GetFieldRange(typeDefRow);
+            for (var fieldRow = firstField; fieldRow < endField;
+                fieldRow++)
+            {
+                VisitTypeSpec(tables.Fields.GetTypeSpecRef(fieldRow),
+                    false, false, depth + 1);
+            }
+            typeDefStates[typeDefRow] = 2;
         }
 
         void VisitTypeSpec(uint typeSpecRef, bool throughPointer,
@@ -1137,82 +1247,8 @@ public static partial class TrRmExecutableCompiler
 
             var typeDefRow = tables.TypeSpecs.GetNominalTypeDefRow(
                 typeSpecRef, tables.TypeDefs, tables.Imports);
-            if (tables.TypeDefs.GetKind(typeDefRow) != 1)
-            {
-                return;
-            }
-            if (requireExport)
-            {
-                if ((tables.TypeDefs.GetFlags(typeDefRow) & 3) != 2)
-                {
-                    throw Invalid(
-                        "A ForeignNativeInterface aggregate pointee is not public.");
-                }
-
-                var definitionId = 0x1300_0000u
-                    | checked((uint)typeDefRow);
-                if (!exportedTypeDefs.Contains(definitionId))
-                {
-                    for (var importRow = 1;
-                        importRow <= tables.Imports.Count; importRow++)
-                    {
-                        if (tables.Imports.GetExpectedDefinitionForImportRow(
-                                importRow) != definitionId)
-                        {
-                            continue;
-                        }
-
-                        var moduleRefRow = tables.Imports
-                            .GetModuleRefForImportRow(importRow);
-                        if (tables.ModuleRefs.GetOwnerModule(moduleRefRow)
-                            == moduleRow)
-                        {
-                            throw Unsupported(
-                                "F+I aggregate TypeDef Import binding is not yet implemented.");
-                        }
-                    }
-
-                    throw Invalid(
-                        "A ForeignNativeInterface aggregate pointee has no local ExportKey or expected Import.");
-                }
-            }
-            if (typeDefStates[typeDefRow] == 1)
-            {
-                if (throughPointer)
-                {
-                    return;
-                }
-                throw Invalid(
-                    "An F+I inline aggregate TypeDef is recursively defined.");
-            }
-            if (typeDefStates[typeDefRow] == 2)
-            {
-                return;
-            }
-            if (!tables.Layouts.HasBlittableLayout(typeDefRow, 1, 1))
-            {
-                throw Unsupported(
-                    "An F+I aggregate pointee has no selected Windows x64 Blittable Layout.");
-            }
-            var (_, genericCount)
-                = tables.TypeDefs.GetGenericRange(typeDefRow);
-            if (genericCount != 0)
-            {
-                throw Unsupported(
-                    "F+I aggregate pointee TypeDefs must be nongeneric.");
-            }
-
-            typeDefStates[typeDefRow] = 1;
-            _ = includedTypeDefRows.Add(typeDefRow);
-            var (firstField, endField)
-                = tables.TypeDefs.GetFieldRange(typeDefRow);
-            for (var fieldRow = firstField; fieldRow < endField;
-                fieldRow++)
-            {
-                VisitTypeSpec(tables.Fields.GetTypeSpecRef(fieldRow),
-                    false, false, depth + 1);
-            }
-            typeDefStates[typeDefRow] = 2;
+            VisitTypeDef(typeDefRow, throughPointer, requireExport,
+                depth + 1);
         }
 
         for (var foreignInterfaceRow = 1;
@@ -1234,6 +1270,14 @@ public static partial class TrRmExecutableCompiler
             {
                 VisitMethodSignature(tables.InterfaceMethods
                     .GetMethodDefRow(firstMethod + methodOrdinal), 0);
+            }
+        }
+
+        if (rootTypeDefRows is not null)
+        {
+            foreach (var typeDefRow in rootTypeDefRows)
+            {
+                VisitTypeDef(typeDefRow, false, true, 0);
             }
         }
 
