@@ -1722,6 +1722,22 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
         var providers = new[] { methodProviderInput, typeProviderInput };
         var loaded = TrRmExecutableCompiler.LoadStandard(rootInput,
             rootIdentity, providers);
+        var reordered = TrRmExecutableCompiler.LoadStandard(rootInput,
+            rootIdentity, [typeProviderInput, methodProviderInput]);
+        var reorderedClosure = reordered.StandardMethodProviderClosure
+            ?? throw new InvalidOperationException(
+                "The L1P root must retain its reordered provider closure.");
+        Assert.That(reorderedClosure.MethodEdges.Single().ProducerIdentity,
+            Is.EqualTo(methodProviderIdentity));
+        Assert.That(reorderedClosure.MethodEdges.Single().ExportKey,
+            Is.EqualTo("Actual"));
+        var reorderedTypeProvider = reorderedClosure.Modules.Single(module =>
+            module.Identity == typeProviderIdentity);
+        Assert.That(reorderedClosure.TypeEdges.All(edge =>
+            edge.ProviderArtifactIndex
+                == reorderedTypeProvider.ArtifactIndex
+            && edge.ProviderModuleRow == reorderedTypeProvider.ModuleRow),
+            Is.True);
         var closure = loaded.StandardMethodProviderClosure
             ?? throw new InvalidOperationException(
                 "The L1P root must retain its method and type provider closure.");
