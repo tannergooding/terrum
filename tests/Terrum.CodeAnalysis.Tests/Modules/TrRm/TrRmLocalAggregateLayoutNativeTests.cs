@@ -1171,15 +1171,21 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
             Snapshot ReadSnapshot(ptr<Snapshot> source) {
                 unsafe { return *source; }
             }
-            public int32 Main() {
+            int32 Capture(int32 selector) {
                 mut Snapshot value = new Snapshot(42, 1, 2, 3, 4);
                 unsafe {
                     ptr<Snapshot> source = &value;
-                    Snapshot captured = ReadSnapshot(source);
+                    mut Snapshot captured;
+                    if (selector == 0) {
+                        captured = ReadSnapshot(source);
+                    } else {
+                        captured = ReadSnapshot(source);
+                    }
                     value.First = 99;
                     return captured.First;
                 }
             }
+            public int32 Main() { return Capture(0) + Capture(1); }
             """), new CompilationOptions {
             RuntimePolicy = BoundRuntimePolicy.FailFast,
             LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
@@ -1200,7 +1206,7 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
             l1pSchemaIdentity, reemitted);
         Assert.That(NativeModuleCompiler.ExecuteStandard(reemittedInput,
             reemittedIdentity, [], NativeRuntimePolicy.FailFast),
-            Is.EqualTo(42));
+            Is.EqualTo(84));
         var image = NativeModuleCompiler.EmitStandardExecutable(
             reemittedInput, reemittedIdentity, [],
             NativeRuntimePolicy.FailFast);
@@ -1210,7 +1216,7 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
         {
             await AssertNativeImageExitCodeAsync(image,
                 Path.Combine(directory, "program.exe"),
-                reemittedIdentity, 42).ConfigureAwait(true);
+                reemittedIdentity, 84).ConfigureAwait(true);
         }
         finally
         {
