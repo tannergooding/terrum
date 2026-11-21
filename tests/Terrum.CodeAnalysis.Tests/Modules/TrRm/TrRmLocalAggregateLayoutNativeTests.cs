@@ -2350,10 +2350,10 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
                 var function = Marshal.GetDelegateForFunctionPointer<
                     GetPointerValueDelegate>(NativeLibrary.GetExport(library,
                     "Main"));
-                var source = Marshal.AllocHGlobal(24);
+                var source = Marshal.AllocHGlobal(32);
                 try
                 {
-                    for (var index = 0; index < 24; index++)
+                    for (var index = 0; index < 32; index++)
                     {
                         Marshal.WriteByte(source, index, 0);
                     }
@@ -2362,6 +2362,8 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
                     Marshal.WriteInt32(source, 12, 1);
                     Marshal.WriteInt32(source, 16, 2);
                     Marshal.WriteInt32(source, 20, 3);
+                    Marshal.WriteInt32(source, 24, 4);
+                    Marshal.WriteInt32(source, 28, 5);
                     Assert.That(function(source), Is.EqualTo(42));
                 }
                 finally
@@ -2397,6 +2399,15 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
                 methodProviderInput,
                 new TrRmStandardArtifactInput(l1pSchemaIdentity,
                     incompatibleRawUnionArtifact),
+            ]));
+        var incompatibleArrayArtifact = CreateL1pTypeProviderArtifact(
+            typeProviderIdentity, l1pSchemaIdentity, relocate: true,
+            incompatibleArray: true);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(rootInput, rootIdentity, [
+                methodProviderInput,
+                new TrRmStandardArtifactInput(l1pSchemaIdentity,
+                    incompatibleArrayArtifact),
             ]));
     }
 
@@ -2621,7 +2632,7 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
     private static byte[] CreateL1pTypeProviderArtifact(
         string moduleIdentity, string schemaIdentity,
         bool relocate = false, bool incompatible = false,
-        bool incompatibleRawUnion = false)
+        bool incompatibleRawUnion = false, bool incompatibleArray = false)
     {
         var prefix = relocate ? """
             [Blittable] [Layout(LayoutKind.Sequential)]
@@ -2631,6 +2642,7 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
             """ : string.Empty;
         var firstFieldType = incompatible ? "uint32" : "int32";
         var wideFieldType = incompatibleRawUnion ? "uint32" : "uint64";
+        var arrayElementType = incompatibleArray ? "uint32" : "int32";
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse($$"""
             {{prefix}}
             [Blittable] [Layout(LayoutKind.Union)]
@@ -2648,7 +2660,7 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
                 public mut Inner Nested;
                 public mut int32 Second;
                 public mut int32 Third;
-                public mut [int32; 3] Values;
+                public mut [{{arrayElementType}}; 3] Values;
             }
             """), new CompilationOptions {
             RuntimePolicy = BoundRuntimePolicy.FailFast,
