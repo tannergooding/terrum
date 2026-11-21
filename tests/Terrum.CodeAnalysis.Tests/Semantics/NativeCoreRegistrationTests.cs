@@ -346,6 +346,92 @@ internal sealed class NativeCoreRegistrationTests
     }
 
     [Test]
+    public void StandardForeignNativeInterfaceProducerEmitsOutputContracts()
+    {
+        var (native, output) = NativeOutputCoreRegistrationTests
+            .CreateCombinedRegistrations(includeForeignNativeInterface: true);
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeCallable(
+                CallConv: Terrum.Interop.NativeCallingConvention.Cdecl)]
+            [Terrum.Interop.ForeignNativeInterface(VTableByteOffset: uint32(0))]
+            public interface IProbe {
+                [param(value): Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonNegative)]
+                public unsafe int32 TryRead(ptr<int32> source,
+                    [Terrum.CodeAnalysis.DependsOn(this, nameof(source))]
+                    [Terrum.CodeAnalysis.ForwardsBacking(
+                        this, nameof(source))]
+                    write ptr<int32> value);
+
+                [return: Terrum.CodeAnalysis.DependsOn(nameof(source))]
+                [return: Terrum.CodeAnalysis.ForwardsBacking(nameof(source))]
+                public unsafe ptr<int32> Get(ptr<int32> source);
+            }
+            """), new CompilationOptions {
+                NativeCoreRegistration = native,
+                LayoutCoreRegistration =
+                    CreateLayoutRegistration(native),
+                NativeOutputCoreRegistration = output,
+            });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program
+            ?? throw new AssertionException("Expected a bound program.");
+        var members = program.Interfaces.Single().Members;
+        var typeExport = new TrRmSourceTypeExport("", "IProbe",
+            "provider/IProbe") {
+            GenericArity = 0,
+            InterfaceMethodExports = [.. members.Select(member =>
+                new TrRmSourceInterfaceMethodExport(
+                    member.SourceInputOrdinal, member.SourceDeclarationSpan,
+                    $"provider/IProbe.{member.Name}"))],
+        };
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "provider.module",
+            "trrm/1-draft-foreign-native-interface-parameter-surface-1", 1,
+            [typeExport]);
+        var schema
+            = TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft;
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(new TrRmArtifactIndex(artifact,
+                schema));
+
+        Assert.That(tables.Contracts.GetNativeOutputs(1).Single(),
+            Is.EqualTo(new TrRmNativeOutputContract(1,
+                PrimitiveType.Int32, 3, 1)));
+        Assert.That(tables.Contracts.GetOutputStateContracts(1)
+            .Select(static state =>
+                (state.ParameterOrdinal, state.State)),
+            Is.EqualTo(new[] { (1, (byte)1), (1, (byte)0) }));
+        Assert.That(tables.Contracts.GetDependencyContracts(1),
+            Is.EquivalentTo([
+                new TrRmDependencyContract(2, 1, 2, 1, 1, 0),
+                new TrRmDependencyContract(2, 2, 2, 1, 1, 0),
+            ]));
+        Assert.That(tables.Contracts.GetDependencyContracts(2).Single(),
+            Is.EqualTo(new TrRmDependencyContract(1, 1, 2, 1, 0, 0)));
+        Assert.That(tables.Contracts.GetPredicateGraphContracts(1)
+            .Select(static predicate =>
+                (predicate.PhaseTag, predicate.PhaseLocalOrdinal)),
+            Is.EqualTo(new[] { ((byte)3, 0u), ((byte)3, 1u) }));
+        Assert.That(tables.Contracts.GetNativeOutputs(2), Is.Empty);
+        Assert.That(tables.PredicateGraphs.Count, Is.EqualTo(2));
+        Assert.That(tables.PredicateReadFootprints.Count, Is.EqualTo(2));
+        Assert.That(tables.PredicateReadRoots.Count, Is.EqualTo(2));
+        Assert.That(tables.PredicateNodes.Count, Is.EqualTo(2));
+        Assert.That(tables.PredicateNodeOperands.Count, Is.EqualTo(2));
+        Assert.That(TrRmFeatureManifestValidator.Requires(tables.Features,
+            tables.Modules, 1,
+            TrRmFeatureTableReader.NativeOutputCellsCandidateFeatureId,
+            schema), Is.True);
+        Assert.That(TrRmFeatureManifestValidator.Requires(tables.Features,
+            tables.Modules, 1,
+            TrRmFeatureTableReader.PublishedPredicatesFeatureId, schema),
+            Is.True);
+    }
+
+    [Test]
     public void StandardForeignNativeInterfaceParameterProducerRetainsDefaultSurface()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""

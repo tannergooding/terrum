@@ -68,15 +68,11 @@ public static partial class TrRmExecutableCompiler
             throw Unsupported(
                 "Parameterized ForeignNativeInterface members require the exact F+I+SF1+PS1 schema.");
         }
-        if (program.Interfaces.Any(static definition =>
-                definition.Members.Any(static member =>
-                    !member.NativeOutputContracts.IsDefaultOrEmpty)))
-        {
-            throw Unsupported(
-                "The F+I declaration producer does not yet emit NativeOutput member clauses.");
-        }
 
         SemanticVerifier.Verify(program);
+        var hasNativeOutputs = program.Interfaces.Any(static definition =>
+            definition.Members.Any(static member =>
+                !member.NativeOutputContracts.IsDefaultOrEmpty));
         var hasScalarDefaults = schema
             .UsesForeignNativeInterfaceParameterSurface()
             && program.Interfaces.Any(static definition =>
@@ -88,6 +84,11 @@ public static partial class TrRmExecutableCompiler
             TrRmFeatureRow.RootlessNativeValues,
             TrRmFeatureRow.NativeInterfaceCalls,
         };
+        if (hasNativeOutputs)
+        {
+            featureRows.Add(TrRmFeatureRow.NativeOutputCellsCandidate);
+            featureRows.Add(TrRmFeatureRow.PublishedPredicates);
+        }
         if (hasScalarDefaults)
         {
             featureRows.Add(TrRmFeatureRow.TypedFrozenValues);

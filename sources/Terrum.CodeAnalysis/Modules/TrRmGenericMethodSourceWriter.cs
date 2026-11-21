@@ -5749,6 +5749,16 @@ public static partial class TrRmExecutableCompiler
         var associatedTypeDefRows
             = new List<TrRmAssociatedTypeDefRow>();
         var foreignInterfaceContractRows = new List<TrRmContractRow>();
+        var foreignInterfacePredicateGraphs
+            = new List<TrRmPredicateGraphRow>();
+        var foreignInterfacePredicateFootprints
+            = new List<TrRmPredicateReadFootprintRow>();
+        var foreignInterfacePredicateRoots
+            = new List<TrRmPredicateReadRootRow>();
+        var foreignInterfacePredicateNodes
+            = new List<TrRmPredicateNodeRow>();
+        var foreignInterfacePredicateOperands
+            = new List<TrRmPredicateNodeOperandRow>();
         var methodParameterLabelCount = GetCount(sections, 0x0066);
         var methodParameterLabelBytes
             = TryGetSection(sections, 0x0066, out var labelSection)
@@ -6050,11 +6060,10 @@ public static partial class TrRmExecutableCompiler
                 if (foreignNativeInterface)
                 {
                     if (member.NativeCallableConvention
-                            is not NativeCallingConvention convention
-                        || !member.NativeOutputContracts.IsDefaultOrEmpty)
+                            is not NativeCallingConvention convention)
                     {
                         throw Unsupported(
-                            "F+I member contracts require a normalized convention and currently exclude NativeOutput.");
+                            "F+I member contracts require a normalized convention.");
                     }
 
                     contractFirst
@@ -6075,6 +6084,155 @@ public static partial class TrRmExecutableCompiler
                             StandardNativeCallableContractPayload(
                                 convention)));
                     methodContractCount = 2;
+                    methodContractCount +=
+                        AddForeignNativeInterfaceDependencyContracts(
+                            member.Dependencies, methodOwner,
+                            foreignInterfaceContractRows);
+                    if (!member.NativeOutputContracts.IsDefaultOrEmpty)
+                    {
+                        if (member.DoesNotReturn)
+                        {
+                            throw Unsupported(
+                                "F+I NativeOutput requires a normal completion outcome.");
+                        }
+
+                        var selectors = new SortedSet<byte>();
+                        foreach (var output in member.NativeOutputContracts)
+                        {
+                            _ = selectors.Add((byte)output.SuccessSelector);
+                            _ = selectors.Add(
+                                (byte)output.ComplementSelector);
+                        }
+
+                        var graphBySelector = new Dictionary<byte, int>();
+                        uint phaseOrdinal = 0;
+                        foreach (var selector in selectors)
+                        {
+                            var graphRow = checked(
+                                GetCount(sections, 0x0037)
+                                + foreignInterfacePredicateGraphs.Count + 1);
+                            var footprintRow = checked(
+                                GetCount(sections, 0x0038)
+                                + foreignInterfacePredicateFootprints.Count
+                                + 1);
+                            var rootRow = checked(
+                                GetCount(sections, 0x0039)
+                                + foreignInterfacePredicateRoots.Count + 1);
+                            var nodeRow = checked(
+                                GetCount(sections, 0x003B)
+                                + foreignInterfacePredicateNodes.Count + 1);
+                            var operandRow = checked(
+                                GetCount(sections, 0x003C)
+                                + foreignInterfacePredicateOperands.Count
+                                + 1);
+                            foreignInterfacePredicateGraphs.Add(
+                                new TrRmPredicateGraphRow(nodeRow,
+                                    footprintRow));
+                            foreignInterfacePredicateFootprints.Add(
+                                new TrRmPredicateReadFootprintRow(rootRow,
+                                    1, 0, 0));
+                            foreignInterfacePredicateRoots.Add(
+                                new TrRmPredicateReadRootRow(5, 0));
+                            foreignInterfacePredicateNodes.Add(
+                                new TrRmPredicateNodeRow(selector,
+                                    0xF200_0001,
+                                    checked((uint)operandRow), 1));
+                            foreignInterfacePredicateOperands.Add(
+                                new TrRmPredicateNodeOperandRow(1,
+                                    checked((uint)rootRow)));
+                            var predicatePayload = new byte[12];
+                            predicatePayload[0] = 3;
+                            BinaryPrimitives.WriteUInt32LittleEndian(
+                                predicatePayload.AsSpan(4), phaseOrdinal++);
+                            BinaryPrimitives.WriteUInt32LittleEndian(
+                                predicatePayload.AsSpan(8),
+                                checked((uint)graphRow));
+                            foreignInterfaceContractRows.Add(
+                                new TrRmContractRow(methodOwner, 0x0B,
+                                    predicatePayload));
+                            methodContractCount++;
+                            graphBySelector.Add(selector, graphRow);
+                        }
+
+                        foreach (var output in member.NativeOutputContracts)
+                        {
+                            var resultType = member.ResultType
+                                is { Kind: BoundInterfaceTypeKind.Primitive }
+                                    ? member.ResultType.PrimitiveType
+                                    : throw Unsupported(
+                                        "F+I NativeOutput requires a scalar result.");
+                            var resultCondition
+                                = (output.SuccessSelector, resultType) switch {
+                                    (NativeOutputSelector.NonZero,
+                                        PrimitiveType.UInt32)
+                                        => DirectNativeImportContract
+                                            .UInt32NonZeroResultCondition,
+                                    (NativeOutputSelector.NonZero,
+                                        PrimitiveType.Int32)
+                                        => DirectNativeImportContract
+                                            .Int32NonZeroResultCondition,
+                                    (NativeOutputSelector.NonNegative,
+                                        PrimitiveType.Int32)
+                                        => DirectNativeImportContract
+                                            .Int32NonNegativeResultCondition,
+                                    _ => throw Unsupported(
+                                        "F+I NativeOutput has an unsupported result selector."),
+                                };
+                            foreignInterfaceContractRows.Add(
+                                new TrRmContractRow(methodOwner, 0x12,
+                                    NativeOutputPayload(
+                                        output.FormalOrdinal,
+                                        resultCondition, 1)));
+                            methodContractCount++;
+                            AddOutputState((byte)output.SuccessState,
+                                output.FormalOrdinal,
+                                graphBySelector[
+                                    (byte)output.SuccessSelector]);
+                            AddOutputState((byte)output.ComplementState,
+                                output.FormalOrdinal,
+                                graphBySelector[
+                                    (byte)output.ComplementSelector]);
+                            foreach (var dependency in output.Dependencies)
+                            {
+                                var dependencyPayload = new byte[12];
+                                dependencyPayload[0]
+                                    = dependency.DestinationKind;
+                                dependencyPayload[1]
+                                    = (byte)dependency.SourceKind;
+                                dependencyPayload[2]
+                                    = (byte)dependency.Relationship;
+                                dependencyPayload[3] = (byte)dependency.Phase;
+                                BinaryPrimitives.WriteUInt32LittleEndian(
+                                    dependencyPayload.AsSpan(4),
+                                    checked((uint)
+                                        dependency.DestinationOrdinal));
+                                BinaryPrimitives.WriteUInt32LittleEndian(
+                                    dependencyPayload.AsSpan(8),
+                                    checked((uint)dependency.SourceOrdinal));
+                                foreignInterfaceContractRows.Add(
+                                    new TrRmContractRow(methodOwner, 4,
+                                        dependencyPayload));
+                                methodContractCount++;
+                            }
+                        }
+
+                        void AddOutputState(byte state, int formalOrdinal,
+                            int graphRow)
+                        {
+                            var outputStatePayload = new byte[12];
+                            BinaryPrimitives.WriteUInt32LittleEndian(
+                                outputStatePayload,
+                                checked((uint)formalOrdinal));
+                            BinaryPrimitives.WriteUInt32LittleEndian(
+                                outputStatePayload.AsSpan(4),
+                                checked((uint)graphRow));
+                            outputStatePayload[8] = state;
+                            foreignInterfaceContractRows.Add(
+                                new TrRmContractRow(methodOwner, 2,
+                                    outputStatePayload));
+                            methodContractCount++;
+                        }
+                    }
                 }
 
                 AppendUInt32(methodBytes, checked((uint)typeDefRow));
@@ -6223,10 +6381,63 @@ public static partial class TrRmExecutableCompiler
             var contractBytes = TrRmContractTableWriter
                 .EncodeForeignInvocationDraft(foreignInterfaceContractRows,
                     typeDefs, methods, signatures, parameters, typeSpecs,
-                    features, modules, 0, schema);
+                    features, modules,
+                    checked(GetCount(sections, 0x0037)
+                        + foreignInterfacePredicateGraphs.Count), schema);
             SetSection(sections, 0x001B,
                 checked((uint)foreignInterfaceContractRows.Count),
                 contractBytes);
+            if (foreignInterfacePredicateGraphs.Count != 0)
+            {
+                var predicateGraphCount = checked(
+                    GetCount(sections, 0x0037)
+                    + foreignInterfacePredicateGraphs.Count);
+                var predicateFootprintCount = checked(
+                    GetCount(sections, 0x0038)
+                    + foreignInterfacePredicateFootprints.Count);
+                var predicateRootCount = checked(
+                    GetCount(sections, 0x0039)
+                    + foreignInterfacePredicateRoots.Count);
+                var predicateNodeCount = checked(
+                    GetCount(sections, 0x003B)
+                    + foreignInterfacePredicateNodes.Count);
+                var predicateOperandCount = checked(
+                    GetCount(sections, 0x003C)
+                    + foreignInterfacePredicateOperands.Count);
+                var predicateGraphBytes
+                    = TrRmPredicateGraphTableWriter.Encode(
+                        foreignInterfacePredicateGraphs,
+                        predicateNodeCount, predicateFootprintCount);
+                var predicateFootprintBytes
+                    = TrRmPredicateReadFootprintTableWriter.Encode(
+                        foreignInterfacePredicateFootprints,
+                        predicateRootCount, 0);
+                var predicateRootBytes
+                    = TrRmPredicateReadRootTableWriter.Encode(
+                        foreignInterfacePredicateRoots, 0, 0, schema);
+                var predicateNodeBytes
+                    = TrRmPredicateNodeTableWriter.Encode(
+                        foreignInterfacePredicateNodes,
+                        predicateOperandCount, typeSpecs, schema);
+                var operandCounts = new TrRmPredicateTableRowCounts(
+                    predicateRootCount, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+                var predicateOperandBytes
+                    = TrRmPredicateNodeOperandTableWriter.Encode(
+                        foreignInterfacePredicateOperands, operandCounts,
+                        schema);
+                SetSection(sections, 0x0037,
+                    checked((uint)predicateGraphCount), predicateGraphBytes);
+                SetSection(sections, 0x0038,
+                    checked((uint)predicateFootprintCount),
+                    predicateFootprintBytes);
+                SetSection(sections, 0x0039,
+                    checked((uint)predicateRootCount), predicateRootBytes);
+                SetSection(sections, 0x003B,
+                    checked((uint)predicateNodeCount), predicateNodeBytes);
+                SetSection(sections, 0x003C,
+                    checked((uint)predicateOperandCount),
+                    predicateOperandBytes);
+            }
         }
         for (var index = 0; index < interfaceTypeExportNameRows.Count;
             index++)
@@ -7415,6 +7626,233 @@ public static partial class TrRmExecutableCompiler
         }
     }
 
+    private static int AddForeignNativeInterfaceDependencyContracts(
+        ImmutableArray<BoundDependencyContract> dependencies,
+        uint methodOwner, List<TrRmContractRow> contractRows)
+    {
+        if (dependencies.IsDefault)
+        {
+            throw Unsupported(
+                "F+I member Dependency contracts are uninitialized.");
+        }
+
+        var rows = new List<TrRmDependencyContract>();
+        var refinements = new List<TrRmDependencyContract>();
+        foreach (var dependency in dependencies)
+        {
+            if (dependency is null || dependency.Sources.IsDefault)
+            {
+                throw Unsupported(
+                    "F+I member Dependency contracts are uninitialized.");
+            }
+
+            var (destinationKind, destinationOrdinal) =
+                dependency.Destination switch {
+                    BoundDependencyDestination.Result
+                        when dependency.DestinationOrdinal is null
+                        => ((byte)1, 0u),
+                    BoundDependencyDestination.InitializedOutput
+                        when dependency.DestinationOrdinal is int output
+                            && output >= 0
+                        => ((byte)2, checked((uint)output)),
+                    BoundDependencyDestination.RetainedFormal
+                        when dependency.DestinationOrdinal is int formal
+                            && formal >= 0
+                        => ((byte)3, checked((uint)formal)),
+                    BoundDependencyDestination.Receiver
+                        when dependency.DestinationOrdinal is null
+                        => ((byte)4, 0u),
+                    _ => throw Unsupported(
+                        "F+I member Dependency destination is not representable."),
+                };
+            if (destinationKind == 2)
+            {
+                continue;
+            }
+
+            if (dependency.Relation is BoundDependencyRelation.DependsOn
+                or BoundDependencyRelation.Captures)
+            {
+                var phase = dependency.Relation switch {
+                    BoundDependencyRelation.DependsOn
+                        when destinationKind is 1 => (byte)1,
+                    BoundDependencyRelation.Captures => (byte)2,
+                    _ => throw Unsupported(
+                        "F+I member Dependency destination/phase is not representable."),
+                };
+                if (dependency.Sources.IsEmpty)
+                {
+                    rows.Add(new TrRmDependencyContract(destinationKind, 0,
+                        0, phase, destinationOrdinal, 0));
+                    continue;
+                }
+
+                foreach (var source in dependency.Sources)
+                {
+                    var (sourceKind, sourceOrdinal)
+                        = GetForeignNativeInterfaceDependencySource(source);
+                    rows.Add(new TrRmDependencyContract(destinationKind,
+                        sourceKind, 3, phase, destinationOrdinal,
+                        sourceOrdinal));
+                }
+
+                continue;
+            }
+
+            var relationship = dependency.Relation switch {
+                BoundDependencyRelation.BorrowSourceStorage => (byte)1,
+                BoundDependencyRelation.ForwardsBacking => (byte)2,
+                _ => throw Unsupported(
+                    "F+I member Dependency relation is not representable."),
+            };
+            if (dependency.Sources.IsEmpty)
+            {
+                throw Unsupported(
+                    "F+I member Dependency refinements require sources.");
+            }
+
+            foreach (var source in dependency.Sources)
+            {
+                var (sourceKind, sourceOrdinal)
+                    = GetForeignNativeInterfaceDependencySource(source);
+                var hasBaseRelationship = false;
+                foreach (var baseDependency in dependencies)
+                {
+                    if (baseDependency is null
+                        || baseDependency.Destination
+                            != dependency.Destination
+                        || baseDependency.DestinationOrdinal
+                            != dependency.DestinationOrdinal
+                        || baseDependency.Relation is not (
+                            BoundDependencyRelation.DependsOn
+                            or BoundDependencyRelation.Captures)
+                        || baseDependency.Sources.IsDefault
+                        || !baseDependency.Sources.Contains(source))
+                    {
+                        continue;
+                    }
+
+                    var phase = baseDependency.Relation switch {
+                        BoundDependencyRelation.DependsOn
+                            when destinationKind == 1 => (byte)1,
+                        BoundDependencyRelation.Captures => (byte)2,
+                        _ => throw Unsupported(
+                            "F+I member Dependency destination/phase is not representable."),
+                    };
+                    refinements.Add(new TrRmDependencyContract(
+                        destinationKind, sourceKind, relationship, phase,
+                        destinationOrdinal, sourceOrdinal));
+                    hasBaseRelationship = true;
+                }
+
+                if (!hasBaseRelationship)
+                {
+                    throw Unsupported(
+                        "F+I member Dependency refinement does not refine a declared source.");
+                }
+            }
+        }
+
+        foreach (var refinement in refinements)
+        {
+            var match = rows.FindIndex(row =>
+                row.DestinationKind == refinement.DestinationKind
+                && row.DestinationOrdinal == refinement.DestinationOrdinal
+                && row.Phase == refinement.Phase
+                && row.SourceKind == refinement.SourceKind
+                && row.SourceOrdinal == refinement.SourceOrdinal
+                && row.Relationship == 3);
+            if (match < 0)
+            {
+                throw Unsupported(
+                    "F+I member Dependency refinements conflict or do not refine a declared source.");
+            }
+
+            rows[match] = rows[match] with {
+                Relationship = refinement.Relationship,
+            };
+        }
+
+        rows.Sort(static (left, right) => {
+            var comparison = left.DestinationKind.CompareTo(
+                right.DestinationKind);
+            if (comparison != 0)
+            {
+                return comparison;
+            }
+            comparison = left.DestinationOrdinal.CompareTo(
+                right.DestinationOrdinal);
+            if (comparison != 0)
+            {
+                return comparison;
+            }
+            comparison = left.Phase.CompareTo(right.Phase);
+            if (comparison != 0)
+            {
+                return comparison;
+            }
+            comparison = left.SourceKind.CompareTo(right.SourceKind);
+            return comparison != 0
+                ? comparison
+                : left.SourceOrdinal.CompareTo(right.SourceOrdinal);
+        });
+
+        var keys = new HashSet<(byte DestinationKind,
+            uint DestinationOrdinal, byte Phase, byte SourceKind,
+            uint SourceOrdinal)>();
+        for (var index = 0; index < rows.Count; index++)
+        {
+            var row = rows[index];
+            if (!keys.Add((row.DestinationKind, row.DestinationOrdinal,
+                    row.Phase, row.SourceKind, row.SourceOrdinal)))
+            {
+                throw Unsupported(
+                    "F+I member Dependency contracts contain a duplicate occurrence key.");
+            }
+
+            if (row.SourceKind == 0
+                && index + 1 < rows.Count
+                && rows[index + 1].DestinationKind == row.DestinationKind
+                && rows[index + 1].DestinationOrdinal
+                    == row.DestinationOrdinal
+                && rows[index + 1].Phase == row.Phase)
+            {
+                throw Unsupported(
+                    "F+I member Dependency empty-source rows cannot coexist with sources.");
+            }
+        }
+
+        foreach (var row in rows)
+        {
+            var payload = new byte[12];
+            payload[0] = row.DestinationKind;
+            payload[1] = row.SourceKind;
+            payload[2] = row.Relationship;
+            payload[3] = row.Phase;
+            BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(4),
+                row.DestinationOrdinal);
+            BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(8),
+                row.SourceOrdinal);
+            contractRows.Add(new TrRmContractRow(methodOwner, 4, payload));
+        }
+
+        return rows.Count;
+
+        static (byte Kind, uint Ordinal)
+            GetForeignNativeInterfaceDependencySource(
+            BoundDependencySource source)
+            => source.Kind switch {
+                BoundDependencySourceKind.Formal
+                    when source.FormalOrdinal is int formalOrdinal
+                        && formalOrdinal >= 0
+                    => (1, checked((uint)formalOrdinal)),
+                BoundDependencySourceKind.Receiver
+                    when source.FormalOrdinal is null => (2, 0),
+                _ => throw Unsupported(
+                    "F+I member Dependency source is not representable."),
+            };
+    }
+
     private static List<GenericInterfaceEmission>
         CaptureGenericInterfaceEmissions(BoundProgram program,
             IReadOnlyList<TrRmSourceTypeExport> typeExports,
@@ -7597,30 +8035,36 @@ public static partial class TrRmExecutableCompiler
                         || !member.AdditionalDeclarationKeys.IsDefaultOrEmpty
                         || !member.TypeParameters.IsDefaultOrEmpty
                         || !member.Constraints.IsDefaultOrEmpty
-                        || !member.Dependencies.IsDefaultOrEmpty
+                        || (!foreignNativeInterface
+                            && !member.Dependencies.IsDefaultOrEmpty)
                         || !member.Accessors.IsDefaultOrEmpty
                         || member.AssociatedDefaultType is not null
                         || member.AssociatedConstantType is not null
                         || member.AssociatedConstantDefault is not null
-                        || (foreignNativeInterface
-                            && !member.NativeOutputContracts.IsDefaultOrEmpty)
                         || member.Parameters.IsDefault
                         || member.Parameters.Length
                             > SemanticVerifier.MaximumArguments
-                        || member.Parameters.Any(parameter =>
-                            parameter.Mode
+                        || member.Parameters.Select((parameter,
+                                parameterOrdinal) =>
+                                (Parameter: parameter,
+                                    Ordinal: parameterOrdinal))
+                            .Any(parameter =>
+                            parameter.Parameter.Mode
                                 != BoundInterfaceParameterMode.Value
                             || (!foreignNativeInterface
-                                && (!parameter.Attributes.IsDefaultOrEmpty
-                                    || !parameter.AttributeTokens.IsDefaultOrEmpty
+                                && (!parameter.Parameter.Attributes.IsDefaultOrEmpty
+                                    || !parameter.Parameter.AttributeTokens.IsDefaultOrEmpty
                                     || !IsSupportedGenericInterfaceSignatureType(
-                                        parameter.Type,
+                                        parameter.Parameter.Type,
                                         definition.Formals.Length,
                                         isReturn: false)))
                             || (foreignNativeInterface
-                                && (!parameter.Attributes.IsDefaultOrEmpty
-                                    || !parameter.AttributeTokens.IsDefaultOrEmpty
-                                    || parameter.Type.Kind
+                                && ((!member.NativeOutputContracts.Any(
+                                        output => output.FormalOrdinal
+                                            == parameter.Ordinal)
+                                    && (!parameter.Parameter.Attributes.IsDefaultOrEmpty
+                                        || !parameter.Parameter.AttributeTokens.IsDefaultOrEmpty))
+                                    || parameter.Parameter.Type.Kind
                                         != BoundInterfaceTypeKind.Primitive)))
                         || (member.ResultType is not null
                             && (foreignNativeInterface
