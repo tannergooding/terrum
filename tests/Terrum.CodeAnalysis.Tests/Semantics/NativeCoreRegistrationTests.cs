@@ -340,8 +340,18 @@ internal sealed class NativeCoreRegistrationTests
                 public unsafe int32 Read(int32 value);
             }
 
-            int32 Invoke(ptr<void> receiver, int32 value) {
-                unsafe { return IProbe.Read(receiver, value: value); }
+            struct Counter {
+                public mut int32 Value;
+                public Counter() { Value = 0; }
+                public mut int32 Next() {
+                    Value = Value + 1;
+                    return Value;
+                }
+            }
+
+            int32 Invoke(ptr<void> receiver) {
+                mut Counter counter = new Counter();
+                unsafe { return IProbe.Read(receiver, value: counter.Next()); }
             }
             """), new CompilationOptions {
                 NativeCoreRegistration = registration,
@@ -381,6 +391,13 @@ internal sealed class NativeCoreRegistrationTests
             Is.TypeOf<BoundConstant>());
         Assert.That(foreignCall.NestedExpressions[0],
             Is.SameAs(foreignCall.ForeignInterfaceCall.Receiver));
+        Assert.That(foreignCall.Arguments[0],
+            Is.TypeOf<BoundCall>());
+        var laterArgumentCall = (BoundCall)foreignCall.Arguments[0];
+        Assert.That(program.Functions[laterArgumentCall.Function]
+            .DeclaringStruct, Is.EqualTo("Counter"));
+        Assert.That(foreignCall.NestedExpressions[1],
+            Is.SameAs(laterArgumentCall));
         Assert.That(foreignCall.NestedExpressions.Skip(1),
             Is.EqualTo(foreignCall.Arguments));
         SemanticVerifier.VerifyLibrary(program);
