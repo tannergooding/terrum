@@ -1999,6 +1999,95 @@ internal sealed class NativeCoreRegistrationTests
         }
     }
 
+    [TestCase("char8", PrimitiveType.Char8)]
+    [TestCase("char16", PrimitiveType.Char16)]
+    [TestCase("char32", PrimitiveType.Char32)]
+    [TestCase("int8", PrimitiveType.Int8)]
+    [TestCase("int16", PrimitiveType.Int16)]
+    [TestCase("uint16", PrimitiveType.UInt16)]
+    [TestCase("uint64", PrimitiveType.UInt64)]
+    [TestCase("nint", PrimitiveType.NativeInt)]
+    public void StandardForeignNativeInterfaceRoundTripsAdditionalScalarOutputs(
+        string typeName, PrimitiveType expectedType)
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-native-interface-parameter-surface-1";
+        var (native, output) = NativeOutputCoreRegistrationTests
+            .CreateCombinedRegistrations(includeForeignNativeInterface: true);
+        var options = new CompilationOptions {
+            NativeCoreRegistration = native,
+            LayoutCoreRegistration = CreateLayoutRegistration(native),
+            NativeOutputCoreRegistration = output,
+        };
+        var source = $$"""
+            using Terrum.Interop;
+            [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+            [ForeignNativeInterface(VTableByteOffset: uint32(0))]
+            public interface IProbe {
+                [param(value): NativeOutput(
+                    When: NativeOutputCondition.NonZero)]
+                public unsafe int32 TryRead(ptr<{{typeName}}> source,
+                    [Terrum.CodeAnalysis.DependsOn(this, nameof(source))]
+                    [Terrum.CodeAnalysis.ForwardsBacking(
+                        this, nameof(source))]
+                    write ptr<{{typeName}}> value);
+            }
+
+            {{typeName}} Invoke(ptr<void> receiver,
+                ptr<{{typeName}}> source, {{typeName}} fallback) {
+                init {{typeName}} value;
+                unsafe {
+                    int32 status = IProbe.TryRead(
+                        receiver, source, &init value);
+                    if (status != 0) { return value; }
+                    return fallback;
+                }
+            }
+            """;
+        var compilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(source), options);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program
+            ?? throw new AssertionException("Expected a scalar FNI program.");
+        var member = program.Interfaces.Single().Members.Single();
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "scalar-output.module", schemaIdentity, 1, [
+                new TrRmSourceTypeExport("", "IProbe",
+                    "provider/IProbe") {
+                    GenericArity = 0,
+                    InterfaceMethodExports = [
+                        new TrRmSourceInterfaceMethodExport(
+                            member.SourceInputOrdinal,
+                            member.SourceDeclarationSpan,
+                            "provider/IProbe.TryRead"),
+                    ],
+                },
+            ]);
+        var input = new TrRmStandardArtifactInput(schemaIdentity, artifact);
+        var loaded = TrRmExecutableCompiler.LoadStandard(input,
+            "scalar-output.module", []);
+        var loadedFunction = loaded.Functions.Single();
+        Assert.That(loadedFunction.ReturnType, Is.EqualTo(expectedType));
+        Assert.That(loadedFunction.Variables[3].Type,
+            Is.EqualTo(expectedType));
+        var image = NativeEmitter.EmitLibrary(loaded, ["Invoke"],
+            NativeRuntimePolicy.FailFast);
+        Assert.That(image[..2], Is.EqualTo(new byte[] {
+            (byte)'M', (byte)'Z',
+        }));
+
+        var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(loaded,
+            "scalar-output.module", schemaIdentity, 1, []);
+        var reloaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, reemittedArtifact),
+            "scalar-output.module", []);
+        Assert.That(reloaded.Functions.Single().ReturnType,
+            Is.EqualTo(expectedType));
+        Assert.That(reloaded.Functions.Single().Variables[3].Type,
+            Is.EqualTo(expectedType));
+    }
+
     [Test]
     public async Task StandardForeignNativeInterfaceConsumesAggregateOutputUnderAc1()
     {

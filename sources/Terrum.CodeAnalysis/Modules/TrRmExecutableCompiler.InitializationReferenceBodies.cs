@@ -6595,7 +6595,7 @@ public static partial class TrRmExecutableCompiler
                 || homeTypes[fallbackVariable] != function.ReturnType)))
         {
             throw Unsupported(
-                "The Standard F+I conditional-output Body requires a scalar result, direct receiver/source formals, and bounded output/status Homes.");
+                "The Standard F+I conditional-output Body requires a supported result type, direct receiver/source formals, and bounded output/status Homes.");
         }
 
         for (var parameter = 0; parameter < function.ParameterCount;
