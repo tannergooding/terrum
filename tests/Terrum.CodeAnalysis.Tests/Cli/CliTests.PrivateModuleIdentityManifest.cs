@@ -534,7 +534,9 @@ internal sealed partial class CliTests
         const string source = """
             using Terrum.Interop;
             [Blittable] [Layout(LayoutKind.Sequential)]
-            public struct Payload { public int32 Value; }
+            public struct Inner { public int32 Value; }
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Payload { public Inner Value; }
             public int32 Add(int32 value) { return value + 1; }
             [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
             [ForeignNativeInterface(VTableByteOffset: uint32(0))]
@@ -591,6 +593,12 @@ internal sealed partial class CliTests
                     definitions: [
                         new {
                             kind = "struct",
+                            qualifiedName = "Inner",
+                            localDeclarationKey = "types.inner",
+                            isExported = true,
+                        },
+                        new {
+                            kind = "struct",
                             qualifiedName = "Payload",
                             localDeclarationKey = "types.payload",
                             isExported = true,
@@ -615,6 +623,34 @@ internal sealed partial class CliTests
             Assert.That(reference.Structures.Single(static structure =>
                 structure.Name == "Payload").DeclaredCopyEvidence,
                 Is.True);
+            Assert.That(reference.Structures.Single(static structure =>
+                structure.Name == "Inner").DeclaredCopyEvidence,
+                Is.True);
+            var innerName = Encoding.UTF8.GetBytes("Inner");
+            var innerOffset = -1;
+            for (var index = 0;
+                index <= artifactBytes.Length - innerName.Length;
+                index++)
+            {
+                if (!artifactBytes.AsSpan(index, innerName.Length)
+                    .SequenceEqual(innerName))
+                {
+                    continue;
+                }
+                Assert.That(innerOffset, Is.EqualTo(-1),
+                    "The private nested Structure name should have one wire occurrence.");
+                innerOffset = index;
+            }
+            Assert.That(innerOffset, Is.GreaterThanOrEqualTo(0));
+            var nestedCopyEvidenceOffset
+                = innerOffset + innerName.Length + 12;
+            Assert.That(artifactBytes[nestedCopyEvidenceOffset],
+                Is.EqualTo(1));
+            var malformedNestedCopy = (byte[])artifactBytes.Clone();
+            malformedNestedCopy[nestedCopyEvidenceOffset] = 0;
+            _ = Assert.Throws<ModuleFormatException>(() =>
+                ModuleCompiler.CreateReferenceWithSchema(
+                    malformedNestedCopy, privateSchema));
             var payloadName = Encoding.UTF8.GetBytes("Payload");
             var payloadOffset = -1;
             for (var index = 0;
