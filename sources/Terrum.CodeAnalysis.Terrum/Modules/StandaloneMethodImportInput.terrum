@@ -11,8 +11,16 @@ public static int32 ValidateStandaloneMethodImportInput()
         || Host.StandaloneSectionArtifactOrdinal.Length != 1
         || Host.StandaloneModuleCount.Length != 1
         || Host.StandaloneModuleDirectoryStatus.Length != 1
+        || Host.StandaloneArtifactParameterStarts.Length
+            != Host.StandaloneArtifactInputs.Length / 4 + 1
+        || Host.StandaloneParameterTypeIds.Length
+            != Host.StandaloneArtifacts.Length / 16 + 1
         || Host.StandaloneResolvedRootCount.Length != 1
         || Host.StandaloneResolvedRoots.Length % 20 != 0
+        || Host.StandaloneTypeFactCount.Length != 1
+        || Host.StandaloneTypeFacts.Length != 159
+        || Host.StandaloneResolvedRootTypeIds.Length
+            != Host.StandaloneMethodRoots.Length / 5
         || Host.StandaloneSectionKinds.Length
             != Host.StandaloneArtifacts.Length / 16 + 1
         || Host.StandaloneSectionFlags.Length

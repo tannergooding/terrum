@@ -119,6 +119,9 @@ internal readonly record struct CapturedStandaloneMethodImportInput(
         var sectionCapacity = checked((artifactByteLength / 16) + 1);
         var moduleCapacity = checked((artifactByteLength / 48) + 2);
         var moduleDirectoryCapacity = checked(moduleCapacity * 8);
+        var parameterTypeCapacity = checked((artifactByteLength / 16) + 1);
+        var artifactParameterStartCapacity
+            = checked(Artifacts.Length + 1);
 
         var agreementStart = AppendText(Agreement);
         var usingModuleStart = AppendText(UsingModuleIdentity);
@@ -182,16 +185,29 @@ internal readonly record struct CapturedStandaloneMethodImportInput(
                 [0], true),
             new HostBuffer("StandaloneModuleDirectoryStatus",
                 PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneArtifactParameterStarts",
+                PrimitiveType.Int32,
+                [.. new int[artifactParameterStartCapacity]], true),
+            new HostBuffer("StandaloneParameterTypeIds",
+                PrimitiveType.Int32,
+                [.. new int[parameterTypeCapacity]], true),
             new HostBuffer("StandaloneModuleDirectory",
                 PrimitiveType.Int32,
                 [.. new int[moduleDirectoryCapacity]], true),
             new HostBuffer("StandaloneModuleOrder", PrimitiveType.Int32,
                 [.. new int[moduleCapacity]], true),
+            new HostBuffer("StandaloneTypeFactCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneTypeFacts", PrimitiveType.Int32,
+                [.. new int[53 * 3]], true),
             new HostBuffer("StandaloneResolvedRootCount",
                 PrimitiveType.Int32, [0], true),
             new HostBuffer("StandaloneResolvedRoots",
                 PrimitiveType.UInt32,
                 [.. new int[resolvedRootsCapacity]], true),
+            new HostBuffer("StandaloneResolvedRootTypeIds",
+                PrimitiveType.Int32,
+                [.. new int[MethodRoots.Length]], true),
         ];
 
         int AppendText(string value)

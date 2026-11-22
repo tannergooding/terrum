@@ -42,6 +42,8 @@ bool BuildStandaloneModuleDirectoryCore()
         return false;
     }
 
+    Host.StandaloneArtifactParameterStarts[0] = 0;
+    mut int32 parameterPrefix = 0;
     int32 requestUsingStart = Host.StandaloneRequest[2];
     int32 requestUsingLength = Host.StandaloneRequest[3];
     WriteStandaloneModuleDirectoryRow(1, -1, 0, 0, 0, 0, 0,
@@ -88,8 +90,20 @@ bool BuildStandaloneModuleDirectoryCore()
             = GetStandaloneArtifactSectionCount(0x0013);
         int32 methodDefCount
             = GetStandaloneArtifactSectionCount(0x0016);
+        int32 artifactParameterCount
+            = GetStandaloneArtifactSectionCount(0x0018);
         int32 sourceFileCount
             = GetStandaloneArtifactSectionCount(0x001F);
+        if (artifactParameterCount < 0
+            || parameterPrefix
+                > Host.StandaloneParameterTypeIds.Length - 1
+                    - artifactParameterCount)
+        {
+            return false;
+        }
+        parameterPrefix = parameterPrefix + artifactParameterCount;
+        Host.StandaloneArtifactParameterStarts[artifactOrdinal + 1]
+            = parameterPrefix;
         mut int32 previousModuleRefStart = 0;
         mut int32 previousTypeDefStart = 0;
         mut int32 previousMethodDefStart = 0;

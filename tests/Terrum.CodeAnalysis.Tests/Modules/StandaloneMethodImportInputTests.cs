@@ -64,8 +64,41 @@ internal sealed class StandaloneMethodImportInputTests
             int32 rootStatus = BindStandaloneMethodRoots();
             if (rootStatus != Host.Expected[1]) { return 23; }
             if (rootStatus != 0
-                && Host.StandaloneResolvedRootCount[0] != 0) {
+                && (Host.StandaloneResolvedRootCount[0] != 0
+                    || Host.StandaloneTypeFactCount[0] != 0
+                    || (Host.StandaloneResolvedRootTypeIds.Length != 0
+                        && Host.StandaloneResolvedRootTypeIds[0] != 0)
+                    || (Host.StandaloneParameterTypeIds.Length > 1
+                        && Host.StandaloneParameterTypeIds[1] != 0))) {
                 return 25;
+            }
+            if (Host.Expected[2] == 1) {
+                if (rootStatus != 0
+                    || Host.StandaloneResolvedRootCount[0] != 2
+                    || Host.StandaloneResolvedRootTypeIds[0] != 1
+                    || Host.StandaloneResolvedRootTypeIds[1] != 1
+                    || Host.StandaloneTypeFactCount[0] != 3
+                    || Host.StandaloneTypeFacts[3] != 0
+                    || Host.StandaloneTypeFacts[4] != 8
+                    || Host.StandaloneTypeFacts[5] != 0
+                    || Host.StandaloneTypeFacts[6] != 0
+                    || Host.StandaloneTypeFacts[7] != 0
+                    || Host.StandaloneTypeFacts[8] != 0
+                    || Host.StandaloneTypeFacts[9] != 1
+                    || Host.StandaloneTypeFacts[10] != 8
+                    || Host.StandaloneTypeFacts[11] != 1
+                    || Host.StandaloneArtifactParameterStarts[0] != 0
+                    || Host.StandaloneArtifactParameterStarts[1] != 1
+                    || Host.StandaloneArtifactParameterStarts[2] != 2
+                    || Host.StandaloneParameterTypeIds[1] != 2
+                    || Host.StandaloneParameterTypeIds[2] != 3
+                    || Host.StandaloneResolvedRoots[10] != 1
+                    || Host.StandaloneResolvedRoots[11] != 1
+                    || Host.StandaloneResolvedRoots[30] != 1
+                    || Host.StandaloneResolvedRoots[31] != 1) {
+                    return 26;
+                }
+                return 0;
             }
             if (rootStatus == 0
                 && (Host.StandaloneResolvedRootCount[0] != 2
@@ -187,10 +220,15 @@ internal sealed class StandaloneMethodImportInputTests
                 "StandaloneSectionOrder",
                 "StandaloneModuleCount",
                 "StandaloneModuleDirectoryStatus",
+                "StandaloneArtifactParameterStarts",
+                "StandaloneParameterTypeIds",
                 "StandaloneModuleDirectory",
                 "StandaloneModuleOrder",
+                "StandaloneTypeFactCount",
+                "StandaloneTypeFacts",
                 "StandaloneResolvedRootCount",
                 "StandaloneResolvedRoots",
+                "StandaloneResolvedRootTypeIds",
             }));
         Assert.That(hostBuffers[2].Values,
             Is.EqualTo(new[] { 1, 2, 3, 4, 5 }));
@@ -226,6 +264,7 @@ internal sealed class StandaloneMethodImportInputTests
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneArtifactDirectory.terrum",
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneStringTable.terrum",
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneModuleDirectory.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneCallableTypes.terrum",
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodRoots.terrum",
         };
         var root = RepositoryRoot();
@@ -360,6 +399,65 @@ internal sealed class StandaloneMethodImportInputTests
         Assert.That(Run(supportedFeatureProgram, supportedFeature, 3, 0),
             Is.EqualTo(0));
 
+        var typedParameters = input with {
+            Artifacts = [
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateParameterizedArtifact("provider/b",
+                        1, TrRmTypeSpecTableWriter.Builtin(0))),
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateParameterizedArtifact("provider/a", 1,
+                        TrRmTypeSpecTableWriter.InitializationReference(
+                            0xF200_0008, isWritable: true))),
+            ],
+        };
+        var typedParametersProgram
+            = Compile(typedParameters, 3, 0, verificationMode: 1);
+        Assert.That(Run(typedParametersProgram, typedParameters, 3, 0,
+                verificationMode: 1),
+            Is.EqualTo(0));
+
+        var voidInitializationReference = input with {
+            Artifacts = [
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateParameterizedArtifact("provider/b", 1,
+                        TrRmTypeSpecTableWriter.InitializationReference(
+                            0xF200_0000, isWritable: true))),
+                input.Artifacts[1],
+            ],
+        };
+        var voidInitializationReferenceProgram
+            = Compile(voidInitializationReference, 3, 2);
+        Assert.That(Run(voidInitializationReferenceProgram,
+                voidInitializationReference, 3, 2),
+            Is.EqualTo(0));
+
+        var pointerParameter = input with {
+            Artifacts = [
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateParameterizedArtifact("provider/b", 1,
+                        TrRmTypeSpecTableWriter.Wrapped(0x08,
+                            0xF200_0008))),
+                input.Artifacts[1],
+            ],
+        };
+        var pointerParameterProgram = Compile(pointerParameter, 3, 2);
+        Assert.That(Run(pointerParameterProgram, pointerParameter, 3, 2),
+            Is.EqualTo(0));
+
+        var invalidParameterMode = input with {
+            Artifacts = [
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateParameterizedArtifact("provider/b",
+                        0xF200_0008, parameterMode: 1)),
+                input.Artifacts[1],
+            ],
+        };
+        var invalidParameterModeProgram
+            = Compile(invalidParameterMode, 3, 3);
+        Assert.That(Run(invalidParameterModeProgram, invalidParameterMode,
+                3, 3),
+            Is.EqualTo(0));
+
         var repeatedFeature = input with {
             Artifacts = [
                 new TrRmStandardArtifactInput(SchemaIdentity,
@@ -448,11 +546,12 @@ internal sealed class StandaloneMethodImportInputTests
             Is.EqualTo(0));
 
         BoundProgram Compile(StandaloneMethodImportInput request,
-            int expectedModuleCount, int expectedRootStatus)
+            int expectedModuleCount, int expectedRootStatus,
+            int verificationMode = 0)
         {
             var compilation = Compilation.Create(components,
                 Buffers(request, expectedModuleCount,
-                    expectedRootStatus), policy);
+                    expectedRootStatus, verificationMode), policy);
             Assert.That(compilation.HasErrors, Is.False,
                 string.Join(Environment.NewLine, compilation.Diagnostics));
             return compilation.Program
@@ -462,18 +561,19 @@ internal sealed class StandaloneMethodImportInputTests
 
         int Run(BoundProgram boundProgram,
             StandaloneMethodImportInput request, int expectedModuleCount,
-            int expectedRootStatus)
+            int expectedRootStatus, int verificationMode = 0)
             => NativeJit.Execute(boundProgram with {
                 Buffers = Buffers(request, expectedModuleCount,
-                    expectedRootStatus),
+                    expectedRootStatus, verificationMode),
             }, (NativeRuntimePolicy)policy);
 
         ImmutableArray<HostBuffer> Buffers(
             StandaloneMethodImportInput request, int expectedModuleCount,
-            int expectedRootStatus)
+            int expectedRootStatus, int verificationMode)
             => request.Capture().CreateHostBuffers().Add(new HostBuffer(
                 "Expected", PrimitiveType.Int32,
-                [expectedModuleCount, expectedRootStatus], false));
+                [expectedModuleCount, expectedRootStatus,
+                    verificationMode], false));
     }
 
     private static string RepositoryRoot() =>
@@ -594,6 +694,68 @@ internal sealed class StandaloneMethodImportInputTests
             new TrRmSection(0x0017, 0, 1, methodSigSection),
             new TrRmSection(0x001D, 0, 2, exportSection),
         ]);
+    }
+
+    private static byte[] CreateParameterizedArtifact(string moduleIdentity,
+        uint parameterTypeSpecRef, byte[]? typeSpecRow = null,
+        byte parameterMode = 0)
+    {
+        ReadOnlyMemory<byte>[] typeSpecRows = typeSpecRow is null
+            ? []
+            : [new ReadOnlyMemory<byte>(typeSpecRow)];
+        byte[] typeSpecSection = typeSpecRows.Length == 0
+            ? Array.Empty<byte>()
+            : TrRmTypeSpecTableWriter.Encode(typeSpecRows, 0, 0, 0);
+        var stringSection = TrRmStringTableWriter.EncodeNames([
+            (moduleIdentity, 0),
+            ("Implementation", 0),
+            ("api/Run", 0),
+        ]);
+        var strings = new TrRmStringTableReader(stringSection, 3);
+        var moduleSection = TrRmModuleTableWriter.Encode([
+            new TrRmModuleRow(1, 1, 0, 0, 1, 1, 1, 1),
+        ], strings, 0, 0, 1, 0);
+        var methodDefSection = new byte[28];
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            methodDefSection.AsSpan(4), 2);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            methodDefSection.AsSpan(8), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            methodDefSection.AsSpan(12), 2);
+        var methodSigSection = new byte[24];
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            methodSigSection, 0xF200_0008);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            methodSigSection.AsSpan(8), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            methodSigSection.AsSpan(12), 1);
+        var paramSection = new byte[16];
+        BinaryPrimitives.WriteUInt32LittleEndian(paramSection, 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            paramSection.AsSpan(8), parameterTypeSpecRef);
+        paramSection[12] = parameterMode;
+        var exportSection = new byte[8];
+        BinaryPrimitives.WriteUInt32LittleEndian(exportSection,
+            0x1600_0001);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            exportSection.AsSpan(4), 3);
+
+        var sections = new List<TrRmSection> {
+            new(0x0001, 0, 1, moduleSection),
+            new(0x0002, 0, 3, stringSection),
+        };
+        if (typeSpecRows.Length != 0)
+        {
+            sections.Add(new TrRmSection(0x0003, 0, 1,
+                typeSpecSection));
+        }
+        sections.Add(new TrRmSection(0x0016, 0, 1,
+            methodDefSection));
+        sections.Add(new TrRmSection(0x0017, 0, 1,
+            methodSigSection));
+        sections.Add(new TrRmSection(0x0018, 0, 1, paramSection));
+        sections.Add(new TrRmSection(0x001D, 0, 1, exportSection));
+        return TrRmArtifactWriter.Encode(sections);
     }
 
     private static byte[] CreateOutOfOrderArtifact()

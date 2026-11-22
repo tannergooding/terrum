@@ -10,6 +10,12 @@ public static int32 BindStandaloneMethodRoots()
     }
 
     Host.StandaloneResolvedRootCount[0] = 0;
+    int32 inputStatus = ValidateStandaloneMethodImportInput();
+    if (inputStatus != 0)
+    {
+        return inputStatus == 2 || inputStatus == 3 ? 2 : 3;
+    }
+
     ClearStandaloneResolvedRoots();
 
     if (!TryBuildStandaloneModuleDirectory())
@@ -77,6 +83,7 @@ public static int32 BindStandaloneMethodRoots()
         init int32 exportKeyStringRow;
         int32 bindingStatus
             = FindStandaloneMethodRootExport(artifactOrdinal,
+                rootOrdinal,
                 Host.StandaloneModuleDirectory[
                     moduleDirectoryOffset + 1],
                 Host.StandaloneModuleDirectory[
@@ -156,6 +163,31 @@ void ClearStandaloneResolvedRoots()
     {
         Host.StandaloneResolvedRoots[index] = 0;
     }
+    for (mut int32 index = 0;
+        index < Host.StandaloneResolvedRootTypeIds.Length;
+        index = index + 1)
+    {
+        Host.StandaloneResolvedRootTypeIds[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneParameterTypeIds.Length;
+        index = index + 1)
+    {
+        Host.StandaloneParameterTypeIds[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneArtifactParameterStarts.Length;
+        index = index + 1)
+    {
+        Host.StandaloneArtifactParameterStarts[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneTypeFacts.Length;
+        index = index + 1)
+    {
+        Host.StandaloneTypeFacts[index] = 0;
+    }
+    Host.StandaloneTypeFactCount[0] = 0;
 }
 
 bool TryFindStandaloneModuleDirectoryRow(int32 textStart,
@@ -231,7 +263,7 @@ bool TryCompareStandaloneModuleDirectoryRowToText(int32 directoryRow,
 }
 
 int32 FindStandaloneMethodRootExport(int32 artifactOrdinal,
-    int32 moduleRow, int32 stringSectionStart,
+    int32 rootOrdinal, int32 moduleRow, int32 stringSectionStart,
     int32 stringSectionLength, int32 stringCount,
     int32 exportTextStart, int32 exportTextLength,
     ref<init int32> exportRowResult,
@@ -457,12 +489,27 @@ int32 FindStandaloneMethodRootExport(int32 artifactOrdinal,
         {
             return 3;
         }
-        if (resultTypeSpecRef == 0 || receiverTypeSpecRef != 0
-            || genericFirst != 0 || signatureGenericCount != 0
+        if (resultTypeSpecRef == 0
             || !IsStandaloneMetadataRange(paramFirst,
-                signatureParamCount, paramCount))
+                signatureParamCount, paramCount)
+            || !IsStandaloneMetadataRange(genericFirst,
+                signatureGenericCount, genericParamCount))
+        {
+            return 3;
+        }
+        if (receiverTypeSpecRef != 0 || signatureGenericCount != 0)
         {
             return 2;
+        }
+
+        int32 signatureTypeStatus
+            = ValidateStandaloneMethodCallableTypes(artifactOrdinal,
+                rootOrdinal, artifactStart, artifactLength,
+                int32(signatureRow), resultTypeSpecRef,
+                int32(paramFirst), int32(signatureParamCount));
+        if (signatureTypeStatus != 0)
+        {
+            return signatureTypeStatus;
         }
 
         init bool nativePointerAnchor;

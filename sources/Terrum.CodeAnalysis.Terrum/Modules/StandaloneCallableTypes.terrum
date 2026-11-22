@@ -1,0 +1,369 @@
+namespace Terrum.CodeAnalysis;
+
+int32 ValidateStandaloneMethodCallableTypes(int32 artifactOrdinal,
+    int32 rootOrdinal, int32 artifactStart, int32 artifactLength,
+    int32 methodSigRow,
+    uint32 resultTypeSpecRef, int32 paramFirst, int32 paramCount)
+{
+    int32 typeSpecEntry = FindStandaloneArtifactSection(0x0003);
+    int32 typeSpecCount = GetStandaloneArtifactSectionCount(0x0003);
+    int32 typeSpecStart = typeSpecEntry == 0 ? 0
+        : Host.StandaloneSectionStarts[typeSpecEntry];
+    int32 typeSpecLength = typeSpecEntry == 0 ? 0
+        : Host.StandaloneSectionLengths[typeSpecEntry];
+    if ((typeSpecEntry == 0) != (typeSpecCount == 0)
+        || (typeSpecCount != 0
+            && !TryValidateStandaloneVariableTableIndex(artifactStart,
+                artifactLength, typeSpecStart, typeSpecLength,
+                typeSpecCount, 2, 1)))
+    {
+        return 3;
+    }
+
+    init int32 resultTypeCode;
+    init bool resultIsInitReference;
+    init bool resultIsWritable;
+    int32 resultStatus = TryGetStandaloneCallableType(
+        artifactStart, artifactLength, typeSpecStart, typeSpecLength,
+        typeSpecCount, resultTypeSpecRef, allowInitReference: false,
+        allowUnit: true, ref init resultTypeCode,
+        ref init resultIsInitReference, ref init resultIsWritable);
+    if (resultStatus != 0)
+    {
+        return resultStatus;
+    }
+    init int32 resultTypeId;
+    int32 resultInternStatus = InternStandaloneCallableTypeFact(
+        resultIsInitReference ? 1 : 0, resultTypeCode,
+        resultIsWritable, ref init resultTypeId);
+    if (resultInternStatus != 0)
+    {
+        return resultInternStatus;
+    }
+    Host.StandaloneResolvedRootTypeIds[rootOrdinal] = resultTypeId;
+
+    int32 parameterTableCount
+        = GetStandaloneArtifactSectionCount(0x0018);
+    if (!IsStandaloneMetadataRange(uint32(paramFirst),
+            uint32(paramCount), parameterTableCount))
+    {
+        return 3;
+    }
+    if (paramCount == 0)
+    {
+        return 0;
+    }
+
+    int32 parameterEntry = FindStandaloneArtifactSection(0x0018);
+    if (parameterEntry == 0)
+    {
+        return 3;
+    }
+
+    int32 parameterStart
+        = Host.StandaloneSectionStarts[parameterEntry];
+    for (mut int32 ordinal = 0;
+        ordinal < paramCount;
+        ordinal = ordinal + 1)
+    {
+        int32 row = paramFirst + ordinal;
+        int32 rowStart = parameterStart + ((row - 1) * 16);
+        init uint32 ownerMethodSigRow;
+        init uint32 parameterOrdinal;
+        init uint32 parameterTypeSpecRef;
+        init int32 mode;
+        init int32 flags;
+        init int32 reserved0;
+        init int32 reserved1;
+        if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, rowStart, ref init ownerMethodSigRow)
+            || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, rowStart + 4, ref init parameterOrdinal)
+            || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, rowStart + 8,
+                ref init parameterTypeSpecRef)
+            || !TryReadStandaloneArtifactAbsoluteByte(artifactStart,
+                artifactLength, rowStart + 12, ref init mode)
+            || !TryReadStandaloneArtifactAbsoluteByte(artifactStart,
+                artifactLength, rowStart + 13, ref init flags)
+            || !TryReadStandaloneArtifactAbsoluteByte(artifactStart,
+                artifactLength, rowStart + 14, ref init reserved0)
+            || !TryReadStandaloneArtifactAbsoluteByte(artifactStart,
+                artifactLength, rowStart + 15, ref init reserved1)
+            || ownerMethodSigRow != uint32(methodSigRow)
+            || parameterOrdinal != uint32(ordinal)
+            || reserved0 != 0 || reserved1 != 0)
+        {
+            return 3;
+        }
+        if (mode != 0)
+        {
+            return 3;
+        }
+        if (flags != 0)
+        {
+            return 2;
+        }
+
+        init int32 parameterTypeCode;
+        init bool parameterIsInitReference;
+        init bool parameterIsWritable;
+        int32 parameterStatus = TryGetStandaloneCallableType(
+            artifactStart, artifactLength, typeSpecStart, typeSpecLength,
+            typeSpecCount, parameterTypeSpecRef,
+            allowInitReference: true, allowUnit: true,
+            ref init parameterTypeCode,
+            ref init parameterIsInitReference,
+            ref init parameterIsWritable);
+        if (parameterStatus != 0)
+        {
+            return parameterStatus;
+        }
+        init int32 parameterTypeId;
+        int32 parameterInternStatus = InternStandaloneCallableTypeFact(
+            parameterIsInitReference ? 1 : 0, parameterTypeCode,
+            parameterIsWritable, ref init parameterTypeId);
+        if (parameterInternStatus != 0)
+        {
+            return parameterInternStatus;
+        }
+        int32 globalParameterRow
+            = Host.StandaloneArtifactParameterStarts[artifactOrdinal]
+                + row;
+        if (globalParameterRow <= 0
+            || globalParameterRow >= Host.StandaloneParameterTypeIds.Length
+            || (Host.StandaloneParameterTypeIds[globalParameterRow] != 0
+                && Host.StandaloneParameterTypeIds[globalParameterRow]
+                    != parameterTypeId))
+        {
+            return 3;
+        }
+        Host.StandaloneParameterTypeIds[globalParameterRow]
+            = parameterTypeId;
+    }
+
+    return 0;
+}
+
+int32 InternStandaloneCallableTypeFact(int32 typeKind,
+    int32 scalarTypeCode, bool isWritable,
+    ref<init int32> typeIdResult)
+    ensure return == 0 ? *typeIdResult is init : true
+{
+    if (typeKind < 0 || typeKind > 1
+        || !IsStandaloneCallableScalarCode(scalarTypeCode)
+            && !(typeKind == 0 && scalarTypeCode == 0)
+        || (typeKind == 1 && scalarTypeCode == 0)
+        || (typeKind == 0 && isWritable)
+        || Host.StandaloneTypeFactCount.Length != 1
+        || Host.StandaloneTypeFacts.Length % 3 != 0)
+    {
+        return 3;
+    }
+
+    int32 typeFactCount = Host.StandaloneTypeFactCount[0];
+    int32 typeFactCapacity = Host.StandaloneTypeFacts.Length / 3;
+    if (typeFactCount < 0 || typeFactCount >= typeFactCapacity)
+    {
+        return 3;
+    }
+
+    int32 writable = isWritable ? 1 : 0;
+    for (mut int32 row = 1; row <= typeFactCount; row = row + 1)
+    {
+        int32 offset = row * 3;
+        if (Host.StandaloneTypeFacts[offset] == typeKind
+            && Host.StandaloneTypeFacts[offset + 1] == scalarTypeCode
+            && Host.StandaloneTypeFacts[offset + 2] == writable)
+        {
+            *typeIdResult = row;
+            return 0;
+        }
+    }
+
+    if (typeFactCount >= typeFactCapacity - 1)
+    {
+        return 3;
+    }
+    int32 row = typeFactCount + 1;
+    int32 offset = row * 3;
+    Host.StandaloneTypeFacts[offset] = typeKind;
+    Host.StandaloneTypeFacts[offset + 1] = scalarTypeCode;
+    Host.StandaloneTypeFacts[offset + 2] = writable;
+    Host.StandaloneTypeFactCount[0] = row;
+    *typeIdResult = row;
+    return 0;
+}
+
+int32 TryGetStandaloneCallableType(int32 artifactStart,
+    int32 artifactLength, int32 typeSpecSectionStart,
+    int32 typeSpecSectionLength, int32 typeSpecCount,
+    uint32 typeSpecRef, bool allowInitReference, bool allowUnit,
+    ref<init int32> scalarTypeCodeResult,
+    ref<init bool> isInitReferenceResult,
+    ref<init bool> isWritableResult)
+    ensure return == 0 ? (*scalarTypeCodeResult is init
+        && *isInitReferenceResult is init && *isWritableResult is init)
+        : true
+{
+    if (typeSpecRef == 0)
+    {
+        return 3;
+    }
+
+    uint32 kind = typeSpecRef & 0xFF00_0000;
+    if (kind == 0xF200_0000)
+    {
+        if ((typeSpecRef & 0x00FF_FF00) != 0)
+        {
+            return 3;
+        }
+        int32 typeCode = int32(typeSpecRef & 0xFF);
+        if (typeCode > 0x1A)
+        {
+            return 3;
+        }
+        if ((typeCode == 0 && allowUnit)
+            || IsStandaloneCallableScalarCode(typeCode))
+        {
+            *scalarTypeCodeResult = typeCode;
+            *isInitReferenceResult = false;
+            *isWritableResult = false;
+            return 0;
+        }
+        return 2;
+    }
+    if (kind == 0xF300_0000)
+    {
+        return 2;
+    }
+    if (kind != 0 || typeSpecRef > uint32(typeSpecCount))
+    {
+        return 3;
+    }
+
+    int32 row = int32(typeSpecRef);
+    init int32 rowStart;
+    init int32 rowLength;
+    if (!TryGetStandaloneVariableTableRowExtent(artifactStart,
+            artifactLength, typeSpecSectionStart, typeSpecSectionLength,
+            typeSpecCount, 2, 1, row,
+            ref init rowStart, ref init rowLength))
+    {
+        return 3;
+    }
+
+    init int32 form;
+    init int32 qualifiers;
+    if (!TryReadStandaloneArtifactAbsoluteByte(artifactStart,
+            artifactLength, rowStart, ref init form)
+        || !TryReadStandaloneArtifactAbsoluteByte(artifactStart,
+            artifactLength, rowStart + 1, ref init qualifiers)
+        || (qualifiers & ~7) != 0)
+    {
+        return 3;
+    }
+
+    if (form == 0x01)
+    {
+        if (rowLength < 3)
+        {
+            return 3;
+        }
+        init int32 code;
+        if (!TryReadStandaloneArtifactAbsoluteByte(artifactStart,
+                artifactLength, rowStart + 2, ref init code))
+        {
+            return 3;
+        }
+        if (code <= 0x19)
+        {
+            if (rowLength != 3 || (qualifiers & ~0x04) != 0)
+            {
+                return 3;
+            }
+            if (qualifiers != 0)
+            {
+                return 2;
+            }
+            if ((code == 0 && allowUnit)
+                || IsStandaloneCallableScalarCode(code))
+            {
+                *scalarTypeCodeResult = code;
+                *isInitReferenceResult = false;
+                *isWritableResult = false;
+                return 0;
+            }
+            return 2;
+        }
+        if (code < 0x80 || rowLength != 4)
+        {
+            return 3;
+        }
+        init int32 argumentCode;
+        if (!TryReadStandaloneArtifactAbsoluteByte(artifactStart,
+                artifactLength, rowStart + 3, ref init argumentCode)
+            || argumentCode > 0x19)
+        {
+            return 3;
+        }
+        return 2;
+    }
+
+    if (form == 0x0E)
+    {
+        if (rowLength != 6 || (qualifiers & ~1) != 0)
+        {
+            return 3;
+        }
+        init uint32 innerTypeSpecRef;
+        if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, rowStart + 2,
+                ref init innerTypeSpecRef)
+            || innerTypeSpecRef == 0
+            || ((innerTypeSpecRef & 0xFF00_0000) == 0
+                && innerTypeSpecRef >= uint32(row)))
+        {
+            return 3;
+        }
+
+        init int32 referentTypeCode;
+        init bool referentIsInitReference;
+        init bool referentIsWritable;
+        int32 referentStatus = TryGetStandaloneCallableType(
+            artifactStart, artifactLength, typeSpecSectionStart,
+            typeSpecSectionLength, typeSpecCount, innerTypeSpecRef,
+            allowInitReference: false, allowUnit: false,
+            ref init referentTypeCode,
+            ref init referentIsInitReference,
+            ref init referentIsWritable);
+        if (referentStatus != 0)
+        {
+            return referentStatus;
+        }
+        if (!allowInitReference)
+        {
+            return 2;
+        }
+
+        *scalarTypeCodeResult = referentTypeCode;
+        *isInitReferenceResult = true;
+        *isWritableResult = (qualifiers & 1) != 0;
+        return 0;
+    }
+
+    if (form == 0x0F)
+    {
+        return rowLength == 2 && qualifiers == 0 ? 2 : 3;
+    }
+
+    return 2;
+}
+
+bool IsStandaloneCallableScalarCode(int32 typeCode)
+{
+    return (typeCode >= 1 && typeCode <= 9)
+        || (typeCode >= 0x0B && typeCode <= 0x0E)
+        || typeCode == 0x10 || typeCode == 0x11
+        || typeCode == 0x14 || typeCode == 0x15;
+}
