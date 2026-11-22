@@ -470,6 +470,101 @@ internal sealed class PrivateForeignNativeInterfaceTests
     }
 
     [Test]
+    public void PrivateFniReferenceSetsComposeNestedNominalProviderTypes()
+    {
+        const string schemaIdentity
+            = "terrum/private-semantic-111-foreign-native-interfaces-1";
+        const string leafIdentity = "PrivateFniNestedLeaf";
+        const string wrapperIdentity = "PrivateFniNestedWrapper";
+        var leafSource = SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Inner { public int32 Value; }
+            public int32 Identity(int32 value) { return value; }
+            """);
+        var leafNativeRegistration
+            = NativeCoreRegistrationTests.CreateRegistration();
+        var leafCompilation = Compilation.CreateLibrary(leafSource,
+            new CompilationOptions {
+                NativeCoreRegistration = leafNativeRegistration,
+                LayoutCoreRegistration =
+                    NativeCoreRegistrationTests.CreateLayoutRegistration(
+                        leafNativeRegistration),
+            });
+        Assert.That(leafCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, leafCompilation.Diagnostics));
+        var leafProgram = leafCompilation.Program!;
+        var leafInputs = PrivateModuleIdentityInputs.CreateFromSelectors(
+            leafProgram, leafIdentity, [
+                new PrivateNominalDefinitionSelection(
+                    new PrivateNominalDeclarationSelector(
+                        PrivateNominalDeclarationKind.Struct, "Inner"),
+                    "leaf.inner", true),
+            ], [], [], [], [], []);
+        var leafProducer = ModuleCompiler.CreateProducerWithSchema(
+            leafProgram, ["Identity"], schemaIdentity, leafInputs);
+        var leafReference = ModuleCompiler.CreateReferenceWithSchema(
+            leafProducer, schemaIdentity);
+
+        var wrapperCoreRegistration
+            = CreateFniNativeCoreRegistration(wrapperIdentity);
+        var wrapperSource = SyntaxTree.Parse("""
+            using Terrum.Interop;
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Payload { public Inner Value; }
+            [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+            [ForeignNativeInterface(VTableByteOffset: uint32(0))]
+            public interface IProbe {
+                public unsafe int32 Get(ptr<Payload> value);
+            }
+            """);
+        var wrapperCompilation = Compilation.CreateLibrary(wrapperSource,
+            leafReference, new CompilationOptions {
+                NativeCoreRegistration = wrapperCoreRegistration,
+                LayoutCoreRegistration =
+                    NativeCoreRegistrationTests.CreateLayoutRegistration(
+                        wrapperCoreRegistration),
+            });
+        Assert.That(wrapperCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                wrapperCompilation.Diagnostics));
+        var wrapperProgram = wrapperCompilation.Program!;
+        var wrapperInputs = PrivateModuleIdentityInputs
+            .CreateFromSelectors(wrapperProgram, wrapperIdentity, [
+                new PrivateNominalDefinitionSelection(
+                    new PrivateNominalDeclarationSelector(
+                        PrivateNominalDeclarationKind.Struct, "Payload"),
+                    "wrapper.payload", true),
+            ], [
+                new PrivateNominalImportSelection(
+                    new PrivateNominalDeclarationSelector(
+                        PrivateNominalDeclarationKind.Struct, "Inner"),
+                    "wrapper.inner", leafIdentity, "leaf.inner"),
+            ], [], [], [
+                new PrivateForeignInterfaceDefinitionAssignment(0,
+                    "wrapper.iprobe", true, [
+                        new PrivateForeignInterfaceMemberDefinitionAssignment(
+                            0, "wrapper.iprobe.get"),
+                    ]),
+            ], []);
+        var wrapperProducer = ModuleCompiler.CreateProducerWithSchema(
+            wrapperProgram, [], schemaIdentity, wrapperInputs);
+        var reference = ModuleCompiler.CreateReferenceSetWithSchema(
+            [wrapperProducer, leafProducer], schemaIdentity);
+        Assert.That(reference.Structures.Select(static structure =>
+                structure.Name),
+            Is.EquivalentTo(["Inner", "Payload"]));
+        var consumerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                int32 Invoke(ptr<void> receiver, ptr<Payload> value) {
+                    unsafe { return IProbe.Get(receiver, value); }
+                }
+                """), reference);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+    }
+
+    [Test]
     public void PrivateFniDirectoryRejectsMemberRedirectedToOrdinaryFunction()
     {
         const string schemaIdentity
