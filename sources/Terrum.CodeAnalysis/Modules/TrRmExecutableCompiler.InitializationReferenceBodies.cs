@@ -2007,18 +2007,45 @@ public static partial class TrRmExecutableCompiler
                 var argument = nestedCall.Arguments[argumentIndex];
                 if ((uint)formal >= (uint)nestedTarget.ParameterCount
                     || seenNestedParameters[formal]
-                    || argument is not BoundRead nestedRead
-                    || (uint)nestedRead.Variable >= (uint)fallbackLocal
                     || !(DirectNativeImportContract.IsScalar(
                             nestedTarget.Variables[formal].Type)
                         || nestedTarget.Variables[formal].Type
-                            == PrimitiveType.NativeRawPointer)
-                    || function.Variables[nestedRead.Variable].Type
-                        != nestedTarget.Variables[formal].Type
-                    || nestedRead.Type
-                        != nestedTarget.Variables[formal].Type
-                    || function.Variables[nestedRead.Variable].IsOut
-                    || function.Variables[nestedRead.Variable].IsInit)
+                            == PrimitiveType.NativeRawPointer))
+                {
+                    return false;
+                }
+
+                var formalType = nestedTarget.Variables[formal].Type;
+                if (argument is BoundRead nestedRead)
+                {
+                    if ((uint)nestedRead.Variable >= (uint)fallbackLocal
+                        || function.Variables[nestedRead.Variable].Type
+                            != formalType
+                        || nestedRead.Type != formalType
+                        || function.Variables[nestedRead.Variable].IsOut
+                        || function.Variables[nestedRead.Variable].IsInit)
+                    {
+                        return false;
+                    }
+                }
+                else if (argument is BoundConstant nestedConstant
+                    && DirectNativeImportContract.IsScalar(
+                        nestedConstant.Type)
+                    && nestedConstant.Type == formalType
+                    && nestedConstant.RepresentationType
+                        == nestedConstant.Type
+                    && nestedConstant.Bits.IsCanonicalFor(
+                        nestedConstant.Type))
+                {
+                    constantInputs.Add((nestedConstant.Type,
+                        nestedConstant.Bits));
+                    if (constantInputs.Count + nestedInputCalls.Count + 1
+                        > 13)
+                    {
+                        return false;
+                    }
+                }
+                else
                 {
                     return false;
                 }
@@ -2026,7 +2053,8 @@ public static partial class TrRmExecutableCompiler
                 seenNestedParameters[formal] = true;
             }
 
-            return seenNestedParameters.All(static seen => seen);
+            return seenNestedParameters.All(static seen => seen)
+                && constantInputs.Count + nestedInputCalls.Count + 1 <= 13;
         }
     }
 
@@ -2366,17 +2394,49 @@ public static partial class TrRmExecutableCompiler
                 var argument = nestedCall.Arguments[argumentIndex];
                 if ((uint)formal >= (uint)nestedTarget.ParameterCount
                     || seenNestedParameters[formal]
-                    || argument is not BoundRead nestedRead
-                    || !IsAvailableStagedInput(nestedRead.Variable,
-                        function.ParameterCount,
-                        function.Variables.Length,
-                        stagedLocalVariables)
-                    || function.Variables[nestedRead.Variable].Type
-                        != nestedTarget.Variables[formal].Type
-                    || nestedRead.Type
-                        != nestedTarget.Variables[formal].Type
-                    || function.Variables[nestedRead.Variable].IsOut
-                    || function.Variables[nestedRead.Variable].IsInit)
+                    || !(DirectNativeImportContract.IsScalar(
+                            nestedTarget.Variables[formal].Type)
+                        || nestedTarget.Variables[formal].Type
+                            == PrimitiveType.NativeRawPointer))
+                {
+                    return false;
+                }
+
+                var formalType = nestedTarget.Variables[formal].Type;
+                if (argument is BoundRead nestedRead)
+                {
+                    if (!IsAvailableStagedInput(nestedRead.Variable,
+                            function.ParameterCount,
+                            function.Variables.Length,
+                            stagedLocalVariables)
+                        || function.Variables[nestedRead.Variable].Type
+                            != formalType
+                        || nestedRead.Type != formalType
+                        || function.Variables[nestedRead.Variable].IsOut
+                        || function.Variables[nestedRead.Variable].IsInit)
+                    {
+                        return false;
+                    }
+                }
+                else if (argument is BoundConstant nestedConstant
+                    && DirectNativeImportContract.IsScalar(
+                        nestedConstant.Type)
+                    && nestedConstant.Type == formalType
+                    && nestedConstant.RepresentationType
+                        == nestedConstant.Type
+                    && nestedConstant.Bits.IsCanonicalFor(
+                        nestedConstant.Type))
+                {
+                    constantInputs.Add((nestedConstant.Type,
+                        nestedConstant.Bits));
+                    if (constantInputs.Count
+                            + nestedForeignInterfaceCalls.Count + 1
+                        > availableInputRegisters)
+                    {
+                        return false;
+                    }
+                }
+                else
                 {
                     return false;
                 }
@@ -2384,7 +2444,10 @@ public static partial class TrRmExecutableCompiler
                 seenNestedParameters[formal] = true;
             }
 
-            return seenNestedParameters.All(static seen => seen);
+            return seenNestedParameters.All(static seen => seen)
+                && constantInputs.Count
+                    + nestedForeignInterfaceCalls.Count + 1
+                    <= availableInputRegisters;
         }
 
         static bool IsAvailableStagedInput(int variable,
@@ -2455,6 +2518,17 @@ public static partial class TrRmExecutableCompiler
             {
                 _ = GetConstantRegister(constant);
             }
+            else if (GetNestedForeignInterfaceCall(argument) is
+                BoundCall nestedCall)
+            {
+                foreach (var nestedArgument in nestedCall.Arguments)
+                {
+                    if (nestedArgument is BoundConstant nestedConstant)
+                    {
+                        _ = GetConstantRegister(nestedConstant);
+                    }
+                }
+            }
         }
 
         if (nestedCalls.Count + constantLoads.Count
@@ -2503,7 +2577,9 @@ public static partial class TrRmExecutableCompiler
 
             var nestedInputMap = new TrRmRegisterBodyCallInput[
                 nestedTarget.ParameterCount + 1];
-            nestedInputMap[0] = CreateInput(nestedForeignCall.Receiver);
+            nestedInputMap[0] = CreateInput(
+                nestedForeignCall.Receiver,
+                PrimitiveType.NativeRawPointer);
             var nestedArgumentsByFormal
                 = new BoundExpression?[nestedTarget.ParameterCount];
             for (var argumentIndex = 0;
@@ -2528,7 +2604,8 @@ public static partial class TrRmExecutableCompiler
                 nestedInputMap[formal + 1] = CreateInput(
                     nestedArgumentsByFormal[formal]
                     ?? throw Invalid(
-                        "A nested F+I input is missing a formal argument."));
+                        "A nested F+I input is missing a formal argument."),
+                    nestedTarget.Variables[formal].Type);
             }
 
             var resultRegister = checked((byte)(nestedIndex
@@ -2552,7 +2629,8 @@ public static partial class TrRmExecutableCompiler
             typeTokens, maps);
         var inputs = new TrRmRegisterBodyCallInput[
             target.ParameterCount + 1];
-        inputs[0] = CreateInput(foreignCall.Receiver);
+        inputs[0] = CreateInput(foreignCall.Receiver,
+            PrimitiveType.NativeRawPointer);
         var argumentsByFormal = new BoundExpression[target.ParameterCount];
         var outputContractsByFormal = target.NativeOutputContracts
             .ToDictionary(static output => output.FormalOrdinal);
@@ -2627,7 +2705,8 @@ public static partial class TrRmExecutableCompiler
             else
             {
                 inputs[formal + 1] = CreateInput(
-                    argumentsByFormal[formal]);
+                    argumentsByFormal[formal],
+                    target.Variables[formal].Type);
             }
         }
 
@@ -2816,21 +2895,38 @@ public static partial class TrRmExecutableCompiler
             return result;
         }
 
-        TrRmRegisterBodyCallInput CreateInput(BoundExpression expression)
+        TrRmRegisterBodyCallInput CreateInput(
+            BoundExpression expression, PrimitiveType expectedType)
         {
-            if (expression is not BoundRead read
-                || ((uint)read.Variable >= (uint)function.ParameterCount
-                    && !stagedLocalVariables.Contains(read.Variable))
-                || function.Variables[read.Variable].Type != read.Type
-                || function.Variables[read.Variable].IsOut
-                || function.Variables[read.Variable].IsInit)
+            if (expression is BoundRead read)
             {
-                throw Unsupported(
-                    $"Function '{function.Name}' has a nested F+I call input outside the direct-parameter or staged-local Body subset.");
+                if (((uint)read.Variable >= (uint)function.ParameterCount
+                        && !stagedLocalVariables.Contains(read.Variable))
+                    || read.Type != expectedType
+                    || function.Variables[read.Variable].Type != read.Type
+                    || function.Variables[read.Variable].IsOut
+                    || function.Variables[read.Variable].IsInit)
+                {
+                    throw Unsupported(
+                        $"Function '{function.Name}' has a nested F+I call input outside the direct-parameter or staged-local Body subset.");
+                }
+
+                return new TrRmRegisterBodyCallInput(2, 1,
+                    checked((ushort)read.Variable));
             }
 
-            return new TrRmRegisterBodyCallInput(2, 1,
-                checked((ushort)read.Variable));
+            if (expression is BoundConstant constant
+                && constant.Type == expectedType
+                && DirectNativeImportContract.IsScalar(constant.Type)
+                && constant.RepresentationType == constant.Type
+                && constant.Bits.IsCanonicalFor(constant.Type))
+            {
+                return new TrRmRegisterBodyCallInput(1, 1,
+                    GetConstantRegister(constant));
+            }
+
+            throw Unsupported(
+                $"Function '{function.Name}' has a nested F+I call input outside the direct Home or scalar ConstantMap subset.");
         }
     }
 
@@ -2884,6 +2980,25 @@ public static partial class TrRmExecutableCompiler
             }
 
             nestedCalls.Add(candidate);
+        }
+
+        foreach (var argument in call.Arguments)
+        {
+            if (argument is BoundConstant constant)
+            {
+                _ = GetConstantRegister(constant);
+            }
+            else if (GetNestedForeignInterfaceCall(argument) is
+                BoundCall nestedCall)
+            {
+                foreach (var nestedArgument in nestedCall.Arguments)
+                {
+                    if (nestedArgument is BoundConstant nestedConstant)
+                    {
+                        _ = GetConstantRegister(nestedConstant);
+                    }
+                }
+            }
         }
 
         var nestedMethodMapTokens = new List<uint>(nestedCalls.Count);
@@ -3077,11 +3192,6 @@ public static partial class TrRmExecutableCompiler
             + (nestedCallSiteRecordIndexes.Count * 2)
             + (constantLoads.Count * 2));
         // Finish input preparation before reserving the output Home.
-        foreach (var nestedRecord in nestedCallSiteRecordIndexes)
-        {
-            entryCode.Add(0x90);
-            entryCode.Add(checked((byte)nestedRecord));
-        }
         foreach (var (constantMapIndex, register) in constantLoads)
         {
             if (constantMapIndex >= 16)
@@ -3093,6 +3203,11 @@ public static partial class TrRmExecutableCompiler
             entryCode.Add(0x16);
             entryCode.Add(checked((byte)(
                 (constantMapIndex << 4) | register)));
+        }
+        foreach (var nestedRecord in nestedCallSiteRecordIndexes)
+        {
+            entryCode.Add(0x90);
+            entryCode.Add(checked((byte)nestedRecord));
         }
         entryCode.Add(0xDF);
         entryCode.Add(0);
@@ -3155,6 +3270,16 @@ public static partial class TrRmExecutableCompiler
         TrRmRegisterBodyCallInput CreateNestedInput(
             BoundExpression expression, PrimitiveType expectedType)
         {
+            if (expression is BoundConstant constant
+                && constant.Type == expectedType
+                && DirectNativeImportContract.IsScalar(constant.Type)
+                && constant.RepresentationType == constant.Type
+                && constant.Bits.IsCanonicalFor(constant.Type))
+            {
+                return new TrRmRegisterBodyCallInput(1, 1,
+                    GetConstantRegister(constant));
+            }
+
             if (expression is not BoundRead read
                 || read.Type != expectedType
                 || (uint)read.Variable >= (uint)fallbackVariable
@@ -7197,6 +7322,15 @@ public static partial class TrRmExecutableCompiler
             nestedInputOuterCall
                 = GetNestedForeignInterfaceCall(expression);
         }
+        else if (function.DoesNotReturn
+            && statements.Count != 0
+            && statements[^1] is BoundExpressionStatement {
+                Expression: BoundExpression expression,
+            })
+        {
+            nestedInputOuterCall
+                = GetNestedForeignInterfaceCall(expression);
+        }
 
         var nestedInputCalls = nestedInputOuterCall is BoundCall outerCall
             ? outerCall.Arguments
@@ -7223,12 +7357,24 @@ public static partial class TrRmExecutableCompiler
                     Type: PrimitiveType.NativeRawPointer,
                 }
                 && nested.Arguments.All(static argument =>
-                    argument is BoundRead));
+                    argument is BoundRead
+                    || argument is BoundConstant constant
+                        && DirectNativeImportContract.IsScalar(
+                            constant.Type)
+                        && constant.RepresentationType == constant.Type
+                        && constant.Bits.IsCanonicalFor(constant.Type)));
+        var nestedInputOuterTerminal
+            = nestedInputOuterCall?.ForeignInterfaceCall?.DoesNotReturn
+                == true;
         var foreignInterfaceNestedCall
             = stores == 0
                 && calls == nestedInputCalls.Length + 1
                 && foreignInterfaceCalls == calls
-                && foreignInterfaceNonReturningCalls == 0
+                && (nestedInputOuterTerminal
+                    ? function.DoesNotReturn
+                        && foreignInterfaceNonReturningCalls == 1
+                    : !function.DoesNotReturn
+                        && foreignInterfaceNonReturningCalls == 0)
                 && pointerLoads == 0
                 && initializedLocals.Count
                     == foreignInterfaceOutputReservations
@@ -7238,6 +7384,8 @@ public static partial class TrRmExecutableCompiler
                 && variables.Count == function.ParameterCount
                     + foreignInterfaceOutputReservations
                     + initializedValueLocals.Count;
+        var foreignInterfaceNestedTerminalCall
+            = foreignInterfaceNestedCall && nestedInputOuterTerminal;
         var pointerLoadCallCount = 0;
         var pointerLoadExpressionCount = 0;
         foreach (var statement in statements)
@@ -7281,7 +7429,8 @@ public static partial class TrRmExecutableCompiler
             || voidInitializationCall || foreignInterfaceVoidCall || valueCall
             || foreignInterfaceValueCall || foreignInterfaceTerminalCall
             || foreignInterfaceNestedCall;
-        if (returns != (foreignInterfaceTerminalCall ? 0 : 1)
+        if (returns != (foreignInterfaceTerminalCall
+                || foreignInterfaceNestedTerminalCall ? 0 : 1)
             || !(simpleInitializationBody || valuePointerLoad))
         {
             throw Unsupported(
@@ -7318,43 +7467,35 @@ public static partial class TrRmExecutableCompiler
         {
             return true;
         }
-        return GetStandardForeignInterfaceConditionalOutputNestedPrefixLength(
-                code) > 0
-            || GetStandardForeignInterfaceConditionalOutputConstantPrefixLength(
-                code) > 0;
+        return GetStandardForeignInterfaceConditionalOutputPreparationPrefixLength(
+            code, out _, out _) > 0;
     }
 
     private static int
-        GetStandardForeignInterfaceConditionalOutputNestedPrefixLength(
-            ReadOnlySpan<byte> code)
+        GetStandardForeignInterfaceConditionalOutputPreparationPrefixLength(
+            ReadOnlySpan<byte> code, out int nestedCallCount,
+            out bool hasConstantInputs)
     {
-        var offset = 0;
-        while (offset + 1 < code.Length && code[offset] == 0x90)
-        {
-            offset += 2;
-        }
-
-        return offset > 0 && offset < code.Length
-            && (code[offset] == 0xDF
-                || GetStandardForeignInterfaceConditionalOutputConstantPrefixLength(
-                    code[offset..]) > 0)
-            ? offset : -1;
-    }
-
-    private static int
-        GetStandardForeignInterfaceConditionalOutputConstantPrefixLength(
-            ReadOnlySpan<byte> code)
-    {
+        nestedCallCount = 0;
+        hasConstantInputs = false;
         var offset = 0;
         while (offset < code.Length && code[offset] != 0xDF)
         {
-            if (code[offset] == 0x16 && code.Length - offset >= 2)
+            if (code[offset] == 0x90 && code.Length - offset >= 2)
             {
+                nestedCallCount++;
+                offset += 2;
+            }
+            else if (code[offset] == 0x16
+                && code.Length - offset >= 2)
+            {
+                hasConstantInputs = true;
                 offset += 2;
             }
             else if (code[offset] == 0xD4
                 && code.Length - offset >= 4)
             {
+                hasConstantInputs = true;
                 offset += 4;
             }
             else
@@ -7389,21 +7530,13 @@ public static partial class TrRmExecutableCompiler
         }
 
         var rawEntryCode = body.GetBlockCode(0);
-        var nestedCallPrefixLength
-            = GetStandardForeignInterfaceConditionalOutputNestedPrefixLength(
-                rawEntryCode);
-        var nestedCallCount = nestedCallPrefixLength > 0
-            ? nestedCallPrefixLength / 2 : 0;
+        var entryPrefixLength
+            = GetStandardForeignInterfaceConditionalOutputPreparationPrefixLength(
+                rawEntryCode, out var nestedCallCount,
+                out var hasConstantInputs);
         var hasNestedCalls = nestedCallCount != 0;
-        var constantPrefixOffset = hasNestedCalls
-            ? nestedCallPrefixLength : 0;
-        var constantPrefixLength
-            = GetStandardForeignInterfaceConditionalOutputConstantPrefixLength(
-                rawEntryCode[constantPrefixOffset..]);
-        var hasConstantInputs = constantPrefixLength > 0;
-        var entryPrefixLength = constantPrefixOffset
-            + (hasConstantInputs ? constantPrefixLength : 0);
-        var entryCode = entryPrefixLength == 0
+        var preparationPrefixLength = Math.Max(0, entryPrefixLength);
+        var entryCode = preparationPrefixLength == 0
             ? rawEntryCode : rawEntryCode[entryPrefixLength..];
         if (!body.Schema.UsesForeignNativeInterface()
             || function.IsExternal || function.DoesNotReturn
@@ -7520,16 +7653,41 @@ public static partial class TrRmExecutableCompiler
                 "The Standard F+I conditional-output Body references an invalid record.");
         }
 
-        for (var nestedIndex = 0; nestedIndex < nestedCallCount;
-            nestedIndex++)
+        var preparationOffset = 0;
+        var nestedCallIndex = 0;
+        while (preparationOffset < preparationPrefixLength)
         {
-            if (rawEntryCode[nestedIndex * 2] != 0x90
-                || rawEntryCode[nestedIndex * 2 + 1]
-                    != nestedIndex + 1)
+            if (rawEntryCode[preparationOffset] == 0x90)
+            {
+                if (rawEntryCode[preparationOffset + 1]
+                    != nestedCallIndex + 1)
+                {
+                    throw Invalid(
+                        "The Standard F+I conditional-output nested CallSites are not invoked in record order.");
+                }
+
+                nestedCallIndex++;
+                preparationOffset += 2;
+            }
+            else if (rawEntryCode[preparationOffset] == 0x16)
+            {
+                preparationOffset += 2;
+            }
+            else if (rawEntryCode[preparationOffset] == 0xD4)
+            {
+                preparationOffset += 4;
+            }
+            else
             {
                 throw Invalid(
-                    "The Standard F+I conditional-output nested CallSites are not invoked in record order.");
+                    "The Standard F+I conditional-output input preparation prefix is invalid.");
             }
+        }
+
+        if (nestedCallIndex != nestedCallCount)
+        {
+            throw Invalid(
+                "The Standard F+I conditional-output nested CallSites are missing from the preparation prefix.");
         }
 
         var callSite = body.GetRecord(callSiteRecordIndex);
@@ -7660,56 +7818,57 @@ public static partial class TrRmExecutableCompiler
         var inputVariableLimit = hasFallback
             ? fallbackVariable : function.ParameterCount;
         var registerInputs = new Dictionary<ushort, BoundExpression>();
-        if (hasConstantInputs)
+        var constantOffset = 0;
+        while (constantOffset < preparationPrefixLength)
         {
-            var constantOffset = constantPrefixOffset;
-            var constantPrefixEnd
-                = constantPrefixOffset + constantPrefixLength;
-            while (constantOffset < constantPrefixEnd)
+            var opcode = rawEntryCode[constantOffset];
+            if (opcode == 0x90)
             {
-                var opcode = rawEntryCode[constantOffset];
-                byte destination;
-                ushort constantIndex;
-                int instructionLength;
-                if (opcode == 0x16)
-                {
-                    var operand = rawEntryCode[constantOffset + 1];
-                    destination = (byte)(operand & 0x0F);
-                    constantIndex = (ushort)(operand >> 4);
-                    instructionLength = 2;
-                }
-                else if (opcode == 0xD4)
-                {
-                    destination = rawEntryCode[constantOffset + 1];
-                    constantIndex = BinaryPrimitives
-                        .ReadUInt16LittleEndian(rawEntryCode[
-                            (constantOffset + 2)..]);
-                    instructionLength = 4;
-                }
-                else
-                {
-                    throw Invalid(
-                        "The Standard F+I conditional-output ConstantMap prefix is invalid.");
-                }
-
-                if (destination is 0 or >= 14
-                    || constantIndex >= scalarConstants.Length
-                    || !DirectNativeImportContract.IsScalar(
-                        scalarConstants[constantIndex].Type))
-                {
-                    throw Invalid(
-                        "The Standard F+I conditional-output ConstantMap load is outside the scalar register subset.");
-                }
-
-                if (!registerInputs.TryAdd(destination,
-                        scalarConstants[constantIndex]))
-                {
-                    throw Invalid(
-                        "The Standard F+I conditional-output Body reuses a ConstantMap register.");
-                }
-
-                constantOffset += instructionLength;
+                constantOffset += 2;
+                continue;
             }
+
+            byte destination;
+            ushort constantIndex;
+            int instructionLength;
+            if (opcode == 0x16)
+            {
+                var operand = rawEntryCode[constantOffset + 1];
+                destination = (byte)(operand & 0x0F);
+                constantIndex = (ushort)(operand >> 4);
+                instructionLength = 2;
+            }
+            else if (opcode == 0xD4)
+            {
+                destination = rawEntryCode[constantOffset + 1];
+                constantIndex = BinaryPrimitives
+                    .ReadUInt16LittleEndian(rawEntryCode[
+                        (constantOffset + 2)..]);
+                instructionLength = 4;
+            }
+            else
+            {
+                throw Invalid(
+                    "The Standard F+I conditional-output ConstantMap prefix is invalid.");
+            }
+
+            if (destination is 0 or >= 14
+                || constantIndex >= scalarConstants.Length
+                || !DirectNativeImportContract.IsScalar(
+                    scalarConstants[constantIndex].Type))
+            {
+                throw Invalid(
+                    "The Standard F+I conditional-output ConstantMap load is outside the scalar register subset.");
+            }
+
+            if (!registerInputs.TryAdd(destination,
+                    scalarConstants[constantIndex]))
+            {
+                throw Invalid(
+                    "The Standard F+I conditional-output Body reuses a ConstantMap register.");
+            }
+
+            constantOffset += instructionLength;
         }
 
         for (var nestedIndex = 0;
@@ -7814,22 +7973,39 @@ public static partial class TrRmExecutableCompiler
                     = nestedMember.Parameters[formal].Type.PrimitiveType;
                 var homeIndex = BinaryPrimitives
                     .ReadUInt16LittleEndian(input[2..]);
-                if (input[0] != 2 || input[1] != 1
-                    || !(DirectNativeImportContract.IsScalar(formalType)
+                BoundExpression? nestedRegisterInput = null;
+                var isConstantInput = input[0] == 1 && input[1] == 1
+                    && registerInputs.TryGetValue(homeIndex,
+                        out nestedRegisterInput)
+                    && nestedRegisterInput is BoundConstant nestedConstant
+                    && nestedConstant.Type == formalType;
+                var isHomeInput = input[0] == 2 && input[1] == 1
+                    && homeIndex < inputVariableLimit
+                    && homeRoles[homeIndex] == 2
+                    && homeVariables[homeIndex] == homeIndex
+                    && homeTypes[homeIndex] == formalType
+                    && !variables[homeIndex].IsOut
+                    && !variables[homeIndex].IsInit;
+                if (!(DirectNativeImportContract.IsScalar(formalType)
                         || formalType == PrimitiveType.NativeRawPointer)
-                    || homeIndex >= inputVariableLimit
-                    || homeRoles[homeIndex] != 2
-                    || homeVariables[homeIndex] != homeIndex
-                    || homeTypes[homeIndex] != formalType
-                    || variables[homeIndex].IsOut
-                    || variables[homeIndex].IsInit)
+                    || !(isConstantInput || isHomeInput))
                 {
                     throw Invalid(
                         "The Standard F+I conditional-output nested input does not match its selected formal.");
                 }
 
-                nestedArguments.Add(new BoundRead(homeVariables[homeIndex],
-                    formalType, default));
+                if (isConstantInput)
+                {
+                    nestedArguments.Add(
+                        nestedRegisterInput
+                        ?? throw Invalid(
+                            "A nested F+I conditional-output ConstantMap input is missing."));
+                }
+                else
+                {
+                    nestedArguments.Add(new BoundRead(
+                        homeVariables[homeIndex], formalType, default));
+                }
                 nestedInputOffset += 4;
             }
 

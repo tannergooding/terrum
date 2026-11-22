@@ -1356,10 +1356,10 @@ read from caller parameters or scalar locals initialized from a direct
 parameter read; direct non-void and void-call Bodies can also nest up to 13
 scalar-returning, no-output FNI CallSites as explicit inputs (12 when staged
 locals reserve register 1), plus scalar literal inputs through typed
-ConstantMap/TypedFrozenValues loads, including mixed nested/literal inputs.
-The fallback conditional-output form separately supports up to 13 total
-nested-call results and distinct scalar-literal register inputs, including
-mixed nested/literal inputs.
+ConstantMap/TypedFrozenValues loads, including literal arguments within nested
+calls and mixed outer inputs. The fallback conditional-output form separately
+supports up to 13 total nested-call results and distinct scalar-literal
+register inputs, including literal arguments within nested calls.
 For conditional-output Bodies, nested calls execute in source argument order
 before output reservation, and source-free re-emission preserves that order
 across formal remapping. Imported-provider source-free
@@ -1372,7 +1372,9 @@ and reservation records use the receiver-first flattened ordinal
 `BoundNativeOutputReservation`, unsafe assertion, exact MethodDef/Import
 target, and selected method's output relations. Terminal FNI
 `DoesNotReturn` calls preserve their output contracts and reservations without
-inventing a normal return, publication or cancellation. FNI emission requires the
+inventing a normal return, publication or cancellation; a terminal call may
+also consume bounded nested scalar/no-output FNI inputs before the terminal
+CallSite. FNI emission requires the
 NativeOutput cells Feature for selected methods with outputs, retaining its
 PublishedPredicates prerequisite. A bounded three-block result branch now
 supports `NonNegative` `int32` and `NonZero` `int32`/`uint32` call results,
