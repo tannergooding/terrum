@@ -308,6 +308,53 @@ internal sealed class PrivateForeignNativeInterfaceTests
                 schemaIdentity));
     }
 
+    [Test]
+    public void PrivateFniCallRejectsTargetOutsideTheOwnerDirectory()
+    {
+        const string schemaIdentity
+            = "terrum/private-semantic-111-foreign-native-interfaces-1";
+        const string providerIdentity = "PrivateFniCallProvider";
+        const string callText = "IProbe.Get(receiver, value)";
+        var producer = CreateFniProvider(providerIdentity, "IProbe", "Add",
+            "Payload");
+        var reference = ModuleCompiler.CreateReferenceWithSchema(producer,
+            schemaIdentity);
+        const string consumerSource = """
+            int32 Invoke(ptr<void> receiver, ptr<Payload> value) {
+                unsafe { return IProbe.Get(receiver, value); }
+            }
+            """;
+        var compilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(consumerSource), reference);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        var identities = PrivateModuleIdentityInputs.CreateFromSelectors(
+            program, "PrivateFniCallConsumer", [], [], [], [], [], [
+                new PrivateForeignInterfaceImportAssignment(0,
+                    "consumer.iprobe", providerIdentity,
+                    providerIdentity + ".owner", [
+                        new PrivateForeignInterfaceMemberImportAssignment(
+                            0, "consumer.iprobe.get",
+                            providerIdentity + ".member"),
+                    ]),
+            ]);
+        var consumer = ModuleCompiler.CreateConsumerWithSchema(program,
+            producer, schemaIdentity, identities);
+        var callOffset = FindExpressionOffset(consumer, 5,
+            (int)PrimitiveType.Int32,
+            consumerSource.IndexOf(callText, StringComparison.Ordinal),
+            callText.Length);
+        Assert.That(callOffset, Is.GreaterThanOrEqualTo(0));
+        Assert.That(consumer[callOffset + 13], Is.EqualTo(1));
+
+        var malformed = (byte[])consumer.Clone();
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            malformed.AsSpan(callOffset + 14), 0);
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.Link(malformed, producer));
+    }
+
     private static byte[] CreateFniProvider(string moduleIdentity,
         string interfaceName, string functionName, string payloadTypeName)
     {
@@ -364,6 +411,25 @@ internal sealed class PrivateForeignNativeInterfaceTests
             source.ResolutionPolicies, source.NativeImport,
             source.NativeCallable, source.NativeCallConv,
             source.NativeExport, source.ForeignNativeInterface);
+    }
+
+    private static int FindExpressionOffset(byte[] module, byte kind,
+        int type, int spanStart, int spanLength)
+    {
+        for (var offset = 0; offset <= module.Length - 13; offset++)
+        {
+            if (module[offset] == kind
+                && BinaryPrimitives.ReadInt32LittleEndian(
+                    module.AsSpan(offset + 1, sizeof(int))) == type
+                && BinaryPrimitives.ReadInt32LittleEndian(
+                    module.AsSpan(offset + 5, sizeof(int))) == spanStart
+                && BinaryPrimitives.ReadInt32LittleEndian(
+                    module.AsSpan(offset + 9, sizeof(int))) == spanLength)
+            {
+                return offset;
+            }
+        }
+        return -1;
     }
 
     private static int PublishOutput(IntPtr receiver, IntPtr output)
