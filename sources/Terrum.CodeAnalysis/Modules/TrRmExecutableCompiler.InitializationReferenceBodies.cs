@@ -2225,6 +2225,17 @@ public static partial class TrRmExecutableCompiler
             return opcode != 0;
         }
 
+        if (binary.Type == PrimitiveType.Bool
+            && binary.Right.Type == PrimitiveType.Bool
+            && (binary.Operator is TokenKind.EqualsEquals
+                or TokenKind.BangEquals))
+        {
+            opcode = 0xC2;
+            control = binary.Operator == TokenKind.EqualsEquals ? (byte)0x01
+                : (byte)0x02;
+            return true;
+        }
+
         if (binary.Right.Type != binary.Type)
         {
             return false;
@@ -2587,7 +2598,7 @@ public static partial class TrRmExecutableCompiler
                         "A Standard F+I binary operation would overwrite a ConstantMap register.");
                 }
 
-                if (binaryOpcode == 0xC0)
+                if (binaryOpcode is 0xC0 or 0xC2)
                 {
                     var payload = checked((ushort)(
                         left.Register | (0x0F << 4)
@@ -8085,6 +8096,60 @@ public static partial class TrRmExecutableCompiler
                     valueByRegister[destinationRegister] = binary;
                     break;
                 }
+                case 0xC2:
+                {
+                    if (!foreignInterfaceDirectCallBody)
+                    {
+                        throw Unsupported(
+                            "A Standard initialization-reference Body does not use direct scalar comparison operations.");
+                    }
+
+                    var control = instruction[1];
+                    var payload = BinaryPrimitives
+                        .ReadUInt16LittleEndian(instruction[2..]);
+                    var destinationRegister = payload & 0x0F;
+                    var result1 = (payload >> 4) & 0x0F;
+                    var source0Register = (payload >> 8) & 0x0F;
+                    var source1Register = payload >> 12;
+                    if (destinationRegister >= 14 || result1 != 15
+                        || source0Register >= 14 || source1Register >= 14
+                        || callSiteValueResultRegisters.Contains(
+                            destinationRegister)
+                        || outputPlaceByRegister.ContainsKey(
+                            destinationRegister)
+                        || !valueByRegister.TryGetValue(source0Register,
+                            out var left)
+                        || !valueByRegister.TryGetValue(source1Register,
+                            out var right))
+                    {
+                        throw Invalid(
+                            "A Standard F+I Boolean comparison has an invalid or unavailable register.");
+                    }
+
+                    var operation = control switch {
+                        0x01 => TokenKind.EqualsEquals,
+                        0x02 => TokenKind.BangEquals,
+                        _ => throw Unsupported(
+                            "A Standard F+I Boolean comparison uses an unsupported control."),
+                    };
+                    var binary = new BoundBinary(operation, left, right,
+                        PrimitiveType.Bool, default) {
+                        OverflowBehavior
+                            = BoundIntegerOverflowBehavior.Checked,
+                    };
+                    if (!TryGetForeignInterfaceScalarBinaryEncoding(binary,
+                            out var expectedOpcode,
+                            out var expectedControl)
+                        || expectedOpcode != 0xC2
+                        || expectedControl != control)
+                    {
+                        throw Invalid(
+                            "A Standard F+I Boolean comparison has incompatible operands.");
+                    }
+
+                    valueByRegister[destinationRegister] = binary;
+                    break;
+                }
                 case 0xD4:
                 {
                     if (!construction2MethodLinking
@@ -10414,7 +10479,7 @@ public static partial class TrRmExecutableCompiler
                 hasConstantInputs = true;
                 offset += 4;
             }
-            else if (code[offset] == 0xC0
+            else if ((code[offset] is 0xC0 or 0xC2)
                 && code.Length - offset >= 4)
             {
                 hasScalarExpressions = true;
@@ -10776,7 +10841,7 @@ public static partial class TrRmExecutableCompiler
                 constantOffset += 2;
                 continue;
             }
-            if (opcode == 0xC0)
+            if (opcode is 0xC0 or 0xC2)
             {
                 constantOffset += 4;
                 continue;
@@ -11106,6 +11171,65 @@ public static partial class TrRmExecutableCompiler
                 writableExpressionRegisters.Add(destinationRegister);
                 scalarExpressionHomeLoadCount++;
                 preparationOffset += 2;
+                continue;
+            }
+
+            if (opcode == 0xC2)
+            {
+                var control = rawEntryCode[preparationOffset + 1];
+                var payload = BinaryPrimitives.ReadUInt16LittleEndian(
+                    rawEntryCode[(preparationOffset + 2)..]);
+                var comparisonDestination
+                    = checked((ushort)(payload & 0x0F));
+                var result1 = (payload >> 4) & 0x0F;
+                var source0Register
+                    = checked((ushort)((payload >> 8) & 0x0F));
+                var source1Register
+                    = checked((ushort)(payload >> 12));
+                if (comparisonDestination is 0 or >= 14
+                    || result1 != 15
+                    || source0Register != comparisonDestination
+                    || source1Register is 0 or >= 14
+                    || !availableRegisters.Contains(comparisonDestination)
+                    || !availableRegisters.Contains(source1Register)
+                    || !writableExpressionRegisters.Contains(
+                        comparisonDestination))
+                {
+                    throw Invalid(
+                        "The Standard F+I conditional-output Boolean comparison has an invalid register mapping.");
+                }
+
+                var operationToken = control switch {
+                    0x01 => TokenKind.EqualsEquals,
+                    0x02 => TokenKind.BangEquals,
+                    _ => throw Unsupported(
+                        "A Standard F+I conditional-output Boolean comparison uses an unsupported control."),
+                };
+                var comparison = new BoundBinary(operationToken,
+                    registerInputs[source0Register],
+                    registerInputs[source1Register], PrimitiveType.Bool,
+                    default) {
+                    OverflowBehavior
+                        = BoundIntegerOverflowBehavior.Checked,
+                };
+                if (!TryGetForeignInterfaceScalarBinaryEncoding(comparison,
+                        out var expectedOpcode,
+                        out var expectedControl)
+                    || expectedOpcode != 0xC2
+                    || expectedControl != control)
+                {
+                    throw Invalid(
+                        "The Standard F+I conditional-output Boolean comparison has incompatible operands.");
+                }
+
+                _ = scalarExpressionResultRegisters.Remove(
+                    source1Register);
+                _ = scalarExpressionResultRegisters.Remove(
+                    comparisonDestination);
+                registerInputs[comparisonDestination] = comparison;
+                _ = scalarExpressionResultRegisters.Add(
+                    comparisonDestination);
+                preparationOffset += 4;
                 continue;
             }
 

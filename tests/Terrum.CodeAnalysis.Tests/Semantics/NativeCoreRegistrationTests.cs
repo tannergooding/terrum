@@ -652,6 +652,12 @@ internal sealed class NativeCoreRegistrationTests
     [TestCase("bool", "value & true", (byte)0x30,
         TokenKind.Ampersand, false, SourceArithmeticProfile.Development,
         BoundIntegerOverflowBehavior.Checked, (ushort)2, false)]
+    [TestCase("bool", "value == true", (byte)0xC2,
+        TokenKind.EqualsEquals, false, SourceArithmeticProfile.Development,
+        BoundIntegerOverflowBehavior.Checked, (ushort)2, false)]
+    [TestCase("bool", "value != false", (byte)0xC2,
+        TokenKind.BangEquals, false, SourceArithmeticProfile.Development,
+        BoundIntegerOverflowBehavior.Checked, (ushort)2, false)]
     [TestCase("uint32", "value << value", (byte)0x34,
         TokenKind.ShiftLeft, false, SourceArithmeticProfile.Development,
         BoundIntegerOverflowBehavior.Checked, (ushort)1, false)]
@@ -948,11 +954,11 @@ internal sealed class NativeCoreRegistrationTests
 
         static void AssertShiftCountTypes(BoundProgram program)
         {
-            var expectedCountTypes = new Dictionary<string, PrimitiveType> {
-                ["InvokeInt8"] = PrimitiveType.Int8,
-                ["InvokeUInt64"] = PrimitiveType.UInt64,
-                ["InvokeInt128"] = PrimitiveType.Int128,
-                ["InvokeUInt128"] = PrimitiveType.UInt128,
+            var expectedCountTypes = new[] {
+                ("InvokeInt8", PrimitiveType.Int8),
+                ("InvokeUInt64", PrimitiveType.UInt64),
+                ("InvokeInt128", PrimitiveType.Int128),
+                ("InvokeUInt128", PrimitiveType.UInt128),
             };
             foreach (var (functionName, expectedCountType)
                 in expectedCountTypes)
@@ -1366,6 +1372,134 @@ internal sealed class NativeCoreRegistrationTests
                 Is.EqualTo(1));
             Assert.That(selectedCall.ParameterIndex(2), Is.EqualTo(2));
             Assert.That(selectedCall.Arguments[2],
+                Is.TypeOf<BoundNativeOutputReservation>());
+        }
+    }
+
+    [Test]
+    public void StandardForeignNativeInterfaceConditionalOutputsDecodeBooleanComparisons()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-native-interface-parameter-surface-1";
+        var (native, output) = NativeOutputCoreRegistrationTests
+            .CreateCombinedRegistrations(includeForeignNativeInterface: true);
+        var options = new CompilationOptions {
+            NativeCoreRegistration = native,
+            LayoutCoreRegistration = CreateLayoutRegistration(native),
+            NativeOutputCoreRegistration = output,
+        };
+        var providerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                [Terrum.Interop.NativeCallable(
+                    CallConv: Terrum.Interop.NativeCallingConvention.Cdecl)]
+                [Terrum.Interop.ForeignNativeInterface(
+                    VTableByteOffset: uint32(0))]
+                public interface IProbe {
+                    [param(output): Terrum.Interop.NativeOutput(
+                        When: Terrum.Interop.NativeOutputCondition.NonNegative)]
+                    public unsafe int32 TryRead(bool flag,
+                        write ptr<int32> output);
+                }
+                """), options);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+        var providerProgram = providerCompilation.Program
+            ?? throw new AssertionException("Expected a bound provider.");
+        var providerInterface = providerProgram.Interfaces.Single();
+        var providerRead = providerInterface.Members.Single();
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerProgram, "provider.module", schemaIdentity, 1, [
+                new TrRmSourceTypeExport("", "IProbe", "provider/IProbe") {
+                    GenericArity = 0,
+                    InterfaceMethodExports = [
+                        new TrRmSourceInterfaceMethodExport(
+                            providerRead.SourceInputOrdinal,
+                            providerRead.SourceDeclarationSpan,
+                            "provider/IProbe.TryRead"),
+                    ],
+                },
+            ]);
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            providerArtifact);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            providerInput, "provider.module", []);
+        var consumerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                int32 Invoke(ptr<void> receiver, bool first, bool second,
+                    int32 fallback) {
+                    init int32 value;
+                    unsafe {
+                        int32 status = IProbe.TryRead(receiver,
+                            first == second, &init value);
+                        if (status >= 0) { return value; }
+                        return fallback;
+                    }
+                }
+                """), reference, options);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumerProgram = consumerCompilation.Program
+            ?? throw new AssertionException("Expected a bound consumer.");
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            consumerProgram, "consumer.module", schemaIdentity, 1, []);
+        var schema
+            = TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft;
+        var consumerTables = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
+                consumerArtifact, schema));
+        var invokeRow = Enumerable.Range(1, consumerTables.Methods.Count)
+            .Single(row =>
+                consumerTables.Methods.GetName(row) == "Invoke");
+        var body = consumerTables.Bodies.GetRegisterBody(
+            consumerTables.Methods.GetBodyRow(invokeRow),
+            consumerTables.Contracts.Count);
+        Assert.That(body.GetBlockCode(0).ToArray(),
+            Does.Contain((byte)0xC2));
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, consumerArtifact),
+            "consumer.module", [providerInput]);
+        AssertBooleanComparison(loaded);
+        var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
+            "consumer.module", schemaIdentity, 1, []);
+        var reloaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, reemitted),
+            "consumer.module", [providerInput]);
+        AssertBooleanComparison(reloaded);
+
+        static void AssertBooleanComparison(BoundProgram program)
+        {
+            var function = program.Functions.Single(
+                static candidate => candidate.Name == "Invoke");
+            BoundCall? foreignCall = null;
+            _ = BoundTreeTraversal.VisitExpressions(function.Body,
+                expression =>
+                {
+                    if (expression is BoundCall call
+                        && call.ForeignInterfaceCall?.Member.Name
+                            == "TryRead")
+                    {
+                        foreignCall = call;
+                    }
+                });
+            var selectedCall = foreignCall
+                ?? throw new AssertionException("Expected an FNI call.");
+            Assert.That(selectedCall.Arguments.Length, Is.EqualTo(2));
+            Assert.That(selectedCall.Arguments[0],
+                Is.TypeOf<BoundBinary>());
+            var comparison = (BoundBinary)selectedCall.Arguments[0];
+            Assert.That(comparison.Operator,
+                Is.EqualTo(TokenKind.EqualsEquals));
+            Assert.That(comparison.Type, Is.EqualTo(PrimitiveType.Bool));
+            Assert.That(comparison.Left, Is.TypeOf<BoundRead>());
+            Assert.That(((BoundRead)comparison.Left).Variable,
+                Is.EqualTo(1));
+            Assert.That(comparison.Right, Is.TypeOf<BoundRead>());
+            Assert.That(((BoundRead)comparison.Right).Variable,
+                Is.EqualTo(2));
+            Assert.That(selectedCall.Arguments[1],
                 Is.TypeOf<BoundNativeOutputReservation>());
         }
     }
