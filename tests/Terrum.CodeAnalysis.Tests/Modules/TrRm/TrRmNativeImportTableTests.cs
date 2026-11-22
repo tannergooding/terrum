@@ -672,6 +672,36 @@ internal sealed class TrRmNativeImportTableTests
     }
 
     [Test]
+    public void TerrumFunctionPointerAnchorsRequireExactSuccessorAndRetainConventionIdentity()
+    {
+        var schemaIdentity = TrRmArtifactSchemaFacts
+            .StandardTerrumFunctionPointerSchemaIdentity;
+        var equivalentArtifact = CreateAnchorMethodMapArtifact(
+            0x1600_0001, firstAnchorConvention: 0,
+            secondAnchorConvention: 0, distinctSecondAnchor: true);
+        var equivalent = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
+                equivalentArtifact, TrRmArtifactSchema.Standard,
+                standardSchemaIdentity: schemaIdentity));
+        Assert.That(equivalent.NativeFunctionPointerAnchors
+            .AreEquivalentTypeSpecRefs(3, 4), Is.True);
+
+        var foreignArtifact = CreateAnchorMethodMapArtifact(
+            0x1600_0001, firstAnchorConvention: 0,
+            secondAnchorConvention: 1, distinctSecondAnchor: true);
+        var foreign = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
+                foreignArtifact, TrRmArtifactSchema.Standard,
+                standardSchemaIdentity: schemaIdentity));
+        Assert.That(foreign.NativeFunctionPointerAnchors
+            .AreEquivalentTypeSpecRefs(3, 4), Is.False);
+
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
+                new TrRmArtifactIndex(equivalentArtifact)));
+    }
+
+    [Test]
     public void StandardPropertyGetterAcceptsEquivalentFunctionPointerAnchors()
     {
         var artifact = CreateAnchorMethodMapArtifact(

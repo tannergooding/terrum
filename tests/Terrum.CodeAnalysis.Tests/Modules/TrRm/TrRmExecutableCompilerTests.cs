@@ -246,10 +246,75 @@ internal sealed class TrRmExecutableCompilerTests
             TrRmFeatureTableReader.RootlessNativeValuesFeatureId,
             TrRmArtifactSchema.Standard), Is.True);
 
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            "terrum-fnptr", Array.Empty<TrRmStandardArtifactInput>());
+        Assert.That(loaded.NativeFunctionPointerSignatures,
+            Has.Length.EqualTo(1));
+        Assert.That(loaded.NativeFunctionPointerSignatures[0].CallingConvention,
+            Is.EqualTo(NativeCallingConvention.Native));
+        var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
+            "terrum-fnptr-reemitted", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var reemittedTables
+            = TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
+                TrRmExecutableCompiler.CreateForeignInvocationIndex(
+                    reemitted, schemaIdentity));
+        var reemittedAcceptMethod = Enumerable.Range(1,
+                reemittedTables.Methods.Count)
+            .Single(row => reemittedTables.Methods.GetName(row) == "Accept");
+        var reemittedSignature
+            = reemittedTables.Methods.GetSignature(reemittedAcceptMethod);
+        var (reemittedParameterFirst, reemittedParameterCount)
+            = reemittedTables.Signatures.GetParamRange(reemittedSignature);
+        Assert.That(reemittedParameterCount, Is.EqualTo(1));
+        Assert.That(reemittedTables.TypeSpecs.TryGetNativeFunctionPointerAnchor(
+            checked((int)reemittedTables.Parameters.GetTypeSpec(
+                reemittedParameterFirst)), out var reemittedConvention,
+            out var reemittedAnchorMethod), Is.True);
+        Assert.That(reemittedConvention, Is.EqualTo(convention));
+        Assert.That(reemittedTables.Methods.GetBodyRow(reemittedAnchorMethod),
+            Is.Zero);
+        Assert.That(reemittedTables.Contracts.HasNativeAbi(
+            reemittedAnchorMethod), Is.False);
+
         _ = Assert.Throws<NotSupportedException>(() =>
             TrRmExecutableCompiler.EmitStandard(program, "terrum-fnptr-old",
                 "trrm/1-draft-layout-queries-1",
                 TrRmModuleTableReader.WindowsX64NativeTargetRequirement));
+    }
+
+    [Test]
+    public void StandardTerrumFunctionPointerBindsThroughProviderReference()
+    {
+        var schemaIdentity = TrRmArtifactSchemaFacts
+            .StandardTerrumFunctionPointerSchemaIdentity;
+        var providerProgram = Compile(
+            "public int32 Accept(fnptr<int32, int32> callback) { return 0; }",
+            library: true);
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerProgram, "terrum-fnptr-provider", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var providerReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, providerArtifact),
+            "terrum-fnptr-provider",
+            Array.Empty<TrRmStandardArtifactInput>());
+
+        var consumer = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            int32 Forward(fnptr<int32, int32> callback) {
+                return Accept(callback);
+            }
+            """), providerReference);
+        Assert.That(consumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumer.Diagnostics));
+
+        var incompatibleConsumer = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                int32 Forward(fnptr<int64, int64> callback) {
+                    return Accept(callback);
+                }
+                """), providerReference);
+        Assert.That(incompatibleConsumer.HasErrors, Is.True);
     }
 
     [Test]
