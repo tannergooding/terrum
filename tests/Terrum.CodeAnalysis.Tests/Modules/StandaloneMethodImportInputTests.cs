@@ -644,8 +644,10 @@ internal sealed class StandaloneMethodImportInputTests
         AssertStandaloneWrittenArtifact(artifact);
 
         var contractSource = SourceText.From(
-            "using api; void Main(ref<init int32> output) { "
-            + "Run(ref init output); Other(ref init output); }");
+            "using api; void Main(ref<init int32> output, "
+            + "ref<init int32> source) { "
+            + "Run(ref init output, ref init source); "
+            + "Other(ref init output); }");
         var contractInput = new StandaloneMethodImportInput(Agreement,
             "consumer/contracts", [
                 new TrRmStandardArtifactInput(SchemaIdentity,
@@ -1996,6 +1998,9 @@ internal sealed class StandaloneMethodImportInputTests
                 methodDefs.Slice(56 + 16, sizeof(uint))), Is.EqualTo(4));
         Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
                 methodDefs.Slice(56 + 20, sizeof(uint))), Is.EqualTo(3));
+        Assert.That(index.TryGetSection(0x0018, out _, out var paramCount),
+            Is.True);
+        Assert.That(paramCount, Is.EqualTo(5));
 
         Assert.That(index.TryGetSection(0x001B, out var contracts,
                 out var contractCount), Is.True);
@@ -2053,7 +2058,7 @@ internal sealed class StandaloneMethodImportInputTests
         Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
                 dependencyClause.Slice(12, sizeof(uint))), Is.EqualTo(0));
         Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
-                dependencyClause.Slice(16, sizeof(uint))), Is.EqualTo(0));
+                dependencyClause.Slice(16, sizeof(uint))), Is.EqualTo(1));
         var secondPredicateClause = contracts.Slice(88, 20);
         Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
                 secondPredicateClause), Is.EqualTo(0x1600_0003));
@@ -2723,14 +2728,22 @@ internal sealed class StandaloneMethodImportInputTests
             typeSpecRows, 0, 0, 0);
         var typeSpecs = new TrRmTypeSpecTableReader(typeSpecSection,
             1, 0, 0, 0);
+        var methodParameterCount = sourcedDependency ? 2 : 1;
         var methodSigSection = TrRmMethodSigTableWriter.Encode([
-            new TrRmMethodSigRow(methodResultTypeSpecRef, 0, 1, 1, 0, 0),
+            new TrRmMethodSigRow(methodResultTypeSpecRef, 0, 1,
+                (uint)methodParameterCount, 0, 0),
         ], typeSpecs, 1, 0);
         var signatures = new TrRmMethodSigTableReader(
-            methodSigSection, 1, typeSpecs, 1, 0);
-        var paramSection = TrRmParamTableWriter.Encode([
-            new TrRmParamRow(1, 0, 1, 0),
-        ], signatures, typeSpecs);
+            methodSigSection, 1, typeSpecs, methodParameterCount, 0);
+        var parameterRows
+            = new TrRmParamRow[methodParameterCount];
+        for (var ordinal = 0; ordinal < methodParameterCount; ordinal++)
+        {
+            parameterRows[ordinal]
+                = new TrRmParamRow(1, (uint)ordinal, 1, 0);
+        }
+        var paramSection = TrRmParamTableWriter.Encode(
+            parameterRows, signatures, typeSpecs);
         var stringSection = TrRmStringTableWriter.EncodeNames([
             (moduleIdentity, 0),
             ("Implementation", 0),
@@ -2855,7 +2868,8 @@ internal sealed class StandaloneMethodImportInputTests
                 BinaryPrimitives.WriteUInt32LittleEndian(
                     dependencyRow.AsSpan(12), 0);
                 BinaryPrimitives.WriteUInt32LittleEndian(
-                    dependencyRow.AsSpan(16), 0);
+                    dependencyRow.AsSpan(16),
+                    sourcedDependency ? 1u : 0u);
                 contractRows[nextContractRow] = dependencyRow;
                 nextContractRow = nextContractRow + 1;
             }
