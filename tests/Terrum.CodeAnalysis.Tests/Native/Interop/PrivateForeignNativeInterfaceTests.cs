@@ -1,9 +1,11 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using System.Buffers.Binary;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading.Tasks;
 using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
@@ -281,6 +283,29 @@ internal sealed class PrivateForeignNativeInterfaceTests
         Assert.That(reversedCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine,
                 reversedCompilation.Diagnostics));
+    }
+
+    [Test]
+    public void PrivateFniDirectoryRejectsMemberRedirectedToOrdinaryFunction()
+    {
+        const string schemaIdentity
+            = "terrum/private-semantic-111-foreign-native-interfaces-1";
+        const string moduleIdentity = "PrivateFniDirectoryTarget";
+        var producer = CreateFniProvider(moduleIdentity, "IProbe", "Add",
+            "Payload");
+        _ = ModuleCompiler.CreateReferenceWithSchema(producer,
+            schemaIdentity);
+        var memberKeyBytes = Encoding.UTF8.GetBytes(
+            moduleIdentity + ".member");
+        var memberKeyOffset = producer.AsSpan().IndexOf(memberKeyBytes);
+        Assert.That(memberKeyOffset, Is.GreaterThanOrEqualTo(0));
+
+        var malformed = (byte[])producer.Clone();
+        BinaryPrimitives.WriteUInt32LittleEndian(malformed.AsSpan(
+            memberKeyOffset + memberKeyBytes.Length), 0);
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReferenceWithSchema(malformed,
+                schemaIdentity));
     }
 
     private static byte[] CreateFniProvider(string moduleIdentity,
