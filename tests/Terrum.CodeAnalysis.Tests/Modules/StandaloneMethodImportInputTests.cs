@@ -953,6 +953,54 @@ internal sealed class StandaloneMethodImportInputTests
             malformedConstantProgram, (NativeRuntimePolicy)policy);
         Assert.That(malformedConstantExecution.ExitCode, Is.EqualTo(3));
 
+        var malformedCallArtifact = artifact.ToArray();
+        var constantCountOffset = bodyCursor;
+        var constantMapCount = checked((int)BinaryPrimitives
+            .ReadUInt32LittleEndian(
+                malformedCallArtifact.AsSpan(constantCountOffset)));
+        bodyCursor += 4;
+        var blockCount = checked((int)BinaryPrimitives
+            .ReadUInt32LittleEndian(malformedCallArtifact.AsSpan(bodyCursor)));
+        var recordCount = checked((int)BinaryPrimitives
+            .ReadUInt32LittleEndian(
+                malformedCallArtifact.AsSpan(bodyCursor + 4)));
+        var mapLength = checked((homeMapCount * 8)
+            + (typeMapCount * 4) + (methodMapCount * 4)
+            + (fieldMapCount * 4) + (constantMapCount * 8));
+        var recordIndexStart = checked(bodyCursor + 12 + mapLength
+            + (blockCount * 12));
+        var recordDataStart = checked(recordIndexStart
+            + ((recordCount + 1) * 4));
+        var firstCallRecordOffset = checked((int)BinaryPrimitives
+            .ReadUInt32LittleEndian(
+                malformedCallArtifact.AsSpan(recordIndexStart + 4)));
+        var firstCallRecordStart = checked(recordDataStart
+            + firstCallRecordOffset);
+        Assert.That(malformedCallArtifact[firstCallRecordStart],
+            Is.EqualTo(2));
+        var firstCallInputStart = firstCallRecordStart + 20;
+        malformedCallArtifact[firstCallInputStart] = 1;
+        malformedCallArtifact[firstCallInputStart + 1] = 1;
+        BinaryPrimitives.WriteUInt16LittleEndian(
+            malformedCallArtifact.AsSpan(firstCallInputStart + 2), 13);
+        var malformedCallInput = new StandaloneMethodImportArtifactInput(
+            Agreement, "consumer/module",
+            new TrRmStandardArtifactInput(SchemaIdentity,
+                malformedCallArtifact), input.Artifacts);
+        var malformedCallBuffers = malformedCallInput.Capture()
+            .CreateSourceFreeReaderHostBuffers();
+        var malformedCallCompilation = Compilation.Create(
+            constantDecoderComponents, malformedCallBuffers, policy);
+        Assert.That(malformedCallCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                malformedCallCompilation.Diagnostics));
+        var malformedCallProgram = malformedCallCompilation.Program
+            ?? throw new AssertionException(
+                "Expected a register-provenance decoder validator.");
+        var malformedCallExecution = NativeJit.ExecuteWithData(
+            malformedCallProgram, (NativeRuntimePolicy)policy);
+        Assert.That(malformedCallExecution.ExitCode, Is.EqualTo(3));
+
         var malformedBodyArtifact = contractArtifact.ToArray();
         var sectionCount = checked((int)BinaryPrimitives
             .ReadUInt32LittleEndian(malformedBodyArtifact.AsSpan(12)));
