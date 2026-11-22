@@ -1,9 +1,12 @@
 namespace Terrum.CodeAnalysis;
 
-int32 ValidateStandaloneMethodEffects(int32 rootOrdinal,
-    int32 artifactStart, int32 artifactLength,
-    int32 methodDefRow, uint32 contractFirst, uint32 contractCount)
+int32 ValidateStandaloneMethodContracts(int32 artifactOrdinal,
+    int32 moduleRow, int32 rootOrdinal, int32 artifactStart,
+    int32 artifactLength, int32 methodDefRow,
+    uint32 paramFirst, uint32 paramCount,
+    uint32 contractFirst, uint32 contractCount)
 {
+    Host.StandaloneContractFactCount[0] = 0;
     int32 tableCount = GetStandaloneArtifactSectionCount(0x001B);
     if (!IsStandaloneMetadataRange(contractFirst, contractCount,
             tableCount))
@@ -13,6 +16,7 @@ int32 ValidateStandaloneMethodEffects(int32 rootOrdinal,
     if (contractCount == 0)
     {
         Host.StandaloneResolvedEffects[rootOrdinal] = 0;
+        Host.StandaloneContractFactCount[0] = 0;
         return 0;
     }
 
@@ -70,26 +74,151 @@ int32 ValidateStandaloneMethodEffects(int32 rootOrdinal,
             return 3;
         }
 
-        if (clauseKind != 1)
+        if (clauseKind == 1)
+        {
+            if (rowLength != 12 || effectsFound)
+            {
+                return 3;
+            }
+
+            init uint32 mask;
+            if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                    artifactLength, rowStart + 8, ref init mask)
+                || (mask & ~allowedEffects) != 0)
+            {
+                return 3;
+            }
+            effectsFound = true;
+            effectsMask = mask;
+            continue;
+        }
+
+        if (clauseKind == 2)
+        {
+            if (rowLength != 20)
+            {
+                return 3;
+            }
+            init uint32 parameterOrdinal;
+            init uint32 predicateGraphRow;
+            init int32 state;
+            init int32 reserved0;
+            init int32 reserved1;
+            init int32 reserved2;
+            if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                    artifactLength, rowStart + 8,
+                    ref init parameterOrdinal)
+                || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                    artifactLength, rowStart + 12,
+                    ref init predicateGraphRow)
+                || !TryReadStandaloneArtifactAbsoluteByte(artifactStart,
+                    artifactLength, rowStart + 16, ref init state)
+                || !TryReadStandaloneArtifactAbsoluteByte(artifactStart,
+                    artifactLength, rowStart + 17, ref init reserved0)
+                || !TryReadStandaloneArtifactAbsoluteByte(artifactStart,
+                    artifactLength, rowStart + 18, ref init reserved1)
+                || !TryReadStandaloneArtifactAbsoluteByte(artifactStart,
+                    artifactLength, rowStart + 19, ref init reserved2)
+                || parameterOrdinal >= paramCount
+                || predicateGraphRow == 0
+                || predicateGraphRow
+                    > uint32(GetStandaloneArtifactSectionCount(0x0037))
+                || state < 0 || state > 1
+                || reserved0 != 0 || reserved1 != 0 || reserved2 != 0)
+            {
+                return 3;
+            }
+
+            int32 parameterRow = int32(paramFirst)
+                + int32(parameterOrdinal);
+            int32 globalParameterRow
+                = Host.StandaloneArtifactParameterStarts[artifactOrdinal]
+                    + parameterRow;
+            if (globalParameterRow <= 0
+                || globalParameterRow
+                    >= Host.StandaloneParameterTypeIds.Length)
+            {
+                return 3;
+            }
+            int32 parameterTypeId
+                = Host.StandaloneParameterTypeIds[globalParameterRow];
+            if (parameterTypeId <= 0
+                || parameterTypeId > Host.StandaloneTypeFactCount[0]
+                || Host.StandaloneTypeFacts[parameterTypeId * 3] != 1)
+            {
+                return 3;
+            }
+
+            int32 appendStatus = AppendStandaloneContractFact(2,
+                int32(parameterOrdinal), int32(predicateGraphRow), state,
+                0, 0, 0);
+            if (appendStatus != 0)
+            {
+                return appendStatus;
+            }
+            continue;
+        }
+
+        if (clauseKind == 0x0B)
+        {
+            if (rowLength != 20)
+            {
+                return 3;
+            }
+            init int32 phaseTag;
+            init int32 phaseFlags;
+            init uint32 phaseReserved;
+            init uint32 phaseOrdinal;
+            init uint32 predicateGraphRow;
+            if (!TryReadStandaloneArtifactAbsoluteByte(artifactStart,
+                    artifactLength, rowStart + 8, ref init phaseTag)
+                || !TryReadStandaloneArtifactAbsoluteByte(artifactStart,
+                    artifactLength, rowStart + 9, ref init phaseFlags)
+                || !TryReadStandaloneArtifactAbsoluteHalfWord(
+                    artifactStart, artifactLength, rowStart + 10,
+                    ref init phaseReserved)
+                || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                    artifactLength, rowStart + 12,
+                    ref init phaseOrdinal)
+                || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                    artifactLength, rowStart + 16,
+                    ref init predicateGraphRow)
+                || phaseFlags != 0 || phaseReserved != 0)
+            {
+                return 3;
+            }
+            if (phaseTag != 3)
+            {
+                return 2;
+            }
+            init int32 nodeKind;
+            int32 graphStatus
+                = TryValidateStandalonePublishedPredicateGraph(
+                    artifactStart, artifactLength, moduleRow,
+                    rootOrdinal, predicateGraphRow,
+                    ref init nodeKind);
+            if (graphStatus != 0)
+            {
+                return graphStatus;
+            }
+
+            int32 appendStatus = AppendStandaloneContractFact(11,
+                phaseTag, int32(phaseOrdinal),
+                int32(predicateGraphRow), nodeKind, 0, 0);
+            if (appendStatus != 0)
+            {
+                return appendStatus;
+            }
+            continue;
+        }
+
+        if (clauseKind == 4)
         {
             return 2;
         }
-        if (rowLength != 12 || effectsFound)
-        {
-            return 3;
-        }
-
-        init uint32 mask;
-        if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
-                artifactLength, rowStart + 8, ref init mask)
-            || (mask & ~allowedEffects) != 0)
-        {
-            return 3;
-        }
-        effectsFound = true;
-        effectsMask = mask;
+        return 2;
     }
 
     Host.StandaloneResolvedEffects[rootOrdinal] = int32(effectsMask);
-    return 0;
+    return ValidateStandaloneOutputStateFacts(rootOrdinal);
 }

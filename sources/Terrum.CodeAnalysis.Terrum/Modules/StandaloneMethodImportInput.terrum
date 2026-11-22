@@ -19,6 +19,11 @@ public static int32 ValidateStandaloneMethodImportInput()
         || Host.StandaloneResolvedRoots.Length % 20 != 0
         || Host.StandaloneTypeFactCount.Length != 1
         || Host.StandaloneTypeFacts.Length != 159
+        || Host.StandaloneContractFactCount.Length != 1
+        || Host.StandaloneContractFacts.Length
+            != (Host.StandaloneArtifacts.Length / 20 + 1) * 7
+        || Host.StandaloneContractFactOrder.Length
+            != Host.StandaloneArtifacts.Length / 20 + 1
         || Host.StandaloneResolvedRootTypeIds.Length
             != Host.StandaloneMethodRoots.Length / 5
         || Host.StandaloneResolvedEffects.Length

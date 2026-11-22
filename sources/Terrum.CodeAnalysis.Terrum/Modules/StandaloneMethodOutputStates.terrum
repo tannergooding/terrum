@@ -1,0 +1,615 @@
+namespace Terrum.CodeAnalysis;
+
+int32 AppendStandaloneContractFact(int32 kind, int32 first,
+    int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth)
+{
+    if (Host.StandaloneContractFactCount.Length != 1
+        || Host.StandaloneContractFacts.Length % 7 != 0)
+    {
+        return 3;
+    }
+
+    int32 row = Host.StandaloneContractFactCount[0] + 1;
+    int32 capacity = Host.StandaloneContractFacts.Length / 7;
+    if (row <= 0 || row >= capacity)
+    {
+        return 3;
+    }
+
+    int32 offset = row * 7;
+    Host.StandaloneContractFacts[offset] = kind;
+    Host.StandaloneContractFacts[offset + 1] = first;
+    Host.StandaloneContractFacts[offset + 2] = second;
+    Host.StandaloneContractFacts[offset + 3] = third;
+    Host.StandaloneContractFacts[offset + 4] = fourth;
+    Host.StandaloneContractFacts[offset + 5] = fifth;
+    Host.StandaloneContractFacts[offset + 6] = sixth;
+    Host.StandaloneContractFactCount[0] = row;
+    return 0;
+}
+
+int32 TryValidateStandalonePublishedPredicateGraph(int32 artifactStart,
+    int32 artifactLength, int32 moduleRow, int32 rootOrdinal,
+    uint32 predicateGraphRow, ref<init int32> nodeKindResult)
+    ensure return == 0 ? *nodeKindResult is init : true
+{
+    init bool requiresPublishedPredicates;
+    if (!TryRequireStandaloneModuleFeature(artifactStart,
+            artifactLength, moduleRow, 10,
+            ref init requiresPublishedPredicates))
+    {
+        return 3;
+    }
+    if (!requiresPublishedPredicates)
+    {
+        return 3;
+    }
+
+    int32 graphEntry = FindStandaloneArtifactSection(0x0037);
+    int32 footprintEntry = FindStandaloneArtifactSection(0x0038);
+    int32 rootEntry = FindStandaloneArtifactSection(0x0039);
+    int32 nodeEntry = FindStandaloneArtifactSection(0x003B);
+    int32 operandEntry = FindStandaloneArtifactSection(0x003C);
+    int32 graphCount = GetStandaloneArtifactSectionCount(0x0037);
+    int32 footprintCount = GetStandaloneArtifactSectionCount(0x0038);
+    int32 rootCount = GetStandaloneArtifactSectionCount(0x0039);
+    int32 nodeCount = GetStandaloneArtifactSectionCount(0x003B);
+    int32 operandCount = GetStandaloneArtifactSectionCount(0x003C);
+    if (graphEntry == 0 || footprintEntry == 0 || rootEntry == 0
+        || nodeEntry == 0 || operandEntry == 0
+        || predicateGraphRow == 0
+        || predicateGraphRow > uint32(graphCount))
+    {
+        return 3;
+    }
+
+    int32 graphOffset
+        = Host.StandaloneSectionStarts[graphEntry]
+            + ((int32(predicateGraphRow) - 1) * 8);
+    init uint32 rootNodeRow;
+    init uint32 footprintRow;
+    if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+            artifactLength, graphOffset, ref init rootNodeRow)
+        || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+            artifactLength, graphOffset + 4, ref init footprintRow)
+        || rootNodeRow == 0 || rootNodeRow > uint32(nodeCount)
+        || footprintRow == 0
+        || footprintRow > uint32(footprintCount))
+    {
+        return 3;
+    }
+
+    int32 footprintOffset
+        = Host.StandaloneSectionStarts[footprintEntry]
+            + ((int32(footprintRow) - 1) * 16);
+    init uint32 rootFirst;
+    init uint32 graphRootCount;
+    init uint32 dependencyFirst;
+    init uint32 dependencyCount;
+    if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+            artifactLength, footprintOffset, ref init rootFirst)
+        || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+            artifactLength, footprintOffset + 4,
+            ref init graphRootCount)
+        || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+            artifactLength, footprintOffset + 8,
+            ref init dependencyFirst)
+        || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+            artifactLength, footprintOffset + 12,
+            ref init dependencyCount)
+        || graphRootCount != 1
+        || !IsStandaloneMetadataRange(rootFirst, graphRootCount,
+            rootCount)
+        || !IsStandaloneMetadataRange(dependencyFirst,
+            dependencyCount,
+            GetStandaloneArtifactSectionCount(0x003A)))
+    {
+        return 3;
+    }
+    if (dependencyCount != 0)
+    {
+        return 2;
+    }
+
+    int32 rootOffset = Host.StandaloneSectionStarts[rootEntry]
+        + ((int32(rootFirst) - 1) * 8);
+    init int32 readRootKind;
+    init int32 readRootFlags;
+    init uint32 readRootReserved;
+    init uint32 readRootIdentity;
+    if (!TryReadStandaloneArtifactAbsoluteByte(artifactStart,
+            artifactLength, rootOffset, ref init readRootKind)
+        || !TryReadStandaloneArtifactAbsoluteByte(artifactStart,
+            artifactLength, rootOffset + 1, ref init readRootFlags)
+        || !TryReadStandaloneArtifactAbsoluteHalfWord(artifactStart,
+            artifactLength, rootOffset + 2,
+            ref init readRootReserved)
+        || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+            artifactLength, rootOffset + 4,
+            ref init readRootIdentity)
+        || readRootKind != 5 || readRootFlags != 0
+        || readRootReserved != 0 || readRootIdentity != 0)
+    {
+        return 3;
+    }
+
+    int32 nodeOffset = Host.StandaloneSectionStarts[nodeEntry]
+        + ((int32(rootNodeRow) - 1) * 16);
+    init uint32 nodeKind;
+    init uint32 nodeResultTypeSpecRef;
+    init uint32 operandFirst;
+    init uint32 nodeOperandCount;
+    if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+            artifactLength, nodeOffset, ref init nodeKind)
+        || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+            artifactLength, nodeOffset + 4,
+            ref init nodeResultTypeSpecRef)
+        || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+            artifactLength, nodeOffset + 8, ref init operandFirst)
+        || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+            artifactLength, nodeOffset + 12,
+            ref init nodeOperandCount))
+    {
+        return 3;
+    }
+    if (nodeKind < 1 || nodeKind > 6)
+    {
+        return 2;
+    }
+    if (nodeOperandCount != 1
+        || !IsStandaloneMetadataRange(operandFirst, 1, operandCount))
+    {
+        return 3;
+    }
+
+    int32 typeSpecEntry = FindStandaloneArtifactSection(0x0003);
+    int32 typeSpecCount = GetStandaloneArtifactSectionCount(0x0003);
+    int32 typeSpecStart = typeSpecEntry == 0 ? 0
+        : Host.StandaloneSectionStarts[typeSpecEntry];
+    int32 typeSpecLength = typeSpecEntry == 0 ? 0
+        : Host.StandaloneSectionLengths[typeSpecEntry];
+    init int32 predicateTypeCode;
+    init bool predicateTypeIsInitReference;
+    init bool predicateTypeIsWritable;
+    int32 predicateTypeStatus = TryGetStandaloneCallableType(
+        artifactStart, artifactLength, typeSpecStart, typeSpecLength,
+        typeSpecCount, nodeResultTypeSpecRef,
+        allowInitReference: false, allowUnit: false,
+        ref init predicateTypeCode,
+        ref init predicateTypeIsInitReference,
+        ref init predicateTypeIsWritable);
+    if (predicateTypeStatus != 0)
+    {
+        return predicateTypeStatus;
+    }
+    if (predicateTypeCode != 1)
+    {
+        return 3;
+    }
+
+    int32 operandOffset = Host.StandaloneSectionStarts[operandEntry]
+        + ((int32(operandFirst) - 1) * 8);
+    init int32 operandKind;
+    init int32 operandFlags;
+    init uint32 operandReserved;
+    init uint32 operandRef;
+    if (!TryReadStandaloneArtifactAbsoluteByte(artifactStart,
+            artifactLength, operandOffset, ref init operandKind)
+        || !TryReadStandaloneArtifactAbsoluteByte(artifactStart,
+            artifactLength, operandOffset + 1, ref init operandFlags)
+        || !TryReadStandaloneArtifactAbsoluteHalfWord(artifactStart,
+            artifactLength, operandOffset + 2,
+            ref init operandReserved)
+        || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+            artifactLength, operandOffset + 4, ref init operandRef)
+        || operandKind != 1 || operandFlags != 0
+        || operandReserved != 0 || operandRef != rootFirst)
+    {
+        return 3;
+    }
+
+    if (GetStandaloneArtifactSectionCount(0x003D) != 0)
+    {
+        return 2;
+    }
+
+    int32 rootTypeId
+        = Host.StandaloneResolvedRootTypeIds[rootOrdinal];
+    int32 typeFactCount = Host.StandaloneTypeFactCount[0];
+    if (rootTypeId <= 0 || rootTypeId > typeFactCount)
+    {
+        return 3;
+    }
+    int32 typeFactOffset = rootTypeId * 3;
+    if (Host.StandaloneTypeFacts[typeFactOffset] != 0)
+    {
+        return 3;
+    }
+    int32 resultTypeCode
+        = Host.StandaloneTypeFacts[typeFactOffset + 1];
+    bool selectorMatchesResultType
+        = (nodeKind == 1 || nodeKind == 2)
+            ? resultTypeCode == 1
+            : (nodeKind == 3 || nodeKind == 4)
+                ? resultTypeCode == 8 || resultTypeCode == 0x0D
+                : resultTypeCode == 8;
+    if (!selectorMatchesResultType)
+    {
+        return 3;
+    }
+
+    *nodeKindResult = int32(nodeKind);
+    return 0;
+}
+
+bool TryRequireStandaloneModuleFeature(int32 artifactStart,
+    int32 artifactLength, int32 moduleRow, uint32 featureId,
+    ref<init bool> isRequiredResult)
+    ensure return ? *isRequiredResult is init : true
+{
+    int32 moduleEntry = FindStandaloneArtifactSection(0x0001);
+    int32 featureEntry = FindStandaloneArtifactSection(0x0004);
+    int32 moduleCount = GetStandaloneArtifactSectionCount(0x0001);
+    int32 featureCount = GetStandaloneArtifactSectionCount(0x0004);
+    if (moduleEntry == 0 || moduleRow <= 0 || moduleRow > moduleCount)
+    {
+        return false;
+    }
+
+    int32 moduleOffset = Host.StandaloneSectionStarts[moduleEntry]
+        + ((moduleRow - 1) * 48);
+    init uint32 featureFirst;
+    init uint32 moduleFeatureCount;
+    if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+            artifactLength, moduleOffset + 24,
+            ref init featureFirst)
+        || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+            artifactLength, moduleOffset + 28,
+            ref init moduleFeatureCount)
+        || !IsStandaloneModuleFeatureRange(featureFirst,
+            moduleFeatureCount, featureCount))
+    {
+        return false;
+    }
+
+    if (moduleFeatureCount == 0)
+    {
+        *isRequiredResult = false;
+        return true;
+    }
+    if (featureEntry == 0)
+    {
+        return false;
+    }
+
+    int32 featureStart = Host.StandaloneSectionStarts[featureEntry];
+    for (mut int32 offset = 0;
+        offset < int32(moduleFeatureCount);
+        offset = offset + 1)
+    {
+        int32 rowStart = featureStart
+            + ((int32(featureFirst) + offset - 1) * 8);
+        init uint32 currentFeatureId;
+        init uint32 ruleRevision;
+        if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, rowStart, ref init currentFeatureId)
+            || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, rowStart + 4,
+                ref init ruleRevision))
+        {
+            return false;
+        }
+        if (currentFeatureId == featureId && ruleRevision == 1)
+        {
+            *isRequiredResult = true;
+            return true;
+        }
+    }
+
+    *isRequiredResult = false;
+    return true;
+}
+
+int32 ValidateStandaloneOutputStateFacts(int32 rootOrdinal)
+{
+    init int32 outputStateCount;
+    init int32 attachmentCount;
+    if (!BuildStandaloneContractFactOrder(2,
+            ref init outputStateCount)
+        || !BuildStandaloneContractFactOrder(11,
+            ref init attachmentCount))
+    {
+        return 3;
+    }
+    if (outputStateCount == 0 && attachmentCount == 0)
+    {
+        return 0;
+    }
+    if (outputStateCount == 0 || attachmentCount == 0
+        || !BuildStandaloneContractFactOrder(2,
+            ref init outputStateCount)
+        || !SortStandaloneContractFactOrder(outputStateCount, 1))
+    {
+        return 3;
+    }
+
+    for (mut int32 index = 2;
+        index <= outputStateCount;
+        index = index + 1)
+    {
+        int32 previousRow = Host.StandaloneContractFactOrder[index - 1];
+        int32 currentRow = Host.StandaloneContractFactOrder[index];
+        int32 previousOffset = previousRow * 7;
+        int32 currentOffset = currentRow * 7;
+        if (Host.StandaloneContractFacts[previousOffset + 1]
+                == Host.StandaloneContractFacts[currentOffset + 1]
+            && Host.StandaloneContractFacts[previousOffset + 2]
+                == Host.StandaloneContractFacts[currentOffset + 2])
+        {
+            return 3;
+        }
+    }
+
+    if (!BuildStandaloneContractFactOrder(11,
+            ref init attachmentCount)
+        || !SortStandaloneContractFactOrder(attachmentCount, 2))
+    {
+        return 3;
+    }
+    for (mut int32 index = 1;
+        index <= attachmentCount;
+        index = index + 1)
+    {
+        int32 factRow = Host.StandaloneContractFactOrder[index];
+        int32 offset = factRow * 7;
+        if (Host.StandaloneContractFacts[offset + 1] != 3
+            || Host.StandaloneContractFacts[offset + 2] != index - 1)
+        {
+            return 3;
+        }
+    }
+
+    if (!BuildStandaloneContractFactOrder(11,
+            ref init attachmentCount)
+        || !SortStandaloneContractFactOrder(attachmentCount, 3))
+    {
+        return 3;
+    }
+    for (mut int32 index = 2;
+        index <= attachmentCount;
+        index = index + 1)
+    {
+        int32 previousRow = Host.StandaloneContractFactOrder[index - 1];
+        int32 currentRow = Host.StandaloneContractFactOrder[index];
+        if (Host.StandaloneContractFacts[previousRow * 7 + 3]
+            == Host.StandaloneContractFacts[currentRow * 7 + 3])
+        {
+            return 3;
+        }
+    }
+
+    for (mut int32 outputRow = 1;
+        outputRow <= Host.StandaloneContractFactCount[0];
+        outputRow = outputRow + 1)
+    {
+        if (Host.StandaloneContractFacts[outputRow * 7] != 2)
+        {
+            continue;
+        }
+        int32 outputOffset = outputRow * 7;
+        int32 outputGraphRow
+            = Host.StandaloneContractFacts[outputOffset + 2];
+        mut int32 low = 1;
+        mut int32 high = attachmentCount;
+        mut int32 foundRow = 0;
+        while (low <= high)
+        {
+            int32 middle = low + (high - low) / 2;
+            int32 attachmentRow
+                = Host.StandaloneContractFactOrder[middle];
+            int32 attachmentOffset = attachmentRow * 7;
+            int32 attachmentGraphRow
+                = Host.StandaloneContractFacts[attachmentOffset + 3];
+            if (attachmentGraphRow == outputGraphRow)
+            {
+                foundRow = attachmentRow;
+                break;
+            }
+            if (attachmentGraphRow < outputGraphRow)
+            {
+                low = middle + 1;
+            }
+            else
+            {
+                high = middle - 1;
+            }
+        }
+        if (foundRow == 0)
+        {
+            return 3;
+        }
+        Host.StandaloneContractFacts[foundRow * 7 + 5] = 1;
+    }
+
+    for (mut int32 index = 1;
+        index <= Host.StandaloneContractFactCount[0];
+        index = index + 1)
+    {
+        int32 factOffset = index * 7;
+        if (Host.StandaloneContractFacts[factOffset] == 11
+            && Host.StandaloneContractFacts[factOffset + 5] != 1)
+        {
+            return 3;
+        }
+    }
+
+    return 0;
+}
+
+bool BuildStandaloneContractFactOrder(int32 kind,
+    ref<init int32> countResult)
+    ensure return ? *countResult is init : true
+{
+    if (Host.StandaloneContractFactCount.Length != 1
+        || Host.StandaloneContractFactOrder.Length
+            != Host.StandaloneContractFacts.Length / 7
+        || Host.StandaloneContractFacts.Length % 7 != 0)
+    {
+        return false;
+    }
+
+    mut int32 count = 0;
+    for (mut int32 row = 1;
+        row <= Host.StandaloneContractFactCount[0];
+        row = row + 1)
+    {
+        if (Host.StandaloneContractFacts[row * 7] == kind)
+        {
+            count = count + 1;
+            Host.StandaloneContractFactOrder[count] = row;
+        }
+    }
+    *countResult = count;
+    return true;
+}
+
+bool SortStandaloneContractFactOrder(int32 count, int32 mode)
+{
+    mut int32 root = count / 2;
+    while (root > 0)
+    {
+        if (!SiftStandaloneContractFactOrder(root, count, mode))
+        {
+            return false;
+        }
+        root = root - 1;
+    }
+
+    mut int32 end = count;
+    while (end > 1)
+    {
+        mut int32 value = Host.StandaloneContractFactOrder[1];
+        Host.StandaloneContractFactOrder[1]
+            = Host.StandaloneContractFactOrder[end];
+        Host.StandaloneContractFactOrder[end] = value;
+        end = end - 1;
+        if (!SiftStandaloneContractFactOrder(1, end, mode))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool SiftStandaloneContractFactOrder(int32 root, int32 end,
+    int32 mode)
+{
+    mut int32 current = root;
+    while (current <= end / 2)
+    {
+        mut int32 child = current * 2;
+        init int32 comparison;
+        if (child < end
+            && !CompareStandaloneContractFacts(
+                Host.StandaloneContractFactOrder[child],
+                Host.StandaloneContractFactOrder[child + 1],
+                mode, ref init comparison))
+        {
+            return false;
+        }
+        if (child < end && comparison < 0)
+        {
+            child = child + 1;
+        }
+
+        if (!CompareStandaloneContractFacts(
+                Host.StandaloneContractFactOrder[current],
+                Host.StandaloneContractFactOrder[child],
+                mode, ref init comparison))
+        {
+            return false;
+        }
+        if (comparison >= 0)
+        {
+            return true;
+        }
+
+        mut int32 value = Host.StandaloneContractFactOrder[current];
+        Host.StandaloneContractFactOrder[current]
+            = Host.StandaloneContractFactOrder[child];
+        Host.StandaloneContractFactOrder[child] = value;
+        current = child;
+    }
+    return true;
+}
+
+bool CompareStandaloneContractFacts(int32 firstRow,
+    int32 secondRow, int32 mode, ref<init int32> comparison)
+    ensure return ? *comparison is init : true
+{
+    if (firstRow <= 0
+        || firstRow > Host.StandaloneContractFactCount[0]
+        || secondRow <= 0
+        || secondRow > Host.StandaloneContractFactCount[0])
+    {
+        return false;
+    }
+
+    int32 firstOffset = firstRow * 7;
+    int32 secondOffset = secondRow * 7;
+    int32 firstPrimary = mode == 3
+        ? Host.StandaloneContractFacts[firstOffset + 3]
+        : Host.StandaloneContractFacts[firstOffset + 1];
+    int32 secondPrimary = mode == 3
+        ? Host.StandaloneContractFacts[secondOffset + 3]
+        : Host.StandaloneContractFacts[secondOffset + 1];
+    int32 firstSecondary = mode == 1
+        ? Host.StandaloneContractFacts[firstOffset + 2]
+        : mode == 2
+            ? Host.StandaloneContractFacts[firstOffset + 2]
+            : Host.StandaloneContractFacts[firstOffset + 1];
+    int32 secondSecondary = mode == 1
+        ? Host.StandaloneContractFacts[secondOffset + 2]
+        : mode == 2
+            ? Host.StandaloneContractFacts[secondOffset + 2]
+            : Host.StandaloneContractFacts[secondOffset + 1];
+    int32 firstTertiary = mode == 1
+        ? Host.StandaloneContractFacts[firstOffset + 3]
+        : mode == 2
+            ? Host.StandaloneContractFacts[firstOffset + 3]
+            : Host.StandaloneContractFacts[firstOffset + 2];
+    int32 secondTertiary = mode == 1
+        ? Host.StandaloneContractFacts[secondOffset + 3]
+        : mode == 2
+            ? Host.StandaloneContractFacts[secondOffset + 3]
+            : Host.StandaloneContractFacts[secondOffset + 2];
+    if (firstPrimary < secondPrimary)
+    {
+        *comparison = -1;
+    }
+    else if (firstPrimary > secondPrimary)
+    {
+        *comparison = 1;
+    }
+    else if (firstSecondary < secondSecondary)
+    {
+        *comparison = -1;
+    }
+    else if (firstSecondary > secondSecondary)
+    {
+        *comparison = 1;
+    }
+    else if (firstTertiary < secondTertiary)
+    {
+        *comparison = -1;
+    }
+    else if (firstTertiary > secondTertiary)
+    {
+        *comparison = 1;
+    }
+    else
+    {
+        *comparison = 0;
+    }
+    return true;
+}

@@ -120,6 +120,8 @@ internal readonly record struct CapturedStandaloneMethodImportInput(
         var moduleCapacity = checked((artifactByteLength / 48) + 2);
         var moduleDirectoryCapacity = checked(moduleCapacity * 8);
         var parameterTypeCapacity = checked((artifactByteLength / 16) + 1);
+        var contractFactCapacity = checked((artifactByteLength / 20) + 1);
+        var contractFactStorage = checked(contractFactCapacity * 7);
         var artifactParameterStartCapacity
             = checked(Artifacts.Length + 1);
 
@@ -200,6 +202,14 @@ internal readonly record struct CapturedStandaloneMethodImportInput(
                 PrimitiveType.Int32, [0], true),
             new HostBuffer("StandaloneTypeFacts", PrimitiveType.Int32,
                 [.. new int[53 * 3]], true),
+            new HostBuffer("StandaloneContractFactCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneContractFacts",
+                PrimitiveType.Int32,
+                [.. new int[contractFactStorage]], true),
+            new HostBuffer("StandaloneContractFactOrder",
+                PrimitiveType.Int32,
+                [.. new int[contractFactCapacity]], true),
             new HostBuffer("StandaloneResolvedRootCount",
                 PrimitiveType.Int32, [0], true),
             new HostBuffer("StandaloneResolvedRoots",

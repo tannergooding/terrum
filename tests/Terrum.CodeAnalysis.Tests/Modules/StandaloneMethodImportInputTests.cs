@@ -111,6 +111,27 @@ internal sealed class StandaloneMethodImportInputTests
                 }
                 return 0;
             }
+            if (Host.Expected[2] == 3) {
+                if (rootStatus != 0
+                    || Host.StandaloneResolvedRootCount[0] != 2
+                    || Host.StandaloneContractFactCount[0] != 2
+                    || Host.StandaloneContractFacts[7] != 11
+                    || Host.StandaloneContractFacts[8] != 3
+                    || Host.StandaloneContractFacts[9] != 0
+                    || Host.StandaloneContractFacts[10] != 1
+                    || Host.StandaloneContractFacts[11] != 1
+                    || Host.StandaloneContractFacts[12] != 1
+                    || Host.StandaloneContractFacts[14] != 2
+                    || Host.StandaloneContractFacts[15] != 0
+                    || Host.StandaloneContractFacts[16] != 1
+                    || Host.StandaloneContractFacts[17] != 1
+                    || Host.StandaloneContractFacts[18] != 0
+                    || Host.StandaloneContractFacts[19] != 0
+                    || Host.StandaloneContractFacts[20] != 0) {
+                    return 28;
+                }
+                return 0;
+            }
             if (rootStatus == 0
                 && (Host.StandaloneResolvedRootCount[0] != 2
                     || Host.StandaloneResolvedEffects[0] != 0
@@ -239,6 +260,9 @@ internal sealed class StandaloneMethodImportInputTests
                 "StandaloneModuleOrder",
                 "StandaloneTypeFactCount",
                 "StandaloneTypeFacts",
+                "StandaloneContractFactCount",
+                "StandaloneContractFacts",
+                "StandaloneContractFactOrder",
                 "StandaloneResolvedRootCount",
                 "StandaloneResolvedRoots",
                 "StandaloneResolvedRootTypeIds",
@@ -280,6 +304,7 @@ internal sealed class StandaloneMethodImportInputTests
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneModuleDirectory.terrum",
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneCallableTypes.terrum",
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodEffects.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodOutputStates.terrum",
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodRoots.terrum",
         };
         var root = RepositoryRoot();
@@ -497,6 +522,47 @@ internal sealed class StandaloneMethodImportInputTests
             = Compile(explicitZeroEffects, 3, 0, verificationMode: 2);
         Assert.That(Run(explicitZeroEffectsProgram, explicitZeroEffects,
                 3, 0, verificationMode: 2),
+            Is.EqualTo(0));
+
+        var publishedOutputState = input with {
+            Artifacts = [
+                input.Artifacts[0],
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateOutputStateArtifact("provider/a")),
+            ],
+        };
+        var publishedOutputStateProgram
+            = Compile(publishedOutputState, 3, 0, verificationMode: 3);
+        Assert.That(Run(publishedOutputStateProgram, publishedOutputState,
+                3, 0, verificationMode: 3),
+            Is.EqualTo(0));
+
+        var outputStateWithoutFeature = input with {
+            Artifacts = [
+                input.Artifacts[0],
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateOutputStateArtifact("provider/a",
+                        featureId: 0)),
+            ],
+        };
+        var outputStateWithoutFeatureProgram
+            = Compile(outputStateWithoutFeature, 3, 3);
+        Assert.That(Run(outputStateWithoutFeatureProgram,
+                outputStateWithoutFeature, 3, 3),
+            Is.EqualTo(0));
+
+        var outputStateWithoutPredicate = input with {
+            Artifacts = [
+                input.Artifacts[0],
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateOutputStateArtifact("provider/a",
+                        includeOutputState: false)),
+            ],
+        };
+        var outputStateWithoutPredicateProgram
+            = Compile(outputStateWithoutPredicate, 3, 3);
+        Assert.That(Run(outputStateWithoutPredicateProgram,
+                outputStateWithoutPredicate, 3, 3),
             Is.EqualTo(0));
 
         var invalidEffectsMask = input with {
@@ -880,6 +946,137 @@ internal sealed class StandaloneMethodImportInputTests
                 contractSection),
             new TrRmSection(0x001D, 0, 1, exportSection),
         ]);
+    }
+
+    private static byte[] CreateOutputStateArtifact(string moduleIdentity,
+        uint featureId = 10, bool includeOutputState = true,
+        byte outputState = 1)
+    {
+        var typeSpecRows = new ReadOnlyMemory<byte>[] {
+            TrRmTypeSpecTableWriter.InitializationReference(
+                0xF200_0008, isWritable: true),
+        };
+        var typeSpecSection = TrRmTypeSpecTableWriter.Encode(
+            typeSpecRows, 0, 0, 0);
+        var typeSpecs = new TrRmTypeSpecTableReader(typeSpecSection,
+            1, 0, 0, 0);
+        var methodSigSection = TrRmMethodSigTableWriter.Encode([
+            new TrRmMethodSigRow(0xF200_0001, 0, 1, 1, 0, 0),
+        ], typeSpecs, 1, 0);
+        var signatures = new TrRmMethodSigTableReader(
+            methodSigSection, 1, typeSpecs, 1, 0);
+        var paramSection = TrRmParamTableWriter.Encode([
+            new TrRmParamRow(1, 0, 1, 0),
+        ], signatures, typeSpecs);
+        var stringSection = TrRmStringTableWriter.EncodeNames([
+            (moduleIdentity, 0),
+            ("Implementation", 0),
+            ("api/Run", 0),
+        ]);
+        var strings = new TrRmStringTableReader(stringSection, 3);
+        var featureCount = featureId == 0 ? 0 : 1;
+        var moduleSection = TrRmModuleTableWriter.Encode([
+            new TrRmModuleRow(1, 1, 0, 0, 1, 1, 1, 1,
+                featureCount == 0 ? 0 : 1, featureCount),
+        ], strings, 0, 0, 1, 0, featureCount);
+
+        var methodDefSection = new byte[28];
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            methodDefSection.AsSpan(4), 2);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            methodDefSection.AsSpan(8), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            methodDefSection.AsSpan(12), 2);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            methodDefSection.AsSpan(16), 1);
+        var contractRowCount = includeOutputState ? 2 : 1;
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            methodDefSection.AsSpan(20), (uint)contractRowCount);
+
+        var predicateGraphSection = new byte[8];
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            predicateGraphSection, 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            predicateGraphSection.AsSpan(4), 1);
+        var readFootprintSection = new byte[16];
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            readFootprintSection, 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            readFootprintSection.AsSpan(4), 1);
+        var readRootSection = new byte[8];
+        readRootSection[0] = 5;
+        var predicateNodeSection = new byte[16];
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            predicateNodeSection, 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            predicateNodeSection.AsSpan(4), 0xF200_0001);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            predicateNodeSection.AsSpan(8), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            predicateNodeSection.AsSpan(12), 1);
+        var predicateOperandSection = new byte[8];
+        predicateOperandSection[0] = 1;
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            predicateOperandSection.AsSpan(4), 1);
+        var owner = 0x1600_0001u;
+        var contractRows = new ReadOnlyMemory<byte>[contractRowCount];
+        var predicateAttachment = new byte[20];
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            predicateAttachment, owner);
+        BinaryPrimitives.WriteUInt16LittleEndian(
+            predicateAttachment.AsSpan(4), 0x000B);
+        predicateAttachment[8] = 3;
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            predicateAttachment.AsSpan(16), 1);
+        contractRows[0] = predicateAttachment;
+        if (includeOutputState)
+        {
+            var outputStateRow = new byte[20];
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                outputStateRow, owner);
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                outputStateRow.AsSpan(4), 0x0002);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                outputStateRow.AsSpan(12), 1);
+            outputStateRow[16] = outputState;
+            contractRows[1] = outputStateRow;
+        }
+        var contractSection
+            = TrRmVariableTableWriter.EncodeBlobs(contractRows);
+        var exportSection = new byte[8];
+        BinaryPrimitives.WriteUInt32LittleEndian(exportSection, owner);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            exportSection.AsSpan(4), 3);
+        var sections = new List<TrRmSection> {
+            new(0x0001, 0, 1, moduleSection),
+            new(0x0002, 0, 3, stringSection),
+            new(0x0003, 0, 1, typeSpecSection),
+        };
+        if (featureCount != 0)
+        {
+            var featureSection = new byte[8];
+            BinaryPrimitives.WriteUInt32LittleEndian(featureSection,
+                featureId);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                featureSection.AsSpan(4), 1);
+            sections.Add(new TrRmSection(0x0004, 0, 1, featureSection));
+        }
+        sections.Add(new TrRmSection(0x0016, 0, 1, methodDefSection));
+        sections.Add(new TrRmSection(0x0017, 0, 1, methodSigSection));
+        sections.Add(new TrRmSection(0x0018, 0, 1, paramSection));
+        sections.Add(new TrRmSection(0x001B, 0,
+            (uint)contractRowCount, contractSection));
+        sections.Add(new TrRmSection(0x001D, 0, 1, exportSection));
+        sections.Add(new TrRmSection(0x0037, 0, 1,
+            predicateGraphSection));
+        sections.Add(new TrRmSection(0x0038, 0, 1,
+            readFootprintSection));
+        sections.Add(new TrRmSection(0x0039, 0, 1, readRootSection));
+        sections.Add(new TrRmSection(0x003B, 0, 1,
+            predicateNodeSection));
+        sections.Add(new TrRmSection(0x003C, 0, 1,
+            predicateOperandSection));
+        return TrRmArtifactWriter.Encode(sections);
     }
 
     private static byte[] CreateOutOfOrderArtifact()

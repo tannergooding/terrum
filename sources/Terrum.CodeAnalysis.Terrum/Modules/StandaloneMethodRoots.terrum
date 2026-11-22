@@ -194,6 +194,7 @@ void ClearStandaloneResolvedRoots()
         Host.StandaloneTypeFacts[index] = 0;
     }
     Host.StandaloneTypeFactCount[0] = 0;
+    Host.StandaloneContractFactCount[0] = 0;
 }
 
 bool TryFindStandaloneModuleDirectoryRow(int32 textStart,
@@ -524,12 +525,14 @@ int32 FindStandaloneMethodRootExport(int32 artifactOrdinal,
             return signatureTypeStatus;
         }
 
-        int32 effectsStatus = ValidateStandaloneMethodEffects(
-            rootOrdinal, artifactStart, artifactLength,
-            int32(row), contractFirst, methodContractCount);
-        if (effectsStatus != 0)
+        int32 contractStatus = ValidateStandaloneMethodContracts(
+            artifactOrdinal, moduleRow, rootOrdinal,
+            artifactStart, artifactLength, int32(row),
+            paramFirst, signatureParamCount,
+            contractFirst, methodContractCount);
+        if (contractStatus != 0)
         {
-            return effectsStatus;
+            return contractStatus;
         }
 
         init bool nativePointerAnchor;
