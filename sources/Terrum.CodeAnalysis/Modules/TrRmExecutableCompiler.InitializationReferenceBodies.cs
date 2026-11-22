@@ -2199,8 +2199,33 @@ public static partial class TrRmExecutableCompiler
         opcode = 0;
         control = 0;
         if (binary.Left.Type != binary.Type
-            || binary.Right.Type != binary.Type
             || !DirectNativeImportContract.IsScalar(binary.Type))
+        {
+            return false;
+        }
+
+        if (binary.Operator is TokenKind.ShiftLeft
+                or TokenKind.ShiftRight
+                or TokenKind.ShiftRightUnsigned)
+        {
+            if (!PrimitiveTypeFacts.IsIntegerOrWide(binary.Type)
+                || binary.Right.Type != PrimitiveType.UInt32
+                || binary.OverflowBehavior
+                    != BoundIntegerOverflowBehavior.Checked)
+            {
+                return false;
+            }
+
+            opcode = binary.Operator switch {
+                TokenKind.ShiftLeft => 0x34,
+                TokenKind.ShiftRight => 0x35,
+                TokenKind.ShiftRightUnsigned => 0x36,
+                _ => 0,
+            };
+            return opcode != 0;
+        }
+
+        if (binary.Right.Type != binary.Type)
         {
             return false;
         }
@@ -2365,7 +2390,11 @@ public static partial class TrRmExecutableCompiler
                 }
 
                 var left = Visit(binary.Left, type);
-                var right = Visit(binary.Right, type);
+                var rightType = binary.Operator is TokenKind.ShiftLeft
+                    or TokenKind.ShiftRight
+                    or TokenKind.ShiftRightUnsigned
+                    ? PrimitiveType.UInt32 : type;
+                var right = Visit(binary.Right, rightType);
                 return left.IsValid && left.OwnsRegister && right.IsValid
                     ? (true, checked(left.RegisterCount
                         + right.RegisterCount), true)
@@ -2542,7 +2571,11 @@ public static partial class TrRmExecutableCompiler
                     out var binaryOpcode, out var binaryControl))
             {
                 var left = Emit(binary.Left, type);
-                var right = Emit(binary.Right, type);
+                var rightType = binary.Operator is TokenKind.ShiftLeft
+                    or TokenKind.ShiftRight
+                    or TokenKind.ShiftRightUnsigned
+                    ? PrimitiveType.UInt32 : type;
+                var right = Emit(binary.Right, rightType);
                 if (!left.OwnsRegister)
                 {
                     throw Invalid(
@@ -7855,6 +7888,7 @@ public static partial class TrRmExecutableCompiler
                 }
                 case >= 0x20 and <= 0x2B:
                 case >= 0x30 and <= 0x33:
+                case >= 0x34 and <= 0x36:
                 {
                     if (!foreignInterfaceDirectCallBody)
                     {
@@ -7926,6 +7960,12 @@ public static partial class TrRmExecutableCompiler
                         0x30 => TokenKind.Ampersand,
                         0x31 => TokenKind.Pipe,
                         0x32 => TokenKind.Caret,
+                        0x34 => TokenKind.ShiftLeft,
+                        0x35 => TokenKind.ShiftRight,
+                        0x36 => TokenKind.ShiftRightUnsigned,
+                        0x34 => TokenKind.ShiftLeft,
+                        0x35 => TokenKind.ShiftRight,
+                        0x36 => TokenKind.ShiftRightUnsigned,
                         _ => throw Unsupported(
                             "A Standard F+I binary operation uses an unsupported opcode."),
                     };
@@ -10377,7 +10417,7 @@ public static partial class TrRmExecutableCompiler
             }
             else if ((code[offset] == 0x11
                     || code[offset] is >= 0x20 and <= 0x2B
-                        or >= 0x30 and <= 0x33)
+                        or >= 0x30 and <= 0x36)
                 && code.Length - offset >= 2)
             {
                 hasScalarExpressions = true;
@@ -10569,7 +10609,7 @@ public static partial class TrRmExecutableCompiler
             }
             else if (rawEntryCode[preparationOffset] == 0x11
                 || rawEntryCode[preparationOffset] is >= 0x20 and <= 0x2B
-                    or >= 0x30 and <= 0x33)
+                    or >= 0x30 and <= 0x36)
             {
                 preparationOffset += 2;
             }
@@ -10726,7 +10766,7 @@ public static partial class TrRmExecutableCompiler
             }
             if (opcode == 0x11
                 || opcode is >= 0x20 and <= 0x2B
-                    or >= 0x30 and <= 0x33)
+                    or >= 0x30 and <= 0x36)
             {
                 constantOffset += 2;
                 continue;
@@ -11168,7 +11208,7 @@ public static partial class TrRmExecutableCompiler
             }
 
             if (opcode is not (>= 0x20 and <= 0x2B
-                    or >= 0x30 and <= 0x33)
+                    or >= 0x30 and <= 0x36)
                 || destinationRegister is 0 or >= 14
                 || sourceRegister is 0 or >= 14
                 || !availableRegisters.Contains(destinationRegister)

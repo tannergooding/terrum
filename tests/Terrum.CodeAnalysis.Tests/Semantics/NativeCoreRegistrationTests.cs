@@ -652,6 +652,26 @@ internal sealed class NativeCoreRegistrationTests
     [TestCase("bool", "value & true", (byte)0x30,
         TokenKind.Ampersand, false, SourceArithmeticProfile.Development,
         BoundIntegerOverflowBehavior.Checked, (ushort)2, false)]
+    [TestCase("uint32", "value << value", (byte)0x34,
+        TokenKind.ShiftLeft, false, SourceArithmeticProfile.Development,
+        BoundIntegerOverflowBehavior.Checked, (ushort)1, false)]
+    [TestCase("uint32", "value >> value", (byte)0x35,
+        TokenKind.ShiftRight, false, SourceArithmeticProfile.Development,
+        BoundIntegerOverflowBehavior.Checked, (ushort)1, false)]
+    [TestCase("uint32", "value >>> value", (byte)0x36,
+        TokenKind.ShiftRightUnsigned, false,
+        SourceArithmeticProfile.Development,
+        BoundIntegerOverflowBehavior.Checked, (ushort)1, false)]
+    [TestCase("int32", "value << count", (byte)0x34,
+        TokenKind.ShiftLeft, false, SourceArithmeticProfile.Development,
+        BoundIntegerOverflowBehavior.Checked, (ushort)1, false)]
+    [TestCase("int32", "value >> count", (byte)0x35,
+        TokenKind.ShiftRight, false, SourceArithmeticProfile.Development,
+        BoundIntegerOverflowBehavior.Checked, (ushort)1, false)]
+    [TestCase("int32", "value >>> count", (byte)0x36,
+        TokenKind.ShiftRightUnsigned, false,
+        SourceArithmeticProfile.Development,
+        BoundIntegerOverflowBehavior.Checked, (ushort)1, false)]
     [TestCase("int32", "value + 1", (byte)0x21, TokenKind.Plus, false,
         SourceArithmeticProfile.Release, BoundIntegerOverflowBehavior.Wrapping,
         (ushort)2, true)]
@@ -724,9 +744,12 @@ internal sealed class NativeCoreRegistrationTests
         var prefixCall = withVoidCallPrefix
             ? "IProbe.Touch(receiver);"
             : "";
+        var shiftCountParameter = expression.Contains("count",
+                StringComparison.Ordinal)
+            ? ", uint32 count" : "";
         var consumerCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse($$"""
-                {{type}} InvokeComputed(ptr<void> receiver, {{type}} value) {
+                {{type}} InvokeComputed(ptr<void> receiver, {{type}} value{{shiftCountParameter}}) {
                     unsafe {
                         {{prefixCall}}
                         return IProbe.Read(receiver, {{expression}});
@@ -780,6 +803,7 @@ internal sealed class NativeCoreRegistrationTests
         {
             var expectedType = typeName switch {
                 "int32" => PrimitiveType.Int32,
+                "uint32" => PrimitiveType.UInt32,
                 "float64" => PrimitiveType.Float64,
                 "bool" => PrimitiveType.Bool,
                 _ => throw new AssertionException(
@@ -822,8 +846,27 @@ internal sealed class NativeCoreRegistrationTests
                 Is.EqualTo(overflowBehavior));
             Assert.That(binary.Left, Is.TypeOf<BoundRead>());
             Assert.That(((BoundRead)binary.Left).Variable, Is.EqualTo(1));
-            Assert.That(binary.Right, Is.TypeOf<BoundConstant>());
-            Assert.That(binary.Right.Type, Is.EqualTo(expectedType));
+            if (operatorKind is TokenKind.ShiftLeft or TokenKind.ShiftRight
+                or TokenKind.ShiftRightUnsigned)
+            {
+                Assert.That(binary.Right.Type,
+                    Is.EqualTo(PrimitiveType.UInt32));
+                if (binary.Right is BoundRead countRead)
+                {
+                    Assert.That(countRead.Variable,
+                        Is.EqualTo(expectedType == PrimitiveType.UInt32
+                            ? 1 : 2));
+                }
+                else
+                {
+                    Assert.That(binary.Right, Is.TypeOf<BoundConstant>());
+                }
+            }
+            else
+            {
+                Assert.That(binary.Right, Is.TypeOf<BoundConstant>());
+                Assert.That(binary.Right.Type, Is.EqualTo(expectedType));
+            }
         }
     }
 

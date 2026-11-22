@@ -1383,8 +1383,11 @@ register inputs, including literal arguments within nested calls.
 FNI scalar expression inputs support wrapping integer arithmetic, checked
 integer negation/add/subtract/multiply/divide/remainder, and floating unary and
 binary operations over Home-rooted trees with typed scalar ConstantMap leaves.
-They also support integer/Boolean AND, OR and XOR, plus type-directed integer
-bitwise and Boolean logical NOT; shifts remain open.
+They also support integer/Boolean AND, OR and XOR, type-directed integer
+bitwise and Boolean logical NOT, and shifts with `uint32` count inputs through
+the registered short Body opcodes. Shift count types requiring source-domain
+validation/conversion before `uint32`, and other integer expression operators,
+remain open.
 Direct-return, mixed-sequence, and fallback conditional-output Bodies can
 combine nested CallSite inputs with non-throwing wrapping integer or floating
 expressions; nested-call order is preserved, and conditional-output input
@@ -1392,7 +1395,7 @@ preparation precedes output reservation. Source-free decoding restores the
 operation trees. Checked integer expressions remain limited to Bodies without
 nested CallSites until their cross-call evaluation order survives source-free
 reconstruction. Regressions are added but remain unverified under the active
-hold. Integer shifts and other integer expression operators remain open.
+hold.
 For conditional-output Bodies, nested calls execute in source argument order
 before output reservation, and source-free re-emission preserves that order
 across formal remapping. Imported-provider source-free
