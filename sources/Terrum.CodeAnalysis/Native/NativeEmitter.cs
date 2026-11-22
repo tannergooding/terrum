@@ -11242,6 +11242,18 @@ internal sealed partial class PeCompiler
                 }
                 StoreValue(Spill(spill), binary.Left.Type);
                 Expression(binary.Right, spill + 1);
+                if ((binary.Operator is TokenKind.ShiftLeft
+                        or TokenKind.ShiftRight
+                        or TokenKind.ShiftRightUnsigned)
+                    && PrimitiveTypeFacts.IsWideInteger(binary.Right.Type))
+                {
+                    StoreValue(Spill(spill + 1), binary.Right.Type);
+                    // Valid counts are below 128, so their high word is zero.
+                    _code.Load64(Spill(spill + 1) + sizeof(ulong));
+                    _code.Bytes(0x48, 0x85, 0xC0);
+                    RuntimeBranch(0x85, 3);
+                    _code.Load64(Spill(spill + 1));
+                }
                 if (floating)
                 {
                     FloatingBinary(binary.Operator, binary.Left.Type, spill);

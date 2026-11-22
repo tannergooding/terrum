@@ -871,6 +871,122 @@ internal sealed class NativeCoreRegistrationTests
     }
 
     [Test]
+    public void StandardForeignNativeInterfaceShiftsPreserveTypedCountHomes()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-native-interface-parameter-surface-1";
+        var registration = CreateRegistration(
+            includeForeignNativeInterface: true);
+        var options = new CompilationOptions {
+            NativeCoreRegistration = registration,
+            LayoutCoreRegistration = CreateLayoutRegistration(registration),
+        };
+        var providerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Terrum.Interop;
+                [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+                [ForeignNativeInterface(VTableByteOffset: uint32(0))]
+                public interface IProbe {
+                    public unsafe int32 Read(int32 value);
+                }
+                """), options);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+        var providerProgram = providerCompilation.Program
+            ?? throw new AssertionException("Expected a bound provider.");
+        var providerInterface = providerProgram.Interfaces.Single();
+        var providerRead = providerInterface.Members.Single();
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerProgram, "provider.module", schemaIdentity, 1, [
+                new TrRmSourceTypeExport("", "IProbe", "provider/IProbe") {
+                    GenericArity = 0,
+                    InterfaceMethodExports = [
+                        new TrRmSourceInterfaceMethodExport(
+                            providerRead.SourceInputOrdinal,
+                            providerRead.SourceDeclarationSpan,
+                            "provider/IProbe.Read"),
+                    ],
+                },
+            ]);
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            providerArtifact);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            providerInput, "provider.module", []);
+        var consumerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                int32 InvokeInt8(ptr<void> receiver, int32 value, int8 count) {
+                    unsafe { return IProbe.Read(receiver, value << count); }
+                }
+                int32 InvokeUInt64(ptr<void> receiver, int32 value, uint64 count) {
+                    unsafe { return IProbe.Read(receiver, value << count); }
+                }
+                int32 InvokeInt128(ptr<void> receiver, int32 value, int128 count) {
+                    unsafe { return IProbe.Read(receiver, value << count); }
+                }
+                int32 InvokeUInt128(ptr<void> receiver, int32 value, uint128 count) {
+                    unsafe { return IProbe.Read(receiver, value << count); }
+                }
+                """), reference, options);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumerProgram = consumerCompilation.Program
+            ?? throw new AssertionException("Expected a bound consumer.");
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            consumerProgram, "consumer.module", schemaIdentity, 1, []);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, consumerArtifact),
+            "consumer.module", [providerInput]);
+        AssertShiftCountTypes(loaded);
+        var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(loaded,
+            "consumer.module", schemaIdentity, 1, []);
+        var reloaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                reemittedArtifact), "consumer.module", [providerInput]);
+        AssertShiftCountTypes(reloaded);
+
+        static void AssertShiftCountTypes(BoundProgram program)
+        {
+            var expectedCountTypes = new Dictionary<string, PrimitiveType> {
+                ["InvokeInt8"] = PrimitiveType.Int8,
+                ["InvokeUInt64"] = PrimitiveType.UInt64,
+                ["InvokeInt128"] = PrimitiveType.Int128,
+                ["InvokeUInt128"] = PrimitiveType.UInt128,
+            };
+            foreach (var (functionName, expectedCountType)
+                in expectedCountTypes)
+            {
+                var function = program.Functions.Single(candidate =>
+                    candidate.Name == functionName);
+                BoundCall? foreignCall = null;
+                _ = BoundTreeTraversal.VisitExpressions(function.Body,
+                    expression =>
+                    {
+                        if (expression is BoundCall call
+                            && call.ForeignInterfaceCall?.Member.Name
+                                == "Read")
+                        {
+                            foreignCall = call;
+                        }
+                    });
+                var selectedCall = foreignCall
+                    ?? throw new AssertionException(
+                        $"Expected {functionName} to contain IProbe.Read.");
+                Assert.That(selectedCall.Arguments.Single(),
+                    Is.TypeOf<BoundBinary>());
+                var shift = (BoundBinary)selectedCall.Arguments.Single();
+                Assert.That(shift.Operator, Is.EqualTo(TokenKind.ShiftLeft));
+                Assert.That(shift.OverflowBehavior,
+                    Is.EqualTo(BoundIntegerOverflowBehavior.Checked));
+                Assert.That(shift.Right, Is.TypeOf<BoundRead>());
+                Assert.That(shift.Right.Type, Is.EqualTo(expectedCountType));
+                Assert.That(((BoundRead)shift.Right).Variable, Is.EqualTo(2));
+            }
+        }
+    }
+
+    [Test]
     public void StandardForeignNativeInterfaceConditionalOutputsAcceptScalarExpressions()
     {
         const string schemaIdentity

@@ -1384,10 +1384,11 @@ FNI scalar expression inputs support wrapping integer arithmetic, checked
 integer negation/add/subtract/multiply/divide/remainder, and floating unary and
 binary operations over Home-rooted trees with typed scalar ConstantMap leaves.
 They also support integer/Boolean AND, OR and XOR, type-directed integer
-bitwise and Boolean logical NOT, and shifts with `uint32` count inputs through
-the registered short Body opcodes. Shift count types requiring source-domain
-validation/conversion before `uint32`, and other integer expression operators,
-remain open.
+bitwise and Boolean logical NOT, and shifts whose Home-rooted count uses any
+fixed/native integer type through the registered short Body opcodes.
+Source-free decoding retains the count type so lowering validates its exact
+source domain before the `uint32` scalar Body bridge; other integer
+expression operators remain open.
 Direct-return, mixed-sequence, and fallback conditional-output Bodies can
 combine nested CallSite inputs with non-throwing wrapping integer,
 integer/Boolean bitwise, Boolean logical, or floating expressions;

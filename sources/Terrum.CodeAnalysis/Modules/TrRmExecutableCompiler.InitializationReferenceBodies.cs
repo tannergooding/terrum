@@ -2209,7 +2209,7 @@ public static partial class TrRmExecutableCompiler
                 or TokenKind.ShiftRightUnsigned)
         {
             if (!PrimitiveTypeFacts.IsIntegerOrWide(binary.Type)
-                || binary.Right.Type != PrimitiveType.UInt32
+                || !PrimitiveTypeFacts.IsIntegerOrWide(binary.Right.Type)
                 || binary.OverflowBehavior
                     != BoundIntegerOverflowBehavior.Checked)
             {
@@ -2393,7 +2393,7 @@ public static partial class TrRmExecutableCompiler
                 var rightType = binary.Operator is TokenKind.ShiftLeft
                     or TokenKind.ShiftRight
                     or TokenKind.ShiftRightUnsigned
-                    ? PrimitiveType.UInt32 : type;
+                    ? binary.Right.Type : type;
                 var right = Visit(binary.Right, rightType);
                 return left.IsValid && left.OwnsRegister && right.IsValid
                     ? (true, checked(left.RegisterCount
@@ -2579,7 +2579,7 @@ public static partial class TrRmExecutableCompiler
                 var rightType = binary.Operator is TokenKind.ShiftLeft
                     or TokenKind.ShiftRight
                     or TokenKind.ShiftRightUnsigned
-                    ? PrimitiveType.UInt32 : type;
+                    ? binary.Right.Type : type;
                 var right = Emit(binary.Right, rightType);
                 if (!left.OwnsRegister)
                 {

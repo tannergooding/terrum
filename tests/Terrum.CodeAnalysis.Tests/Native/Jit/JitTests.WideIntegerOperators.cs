@@ -34,6 +34,12 @@ internal sealed partial class JitTests
             int128 Negate(int128 value) { return -value; }
             int128 Complement(int128 value) { return ~value; }
             uint128 ComplementUnsigned(uint128 value) { return ~value; }
+            int32 ShiftNarrowWideCount(int32 value, int128 count) {
+                return value << count;
+            }
+            int32 ShiftNarrowUnsignedWideCount(int32 value, uint128 count) {
+                return value << count;
+            }
             uint128 And(uint128 left, uint128 right) { return left & right; }
             uint128 Or(uint128 left, uint128 right) { return left | right; }
             uint128 Xor(uint128 left, uint128 right) { return left ^ right; }
@@ -57,6 +63,10 @@ internal sealed partial class JitTests
                 int128 negated = Negate(int128(7));
                 int128 complemented = Complement(int128(0));
                 uint128 unsignedComplement = ComplementUnsigned(uint128(0));
+                int32 narrowWideCount = ShiftNarrowWideCount(
+                    int32(1), int128(3));
+                int32 narrowUnsignedWideCount = ShiftNarrowUnsignedWideCount(
+                    int32(1), uint128(2));
                 uint128 andResult = And(
                     uint128(340282366920938463463374607431768211455), uint128(18446744073709551621));
                 uint128 orResult = Or(uint128(1),
@@ -98,6 +108,8 @@ internal sealed partial class JitTests
                     && unsignedRemainder == uint128(0)
                     && negated == int128(-7) && complemented == int128(-1)
                     && unsignedComplement == uint128(340282366920938463463374607431768211455)
+                    && narrowWideCount == int32(8)
+                    && narrowUnsignedWideCount == int32(4)
                     && andResult == uint128(18446744073709551621)
                     && orResult == uint128(170141183460469231731687303715884105729)
                     && xorResult == uint128(1)
@@ -136,6 +148,12 @@ internal sealed partial class JitTests
             uint128 DivideUnsigned(uint128 left, uint128 right) { return left / right; }
             uint128 ShiftLeft(uint128 value, int16 count) { return value << count; }
             uint128 ShiftLeftWideCount(uint128 value, uint128 count) { return value << count; }
+            int32 ShiftNarrowWideCount(int32 value, int128 count) {
+                return value << count;
+            }
+            int32 ShiftNarrowUnsignedWideCount(int32 value, uint128 count) {
+                return value << count;
+            }
             int32 Main() {
                 mut int128 value = int128(170141183460469231731687303715884105727);
                 mut int32 failures = 0;
@@ -163,6 +181,30 @@ internal sealed partial class JitTests
                     }
                     try {
                         uint128 invalid = ShiftLeftWideCount(uint128(1), uint128(128));
+                    } catch {
+                        failures += 1;
+                    }
+                    try {
+                        int32 invalid = ShiftNarrowWideCount(int32(1),
+                            int128(-1));
+                    } catch {
+                        failures += 1;
+                    }
+                    try {
+                        int32 invalid = ShiftNarrowWideCount(int32(1),
+                            int128(18446744073709551617));
+                    } catch {
+                        failures += 1;
+                    }
+                    try {
+                        int32 invalid = ShiftNarrowUnsignedWideCount(int32(1),
+                            uint128(18446744073709551617));
+                    } catch {
+                        failures += 1;
+                    }
+                    try {
+                        int32 invalid = ShiftNarrowWideCount(int32(1),
+                            int128(32));
                     } catch {
                         failures += 1;
                     }
@@ -203,7 +245,7 @@ internal sealed partial class JitTests
                         }
                     }
                 }
-                return failures == 10 && minimumRemainder == int128(0) ? 42 : 0;
+                return failures == 14 && minimumRemainder == int128(0) ? 42 : 0;
             }
             """;
 
@@ -233,6 +275,24 @@ internal sealed partial class JitTests
     [TestCase("""
         uint128 Shift(uint128 value, int16 count) { return value << count; }
         int32 Main() { uint128 invalid = Shift(uint128(1), int16(128)); return 42; }
+        """, unchecked((int)0xE0540003))]
+    [TestCase("""
+        int32 Shift(int32 value, int128 count) { return value << count; }
+        int32 Main() { int32 invalid = Shift(int32(1), int128(-1)); return 42; }
+        """, unchecked((int)0xE0540003))]
+    [TestCase("""
+        int32 Shift(int32 value, int128 count) { return value << count; }
+        int32 Main() {
+            int32 invalid = Shift(int32(1), int128(18446744073709551617));
+            return 42;
+        }
+        """, unchecked((int)0xE0540003))]
+    [TestCase("""
+        int32 Shift(int32 value, uint128 count) { return value << count; }
+        int32 Main() {
+            int32 invalid = Shift(int32(1), uint128(18446744073709551617));
+            return 42;
+        }
         """, unchecked((int)0xE0540003))]
     public Task FailFastWideIntegerFailuresUseExactRuntimeStatusesAsync(string source, int expected) =>
         AssertFailFastExecutionAsync(source, expected);
