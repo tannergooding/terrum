@@ -1,0 +1,1123 @@
+namespace Terrum.CodeAnalysis;
+
+bool ValidateStandaloneDecoderBuffers()
+{
+    int32 methodCapacity
+        = Host.StandaloneDecoderMethods.Length / 16;
+    int32 importCapacity
+        = Host.StandaloneDecoderImportedCallables.Length / 16;
+    return Host.StandaloneDecoderStatus.Length == 1
+        && Host.StandaloneModuleDirectoryMode.Length == 1
+        && Host.StandaloneModuleDirectoryMode[0] == 1
+        && Host.StandaloneDecoderSelectedModuleId.Length == 1
+        && Host.StandaloneDecoderMethodCount.Length == 1
+        && Host.StandaloneDecoderMethods.Length % 16 == 0
+        && Host.StandaloneDecoderLocalCallableCount.Length == 1
+        && Host.StandaloneDecoderLocalCallables.Length % 4 == 0
+        && Host.StandaloneDecoderImportedCallableCount.Length == 1
+        && Host.StandaloneDecoderImportedCallables.Length % 16 == 0
+        && Host.StandaloneDecoderImportMapCount.Length == 1
+        && Host.StandaloneDecoderImportMap.Length % 4 == 0
+        && Host.StandaloneDecoderExpectedGroupCallableIds.Length
+            == Host.StandaloneResolvedImports.Length / 32 + 1
+        && Host.StandaloneDecoderExpectedGroupRepresentativeImportIds.Length
+            == Host.StandaloneResolvedImports.Length / 32 + 1
+        && Host.StandaloneDecoderMethodLookupSlots.Length
+            == methodCapacity * 2 + 1
+        && Host.StandaloneDecoderImportLookupSlots.Length
+            == importCapacity * 2 + 1
+        && Host.StandaloneDecoderModuleLookupSlots.Length
+            == Host.StandaloneModuleDirectory.Length / 8 * 2 + 1
+        && Host.StandaloneMethodRoots.Length == 0
+        && Host.StandaloneResolvedRoots.Length == 0;
+}
+
+void ClearStandaloneDecoderOutputs()
+{
+    Host.StandaloneDecoderStatus[0] = 0;
+    Host.StandaloneDecoderSelectedModuleId[0] = -1;
+    Host.StandaloneDecoderMethodCount[0] = 0;
+    Host.StandaloneDecoderLocalCallableCount[0] = 0;
+    Host.StandaloneDecoderImportedCallableCount[0] = 0;
+    Host.StandaloneDecoderImportMapCount[0] = 0;
+
+    for (mut int32 index = 0;
+        index < Host.StandaloneDecoderMethods.Length;
+        index = index + 1)
+    {
+        Host.StandaloneDecoderMethods[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneDecoderLocalCallables.Length;
+        index = index + 1)
+    {
+        Host.StandaloneDecoderLocalCallables[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneDecoderImportedCallables.Length;
+        index = index + 1)
+    {
+        Host.StandaloneDecoderImportedCallables[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneDecoderImportMap.Length;
+        index = index + 1)
+    {
+        Host.StandaloneDecoderImportMap[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneDecoderExpectedGroupCallableIds.Length;
+        index = index + 1)
+    {
+        Host.StandaloneDecoderExpectedGroupCallableIds[index] = -1;
+        Host.StandaloneDecoderExpectedGroupRepresentativeImportIds[index]
+            = -1;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneDecoderMethodLookupSlots.Length;
+        index = index + 1)
+    {
+        Host.StandaloneDecoderMethodLookupSlots[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneDecoderImportLookupSlots.Length;
+        index = index + 1)
+    {
+        Host.StandaloneDecoderImportLookupSlots[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneDecoderModuleLookupSlots.Length;
+        index = index + 1)
+    {
+        Host.StandaloneDecoderModuleLookupSlots[index] = 0;
+    }
+}
+
+int32 GetStandaloneDecoderModuleHash(int32 artifactOrdinal,
+    int32 moduleRow)
+{
+    mut int32 hash = 0x6A09_E667;
+    hash = ((hash << 5) | (hash >>> 27)) ^ artifactOrdinal;
+    hash = ((hash << 5) | (hash >>> 27)) ^ moduleRow;
+    return hash;
+}
+
+int32 BuildStandaloneDecoderModuleLookup()
+{
+    int32 moduleCount = Host.StandaloneModuleCount[0];
+    int32 capacity
+        = Host.StandaloneDecoderModuleLookupSlots.Length;
+    if (moduleCount <= 0
+        || moduleCount > Host.StandaloneModuleDirectory.Length / 8
+        || capacity <= 0)
+    {
+        return 3;
+    }
+
+    for (mut int32 directoryRow = 1;
+        directoryRow <= moduleCount;
+        directoryRow = directoryRow + 1)
+    {
+        int32 offset = directoryRow * 8;
+        int32 artifactOrdinal
+            = Host.StandaloneModuleDirectory[offset];
+        int32 moduleRow
+            = Host.StandaloneModuleDirectory[offset + 1];
+        if (artifactOrdinal < 0 || moduleRow <= 0
+            || artifactOrdinal >= Host.StandaloneRequest[4])
+        {
+            return 3;
+        }
+
+        int32 slot = GetStandaloneDecoderHashSlot(
+            GetStandaloneDecoderModuleHash(artifactOrdinal, moduleRow),
+            capacity);
+        if (slot < 0)
+        {
+            return 3;
+        }
+        mut bool inserted = false;
+        for (mut int32 probe = 0;
+            probe < capacity;
+            probe = probe + 1)
+        {
+            int32 storedRow
+                = Host.StandaloneDecoderModuleLookupSlots[slot];
+            if (storedRow == 0)
+            {
+                Host.StandaloneDecoderModuleLookupSlots[slot]
+                    = directoryRow;
+                inserted = true;
+                break;
+            }
+            int32 storedOffset = storedRow * 8;
+            if (Host.StandaloneModuleDirectory[storedOffset]
+                    == artifactOrdinal
+                && Host.StandaloneModuleDirectory[storedOffset + 1]
+                    == moduleRow)
+            {
+                return 3;
+            }
+            slot = slot + 1;
+            if (slot == capacity)
+            {
+                slot = 0;
+            }
+        }
+        if (!inserted)
+        {
+            return 3;
+        }
+    }
+    return 0;
+}
+
+int32 FindStandaloneDecoderModuleDirectoryRow(int32 artifactOrdinal,
+    int32 moduleRow)
+{
+    int32 capacity
+        = Host.StandaloneDecoderModuleLookupSlots.Length;
+    if (artifactOrdinal < 0
+        || artifactOrdinal >= Host.StandaloneRequest[4]
+        || moduleRow <= 0 || capacity <= 0)
+    {
+        return 0;
+    }
+
+    int32 slot = GetStandaloneDecoderHashSlot(
+        GetStandaloneDecoderModuleHash(artifactOrdinal, moduleRow),
+        capacity);
+    if (slot < 0)
+    {
+        return 0;
+    }
+    for (mut int32 probe = 0;
+        probe < capacity;
+        probe = probe + 1)
+    {
+        int32 directoryRow
+            = Host.StandaloneDecoderModuleLookupSlots[slot];
+        if (directoryRow == 0)
+        {
+            return 0;
+        }
+        int32 offset = directoryRow * 8;
+        if (Host.StandaloneModuleDirectory[offset] == artifactOrdinal
+            && Host.StandaloneModuleDirectory[offset + 1] == moduleRow)
+        {
+            return directoryRow;
+        }
+        slot = slot + 1;
+        if (slot == capacity)
+        {
+            slot = 0;
+        }
+    }
+    return 0;
+}
+
+int32 GetStandaloneDecoderImportHash(int32 artifactOrdinal,
+    int32 moduleRow, int32 importRow)
+{
+    mut int32 hash = 0x51ED_270B;
+    hash = ((hash << 5) | (hash >>> 27)) ^ artifactOrdinal;
+    hash = ((hash << 5) | (hash >>> 27)) ^ moduleRow;
+    hash = ((hash << 5) | (hash >>> 27)) ^ importRow;
+    return hash;
+}
+
+int32 GetStandaloneDecoderMethodHash(int32 moduleId, int32 methodDefRow)
+{
+    mut int32 hash = 0x2C1B_3C6D;
+    hash = ((hash << 5) | (hash >>> 27)) ^ moduleId;
+    hash = ((hash << 5) | (hash >>> 27)) ^ methodDefRow;
+    return hash;
+}
+
+int32 GetStandaloneDecoderHashSlot(int32 hash, int32 capacity)
+{
+    if (capacity <= 0)
+    {
+        return -1;
+    }
+    return int32(uint32(hash) % uint32(capacity));
+}
+
+int32 AddStandaloneDecoderMethodLookup(int32 moduleId,
+    int32 methodDefRow, int32 methodRecordId)
+{
+    int32 capacity
+        = Host.StandaloneDecoderMethodLookupSlots.Length;
+    if (moduleId < 0 || methodDefRow <= 0 || methodRecordId < 0
+        || methodRecordId >= Host.StandaloneDecoderMethods.Length / 16
+        || capacity <= 0)
+    {
+        return 3;
+    }
+    int32 hash
+        = GetStandaloneDecoderMethodHash(moduleId, methodDefRow);
+    int32 slot = GetStandaloneDecoderHashSlot(hash, capacity);
+    if (slot < 0)
+    {
+        return 3;
+    }
+
+    for (mut int32 probe = 0;
+        probe < capacity;
+        probe = probe + 1)
+    {
+        int32 storedMethod
+            = Host.StandaloneDecoderMethodLookupSlots[slot];
+        if (storedMethod == 0)
+        {
+            Host.StandaloneDecoderMethodLookupSlots[slot]
+                = methodRecordId + 1;
+            return 0;
+        }
+        int32 storedOffset = (storedMethod - 1) * 16;
+        if (Host.StandaloneDecoderMethods[storedOffset] == moduleId
+            && Host.StandaloneDecoderMethods[storedOffset + 3]
+                == methodDefRow)
+        {
+            return 3;
+        }
+        slot = slot + 1;
+        if (slot == capacity)
+        {
+            slot = 0;
+        }
+    }
+    return 3;
+}
+
+int32 FindStandaloneDecoderMethodRecord(int32 moduleId,
+    int32 methodDefRow)
+{
+    int32 capacity
+        = Host.StandaloneDecoderMethodLookupSlots.Length;
+    if (moduleId < 0 || methodDefRow <= 0 || capacity <= 0)
+    {
+        return -1;
+    }
+    int32 hash
+        = GetStandaloneDecoderMethodHash(moduleId, methodDefRow);
+    int32 slot = GetStandaloneDecoderHashSlot(hash, capacity);
+    if (slot < 0)
+    {
+        return -1;
+    }
+
+    for (mut int32 probe = 0;
+        probe < capacity;
+        probe = probe + 1)
+    {
+        int32 storedMethod
+            = Host.StandaloneDecoderMethodLookupSlots[slot];
+        if (storedMethod == 0)
+        {
+            return -1;
+        }
+        int32 methodRecordId = storedMethod - 1;
+        int32 storedOffset = methodRecordId * 16;
+        if (Host.StandaloneDecoderMethods[storedOffset] == moduleId
+            && Host.StandaloneDecoderMethods[storedOffset + 3]
+                == methodDefRow)
+        {
+            return methodRecordId;
+        }
+        slot = slot + 1;
+        if (slot == capacity)
+        {
+            slot = 0;
+        }
+    }
+    return -1;
+}
+
+int32 AddStandaloneDecoderImportMap(int32 artifactOrdinal,
+    int32 moduleRow, int32 importRow, int32 catalogOrdinal)
+{
+    int32 mapCount = Host.StandaloneDecoderImportMapCount[0];
+    int32 mapCapacity
+        = Host.StandaloneDecoderImportMap.Length / 4;
+    int32 slotCapacity
+        = Host.StandaloneDecoderImportLookupSlots.Length;
+    if (mapCount < 0 || mapCount >= mapCapacity
+        || slotCapacity <= 0 || artifactOrdinal < 0
+        || moduleRow <= 0 || importRow <= 0 || catalogOrdinal < 0)
+    {
+        return 3;
+    }
+
+    int32 hash
+        = GetStandaloneDecoderImportHash(artifactOrdinal,
+            moduleRow, importRow);
+    int32 slot = GetStandaloneDecoderHashSlot(hash, slotCapacity);
+    if (slot < 0)
+    {
+        return 3;
+    }
+    for (mut int32 probe = 0;
+        probe < slotCapacity;
+        probe = probe + 1)
+    {
+        int32 storedImport
+            = Host.StandaloneDecoderImportLookupSlots[slot];
+        if (storedImport == 0)
+        {
+            int32 mapOffset = mapCount * 4;
+            Host.StandaloneDecoderImportMap[mapOffset]
+                = artifactOrdinal;
+            Host.StandaloneDecoderImportMap[mapOffset + 1]
+                = moduleRow;
+            Host.StandaloneDecoderImportMap[mapOffset + 2]
+                = importRow;
+            Host.StandaloneDecoderImportMap[mapOffset + 3]
+                = catalogOrdinal;
+            Host.StandaloneDecoderImportLookupSlots[slot]
+                = mapCount + 1;
+            Host.StandaloneDecoderImportMapCount[0] = mapCount + 1;
+            return 0;
+        }
+
+        int32 storedOffset = (storedImport - 1) * 4;
+        if (Host.StandaloneDecoderImportMap[storedOffset]
+                == artifactOrdinal
+            && Host.StandaloneDecoderImportMap[storedOffset + 1]
+                == moduleRow
+            && Host.StandaloneDecoderImportMap[storedOffset + 2]
+                == importRow)
+        {
+            return 3;
+        }
+        slot = slot + 1;
+        if (slot == slotCapacity)
+        {
+            slot = 0;
+        }
+    }
+    return 3;
+}
+
+int32 FindStandaloneDecoderImport(int32 artifactOrdinal,
+    int32 moduleRow, int32 importRow)
+{
+    int32 slotCapacity
+        = Host.StandaloneDecoderImportLookupSlots.Length;
+    if (artifactOrdinal < 0
+        || artifactOrdinal >= Host.StandaloneRequest[4]
+        || moduleRow <= 0 || importRow <= 0 || slotCapacity <= 0)
+    {
+        return -1;
+    }
+    int32 hash
+        = GetStandaloneDecoderImportHash(artifactOrdinal,
+            moduleRow, importRow);
+    int32 slot = GetStandaloneDecoderHashSlot(hash, slotCapacity);
+    if (slot < 0)
+    {
+        return -1;
+    }
+    for (mut int32 probe = 0;
+        probe < slotCapacity;
+        probe = probe + 1)
+    {
+        int32 storedImport
+            = Host.StandaloneDecoderImportLookupSlots[slot];
+        if (storedImport == 0)
+        {
+            return -1;
+        }
+        int32 mapOffset = (storedImport - 1) * 4;
+        if (Host.StandaloneDecoderImportMap[mapOffset]
+                == artifactOrdinal
+            && Host.StandaloneDecoderImportMap[mapOffset + 1]
+                == moduleRow
+            && Host.StandaloneDecoderImportMap[mapOffset + 2]
+                == importRow)
+        {
+            return Host.StandaloneDecoderImportMap[mapOffset + 3];
+        }
+        slot = slot + 1;
+        if (slot == slotCapacity)
+        {
+            slot = 0;
+        }
+    }
+    return -1;
+}
+
+int32 FindStandaloneDecoderExpectedGroup(int32 artifactOrdinal,
+    int32 moduleRow, int32 methodDefRow)
+{
+    int32 importCount = Host.StandaloneDecoderImportedCallableCount[0];
+    if (artifactOrdinal < 0
+        || artifactOrdinal >= Host.StandaloneRequest[4]
+        || moduleRow <= 0 || methodDefRow <= 0
+        || importCount < 0
+        || importCount
+            > Host.StandaloneResolvedExpectedImportOrder.Length)
+    {
+        return -1;
+    }
+
+    mut int32 low = 1;
+    mut int32 high = importCount;
+    while (low <= high)
+    {
+        int32 middle = low + (high - low) / 2;
+        int32 catalogOrdinal
+            = Host.StandaloneResolvedExpectedImportOrder[middle] - 1;
+        if (catalogOrdinal < 0 || catalogOrdinal >= importCount)
+        {
+            return -1;
+        }
+        int32 offset = catalogOrdinal * 32;
+        int32 candidateArtifact
+            = Host.StandaloneResolvedImports[offset];
+        int32 candidateModule
+            = Host.StandaloneResolvedImports[offset + 1];
+        int32 candidateMethod
+            = Host.StandaloneResolvedImports[offset + 5];
+        if (candidateArtifact == artifactOrdinal
+            && candidateModule == moduleRow
+            && candidateMethod == methodDefRow)
+        {
+            int32 expectedGroupId
+                = Host.StandaloneResolvedImports[offset + 20];
+            return expectedGroupId > 0
+                && expectedGroupId
+                    <= Host.StandaloneResolvedExpectedImportCount[0]
+                ? expectedGroupId : -1;
+        }
+        if (candidateArtifact < artifactOrdinal
+            || (candidateArtifact == artifactOrdinal
+                && candidateModule < moduleRow)
+            || (candidateArtifact == artifactOrdinal
+                && candidateModule == moduleRow
+                && candidateMethod < methodDefRow))
+        {
+            low = middle + 1;
+        }
+        else
+        {
+            high = middle - 1;
+        }
+    }
+    return 0;
+}
+
+int32 GetStandaloneDecoderRepresentativeImportId(int32 expectedGroupId)
+{
+    if (expectedGroupId <= 0
+        || expectedGroupId
+            >= Host.StandaloneDecoderExpectedGroupCallableIds.Length)
+    {
+        return -1;
+    }
+
+    int32 importId
+        = Host.StandaloneDecoderExpectedGroupRepresentativeImportIds[
+            expectedGroupId];
+    if (importId < 0
+        || importId
+            >= Host.StandaloneDecoderImportedCallableCount[0]
+        || Host.StandaloneDecoderImportedCallables[
+            importId * 16 + 3]
+            != Host.StandaloneDecoderExpectedGroupCallableIds[
+                expectedGroupId])
+    {
+        return -1;
+    }
+    return importId;
+}
+
+int32 BuildStandaloneDecoderImportedCallables()
+{
+    int32 importCount = Host.StandaloneResolvedImportCount[0];
+    int32 expectedImportCount
+        = Host.StandaloneResolvedExpectedImportCount[0];
+    int32 importCapacity
+        = Host.StandaloneDecoderImportedCallables.Length / 16;
+    if (importCount < 0 || importCount > importCapacity
+        || expectedImportCount < 0
+        || expectedImportCount
+            >= Host.StandaloneDecoderExpectedGroupCallableIds.Length
+        || Host.StandaloneResolvedImports.Length % 32 != 0
+        || importCount > Host.StandaloneResolvedImports.Length / 32)
+    {
+        return 3;
+    }
+
+    Host.StandaloneDecoderImportedCallableCount[0] = importCount;
+    for (mut int32 catalogOrdinal = 0;
+        catalogOrdinal < importCount;
+        catalogOrdinal = catalogOrdinal + 1)
+    {
+        int32 sourceOffset = catalogOrdinal * 32;
+        int32 artifactOrdinal
+            = Host.StandaloneResolvedImports[sourceOffset];
+        int32 moduleRow
+            = Host.StandaloneResolvedImports[sourceOffset + 1];
+        int32 importRow
+            = Host.StandaloneResolvedImports[sourceOffset + 2];
+        int32 providerDirectoryRow
+            = Host.StandaloneResolvedImports[sourceOffset + 4];
+        int32 expectedMethodDefRow
+            = Host.StandaloneResolvedImports[sourceOffset + 5];
+        int32 expectedCallableSlot
+            = Host.StandaloneResolvedImports[sourceOffset + 13];
+        int32 expectedGroupId
+            = Host.StandaloneResolvedImports[sourceOffset + 20];
+        int32 providerMethodDefRow
+            = Host.StandaloneResolvedImports[sourceOffset + 21];
+        int32 providerMethodSigRow
+            = Host.StandaloneResolvedImports[sourceOffset + 23];
+        int32 providerParamFirst
+            = Host.StandaloneResolvedImports[sourceOffset + 24];
+        int32 providerParamCount
+            = Host.StandaloneResolvedImports[sourceOffset + 25];
+        int32 providerContractFirst
+            = Host.StandaloneResolvedImports[sourceOffset + 26];
+        int32 providerContractCount
+            = Host.StandaloneResolvedImports[sourceOffset + 27];
+        int32 providerBodyRow
+            = Host.StandaloneResolvedImports[sourceOffset + 28];
+        int32 providerCallableSlot
+            = Host.StandaloneResolvedImports[sourceOffset + 29];
+        if (artifactOrdinal < 0
+            || artifactOrdinal >= Host.StandaloneRequest[4]
+            || moduleRow <= 0 || importRow <= 0
+            || providerDirectoryRow <= 0
+            || providerDirectoryRow >= Host.StandaloneModuleDirectory.Length / 8
+            || expectedMethodDefRow <= 0 || expectedGroupId <= 0
+            || expectedGroupId > expectedImportCount
+            || expectedCallableSlot < 0
+            || expectedCallableSlot >= Host.StandaloneCallableTypeIds.Length
+            || expectedCallableSlot >= Host.StandaloneCallableEffects.Length
+            || providerMethodDefRow <= 0 || providerMethodSigRow <= 0
+            || providerParamFirst < 0 || providerParamCount < 0
+            || providerContractFirst < 0 || providerContractCount < 0
+            || providerBodyRow < 0 || providerCallableSlot < 0
+            || providerCallableSlot
+                >= Host.StandaloneCallableTypeIds.Length)
+        {
+            return 3;
+        }
+
+        int32 importerDirectoryRow
+            = FindStandaloneDecoderModuleDirectoryRow(
+                artifactOrdinal, moduleRow);
+        if (importerDirectoryRow <= 0)
+        {
+            return 3;
+        }
+        int32 importerModuleId = importerDirectoryRow - 1;
+        int32 providerModuleId = providerDirectoryRow - 1;
+        int32 providerOffset = providerDirectoryRow * 8;
+        int32 expectedCallableId = expectedGroupId - 1;
+        int32 existingGroupCallable
+            = Host.StandaloneDecoderExpectedGroupCallableIds[
+                expectedGroupId];
+        if (existingGroupCallable != -1
+            && existingGroupCallable != expectedCallableId)
+        {
+            return 3;
+        }
+        Host.StandaloneDecoderExpectedGroupCallableIds[
+            expectedGroupId] = expectedCallableId;
+
+        int32 targetOffset = catalogOrdinal * 16;
+        Host.StandaloneDecoderImportedCallables[targetOffset]
+            = catalogOrdinal;
+        Host.StandaloneDecoderImportedCallables[targetOffset + 1]
+            = importerModuleId;
+        Host.StandaloneDecoderImportedCallables[targetOffset + 2]
+            = providerModuleId;
+        Host.StandaloneDecoderImportedCallables[targetOffset + 3]
+            = expectedCallableId;
+        Host.StandaloneDecoderImportedCallables[targetOffset + 4]
+            = artifactOrdinal;
+        Host.StandaloneDecoderImportedCallables[targetOffset + 5]
+            = moduleRow;
+        Host.StandaloneDecoderImportedCallables[targetOffset + 6]
+            = importRow;
+        Host.StandaloneDecoderImportedCallables[targetOffset + 7]
+            = expectedMethodDefRow;
+        Host.StandaloneDecoderImportedCallables[targetOffset + 8]
+            = Host.StandaloneModuleDirectory[providerOffset];
+        Host.StandaloneDecoderImportedCallables[targetOffset + 9]
+            = Host.StandaloneModuleDirectory[providerOffset + 1];
+        Host.StandaloneDecoderImportedCallables[targetOffset + 10]
+            = providerMethodDefRow;
+        Host.StandaloneDecoderImportedCallables[targetOffset + 11]
+            = providerBodyRow;
+        Host.StandaloneDecoderImportedCallables[targetOffset + 12]
+            = expectedCallableSlot;
+        Host.StandaloneDecoderImportedCallables[targetOffset + 13]
+            = providerCallableSlot;
+        Host.StandaloneDecoderImportedCallables[targetOffset + 14]
+            = providerParamFirst;
+        Host.StandaloneDecoderImportedCallables[targetOffset + 15]
+            = providerParamCount;
+        int32 representativeImport
+            = Host.StandaloneDecoderExpectedGroupRepresentativeImportIds[
+                expectedGroupId];
+        if (representativeImport < 0
+            || importRow
+                < Host.StandaloneDecoderImportedCallables[
+                    representativeImport * 16 + 6])
+        {
+            Host.StandaloneDecoderExpectedGroupRepresentativeImportIds[
+                expectedGroupId] = catalogOrdinal;
+        }
+
+        int32 mapStatus = AddStandaloneDecoderImportMap(
+            artifactOrdinal, moduleRow, importRow, catalogOrdinal);
+        if (mapStatus != 0)
+        {
+            return mapStatus;
+        }
+    }
+    return 0;
+}
+
+int32 BuildStandaloneDecoderModuleCatalog()
+{
+    if (!ValidateStandaloneDecoderBuffers())
+    {
+        return 3;
+    }
+    ClearStandaloneDecoderOutputs();
+    if (Host.StandaloneRequest[5] != 0
+        || Host.StandaloneRequest[4] <= 0)
+    {
+        return 3;
+    }
+
+    int32 bindStatus = BindStandaloneMethodRoots();
+    if (bindStatus != 0)
+    {
+        return bindStatus;
+    }
+    if (Host.StandaloneResolvedRootCount[0] != 0)
+    {
+        return 3;
+    }
+
+    int32 moduleLookupStatus = BuildStandaloneDecoderModuleLookup();
+    if (moduleLookupStatus != 0)
+    {
+        return moduleLookupStatus;
+    }
+
+    init int32 selectedDirectoryRow;
+    if (!TryFindStandaloneModuleDirectoryRow(
+            Host.StandaloneRequest[2], Host.StandaloneRequest[3],
+            ref init selectedDirectoryRow)
+        || selectedDirectoryRow <= 0)
+    {
+        return 1;
+    }
+    int32 selectedDirectoryOffset = selectedDirectoryRow * 8;
+    if (Host.StandaloneModuleDirectory[selectedDirectoryOffset] != 0)
+    {
+        return 2;
+    }
+    int32 selectedModuleId = selectedDirectoryRow - 1;
+    int32 selectedModuleRow
+        = Host.StandaloneModuleDirectory[
+            selectedDirectoryOffset + 1];
+    if (selectedModuleId < 0 || selectedModuleRow <= 0)
+    {
+        return 3;
+    }
+
+    int32 importStatus = BuildStandaloneDecoderImportedCallables();
+    if (importStatus != 0)
+    {
+        return importStatus;
+    }
+
+    init int32 artifactStart;
+    init int32 artifactLength;
+    if (!TryGetStandaloneArtifactExtent(0,
+            ref init artifactStart, ref init artifactLength)
+        || !TryValidateStandaloneArtifactDirectory(0))
+    {
+        return 3;
+    }
+
+    int32 moduleEntry = FindStandaloneArtifactSection(0x0001);
+    int32 methodEntry = FindStandaloneArtifactSection(0x0016);
+    int32 signatureEntry = FindStandaloneArtifactSection(0x0017);
+    int32 methodDefCount = GetStandaloneArtifactSectionCount(0x0016);
+    int32 signatureCount = GetStandaloneArtifactSectionCount(0x0017);
+    int32 parameterCount = GetStandaloneArtifactSectionCount(0x0018);
+    int32 moduleCount = GetStandaloneArtifactSectionCount(0x0001);
+    if (moduleEntry == 0 || methodEntry == 0 || signatureEntry == 0
+        || selectedModuleRow > moduleCount)
+    {
+        return 3;
+    }
+    int32 moduleStart = Host.StandaloneSectionStarts[moduleEntry];
+    int32 methodStart = Host.StandaloneSectionStarts[methodEntry];
+    int32 methodLength = Host.StandaloneSectionLengths[methodEntry];
+    int32 signatureStart
+        = Host.StandaloneSectionStarts[signatureEntry];
+    int32 signatureLength
+        = Host.StandaloneSectionLengths[signatureEntry];
+    if (int64(methodLength) != int64(methodDefCount) * 28
+        || int64(signatureLength) != int64(signatureCount) * 24)
+    {
+        return 3;
+    }
+
+    init int32 methodFirst;
+    init int32 methodEnd;
+    if (!TryGetStandaloneModuleMethodDefRange(artifactStart,
+            artifactLength, moduleStart, moduleCount,
+            methodDefCount, selectedModuleRow,
+            ref init methodFirst, ref init methodEnd)
+        || methodEnd < methodFirst
+        || methodEnd - methodFirst
+            > Host.StandaloneDecoderMethods.Length / 16)
+    {
+        return 3;
+    }
+
+    int32 scratchCallableSlot
+        = Host.StandaloneCallableTypeIds.Length - 1;
+    int32 importCapacity
+        = Host.StandaloneResolvedImports.Length / 32;
+    int32 providerCallableEnd
+        = importCapacity
+            + Host.StandaloneResolvedProviderGroupCount[0];
+    if (scratchCallableSlot < providerCallableEnd
+        || scratchCallableSlot < 0
+        || scratchCallableSlot
+            >= Host.StandaloneCallableEffects.Length)
+    {
+        return 3;
+    }
+
+    int32 methodRecordCount = 0;
+    int32 localCallableCount = 0;
+    for (mut int32 methodDefRow = methodFirst;
+        methodDefRow < methodEnd;
+        methodDefRow = methodDefRow + 1)
+    {
+        int32 methodOffset
+            = methodStart + ((methodDefRow - 1) * 28);
+        init uint32 ownerTypeDef;
+        init uint32 nameStringRow;
+        init uint32 methodSigRow;
+        init uint32 methodFlags;
+        init uint32 contractFirst;
+        init uint32 methodContractCount;
+        init uint32 bodyRow;
+        if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, methodOffset, ref init ownerTypeDef)
+            || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, methodOffset + 4,
+                ref init nameStringRow)
+            || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, methodOffset + 8,
+                ref init methodSigRow)
+            || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, methodOffset + 12,
+                ref init methodFlags)
+            || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, methodOffset + 16,
+                ref init contractFirst)
+            || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, methodOffset + 20,
+                ref init methodContractCount)
+            || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, methodOffset + 24, ref init bodyRow)
+            || ownerTypeDef != 0 || nameStringRow == 0
+            || methodSigRow == 0
+            || methodSigRow > uint32(signatureCount)
+            || (methodFlags != 0 && methodFlags != 2)
+            || bodyRow > uint32(GetStandaloneArtifactSectionCount(0x0020))
+            || !IsStandaloneMetadataRange(contractFirst,
+                methodContractCount,
+                GetStandaloneArtifactSectionCount(0x001B)))
+        {
+            return 3;
+        }
+
+        if (!TryValidateStandaloneStringName(0, artifactStart,
+                artifactLength,
+                Host.StandaloneSectionStarts[
+                    FindStandaloneArtifactSection(0x0002)],
+                Host.StandaloneSectionLengths[
+                    FindStandaloneArtifactSection(0x0002)],
+                GetStandaloneArtifactSectionCount(0x0002),
+                int32(nameStringRow)))
+        {
+            return 3;
+        }
+
+        int32 expectedGroupId
+            = FindStandaloneDecoderExpectedGroup(0,
+                selectedModuleRow, methodDefRow);
+        if (expectedGroupId < 0)
+        {
+            return 3;
+        }
+
+        int32 callableKind;
+        int32 callableId;
+        int32 resultTypeId;
+        int32 effectMask;
+        int32 paramFirst;
+        int32 paramCount;
+        int32 decodedContractFirst;
+        int32 decodedContractCount;
+        int32 decodedBodyRow;
+        if (bodyRow == 0)
+        {
+            if (expectedGroupId == 0 || methodFlags != 2)
+            {
+                return 2;
+            }
+            int32 importedId = -1;
+            for (mut int32 candidate = 0;
+                candidate
+                    < Host.StandaloneDecoderImportedCallableCount[0];
+                candidate = candidate + 1)
+            {
+                int32 importedOffset = candidate * 16;
+                if (Host.StandaloneDecoderImportedCallables[
+                        importedOffset + 4] == 0
+                    && Host.StandaloneDecoderImportedCallables[
+                        importedOffset + 5] == selectedModuleRow
+                    && Host.StandaloneDecoderImportedCallables[
+                        importedOffset + 7] == methodDefRow)
+                {
+                    if (importedId >= 0)
+                    {
+                        int32 previousOffset = importedId * 16;
+                        if (Host.StandaloneDecoderImportedCallables[
+                                previousOffset + 3]
+                            != Host.StandaloneDecoderImportedCallables[
+                                importedOffset + 3])
+                        {
+                            return 3;
+                        }
+                    }
+                    else
+                    {
+                        importedId = candidate;
+                    }
+                }
+            }
+            if (importedId < 0)
+            {
+                return 3;
+            }
+            int32 importedOffset = importedId * 16;
+            int32 expectedCallableSlot
+                = Host.StandaloneDecoderImportedCallables[
+                    importedOffset + 12];
+            callableKind = 2;
+            callableId = expectedGroupId - 1;
+            resultTypeId
+                = Host.StandaloneCallableTypeIds[expectedCallableSlot];
+            effectMask
+                = Host.StandaloneCallableEffects[expectedCallableSlot];
+            paramFirst
+                = Host.StandaloneResolvedImports[
+                    Host.StandaloneDecoderImportedCallables[
+                        importedOffset] * 32 + 8];
+            paramCount
+                = Host.StandaloneResolvedImports[
+                    Host.StandaloneDecoderImportedCallables[
+                        importedOffset] * 32 + 9];
+            decodedContractFirst
+                = Host.StandaloneResolvedImports[
+                    Host.StandaloneDecoderImportedCallables[
+                        importedOffset] * 32 + 10];
+            decodedContractCount
+                = Host.StandaloneResolvedImports[
+                    Host.StandaloneDecoderImportedCallables[
+                        importedOffset] * 32 + 11];
+            decodedBodyRow = 0;
+            if (int32(methodSigRow)
+                    != Host.StandaloneResolvedImports[
+                        Host.StandaloneDecoderImportedCallables[
+                            importedOffset] * 32 + 6]
+                || int32(contractFirst) != decodedContractFirst
+                || int32(methodContractCount) != decodedContractCount
+                || resultTypeId <= 0 || (effectMask & ~6) != 0)
+            {
+                return 3;
+            }
+        }
+        else
+        {
+            if (expectedGroupId != 0)
+            {
+                return 3;
+            }
+            int32 signatureOffset
+                = signatureStart + ((int32(methodSigRow) - 1) * 24);
+            init uint32 resultTypeSpecRef;
+            init uint32 receiverTypeSpecRef;
+            init uint32 parameterFirst;
+            init uint32 signatureParameterCount;
+            init uint32 genericFirst;
+            init uint32 genericCount;
+            if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                    artifactLength, signatureOffset,
+                    ref init resultTypeSpecRef)
+                || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                    artifactLength, signatureOffset + 4,
+                    ref init receiverTypeSpecRef)
+                || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                    artifactLength, signatureOffset + 8,
+                    ref init parameterFirst)
+                || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                    artifactLength, signatureOffset + 12,
+                    ref init signatureParameterCount)
+                || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                    artifactLength, signatureOffset + 16,
+                    ref init genericFirst)
+                || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                    artifactLength, signatureOffset + 20,
+                    ref init genericCount)
+                || resultTypeSpecRef == 0
+                || !IsStandaloneMetadataRange(parameterFirst,
+                    signatureParameterCount, parameterCount)
+                || !IsStandaloneMetadataRange(genericFirst,
+                    genericCount,
+                    GetStandaloneArtifactSectionCount(0x0019)))
+            {
+                return 3;
+            }
+            if (receiverTypeSpecRef != 0 || genericCount != 0)
+            {
+                return 2;
+            }
+
+            int32 typeStatus = ValidateStandaloneMethodCallableTypes(
+                0, scratchCallableSlot, artifactStart, artifactLength,
+                int32(methodSigRow), resultTypeSpecRef,
+                int32(parameterFirst), int32(signatureParameterCount));
+            if (typeStatus != 0)
+            {
+                return typeStatus;
+            }
+            int32 contractStatus = ValidateStandaloneMethodContracts(
+                0, selectedModuleRow, scratchCallableSlot,
+                artifactStart, artifactLength, methodDefRow,
+                parameterFirst, signatureParameterCount,
+                contractFirst, methodContractCount);
+            if (contractStatus != 0)
+            {
+                return contractStatus;
+            }
+
+            callableKind = 1;
+            callableId = localCallableCount;
+            resultTypeId
+                = Host.StandaloneCallableTypeIds[scratchCallableSlot];
+            effectMask
+                = Host.StandaloneCallableEffects[scratchCallableSlot];
+            paramFirst = int32(parameterFirst);
+            paramCount = int32(signatureParameterCount);
+            decodedContractFirst = int32(contractFirst);
+            decodedContractCount = int32(methodContractCount);
+            decodedBodyRow = int32(bodyRow);
+        }
+
+        if (methodRecordCount
+                >= Host.StandaloneDecoderMethods.Length / 16
+            || (callableKind == 1
+                && localCallableCount
+                    >= Host.StandaloneDecoderLocalCallables.Length / 4))
+        {
+            return 3;
+        }
+
+        int32 methodRecordOffset = methodRecordCount * 16;
+        Host.StandaloneDecoderMethods[methodRecordOffset]
+            = selectedModuleId;
+        Host.StandaloneDecoderMethods[methodRecordOffset + 1] = 0;
+        Host.StandaloneDecoderMethods[methodRecordOffset + 2]
+            = selectedModuleRow;
+        Host.StandaloneDecoderMethods[methodRecordOffset + 3]
+            = methodDefRow;
+        Host.StandaloneDecoderMethods[methodRecordOffset + 4]
+            = int32(methodSigRow);
+        Host.StandaloneDecoderMethods[methodRecordOffset + 5]
+            = resultTypeId;
+        Host.StandaloneDecoderMethods[methodRecordOffset + 6]
+            = paramFirst;
+        Host.StandaloneDecoderMethods[methodRecordOffset + 7]
+            = paramCount;
+        Host.StandaloneDecoderMethods[methodRecordOffset + 8]
+            = decodedContractFirst;
+        Host.StandaloneDecoderMethods[methodRecordOffset + 9]
+            = decodedContractCount;
+        Host.StandaloneDecoderMethods[methodRecordOffset + 10]
+            = decodedBodyRow;
+        Host.StandaloneDecoderMethods[methodRecordOffset + 11]
+            = int32(methodFlags);
+        Host.StandaloneDecoderMethods[methodRecordOffset + 12]
+            = callableId;
+        Host.StandaloneDecoderMethods[methodRecordOffset + 13]
+            = callableKind;
+        Host.StandaloneDecoderMethods[methodRecordOffset + 14]
+            = expectedGroupId;
+        Host.StandaloneDecoderMethods[methodRecordOffset + 15]
+            = effectMask;
+
+        int32 lookupStatus = AddStandaloneDecoderMethodLookup(
+            selectedModuleId, methodDefRow, methodRecordCount);
+        if (lookupStatus != 0)
+        {
+            return lookupStatus;
+        }
+        if (callableKind == 1)
+        {
+            int32 localOffset = localCallableCount * 4;
+            Host.StandaloneDecoderLocalCallables[localOffset]
+                = selectedModuleId;
+            Host.StandaloneDecoderLocalCallables[localOffset + 1]
+                = localCallableCount;
+            Host.StandaloneDecoderLocalCallables[localOffset + 2]
+                = int32(bodyRow);
+            Host.StandaloneDecoderLocalCallables[localOffset + 3]
+                = methodRecordCount;
+            localCallableCount = localCallableCount + 1;
+        }
+        methodRecordCount = methodRecordCount + 1;
+    }
+
+    Host.StandaloneDecoderSelectedModuleId[0] = selectedModuleId;
+    Host.StandaloneDecoderMethodCount[0] = methodRecordCount;
+    Host.StandaloneDecoderLocalCallableCount[0] = localCallableCount;
+    return 0;
+}
+
+public static int32 DecodeStandaloneModuleMetadata()
+{
+    if (!ValidateStandaloneDecoderBuffers())
+    {
+        return 3;
+    }
+
+    ClearStandaloneDecoderOutputs();
+    int32 status = BuildStandaloneDecoderModuleCatalog();
+    if (status != 0)
+    {
+        ClearStandaloneDecoderOutputs();
+        Host.StandaloneDecoderStatus[0] = status;
+        return status;
+    }
+
+    Host.StandaloneDecoderStatus[0] = 0;
+    return 0;
+}

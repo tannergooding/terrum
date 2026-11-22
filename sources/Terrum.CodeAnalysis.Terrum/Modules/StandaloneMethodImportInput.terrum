@@ -145,7 +145,7 @@ public static int32 ValidateStandaloneMethodImportInput()
             return 1;
         }
         expectedTextStart = schemaStart + schemaLength;
-        if (!MatchesInitializationReferenceSchema(schemaStart,
+        if (!MatchesStandaloneGeneralPredicateSchema(schemaStart,
                 schemaLength))
         {
             return 3;
@@ -362,9 +362,9 @@ bool MatchesStandaloneImportAgreement(int32 start, int32 length)
         && Host.StandaloneText[start + 46] == '1';
 }
 
-bool MatchesInitializationReferenceSchema(int32 start, int32 length)
+bool MatchesStandaloneGeneralPredicateSchema(int32 start, int32 length)
 {
-    return length == 36
+    return length == 61
         && Host.StandaloneText[start] == 't'
         && Host.StandaloneText[start + 1] == 'r'
         && Host.StandaloneText[start + 2] == 'r'
@@ -400,5 +400,30 @@ bool MatchesInitializationReferenceSchema(int32 start, int32 length)
         && Host.StandaloneText[start + 32] == 'e'
         && Host.StandaloneText[start + 33] == 's'
         && Host.StandaloneText[start + 34] == '-'
-        && Host.StandaloneText[start + 35] == '1';
+        && Host.StandaloneText[start + 35] == 'g'
+        && Host.StandaloneText[start + 36] == 'e'
+        && Host.StandaloneText[start + 37] == 'n'
+        && Host.StandaloneText[start + 38] == 'e'
+        && Host.StandaloneText[start + 39] == 'r'
+        && Host.StandaloneText[start + 40] == 'a'
+        && Host.StandaloneText[start + 41] == 'l'
+        && Host.StandaloneText[start + 42] == '-'
+        && Host.StandaloneText[start + 43] == 'p'
+        && Host.StandaloneText[start + 44] == 'r'
+        && Host.StandaloneText[start + 45] == 'e'
+        && Host.StandaloneText[start + 46] == 'd'
+        && Host.StandaloneText[start + 47] == 'i'
+        && Host.StandaloneText[start + 48] == 'c'
+        && Host.StandaloneText[start + 49] == 'a'
+        && Host.StandaloneText[start + 50] == 't'
+        && Host.StandaloneText[start + 51] == 'e'
+        && Host.StandaloneText[start + 52] == '-'
+        && Host.StandaloneText[start + 53] == 'g'
+        && Host.StandaloneText[start + 54] == 'r'
+        && Host.StandaloneText[start + 55] == 'a'
+        && Host.StandaloneText[start + 56] == 'p'
+        && Host.StandaloneText[start + 57] == 'h'
+        && Host.StandaloneText[start + 58] == 's'
+        && Host.StandaloneText[start + 59] == '-'
+        && Host.StandaloneText[start + 60] == '1';
 }

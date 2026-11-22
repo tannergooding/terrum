@@ -1489,10 +1489,8 @@ int32 WriteStandaloneWriterModuleSection()
         = Host.StandaloneWriterUniqueConstantCount[0];
     int32 predicateGraphCount
         = Host.StandaloneWriterPredicateGraphMapCount[0];
-    bool requiresTypedValueFeatures
-        = constantCount != 0 || predicateGraphCount != 0;
     int32 featureCount
-        = (requiresTypedValueFeatures ? 2 : 0)
+        = (constantCount == 0 ? 0 : 1)
             + (predicateGraphCount != 0 ? 1 : 0);
     if (moduleIdentityStringId <= 0
         || moduleIdentityStringId
@@ -1543,10 +1541,8 @@ int32 WriteStandaloneWriterFeatureSection()
         return 3;
     }
 
-    bool requiresTypedValueFeatures
-        = constantCount != 0 || predicateGraphCount != 0;
     int32 featureCount
-        = (requiresTypedValueFeatures ? 2 : 0)
+        = (constantCount == 0 ? 0 : 1)
             + (predicateGraphCount == 0 ? 0 : 1);
     if (featureCount == 0)
     {
@@ -1555,13 +1551,6 @@ int32 WriteStandaloneWriterFeatureSection()
 
     int32 sectionStart = Host.StandaloneWriterOutputByteCount[0];
     int32 status = 0;
-    if (requiresTypedValueFeatures)
-    {
-        status = AppendStandaloneWriterWord(9);
-        if (status != 0) { return status; }
-        status = AppendStandaloneWriterWord(1);
-        if (status != 0) { return status; }
-    }
     if (predicateGraphCount != 0)
     {
         status = AppendStandaloneWriterWord(10);
@@ -1569,7 +1558,7 @@ int32 WriteStandaloneWriterFeatureSection()
         status = AppendStandaloneWriterWord(1);
         if (status != 0) { return status; }
     }
-    if (requiresTypedValueFeatures)
+    if (constantCount != 0)
     {
         status = AppendStandaloneWriterWord(11);
         if (status != 0) { return status; }
@@ -3502,21 +3491,21 @@ int32 WriteStandaloneWriterBodyCode(int32 bodyId,
             }
             if (operand0 == 0)
             {
-                status = AppendStandaloneWriterByte(0x07);
+                status = AppendStandaloneWriterByte(0x05);
                 if (status != 0) { return status; }
             }
             else if (operand0 <= 15)
             {
-                status = AppendStandaloneWriterByte(0x14);
+                status = AppendStandaloneWriterByte(0x13);
                 if (status != 0) { return status; }
-                status = AppendStandaloneWriterByte(operand0);
+                status = AppendStandaloneWriterByte(operand0 << 4);
                 if (status != 0) { return status; }
             }
             else if (operand0 <= 0xFFFF)
             {
-                status = AppendStandaloneWriterByte(0xD6);
+                status = AppendStandaloneWriterByte(0xD5);
                 if (status != 0) { return status; }
-                status = AppendStandaloneWriterByte(0x10);
+                status = AppendStandaloneWriterByte(0);
                 if (status != 0) { return status; }
                 status = AppendStandaloneWriterHalfWord(
                     uint32(operand0));
@@ -4696,8 +4685,7 @@ int32 AppendStandaloneWriterContractHeader(int32 methodId,
         return 3;
     }
 
-    int32 status = AppendStandaloneWriterWord(
-        uint32(0x1600_0000) | uint32(methodId + 1));
+    int32 status = AppendStandaloneWriterWord(uint32(methodId + 1));
     if (status != 0) { return status; }
     status = AppendStandaloneWriterHalfWord(uint32(clauseKind));
     if (status != 0) { return status; }
@@ -4968,8 +4956,7 @@ int32 WriteStandaloneWriterContractSection()
                 || !TryReadStandaloneArtifactAbsoluteHalfWord(
                     artifactStart, artifactLength, rowStart + 6,
                     ref init clauseFlags)
-                || owner != (uint32(0x1600_0000)
-                    | uint32(methodDefRow))
+                || owner != uint32(methodDefRow)
                 || clauseFlags != 0)
             {
                 return 3;

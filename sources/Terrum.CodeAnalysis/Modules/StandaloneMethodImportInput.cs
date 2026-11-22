@@ -11,6 +11,46 @@ namespace Terrum.CodeAnalysis.Modules;
 internal readonly record struct StandaloneMethodRoot(
     int ArtifactInputOrdinal, string ModuleIdentity, string ExportKey);
 
+internal readonly record struct StandaloneMethodImportArtifactInput(
+    string Agreement, string ModuleIdentity, TrRmStandardArtifactInput Input,
+    IReadOnlyList<TrRmStandardArtifactInput> Providers)
+{
+    internal CapturedStandaloneMethodImportInput Capture()
+    {
+        ArgumentNullException.ThrowIfNull(Agreement);
+        ArgumentNullException.ThrowIfNull(ModuleIdentity);
+        ArgumentNullException.ThrowIfNull(Input);
+        ArgumentNullException.ThrowIfNull(Input.SchemaIdentity);
+        ArgumentNullException.ThrowIfNull(Providers);
+
+        var providerCount = Providers.Count;
+        var artifacts
+            = ImmutableArray.CreateBuilder<TrRmStandardArtifactInput>(
+                checked(providerCount + 1));
+        artifacts.Add(new TrRmStandardArtifactInput(Input.SchemaIdentity,
+            Input.Artifact.ToArray()));
+        for (var index = 0; index < providerCount; index++)
+        {
+            var provider = Providers[index]
+                ?? throw new ArgumentException(
+                    "The provider list cannot contain null entries.",
+                    nameof(Providers));
+            ArgumentNullException.ThrowIfNull(provider.SchemaIdentity);
+            artifacts.Add(new TrRmStandardArtifactInput(
+                provider.SchemaIdentity, provider.Artifact.ToArray()));
+        }
+        if (Providers.Count != providerCount)
+        {
+            throw new InvalidOperationException(
+                "The provider list changed during capture.");
+        }
+
+        return new CapturedStandaloneMethodImportInput(Agreement,
+            ModuleIdentity, artifacts.MoveToImmutable(),
+            ImmutableArray<StandaloneMethodRoot>.Empty);
+    }
+}
+
 internal readonly record struct StandaloneMethodImportInput(
     string Agreement, string UsingModuleIdentity,
     IReadOnlyList<TrRmStandardArtifactInput> Artifacts,
@@ -263,6 +303,71 @@ internal readonly record struct CapturedStandaloneMethodImportInput(
 
             return start;
         }
+    }
+
+    internal ImmutableArray<HostBuffer> CreateSourceFreeReaderHostBuffers()
+    {
+        if (Artifacts.IsDefault || MethodRoots.IsDefault
+            || Artifacts.IsEmpty || !MethodRoots.IsEmpty)
+        {
+            throw new InvalidOperationException(
+                "Source-free decoding requires captured artifacts and no source MethodRoots.");
+        }
+
+        var artifactByteLength = 0;
+        foreach (var artifact in Artifacts)
+        {
+            artifactByteLength = checked(artifactByteLength
+                + artifact.Artifact.Length);
+        }
+
+        var methodCapacity = checked((artifactByteLength / 28) + 1);
+        var importCapacity = checked((artifactByteLength / 12) + 1);
+        var moduleCapacity = checked((artifactByteLength / 48) + 2);
+        return CreateHostBuffers().AddRange([
+            new HostBuffer("StandaloneModuleDirectoryMode",
+                PrimitiveType.Int32, [1], false),
+            new HostBuffer("StandaloneDecoderStatus",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneDecoderSelectedModuleId",
+                PrimitiveType.Int32, [-1], true),
+            new HostBuffer("StandaloneDecoderMethodCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneDecoderMethods",
+                PrimitiveType.Int32,
+                [.. new int[checked(methodCapacity * 16)]], true),
+            new HostBuffer("StandaloneDecoderLocalCallableCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneDecoderLocalCallables",
+                PrimitiveType.Int32,
+                [.. new int[checked(methodCapacity * 4)]], true),
+            new HostBuffer("StandaloneDecoderImportedCallableCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneDecoderImportedCallables",
+                PrimitiveType.Int32,
+                [.. new int[checked(importCapacity * 12)]], true),
+            new HostBuffer("StandaloneDecoderImportMapCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneDecoderImportMap",
+                PrimitiveType.Int32,
+                [.. new int[checked(importCapacity * 4)]], true),
+            new HostBuffer("StandaloneDecoderExpectedGroupCallableIds",
+                PrimitiveType.Int32,
+                [.. new int[checked(importCapacity + 1)]], true),
+            new HostBuffer(
+                "StandaloneDecoderExpectedGroupRepresentativeImportIds",
+                PrimitiveType.Int32,
+                [.. new int[checked(importCapacity + 1)]], true),
+            new HostBuffer("StandaloneDecoderMethodLookupSlots",
+                PrimitiveType.Int32,
+                [.. new int[checked(methodCapacity * 2 + 1)]], true),
+            new HostBuffer("StandaloneDecoderImportLookupSlots",
+                PrimitiveType.Int32,
+                [.. new int[checked(importCapacity * 2 + 1)]], true),
+            new HostBuffer("StandaloneDecoderModuleLookupSlots",
+                PrimitiveType.Int32,
+                [.. new int[checked(moduleCapacity * 2 + 1)]], true),
+        ]);
     }
 
     internal ImmutableArray<HostBuffer> CreateSourceCallHostBuffers(

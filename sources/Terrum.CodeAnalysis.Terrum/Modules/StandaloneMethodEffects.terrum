@@ -36,8 +36,7 @@ int32 ValidateStandaloneMethodContracts(int32 artifactOrdinal,
         return 3;
     }
 
-    uint32 expectedOwner = 0x1600_0000
-        | uint32(methodDefRow);
+    uint32 expectedOwner = uint32(methodDefRow);
     mut bool effectsFound = false;
     mut uint32 effectsMask = 0;
     uint32 allowedEffects = 6;

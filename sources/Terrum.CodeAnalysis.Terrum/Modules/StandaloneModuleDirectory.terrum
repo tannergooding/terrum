@@ -37,18 +37,28 @@ bool BuildStandaloneModuleDirectoryCore()
     }
 
     int32 moduleCapacity = Host.StandaloneModuleDirectory.Length / 8;
-    if (moduleCapacity < 1)
+    if (moduleCapacity < 1
+        || (Host.StandaloneModuleDirectoryMode.Length != 0
+            && (Host.StandaloneModuleDirectoryMode.Length != 1
+                || Host.StandaloneModuleDirectoryMode[0] != 1)))
     {
         return false;
     }
 
     Host.StandaloneArtifactParameterStarts[0] = 0;
     mut int32 parameterPrefix = 0;
-    int32 requestUsingStart = Host.StandaloneRequest[2];
-    int32 requestUsingLength = Host.StandaloneRequest[3];
-    WriteStandaloneModuleDirectoryRow(1, -1, 0, 0, 0, 0, 0,
-        requestUsingStart, requestUsingLength);
-    mut int32 moduleCount = 1;
+    // Source binding has a virtual consumer; artifact decoding selects a real Module.
+    bool includeUsingModule
+        = Host.StandaloneModuleDirectoryMode.Length == 0;
+    mut int32 moduleCount = 0;
+    if (includeUsingModule)
+    {
+        int32 requestUsingStart = Host.StandaloneRequest[2];
+        int32 requestUsingLength = Host.StandaloneRequest[3];
+        WriteStandaloneModuleDirectoryRow(1, -1, 0, 0, 0, 0, 0,
+            requestUsingStart, requestUsingLength);
+        moduleCount = 1;
+    }
 
     for (mut int32 artifactOrdinal = 0;
         artifactOrdinal < Host.StandaloneRequest[4];

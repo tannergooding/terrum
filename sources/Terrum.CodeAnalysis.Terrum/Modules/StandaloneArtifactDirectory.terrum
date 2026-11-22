@@ -465,7 +465,8 @@ bool ValidateStandaloneArtifactFeatures(int32 artifactStart,
             return false;
         }
 
-        // The initial import operation supports only PublishedPredicates 1/1.
+        mut bool hasPublishedPredicates = false;
+        mut bool hasGeneralPredicateGraphs = false;
         for (mut int32 featureOffset = 0;
             featureOffset < int32(moduleFeatureCount);
             featureOffset = featureOffset + 1)
@@ -484,11 +485,26 @@ bool ValidateStandaloneArtifactFeatures(int32 artifactStart,
             {
                 return false;
             }
-            if (featureId != 10 || ruleRevision != 1)
+            if (ruleRevision != 1
+                || (featureId != 10 && featureId != 11
+                    && featureId != 17))
             {
                 Host.StandaloneModuleDirectoryStatus[0] = 2;
                 return false;
             }
+            if (featureId == 10)
+            {
+                hasPublishedPredicates = true;
+            }
+            else if (featureId == 17)
+            {
+                hasGeneralPredicateGraphs = true;
+            }
+        }
+        if (hasGeneralPredicateGraphs && !hasPublishedPredicates)
+        {
+            Host.StandaloneModuleDirectoryStatus[0] = 3;
+            return false;
         }
     }
 

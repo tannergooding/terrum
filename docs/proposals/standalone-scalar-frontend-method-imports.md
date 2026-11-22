@@ -25,14 +25,16 @@ targets in explicit invocation records, and Terrum-owned decoding/lowering
 consumes those records. Complete B+I `.trrm` is the only serialized carrier.
 An imported expectation is never a local source frame.
 
-For the first coherent operation, select exactly the existing provisional
-**`trrm/1-draft-init-reference-bodies-1`** agreement, including its complete
-catalog and [initialization-call contract](standard-trrm-initialization-destination-callsite.md).
-Every supplied artifact explicitly selects that identical literal. Admit
-ordinary, public, nongeneric, receiver-free module functions with closed
-scalar/unit results, ordinary scalar/unit inputs and the profile's supported
-scalar initialization-reference inputs. Retain their complete contracts.
-This selects no new TRRM schema and does not infer broader support from v88.
+The initial B+I-only operation selected the provisional
+**`trrm/1-draft-init-reference-bodies-1`** identity, its complete catalog and
+[initialization-call contract](standard-trrm-initialization-destination-callsite.md).
+For complete predicate closure, that selection is superseded by the
+[standalone graph-closure recommendation](standalone-published-predicate-graph-closure.md):
+use the exact B+I+G identity on every artifact. The two identities are not
+aliases and are not mixed or probed as fallbacks. This supersession changes
+only schema selection for the complete graph operation; the raw-input
+agreement, source domain, call-node pipeline and retained-call obligations
+remain owned here. Both proposals remain unapproved.
 
 The new agreement, its initial operation domain and every new record/policy
 below remain **unapproved/provisional**. The initialization-Body prerequisite
