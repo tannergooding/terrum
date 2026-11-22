@@ -215,7 +215,7 @@ bool TryValidateStandaloneTypeSpecTable(int32 artifactStart,
                 || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
                     artifactLength, rowStart + 3,
                     ref init methodDefRow)
-                || callingConvention > 4
+                || callingConvention < 1 || callingConvention > 4
                 || methodDefRow == 0
                 || methodDefRow > uint32(methodDefCount))
             {
@@ -501,6 +501,246 @@ bool TryValidateStandaloneConstructedTypeArguments(int32 artifactStart,
     return true;
 }
 
+bool TryBuildStandaloneProjectionInterfaceMap(int32 artifactStart,
+    int32 artifactLength, int32 typeDefCount, int32 interfaceDefCount,
+    int32 interfaceBaseCount, int32 interfaceMethodCount)
+{
+    int32 typeDefEntry = FindStandaloneArtifactSection(0x0013);
+    int32 interfaceDefEntry = FindStandaloneArtifactSection(0x0025);
+    int32 genericParamCount = GetStandaloneArtifactSectionCount(0x0019);
+    int32 genericParamEntry = FindStandaloneArtifactSection(0x0019);
+    if (typeDefEntry == 0 || interfaceDefEntry == 0
+        || typeDefCount == 0 || interfaceDefCount == 0
+        || Host.StandaloneProjectionInterfaceByTypeDef.Length
+            <= typeDefCount)
+    {
+        return false;
+    }
+
+    for (mut int32 row = 0; row <= typeDefCount; row = row + 1)
+    {
+        Host.StandaloneProjectionInterfaceByTypeDef[row] = 0;
+    }
+
+    int32 typeDefStart = Host.StandaloneSectionStarts[typeDefEntry];
+    int32 interfaceDefStart
+        = Host.StandaloneSectionStarts[interfaceDefEntry];
+    for (mut int32 interfaceDefRow = 1;
+        interfaceDefRow <= interfaceDefCount;
+        interfaceDefRow = interfaceDefRow + 1)
+    {
+        int32 rowOffset = interfaceDefStart
+            + ((interfaceDefRow - 1) * 48);
+        init uint32 ownerTypeDefRow;
+        init uint32 selfGenericParamRow;
+        init uint32 baseFirst;
+        init uint32 baseCount;
+        init uint32 methodFirst;
+        init uint32 methodCount;
+        if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, rowOffset, ref init ownerTypeDefRow)
+            || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, rowOffset + 4,
+                ref init selfGenericParamRow)
+            || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, rowOffset + 8, ref init baseFirst)
+            || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, rowOffset + 12, ref init baseCount)
+            || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, rowOffset + 16,
+                ref init methodFirst)
+            || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, rowOffset + 20,
+                ref init methodCount)
+            || ownerTypeDefRow == 0
+            || ownerTypeDefRow > uint32(typeDefCount)
+            || Host.StandaloneProjectionInterfaceByTypeDef[
+                int32(ownerTypeDefRow)] != 0
+            || !IsStandaloneMetadataRange(baseFirst, baseCount,
+                interfaceBaseCount)
+            || !IsStandaloneMetadataRange(methodFirst, methodCount,
+                interfaceMethodCount))
+        {
+            return false;
+        }
+
+        int32 typeDefRowOffset = typeDefStart
+            + ((int32(ownerTypeDefRow) - 1) * 44);
+        init int32 typeDefFlags;
+        init uint32 genericFirst;
+        init uint32 typeGenericCount;
+        if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, typeDefRowOffset + 8,
+                ref init typeDefFlags)
+            || ((typeDefFlags >> 2) & 7) != 3
+            || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, typeDefRowOffset + 20,
+                ref init genericFirst)
+            || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, typeDefRowOffset + 24,
+                ref init typeGenericCount)
+            || (selfGenericParamRow != 0
+                && (genericParamEntry == 0
+                    || selfGenericParamRow > uint32(genericParamCount)
+                    || !IsStandaloneMetadataRange(genericFirst,
+                        typeGenericCount, genericParamCount)
+                    || selfGenericParamRow < genericFirst
+                    || selfGenericParamRow - genericFirst
+                        >= typeGenericCount)))
+        {
+            return false;
+        }
+
+        if (selfGenericParamRow != 0)
+        {
+            int32 genericParamStart
+                = Host.StandaloneSectionStarts[genericParamEntry]
+                    + ((int32(selfGenericParamRow) - 1) * 32);
+            init uint32 ownerDefId;
+            init int32 formalKind;
+            if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                    artifactLength, genericParamStart,
+                    ref init ownerDefId)
+                || !TryReadStandaloneArtifactAbsoluteByte(artifactStart,
+                    artifactLength, genericParamStart + 20,
+                    ref init formalKind)
+                || ownerDefId
+                    != (uint32(0x1300_0000) | ownerTypeDefRow)
+                || formalKind != 1)
+            {
+                return false;
+            }
+        }
+
+        Host.StandaloneProjectionInterfaceByTypeDef[
+            int32(ownerTypeDefRow)] = interfaceDefRow;
+    }
+
+    for (mut int32 typeDefRow = 1;
+        typeDefRow <= typeDefCount;
+        typeDefRow = typeDefRow + 1)
+    {
+        int32 typeDefRowOffset = typeDefStart + ((typeDefRow - 1) * 44);
+        init int32 typeDefFlags;
+        if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, typeDefRowOffset + 8,
+                ref init typeDefFlags)
+            || ((((typeDefFlags >> 2) & 7) == 3)
+                != (Host.StandaloneProjectionInterfaceByTypeDef[
+                    typeDefRow] != 0)))
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool TryGetStandaloneProjectionInterfaceDef(int32 artifactStart,
+    int32 artifactLength, int32 typeSpecStart, int32 typeSpecLength,
+    int32 typeSpecCount, uint32 interfaceTypeSpec,
+    ref<init int32> interfaceDefRowResult,
+    ref<init uint32> typeDefRowResult)
+    ensure return ? (*interfaceDefRowResult is init
+        && *typeDefRowResult is init) : true
+{
+    init bool isRow;
+    init int32 typeSpecRow;
+    init int32 typeSpecForm;
+    init int32 typeSpecQualifiers;
+    init int32 typeSpecCode;
+    init int32 typeSpecArgument;
+    if (!TryGetStandaloneTypeSpecRefInfo(artifactStart,
+            artifactLength, typeSpecStart, typeSpecLength,
+            typeSpecCount, interfaceTypeSpec,
+            allowInitQualifier: false, rowLimit: 0,
+            ref init isRow, ref init typeSpecRow,
+            ref init typeSpecForm, ref init typeSpecQualifiers,
+            ref init typeSpecCode, ref init typeSpecArgument)
+        || !isRow)
+    {
+        return false;
+    }
+
+    init int32 rowStart;
+    init int32 rowLength;
+    if (!TryGetStandaloneVariableTableRowExtent(artifactStart,
+            artifactLength, typeSpecStart, typeSpecLength,
+            typeSpecCount, 2, 1, typeSpecRow,
+            ref init rowStart, ref init rowLength))
+    {
+        return false;
+    }
+
+    int32 nominalForm = typeSpecForm;
+    int32 nominalRowStart = rowStart;
+    if (typeSpecForm == 5)
+    {
+        init uint32 genericTypeSpec;
+        if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, rowStart + 2, ref init genericTypeSpec)
+            || !TryGetStandaloneVariableTableRowExtent(artifactStart,
+                artifactLength, typeSpecStart, typeSpecLength,
+                typeSpecCount, 2, 1, int32(genericTypeSpec),
+                ref init rowStart, ref init rowLength)
+            || rowLength != 6
+            || !TryReadStandaloneArtifactAbsoluteByte(artifactStart,
+                artifactLength, rowStart, ref init nominalForm))
+        {
+            return false;
+        }
+        nominalRowStart = rowStart;
+    }
+
+    if (nominalForm != 2 && nominalForm != 3)
+    {
+        return false;
+    }
+
+    init uint32 nominalRow;
+    if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+            artifactLength, nominalRowStart + 2,
+            ref init nominalRow))
+    {
+        return false;
+    }
+
+    int32 typeDefCount = GetStandaloneArtifactSectionCount(0x0013);
+    if (nominalForm == 3)
+    {
+        int32 importCount = GetStandaloneArtifactSectionCount(0x001C);
+        int32 importEntry = FindStandaloneArtifactSection(0x001C);
+        if (importEntry == 0 || nominalRow == 0
+            || nominalRow > uint32(importCount))
+        {
+            return false;
+        }
+        int32 importOffset = Host.StandaloneSectionStarts[importEntry]
+            + ((int32(nominalRow) - 1) * 12) + 8;
+        init uint32 expectedTypeDef;
+        if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, importOffset,
+                ref init expectedTypeDef)
+            || (expectedTypeDef >> 24) != 0x13)
+        {
+            return false;
+        }
+        nominalRow = expectedTypeDef & 0x00FF_FFFF;
+    }
+
+    if (nominalRow == 0 || nominalRow > uint32(typeDefCount)
+        || Host.StandaloneProjectionInterfaceByTypeDef[
+            int32(nominalRow)] == 0)
+    {
+        return false;
+    }
+
+    *typeDefRowResult = nominalRow;
+    *interfaceDefRowResult
+        = Host.StandaloneProjectionInterfaceByTypeDef[int32(nominalRow)];
+    return true;
+}
+
 bool TryValidateStandaloneWitnessProjectionTable(int32 artifactStart,
     int32 artifactLength)
 {
@@ -533,6 +773,10 @@ bool TryValidateStandaloneWitnessProjectionTable(int32 artifactStart,
     int32 witnessMemberEntry = FindStandaloneArtifactSection(0x0029);
     int32 methodDefCount = GetStandaloneArtifactSectionCount(0x0016);
     int32 methodDefEntry = FindStandaloneArtifactSection(0x0016);
+    int32 typeDefCount = GetStandaloneArtifactSectionCount(0x0013);
+    int32 interfaceDefCount = GetStandaloneArtifactSectionCount(0x0025);
+    int32 interfaceBaseCount = GetStandaloneArtifactSectionCount(0x0023);
+    int32 interfaceMethodCount = GetStandaloneArtifactSectionCount(0x0024);
     int32 typeSpecCount = GetStandaloneArtifactSectionCount(0x0011);
     int32 typeSpecEntry = FindStandaloneArtifactSection(0x0011);
     int32 typeSpecStart = typeSpecEntry == 0 ? 0
@@ -544,9 +788,21 @@ bool TryValidateStandaloneWitnessProjectionTable(int32 artifactStart,
         || typeSpecEntry == 0
         || !TryValidateStandaloneVariableTableIndex(artifactStart,
             artifactLength, typeSpecStart, typeSpecLength,
-            typeSpecCount, 2, 1))
+            typeSpecCount, 2, 1)
+        || !TryBuildStandaloneProjectionInterfaceMap(artifactStart,
+            artifactLength, typeDefCount, interfaceDefCount,
+            interfaceBaseCount, interfaceMethodCount)
+        || Host.StandaloneProjectionMemberSeen.Length
+            <= witnessMemberCount)
     {
         return false;
+    }
+
+    for (mut int32 row = 0;
+        row <= witnessMemberCount;
+        row = row + 1)
+    {
+        Host.StandaloneProjectionMemberSeen[row] = 0;
     }
 
     for (mut int32 projectionRow = 1;
@@ -707,6 +963,55 @@ bool TryValidateStandaloneWitnessProjectionTable(int32 artifactStart,
             return false;
         }
 
+        init int32 sourceInterfaceDefRow;
+        init uint32 sourceInterfaceTypeDefRow;
+        init int32 requestedInterfaceDefRow;
+        init uint32 requestedInterfaceTypeDefRow;
+        if (!TryGetStandaloneProjectionInterfaceDef(artifactStart,
+                artifactLength, typeSpecStart, typeSpecLength,
+                typeSpecCount, sourceInterfaceTypeSpec,
+                ref init sourceInterfaceDefRow,
+                ref init sourceInterfaceTypeDefRow)
+            || !TryGetStandaloneProjectionInterfaceDef(artifactStart,
+                artifactLength, typeSpecStart, typeSpecLength,
+                typeSpecCount, requestedInterfaceTypeSpec,
+                ref init requestedInterfaceDefRow,
+                ref init requestedInterfaceTypeDefRow))
+        {
+            return false;
+        }
+
+        int32 interfaceDefStart
+            = Host.StandaloneSectionStarts[
+                FindStandaloneArtifactSection(0x0025)];
+        int32 sourceInterfaceDefOffset = interfaceDefStart
+            + ((sourceInterfaceDefRow - 1) * 48);
+        int32 requestedInterfaceDefOffset = interfaceDefStart
+            + ((requestedInterfaceDefRow - 1) * 48);
+        init uint32 sourceRootBaseCount;
+        init uint32 requestedRootBaseCount;
+        if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, sourceInterfaceDefOffset + 12,
+                ref init sourceRootBaseCount)
+            || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, requestedInterfaceDefOffset + 12,
+                ref init requestedRootBaseCount))
+        {
+            return false;
+        }
+        bool hasFlatRootClosure
+            = sourceInterfaceDefRow == requestedInterfaceDefRow
+                && sourceInterfaceTypeDefRow
+                    == requestedInterfaceTypeDefRow
+                && sourceRootBaseCount == 0
+                && requestedRootBaseCount == 0;
+        if (hasFlatRootClosure
+            && (viewCount != 1
+                || projectionMemberCount != witnessMemberRows))
+        {
+            return false;
+        }
+
         mut int32 rootViewCount = 0;
         int32 viewCountInt = int32(viewCount);
         for (mut int32 viewOrdinal = 0;
@@ -853,6 +1158,72 @@ bool TryValidateStandaloneWitnessProjectionTable(int32 artifactStart,
                 return false;
             }
 
+            if (hasFlatRootClosure)
+            {
+                if (viewOrdinal != 0
+                    || memberDeclaringInterface != sourceInterfaceTypeSpec
+                    || Host.StandaloneProjectionMemberSeen[
+                        int32(witnessMemberRow)] == projectionRow)
+                {
+                    return false;
+                }
+
+                init uint32 sourceMethodFirstValue;
+                init uint32 sourceMethodCountValue;
+                if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                        artifactLength, sourceInterfaceDefOffset + 16,
+                        ref init sourceMethodFirstValue)
+                    || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                        artifactLength, sourceInterfaceDefOffset + 20,
+                        ref init sourceMethodCountValue))
+                {
+                    return false;
+                }
+                int32 sourceMethodFirst = int32(sourceMethodFirstValue);
+                int32 sourceMethodCount = int32(sourceMethodCountValue);
+                bool requirementFound = false;
+                int32 interfaceMethodEntry
+                    = FindStandaloneArtifactSection(0x0024);
+                int32 interfaceMethodStart
+                    = Host.StandaloneSectionStarts[interfaceMethodEntry];
+                for (mut int32 methodOrdinal = 0;
+                    methodOrdinal < sourceMethodCount;
+                    methodOrdinal = methodOrdinal + 1)
+                {
+                    int32 interfaceMethodOffset = interfaceMethodStart
+                        + ((sourceMethodFirst + methodOrdinal - 1) * 12);
+                    init uint32 methodOwner;
+                    init uint32 methodRowOrdinal;
+                    init uint32 methodDefRow;
+                    if (!TryReadStandaloneArtifactAbsoluteWord(
+                            artifactStart, artifactLength,
+                            interfaceMethodOffset, ref init methodOwner)
+                        || !TryReadStandaloneArtifactAbsoluteWord(
+                            artifactStart, artifactLength,
+                            interfaceMethodOffset + 4,
+                            ref init methodRowOrdinal)
+                        || !TryReadStandaloneArtifactAbsoluteWord(
+                            artifactStart, artifactLength,
+                            interfaceMethodOffset + 8,
+                            ref init methodDefRow)
+                        || methodOwner != uint32(sourceInterfaceDefRow)
+                        || methodRowOrdinal != uint32(methodOrdinal))
+                    {
+                        return false;
+                    }
+                    if (methodDefRow == requirementMethodDef)
+                    {
+                        requirementFound = true;
+                    }
+                }
+                if (!requirementFound)
+                {
+                    return false;
+                }
+                Host.StandaloneProjectionMemberSeen[
+                    int32(witnessMemberRow)] = projectionRow;
+            }
+
             int32 selectedMethodOffset
                 = Host.StandaloneSectionStarts[methodDefEntry]
                     + ((int32(selectedMethodDef) - 1) * 28);
@@ -904,6 +1275,22 @@ bool TryValidateStandaloneWitnessProjectionTable(int32 artifactStart,
                 }
                 if (targetPolicy == 2
                     && selectedOwnerTypeSpec != viewRequestedTypeSpec)
+                {
+                    return false;
+                }
+            }
+        }
+
+        if (hasFlatRootClosure)
+        {
+            for (mut int32 sourceMemberOrdinal = 0;
+                sourceMemberOrdinal < int32(witnessMemberRows);
+                sourceMemberOrdinal = sourceMemberOrdinal + 1)
+            {
+                int32 sourceMemberRow
+                    = int32(witnessMemberFirst) + sourceMemberOrdinal;
+                if (Host.StandaloneProjectionMemberSeen[
+                        sourceMemberRow] != projectionRow)
                 {
                     return false;
                 }
