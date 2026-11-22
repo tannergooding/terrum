@@ -8109,6 +8109,48 @@ internal sealed class NativeCoreRegistrationTests
             tables.Modules, 1,
             TrRmFeatureTableReader.NominalUnionMetadataFeatureId, schema),
             Is.False);
+
+        byte[] RewriteSurface(byte[] replacement, int rowCount)
+        {
+            var sourceIndex = new TrRmArtifactIndex(artifact, schema);
+            var sections = new List<TrRmSection>(sourceIndex.SectionCount);
+            for (var sectionIndex = 0;
+                sectionIndex < sourceIndex.SectionCount;
+                sectionIndex++)
+            {
+                sourceIndex.GetSection(sectionIndex, out var kind,
+                    out var flags, out var bytes, out var count);
+                sections.Add(kind == 0x0066
+                    ? new TrRmSection(kind, flags,
+                        checked((uint)rowCount), replacement)
+                    : new TrRmSection(kind, flags,
+                        checked((uint)count), bytes.ToArray()));
+            }
+
+            return TrRmArtifactWriter.Encode(sections, schema);
+        }
+
+        void AssertMalformedSurface(byte[] replacement, int rowCount)
+            => Assert.Throws<InvalidDataException>(() =>
+                TrRmExecutableCompiler.CreateStandardReference(
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        RewriteSurface(replacement, rowCount)),
+                    "provider.module", []));
+
+        AssertMalformedSurface(surfaceBytes[..16].ToArray(), 1);
+        var duplicateOrdinalSurface = surfaceBytes.ToArray();
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            duplicateOrdinalSurface.AsSpan(20, sizeof(uint)), 0);
+        AssertMalformedSurface(duplicateOrdinalSurface, surfaceCount);
+        var duplicateNameSurface = surfaceBytes.ToArray();
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            duplicateNameSurface.AsSpan(24, sizeof(uint)),
+            checked((uint)valueNameRow));
+        AssertMalformedSurface(duplicateNameSurface, surfaceCount);
+        var invalidDefaultSurface = surfaceBytes.ToArray();
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            invalidDefaultSurface.AsSpan(28, sizeof(uint)), 0x00FF_FFFF);
+        AssertMalformedSurface(invalidDefaultSurface, surfaceCount);
     }
 
     [Test]
