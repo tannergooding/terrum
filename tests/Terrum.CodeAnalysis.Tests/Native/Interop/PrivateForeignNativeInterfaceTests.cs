@@ -266,6 +266,101 @@ internal sealed class PrivateForeignNativeInterfaceTests
     }
 
     [Test]
+    public void PrivateFniGraphRetainsImportedOwnerWithoutReexportingIt()
+    {
+        const string schemaIdentity
+            = "terrum/private-semantic-111-foreign-native-interfaces-1";
+        const string leafIdentity = "PrivateFniGraphLeaf";
+        const string graphIdentity = "PrivateFniGraphWrapper";
+        const string ownerKey = "leaf.iprobe";
+        const string memberKey = "leaf.iprobe.get";
+        var leafSource = SyntaxTree.Parse("""
+            using Terrum.Interop;
+            public int32 Identity(int32 value) { return value; }
+            [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+            [ForeignNativeInterface(VTableByteOffset: uint32(0))]
+            public interface IProbe {
+                public unsafe int32 Get(int32 value);
+            }
+            """);
+        var leafCompilation = Compilation.CreateLibrary(leafSource,
+            new CompilationOptions {
+                NativeCoreRegistration =
+                    CreateFniNativeCoreRegistration(leafIdentity),
+            });
+        Assert.That(leafCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, leafCompilation.Diagnostics));
+        var leafProgram = leafCompilation.Program!;
+        var leafInputs = PrivateModuleIdentityInputs.CreateFromSelectors(
+            leafProgram, leafIdentity, [], [], [], [], [
+                new PrivateForeignInterfaceDefinitionAssignment(0,
+                    ownerKey, true, [
+                        new PrivateForeignInterfaceMemberDefinitionAssignment(
+                            0, memberKey),
+                    ]),
+            ], []);
+        var leafPackage = NativeModuleCompiler.CreateProducerWithSchema(
+            leafProgram, ["Identity"], leafIdentity, schemaIdentity,
+            NativeRuntimePolicy.FailFast, leafInputs);
+        var leafReference = NativeModuleCompiler
+            .CreateReferenceWithSchema(leafPackage, schemaIdentity);
+
+        var graphSource = SyntaxTree.Parse("""
+            public int32 Forward(ptr<void> receiver, int32 value) {
+                unsafe { return IProbe.Get(receiver, value); }
+            }
+            """);
+        var graphCompilation = Compilation.CreateLibrary(graphSource,
+            leafReference);
+        Assert.That(graphCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                graphCompilation.Diagnostics));
+        var graphProgram = graphCompilation.Program!;
+        var graphInputs = PrivateModuleIdentityInputs.CreateFromSelectors(
+            graphProgram, graphIdentity, [], [], [], [], [], [
+                new PrivateForeignInterfaceImportAssignment(0,
+                    "graph.iprobe", leafIdentity, ownerKey, [
+                        new PrivateForeignInterfaceMemberImportAssignment(
+                            0, "graph.iprobe.get", memberKey),
+                    ]),
+            ]);
+        var graphPackage = NativeModuleCompiler
+            .CreateGraphProducerWithSchema(graphProgram, ["Forward"],
+                graphIdentity, [leafPackage], schemaIdentity,
+                NativeRuntimePolicy.FailFast, graphInputs);
+        var graphOnlyReference = NativeModuleCompiler
+            .CreateGraphReferenceWithSchema([graphPackage], schemaIdentity);
+        Assert.That(graphOnlyReference.Functions.Select(
+                static function => function.Name),
+            Is.EquivalentTo(["Forward"]));
+        Assert.That(graphOnlyReference.Interfaces, Is.Empty);
+        var reference = NativeModuleCompiler.CreateGraphReferenceWithSchema(
+            [graphPackage, leafPackage], schemaIdentity);
+
+        Assert.That(reference.Functions.Select(static function =>
+                function.Name),
+            Is.EquivalentTo(["Forward", "Identity"]));
+        Assert.That(reference.Interfaces.Select(static definition =>
+                definition.QualifiedName),
+            Is.EqualTo(["IProbe"]));
+        var consumerCompilation = Compilation.Create(SyntaxTree.Parse(
+            """
+            int32 Main(ptr<void> receiver) {
+                unsafe { return Forward(receiver, 41); }
+            }
+            """),
+            graphOnlyReference);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumer = NativeModuleCompiler.CreateGraphConsumerWithSchema(
+            consumerCompilation.Program!, [graphPackage, leafPackage],
+            schemaIdentity, NativeRuntimePolicy.FailFast);
+        NativeModuleCompiler.ValidateGraph(consumer,
+            [graphPackage, leafPackage]);
+    }
+
+    [Test]
     public void PrivateFniReferenceSetsPreserveDistinctOwnerBindings()
     {
         const string schemaIdentity
