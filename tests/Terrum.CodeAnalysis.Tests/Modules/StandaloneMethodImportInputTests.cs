@@ -823,6 +823,85 @@ internal sealed class StandaloneMethodImportInputTests
             (NativeRuntimePolicy)policy);
         Assert.That(decoderExecution.ExitCode, Is.EqualTo(0));
 
+        var executableProviderArtifact = CreateMethodProviderArtifact(
+            "provider/leaf", "api.Imported", scalarParameter: true,
+            executableBody: true);
+        var targetPlanInput = new StandaloneMethodImportArtifactInput(
+            Agreement, "consumer/module",
+            new TrRmStandardArtifactInput(SchemaIdentity, artifact), [
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    executableProviderArtifact),
+            ]);
+        var targetPlanBuffers = targetPlanInput.Capture()
+            .CreateSourceFreeReaderHostBuffers();
+        const string targetPlanVerificationSource = """
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                int32 status = DecodeStandaloneModuleMetadata();
+                if (status != 0) { return status; }
+                status = BuildStandaloneImportedTargetPlan();
+                if (status != 0) { return status; }
+                status = ValidateStandaloneImportedTargetBodies();
+                if (status != 0) { return status; }
+                if (Host.StandaloneDecoderTargetPlanBuilt[0] != 1
+                    || Host.StandaloneDecoderTargetBodiesValidated[0] != 1
+                    || Host.StandaloneDecoderCallCount[0] != 3) {
+                    return 72;
+                }
+                for (mut int32 callId = 0;
+                    callId < Host.StandaloneDecoderCallCount[0];
+                    callId = callId + 1) {
+                    int32 offset = callId * 22;
+                    if (Host.StandaloneDecoderCalls[offset + 3] != 2
+                        || Host.StandaloneDecoderCalls[offset + 14] != 1
+                        || Host.StandaloneDecoderCalls[offset + 16] != 1
+                        || Host.StandaloneDecoderCalls[offset + 17] != 1
+                        || Host.StandaloneDecoderCalls[offset + 18] != 1
+                        || Host.StandaloneDecoderCalls[offset + 19] != 1
+                        || Host.StandaloneDecoderCalls[offset + 20] <= 0
+                        || Host.StandaloneDecoderCalls[offset + 21] != 48) {
+                        return 73;
+                    }
+                }
+                return 0;
+            }
+            """;
+        var targetPlanComponents = new List<SyntaxTree>(
+            decoderComponents);
+        targetPlanComponents[^1] = SyntaxTree.Parse(
+            targetPlanVerificationSource,
+            "standalone-import-target-plan-tests.terrum");
+        var targetPlanCompilation = Compilation.Create(
+            targetPlanComponents, targetPlanBuffers, policy);
+        Assert.That(targetPlanCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                targetPlanCompilation.Diagnostics));
+        var targetPlanProgram = targetPlanCompilation.Program
+            ?? throw new AssertionException(
+                "Expected an imported-target plan validator.");
+        var targetPlanExecution = NativeJit.ExecuteWithData(
+            targetPlanProgram, (NativeRuntimePolicy)policy);
+        Assert.That(targetPlanExecution.ExitCode, Is.EqualTo(0));
+
+        var missingBodyTargetInput
+            = new StandaloneMethodImportArtifactInput(Agreement,
+                "consumer/module",
+                new TrRmStandardArtifactInput(SchemaIdentity, artifact),
+                input.Artifacts);
+        var missingBodyTargetBuffers = missingBodyTargetInput.Capture()
+            .CreateSourceFreeReaderHostBuffers();
+        var missingBodyTargetCompilation = Compilation.Create(
+            targetPlanComponents, missingBodyTargetBuffers, policy);
+        Assert.That(missingBodyTargetCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                missingBodyTargetCompilation.Diagnostics));
+        var missingBodyTargetProgram = missingBodyTargetCompilation.Program
+            ?? throw new AssertionException(
+                "Expected a missing-provider-body validator.");
+        var missingBodyTargetExecution = NativeJit.ExecuteWithData(
+            missingBodyTargetProgram, (NativeRuntimePolicy)policy);
+        Assert.That(missingBodyTargetExecution.ExitCode, Is.EqualTo(2));
+
         var constantDecoderInput = new StandaloneMethodImportArtifactInput(
             Agreement, "consumer/module",
             new TrRmStandardArtifactInput(SchemaIdentity, artifact),
@@ -2605,7 +2684,8 @@ internal sealed class StandaloneMethodImportInputTests
         uint resultTypeSpecRef = 0xF200_0008, uint effectsMask = 0,
         bool scalarParameter = false,
         uint parameterTypeSpecRef = 0xF200_0008,
-        byte[]? typeSpecSection = null)
+        byte[]? typeSpecSection = null,
+        bool executableBody = false)
     {
         var stringSection = TrRmStringTableWriter.EncodeNames([
             (moduleIdentity, 0),
@@ -2623,6 +2703,11 @@ internal sealed class StandaloneMethodImportInputTests
             methodDefSection.AsSpan(8), 1);
         BinaryPrimitives.WriteUInt32LittleEndian(
             methodDefSection.AsSpan(12), 2);
+        if (executableBody)
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                methodDefSection.AsSpan(24), 1);
+        }
         if (effectsMask != 0)
         {
             BinaryPrimitives.WriteUInt32LittleEndian(
@@ -2681,6 +2766,38 @@ internal sealed class StandaloneMethodImportInputTests
                 effectsRow.AsSpan(8), effectsMask);
             sections.Add(new TrRmSection(0x001B, 0, 1,
                 TrRmVariableTableWriter.EncodeBlobs([effectsRow])));
+        }
+        if (executableBody)
+        {
+            var body = new byte[48];
+            body[0] = 1;
+            body[1] = 1;
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                body.AsSpan(5), 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                body.AsSpan(9), 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                body.AsSpan(13), 3);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                body.AsSpan(17), 0);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                body.AsSpan(21), 3);
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                body.AsSpan(25), 0);
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                body.AsSpan(27), 0);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                body.AsSpan(29), 0);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                body.AsSpan(33), 8);
+            body[37] = 1;
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                body.AsSpan(41), 0);
+            body[45] = 0x10;
+            body[46] = 0xE0;
+            body[47] = 0x00;
+            sections.Add(new TrRmSection(0x0020, 0, 1,
+                TrRmVariableTableWriter.EncodeBlobs([body])));
         }
         sections.Sort(static (left, right)
             => left.Kind.CompareTo(right.Kind));
