@@ -394,6 +394,22 @@ internal sealed class PrivateForeignNativeInterfaceTests
     }
 
     [Test]
+    public void PrivateFniReferenceSetsRejectConflictingOwnerIdentity()
+    {
+        const string schemaIdentity
+            = "terrum/private-semantic-111-foreign-native-interfaces-1";
+        const string moduleIdentity = "PrivateFniSetConflict";
+        var first = CreateFniProvider(moduleIdentity, "IProbe", "AddA",
+            "Payload");
+        var conflicting = CreateFniProvider(moduleIdentity, "IProbe", "AddB",
+            "Payload", useTwoScalarFormals: true);
+
+        _ = Assert.Throws<ModuleContractException>(() =>
+            ModuleCompiler.CreateReferenceSetWithSchema([first, conflicting],
+                schemaIdentity));
+    }
+
+    [Test]
     public void PrivateFniDirectoryRejectsMemberRedirectedToOrdinaryFunction()
     {
         const string schemaIdentity
