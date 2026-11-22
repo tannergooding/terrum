@@ -1427,10 +1427,10 @@ remapping; producer, source-free consumer, re-emission and Windows x64
 success/failure execution coverage, including NonNegative's zero-success
 boundary, is added but unverified under the hold. Other side-effecting
 argument expressions beyond one nested scalar/no-output FNI input, declared
-FNI defaults and constant domains beyond scalar literals, multiple calls,
-condition selectors beyond NonZero/NonNegative, other Body control-flow
-shapes, nonreturning-call forms beyond the terminal subset and reservation
-cancellation remain open.
+FNI defaults and constant domains beyond scalar literals, additional or
+repeated FNI calls beyond one nested-input/output pair, condition selectors
+beyond NonZero/NonNegative, other Body control-flow shapes, nonreturning-call
+forms beyond the terminal subset and reservation cancellation remain open.
 Supervised native execution, private persistence and dependent runtime work
 remain open. CLI qualification is still unverified. NativeParameter is not
 admitted on these methods or anchors, and neither FNI proposal is approved.
