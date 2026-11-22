@@ -858,6 +858,8 @@ internal sealed class NativeCoreRegistrationTests
                     int32 bias);
                 public unsafe int32 GetOtherIndex(ptr<int32> source);
                 public unsafe int32 UseIndex(int32 index);
+                public unsafe int32 UseIndexWithDefault(int32 index,
+                    int32 bias = 7);
                 public unsafe int32 UsePair(int32 first, int32 second);
                 public unsafe int32 UseTriple(int32 first, int32 second,
                     int32 third);
@@ -1151,7 +1153,7 @@ internal sealed class NativeCoreRegistrationTests
             int32 InvokeValueSequence(ptr<void> receiver, int32 value) {
                 unsafe {
                     IProbe.TouchValue(receiver, 42);
-                    return IProbe.UseIndex(receiver, value);
+                    return IProbe.UseIndexWithDefault(receiver, value);
                 }
             }
 
@@ -1432,7 +1434,7 @@ internal sealed class NativeCoreRegistrationTests
             int32 InvokeValueSequence(ptr<void> receiver, int32 value) {
                 unsafe {
                     IProbe.TouchValue(receiver, 42);
-                    return IProbe.UseIndex(receiver, value);
+                    return IProbe.UseIndexWithDefault(receiver, value);
                 }
             }
 
@@ -2648,8 +2650,8 @@ internal sealed class NativeCoreRegistrationTests
             Assert.That(body.BlockCount, Is.EqualTo(1));
             Assert.That(body.RecordCount, Is.EqualTo(3));
             Assert.That(body.MethodCount, Is.EqualTo(2));
-            Assert.That(body.ConstantCount, Is.EqualTo(1));
-            Assert.That(body.ConstantMap.Length, Is.EqualTo(8));
+            Assert.That(body.ConstantCount, Is.EqualTo(2));
+            Assert.That(body.ConstantMap.Length, Is.EqualTo(16));
             for (var methodIndex = 0; methodIndex < body.MethodCount;
                 methodIndex++)
             {
@@ -2676,9 +2678,12 @@ internal sealed class NativeCoreRegistrationTests
             Assert.That((valueCall[24], valueCall[25],
                     BinaryPrimitives.ReadUInt16LittleEndian(valueCall[26..])),
                 Is.EqualTo(((byte)2, (byte)1, (ushort)1)));
+            Assert.That((valueCall[28], valueCall[29],
+                    BinaryPrimitives.ReadUInt16LittleEndian(valueCall[30..])),
+                Is.EqualTo(((byte)1, (byte)1, (ushort)2)));
             Assert.That(body.GetBlockCode(0).ToArray(),
                 Is.EqualTo(new byte[] {
-                    0x16, 1, 0x90, 1, 0x90, 2, 0x17, 0,
+                    0x16, 1, 0x16, 0x12, 0x90, 1, 0x90, 2, 0x17, 0,
                 }));
         }
 
@@ -3349,7 +3354,7 @@ internal sealed class NativeCoreRegistrationTests
                 }), Is.True);
             Assert.That(calls, Has.Count.EqualTo(2));
             Assert.That(calls.Select(GetMemberName),
-                Is.EqualTo(new[] { "TouchValue", "UseIndex" }));
+                Is.EqualTo(new[] { "TouchValue", "UseIndexWithDefault" }));
             Assert.That(calls.Select(static call => call.Type),
                 Is.EqualTo(new[] {
                     PrimitiveType.Void, PrimitiveType.Int32,
@@ -3367,10 +3372,19 @@ internal sealed class NativeCoreRegistrationTests
                 Is.TypeOf<BoundConstant>());
             Assert.That(((BoundConstant)calls[0].Arguments.Single()).Value,
                 Is.EqualTo(42L));
-            Assert.That(calls[1].Arguments.Single(),
+            Assert.That(calls[1].Arguments, Has.Count.EqualTo(2));
+            Assert.That(calls[1].Arguments[0],
                 Is.TypeOf<BoundRead>());
-            Assert.That(((BoundRead)calls[1].Arguments.Single()).Variable,
+            Assert.That(((BoundRead)calls[1].Arguments[0]).Variable,
                 Is.EqualTo(1));
+            Assert.That(calls[1].Arguments[1],
+                Is.TypeOf<BoundConstant>());
+            Assert.That(((BoundConstant)calls[1].Arguments[1]).Value,
+                Is.EqualTo(7L));
+            Assert.That(calls[1].ArgumentParameterIndices,
+                Is.EqualTo([0, 1]));
+            Assert.That(calls[1].ForeignInterfaceCall!.Member.Parameters[1]
+                .DefaultValue?.Value, Is.EqualTo(7L));
             foreach (var call in calls)
             {
                 Assert.That(call.ForeignInterfaceCall!.Member
