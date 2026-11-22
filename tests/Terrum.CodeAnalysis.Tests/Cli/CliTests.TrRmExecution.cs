@@ -3784,6 +3784,312 @@ internal sealed partial class CliTests
     }
 
     [Test]
+    public async Task CompileTrRmAc1PreservesPs1AndA2CopyViewsAsync()
+    {
+        const string ac1SchemaIdentity
+            = "trrm/1-draft-foreign-native-interface-aggregate-output-consumption-1";
+        const string ps1SchemaIdentity
+            = "trrm/1-draft-foreign-native-interface-parameter-surface-1";
+        const string a2SchemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
+        const string consumerIdentity = "cli-ac1-ps1-a2-consumer";
+        const string ps1ProviderIdentity = "cli-ac1-ps1-methods";
+        const string pointProviderIdentity = "cli-ac1-a2-point";
+        const string unusedProviderIdentity = "cli-ac1-a2-unused";
+        const string pointSource = """
+            using Terrum.Interop;
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Point {
+                public int64 X;
+                public int64 Y;
+            }
+            """;
+        const string unusedSource = """
+            using Terrum.Interop;
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Unused {
+                public uint32 Marker;
+            }
+            """;
+        const string ps1Source = """
+            using Terrum.Interop;
+            [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+            [ForeignNativeInterface(VTableByteOffset: uint32(0))]
+            public interface IBase {
+                public unsafe int32 Read(ptr<Point> point);
+            }
+            """;
+        const string consumerSource = """
+            using Terrum.Interop;
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Payload {
+                public int64 X;
+                public int64 Y;
+            }
+            [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+            [ForeignNativeInterface(VTableByteOffset: uint32(8))]
+            public interface IConsumer {
+                [param(value): NativeOutput(
+                    When: NativeOutputCondition.NonZero)]
+                public unsafe int32 TryReadPoint(ptr<int32> source,
+                    [Terrum.CodeAnalysis.DependsOn(this, nameof(source))]
+                    [Terrum.CodeAnalysis.ForwardsBacking(
+                        this, nameof(source))]
+                    write ptr<Point> value);
+            }
+            """;
+        var (native, output)
+            = NativeOutputCoreRegistrationTests
+                .CreateCombinedRegistrations(
+                    includeForeignNativeInterface: true);
+        Compilation CreateTypeCompilation(string source)
+            => Compilation.CreateLibrary(SyntaxTree.Parse(source),
+                new CompilationOptions {
+                    NativeCoreRegistration = native,
+                    LayoutCoreRegistration =
+                        NativeCoreRegistrationTests
+                            .CreateLayoutRegistration(native),
+                });
+        var pointCompilation = CreateTypeCompilation(pointSource);
+        var unusedCompilation = CreateTypeCompilation(unusedSource);
+        Assert.That(pointCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                pointCompilation.Diagnostics));
+        Assert.That(unusedCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                unusedCompilation.Diagnostics));
+        var pointArtifact = TrRmExecutableCompiler.EmitStandard(
+            pointCompilation.Program!, pointProviderIdentity,
+            a2SchemaIdentity, 1, [
+                new TrRmSourceTypeExport("", "Point", "a2/Point"),
+            ]);
+        var unusedArtifact = TrRmExecutableCompiler.EmitStandard(
+            unusedCompilation.Program!, unusedProviderIdentity,
+            a2SchemaIdentity, 1, [
+                new TrRmSourceTypeExport("", "Unused", "a2/Unused"),
+            ]);
+        var pointReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(a2SchemaIdentity, pointArtifact),
+            pointProviderIdentity, [], ["a2/Point"]);
+        var ps1Compilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(ps1Source), pointReference,
+            new CompilationOptions {
+                NativeCoreRegistration = native,
+                LayoutCoreRegistration =
+                    NativeCoreRegistrationTests
+                        .CreateLayoutRegistration(native),
+            });
+        Assert.That(ps1Compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, ps1Compilation.Diagnostics));
+        var ps1Program = ps1Compilation.Program!;
+        var ps1Member = ps1Program.Interfaces.Single().Members.Single();
+        var ps1Artifact = TrRmExecutableCompiler.EmitStandard(ps1Program,
+            ps1ProviderIdentity, ps1SchemaIdentity, 1, [
+                new TrRmSourceTypeExport("", "IBase", "ps1/IBase") {
+                    GenericArity = 0,
+                    InterfaceMethodExports = [
+                        new TrRmSourceInterfaceMethodExport(
+                            ps1Member.SourceInputOrdinal,
+                            ps1Member.SourceDeclarationSpan,
+                            "ps1/IBase.Read"),
+                    ],
+                },
+            ]);
+        var ps1Reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(ps1SchemaIdentity, ps1Artifact),
+            ps1ProviderIdentity, [
+                new TrRmStandardArtifactInput(a2SchemaIdentity,
+                    unusedArtifact),
+                new TrRmStandardArtifactInput(a2SchemaIdentity,
+                    pointArtifact),
+            ]);
+        var ps1Point = ps1Reference.Structures.Single(
+            static structure => structure.Name == "Point");
+        Assert.That(ps1Point.DeclaredCopyEvidence, Is.True);
+        Assert.That(ps1Point.StandardTypeOrigin!.ExpectedDeclaration!
+            .DeclaredCopyEvidence, Is.Null);
+        Assert.That(ps1Point.StandardTypeOrigin.Expectations.Any(
+            expectation => expectation.UsingModule.ModuleIdentity
+                    == ps1ProviderIdentity
+                && expectation.ExportKey == "a2/Point"), Is.True);
+
+        var consumerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(consumerSource), ps1Reference,
+            new CompilationOptions {
+                NativeCoreRegistration = native,
+                LayoutCoreRegistration =
+                    NativeCoreRegistrationTests
+                        .CreateLayoutRegistration(native),
+                NativeOutputCoreRegistration = output,
+            });
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var program = consumerCompilation.Program!;
+        var sourcePoint = program.Structures.Single(
+            static structure => structure.Name == "Point");
+        Assert.That(sourcePoint.DeclaredCopyEvidence, Is.True);
+        Assert.That(sourcePoint.StandardTypeOrigin!.ExpectedDeclaration!
+            .DeclaredCopyEvidence, Is.Null);
+        Assert.That(sourcePoint.StandardTypeOrigin.Expectations.Any(
+            expectation => expectation.UsingModule.ModuleIdentity
+                    == ps1ProviderIdentity
+                && expectation.ExportKey == "a2/Point"), Is.True);
+        var member = program.Interfaces.Single(
+            static definition => definition.QualifiedName == "IConsumer")
+            .Members.Single();
+
+        var directory = TestArtifactPaths.CreateDirectory(
+            "trrm-ac1-ps1-a2-source-provider-v4-");
+        var sourcePath = Path.Combine(directory, "consumer.terrum");
+        var typeExportsPath = Path.Combine(directory, "types.json");
+        var sourceProvidersPath = Path.Combine(directory,
+            "source-providers.json");
+        var nativeManifestPath = Path.Combine(directory, "native.json");
+        var layoutManifestPath = Path.Combine(directory, "layout.json");
+        var nativeOutputManifestPath = Path.Combine(directory,
+            "native-output.json");
+        var unusedProviderPath = Path.Combine(directory, "unused.trrm");
+        var ps1ProviderPath = Path.Combine(directory, "ps1.trrm");
+        var pointProviderPath = Path.Combine(directory, "point.trrm");
+        var artifactPath = Path.Combine(directory, "consumer.trrm");
+        try
+        {
+            await File.WriteAllTextAsync(sourcePath, consumerSource,
+                new UTF8Encoding(false)).ConfigureAwait(true);
+            await File.WriteAllBytesAsync(unusedProviderPath, unusedArtifact)
+                .ConfigureAwait(true);
+            await File.WriteAllBytesAsync(ps1ProviderPath, ps1Artifact)
+                .ConfigureAwait(true);
+            await File.WriteAllBytesAsync(pointProviderPath, pointArtifact)
+                .ConfigureAwait(true);
+            await File.WriteAllTextAsync(typeExportsPath,
+                JsonSerializer.Serialize(new {
+                    schemaVersion = 2,
+                    sources = new[] {
+                        new {
+                            path = sourcePath,
+                            snapshotSha256 = LowercaseHex(SHA256.HashData(
+                                Encoding.Unicode.GetBytes(consumerSource))),
+                        },
+                    },
+                    exports = new object[] {
+                        new {
+                            kind = "struct",
+                            @namespace = "",
+                            name = "Payload",
+                            exportKey = "local/Payload",
+                            fieldExports = new[] {
+                                new { name = "X", exportKey = "local/Payload.X" },
+                                new { name = "Y", exportKey = "local/Payload.Y" },
+                            },
+                        },
+                        new {
+                            kind = "foreign-native-interface",
+                            @namespace = "",
+                            name = "IConsumer",
+                            exportKey = "local/IConsumer",
+                            interfaceMethodExports = new[] {
+                                new {
+                                    sourceInputOrdinal
+                                        = member.SourceInputOrdinal,
+                                    declarationStart
+                                        = member.SourceDeclarationSpan.Start,
+                                    declarationLength
+                                        = member.SourceDeclarationSpan.Length,
+                                    exportKey
+                                        = "local/IConsumer.TryReadPoint",
+                                },
+                            },
+                        },
+                    },
+                }), new UTF8Encoding(false)).ConfigureAwait(true);
+            await File.WriteAllTextAsync(sourceProvidersPath,
+                JsonSerializer.Serialize(new {
+                    schemaVersion = 4,
+                    providers = new[] {
+                        new {
+                            schemaIdentity = a2SchemaIdentity,
+                            path = unusedProviderPath,
+                        },
+                        new {
+                            schemaIdentity = ps1SchemaIdentity,
+                            path = ps1ProviderPath,
+                        },
+                        new {
+                            schemaIdentity = a2SchemaIdentity,
+                            path = pointProviderPath,
+                        },
+                    },
+                    references = new[] {
+                        new {
+                            kind = "foreign-native-interface",
+                            providerInputOrdinal = 1,
+                            moduleIdentity = ps1ProviderIdentity,
+                        },
+                    },
+                }), new UTF8Encoding(false)).ConfigureAwait(true);
+            await File.WriteAllTextAsync(nativeManifestPath,
+                CreateNativeCoreManifest(consumerIdentity,
+                    includeForeignNativeInterface: true))
+                .ConfigureAwait(true);
+            await File.WriteAllTextAsync(layoutManifestPath,
+                CreateLayoutCoreManifest(consumerIdentity))
+                .ConfigureAwait(true);
+            await File.WriteAllTextAsync(nativeOutputManifestPath,
+                CreateNativeOutputCoreManifest(consumerIdentity))
+                .ConfigureAwait(true);
+
+            var (exit, result, error) = await RunAsync([], [
+                "compile-trrm", sourcePath, "--identity", consumerIdentity,
+                "--trrm-schema", ac1SchemaIdentity,
+                "--trrm-source-type-exports", typeExportsPath,
+                "--trrm-source-providers", sourceProvidersPath,
+                "--native-core-manifest", nativeManifestPath,
+                "--layout-core-manifest", layoutManifestPath,
+                "--native-output-core-manifest", nativeOutputManifestPath,
+                "--library", "-o", artifactPath, "--runtime", "fail-fast",
+                "--json",
+            ]).ConfigureAwait(true);
+            Assert.That(exit, Is.Zero, $"{result}{Environment.NewLine}{error}");
+            Assert.That(error, Is.Empty);
+
+            var outputReference = TrRmExecutableCompiler
+                .CreateStandardReference(
+                    new TrRmStandardArtifactInput(ac1SchemaIdentity,
+                        await File.ReadAllBytesAsync(artifactPath)
+                            .ConfigureAwait(true)),
+                    consumerIdentity, [
+                        new TrRmStandardArtifactInput(a2SchemaIdentity,
+                            unusedArtifact),
+                        new TrRmStandardArtifactInput(ps1SchemaIdentity,
+                            ps1Artifact),
+                        new TrRmStandardArtifactInput(a2SchemaIdentity,
+                            pointArtifact),
+                    ]);
+            Assert.That(outputReference.Interfaces.Any(
+                static definition => definition.QualifiedName == "IConsumer"),
+                Is.True);
+            Assert.That(outputReference.Interfaces.Single(
+                    static definition => definition.QualifiedName == "IBase")
+                .ModuleImport?.ProducerIdentity,
+                Is.EqualTo(ps1ProviderIdentity));
+            var outputPoint = outputReference.Structures.Single(
+                static structure => structure.Name == "Point");
+            Assert.That(outputPoint.DeclaredCopyEvidence, Is.True);
+            Assert.That(outputPoint.StandardTypeOrigin!.Provider.SchemaIdentity,
+                Is.EqualTo(a2SchemaIdentity));
+            Assert.That(outputPoint.StandardTypeOrigin.Provider.ModuleIdentity,
+                Is.EqualTo(pointProviderIdentity));
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
+                .ConfigureAwait(false);
+        }
+    }
+
+    [Test]
     public async Task SelectedFProfileRunsBuildsAndEmitsLibraryWithDirectNativeImportAsync()
     {
         Assume.That(OperatingSystem.IsWindows()

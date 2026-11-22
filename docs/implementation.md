@@ -1410,8 +1410,11 @@ source emission, and publishes A2 aggregate TypeDefs with Features 2/1 and
 provider v4's non-first root ordinal, a non-first co-located A2 Module/key,
 malformed source spans/provider pairings, output-preservation failures, and
 A2's type-only export map. These
-changes and regressions remain unverified under the hold; formal proposal
-review and qualification remain open.
+changes and regressions remain unverified under the hold. A further source
+regression compiles a local AC1 FNI owner through a PS1 FNI root with an A2
+aggregate dependency, checking that Copy remains unknown in the PS1 expected
+view while the A2 provider carries positive evidence; it is also unverified.
+Formal proposal review and qualification remain open.
 Pointer output reads, other side-effecting argument expressions,
 defaults/constants, multiple calls, other condition expressions and Body
 control-flow shapes, nonreturning-call shapes beyond the terminal subset and
