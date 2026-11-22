@@ -151,6 +151,14 @@ public static int32 BindStandaloneMethodRoots()
             = uint32(rootOrdinal);
     }
 
+    int32 importStatus
+        = CatalogStandaloneProviderImports(rootCount);
+    if (importStatus != 0)
+    {
+        ClearStandaloneResolvedRoots();
+        return importStatus;
+    }
+
     Host.StandaloneResolvedRootCount[0] = rootCount;
     return 0;
 }
@@ -164,16 +172,16 @@ void ClearStandaloneResolvedRoots()
         Host.StandaloneResolvedRoots[index] = 0;
     }
     for (mut int32 index = 0;
-        index < Host.StandaloneResolvedRootTypeIds.Length;
+        index < Host.StandaloneCallableTypeIds.Length;
         index = index + 1)
     {
-        Host.StandaloneResolvedRootTypeIds[index] = 0;
+        Host.StandaloneCallableTypeIds[index] = 0;
     }
     for (mut int32 index = 0;
-        index < Host.StandaloneResolvedEffects.Length;
+        index < Host.StandaloneCallableEffects.Length;
         index = index + 1)
     {
-        Host.StandaloneResolvedEffects[index] = 0;
+        Host.StandaloneCallableEffects[index] = 0;
     }
     for (mut int32 index = 0;
         index < Host.StandaloneParameterTypeIds.Length;
@@ -195,6 +203,20 @@ void ClearStandaloneResolvedRoots()
     }
     Host.StandaloneTypeFactCount[0] = 0;
     Host.StandaloneContractFactCount[0] = 0;
+    Host.StandaloneResolvedImportCount[0] = 0;
+    Host.StandaloneResolvedExpectedImportCount[0] = 0;
+    for (mut int32 index = 0;
+        index < Host.StandaloneResolvedImports.Length;
+        index = index + 1)
+    {
+        Host.StandaloneResolvedImports[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneResolvedImportOrder.Length;
+        index = index + 1)
+    {
+        Host.StandaloneResolvedImportOrder[index] = 0;
+    }
 }
 
 bool TryFindStandaloneModuleDirectoryRow(int32 textStart,
@@ -775,7 +797,9 @@ bool TryFindStandaloneModuleForRow(int32 artifactStart,
     ensure return ? *moduleRowResult is init : true
 {
     if (moduleCount <= 0 || tableCount <= 0 || row <= 0
-        || row > tableCount || (cursorOffset != 36 && cursorOffset != 40))
+        || row > tableCount
+        || (cursorOffset != 32 && cursorOffset != 36
+            && cursorOffset != 40))
     {
         return false;
     }

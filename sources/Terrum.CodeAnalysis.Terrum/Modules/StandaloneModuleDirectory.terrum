@@ -220,7 +220,8 @@ bool BuildStandaloneModuleDirectoryCore()
 
             WriteStandaloneModuleDirectoryRow(moduleCount + 1,
                 artifactOrdinal, moduleRow, int32(identityStringRow),
-                stringStart, stringSectionLength, stringCount, -1, 0);
+                stringStart, stringSectionLength, stringCount,
+                int32(targetRequirement), int32(runtimePolicy));
             moduleCount = moduleCount + 1;
         }
     }

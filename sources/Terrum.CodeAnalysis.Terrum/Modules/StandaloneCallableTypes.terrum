@@ -1,7 +1,7 @@
 namespace Terrum.CodeAnalysis;
 
 int32 ValidateStandaloneMethodCallableTypes(int32 artifactOrdinal,
-    int32 rootOrdinal, int32 artifactStart, int32 artifactLength,
+    int32 callableSlot, int32 artifactStart, int32 artifactLength,
     int32 methodSigRow,
     uint32 resultTypeSpecRef, int32 paramFirst, int32 paramCount)
 {
@@ -40,7 +40,7 @@ int32 ValidateStandaloneMethodCallableTypes(int32 artifactOrdinal,
     {
         return resultInternStatus;
     }
-    Host.StandaloneResolvedRootTypeIds[rootOrdinal] = resultTypeId;
+    Host.StandaloneCallableTypeIds[callableSlot] = resultTypeId;
 
     int32 parameterTableCount
         = GetStandaloneArtifactSectionCount(0x0018);

@@ -122,6 +122,10 @@ internal readonly record struct CapturedStandaloneMethodImportInput(
         var parameterTypeCapacity = checked((artifactByteLength / 16) + 1);
         var contractFactCapacity = checked((artifactByteLength / 20) + 1);
         var contractFactStorage = checked(contractFactCapacity * 7);
+        var importCapacity = checked((artifactByteLength / 12) + 1);
+        var importFactStorage = checked(importCapacity * 20);
+        var callableCapacity
+            = checked(MethodRoots.Length + importCapacity);
         var artifactParameterStartCapacity
             = checked(Artifacts.Length + 1);
 
@@ -210,17 +214,27 @@ internal readonly record struct CapturedStandaloneMethodImportInput(
             new HostBuffer("StandaloneContractFactOrder",
                 PrimitiveType.Int32,
                 [.. new int[contractFactCapacity]], true),
+            new HostBuffer("StandaloneResolvedImportCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneResolvedImports",
+                PrimitiveType.Int32,
+                [.. new int[importFactStorage]], true),
+            new HostBuffer("StandaloneResolvedImportOrder",
+                PrimitiveType.Int32,
+                [.. new int[importCapacity]], true),
+            new HostBuffer("StandaloneResolvedExpectedImportCount",
+                PrimitiveType.Int32, [0], true),
             new HostBuffer("StandaloneResolvedRootCount",
                 PrimitiveType.Int32, [0], true),
             new HostBuffer("StandaloneResolvedRoots",
                 PrimitiveType.UInt32,
                 [.. new int[resolvedRootsCapacity]], true),
-            new HostBuffer("StandaloneResolvedRootTypeIds",
+            new HostBuffer("StandaloneCallableTypeIds",
                 PrimitiveType.Int32,
-                [.. new int[MethodRoots.Length]], true),
-            new HostBuffer("StandaloneResolvedEffects",
+                [.. new int[callableCapacity]], true),
+            new HostBuffer("StandaloneCallableEffects",
                 PrimitiveType.Int32,
-                [.. new int[MethodRoots.Length]], true),
+                [.. new int[callableCapacity]], true),
         ];
 
         int AppendText(string value)

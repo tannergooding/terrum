@@ -1,7 +1,7 @@
 namespace Terrum.CodeAnalysis;
 
 int32 ValidateStandaloneMethodContracts(int32 artifactOrdinal,
-    int32 moduleRow, int32 rootOrdinal, int32 artifactStart,
+    int32 moduleRow, int32 callableSlot, int32 artifactStart,
     int32 artifactLength, int32 methodDefRow,
     uint32 paramFirst, uint32 paramCount,
     uint32 contractFirst, uint32 contractCount)
@@ -15,7 +15,7 @@ int32 ValidateStandaloneMethodContracts(int32 artifactOrdinal,
     }
     if (contractCount == 0)
     {
-        Host.StandaloneResolvedEffects[rootOrdinal] = 0;
+        Host.StandaloneCallableEffects[callableSlot] = 0;
         Host.StandaloneContractFactCount[0] = 0;
         return 0;
     }
@@ -195,7 +195,7 @@ int32 ValidateStandaloneMethodContracts(int32 artifactOrdinal,
             int32 graphStatus
                 = TryValidateStandalonePublishedPredicateGraph(
                     artifactStart, artifactLength, moduleRow,
-                    rootOrdinal, predicateGraphRow,
+                    callableSlot, predicateGraphRow,
                     ref init nodeKind);
             if (graphStatus != 0)
             {
@@ -313,9 +313,8 @@ int32 ValidateStandaloneMethodContracts(int32 artifactOrdinal,
         return 2;
     }
 
-    Host.StandaloneResolvedEffects[rootOrdinal] = int32(effectsMask);
-    int32 outputStateStatus
-        = ValidateStandaloneOutputStateFacts(rootOrdinal);
+    Host.StandaloneCallableEffects[callableSlot] = int32(effectsMask);
+    int32 outputStateStatus = ValidateStandaloneOutputStateFacts();
     if (outputStateStatus != 0)
     {
         return outputStateStatus;

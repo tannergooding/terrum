@@ -44,41 +44,118 @@ internal sealed class StandaloneMethodImportInputTests
             if (!built || Host.StandaloneModuleCount[0] != Host.Expected[0]) {
                 return 21;
             }
-            if (Host.Expected[0] == 1) {
-                if (Host.StandaloneModuleDirectory[8] != -1) { return 22; }
-                return 0;
-            }
-            if (Host.StandaloneModuleCount[0] != 3
-                || Host.StandaloneModuleDirectory[8] != -1
-                || Host.StandaloneModuleDirectory[16] != 0
-                || Host.StandaloneModuleDirectory[17] != 1
-                || Host.StandaloneModuleDirectory[24] != 1
-                || Host.StandaloneModuleDirectory[25] != 1) {
-                return 22;
-            }
-            if (Host.StandaloneModuleOrder[1] != 1
-                || Host.StandaloneModuleOrder[2] != 3
-                || Host.StandaloneModuleOrder[3] != 2) {
-                return 22;
+            if (Host.Expected[2] < 4) {
+                if (Host.Expected[0] == 1) {
+                    if (Host.StandaloneModuleDirectory[8] != -1) {
+                        return 22;
+                    }
+                    return 0;
+                }
+                if (Host.StandaloneModuleCount[0] != 3
+                    || Host.StandaloneModuleDirectory[8] != -1
+                    || Host.StandaloneModuleDirectory[16] != 0
+                    || Host.StandaloneModuleDirectory[17] != 1
+                    || Host.StandaloneModuleDirectory[24] != 1
+                    || Host.StandaloneModuleDirectory[25] != 1) {
+                    return 22;
+                }
+                if (Host.StandaloneModuleOrder[1] != 1
+                    || Host.StandaloneModuleOrder[2] != 3
+                    || Host.StandaloneModuleOrder[3] != 2) {
+                    return 22;
+                }
             }
             int32 rootStatus = BindStandaloneMethodRoots();
             if (rootStatus != Host.Expected[1]) { return 23; }
             if (rootStatus != 0
                 && (Host.StandaloneResolvedRootCount[0] != 0
                     || Host.StandaloneTypeFactCount[0] != 0
-                    || (Host.StandaloneResolvedRootTypeIds.Length != 0
-                        && Host.StandaloneResolvedRootTypeIds[0] != 0)
+                    || (Host.StandaloneCallableTypeIds.Length != 0
+                        && Host.StandaloneCallableTypeIds[0] != 0)
                     || (Host.StandaloneParameterTypeIds.Length > 1
                         && Host.StandaloneParameterTypeIds[1] != 0))) {
                 return 25;
             }
+            if (Host.Expected[2] == 4) {
+                if (rootStatus != 0
+                    || Host.StandaloneResolvedRootCount[0] != 1
+                    || Host.StandaloneResolvedImportCount[0] != 2
+                    || Host.StandaloneResolvedExpectedImportCount[0] != 1
+                    || Host.StandaloneResolvedImportOrder[1] != 1
+                    || Host.StandaloneResolvedImportOrder[2] != 2
+                    || Host.StandaloneResolvedImports[0] != 0
+                    || Host.StandaloneResolvedImports[1] != 1
+                    || Host.StandaloneResolvedImports[2] != 1
+                    || Host.StandaloneResolvedImports[3] != 1
+                    || Host.StandaloneResolvedImports[4]
+                        != Host.StandaloneResolvedImports[24]
+                    || Host.StandaloneResolvedImports[12] != 3
+                    || Host.StandaloneResolvedImports[13] != 1
+                    || Host.StandaloneResolvedImports[19] != 1
+                    || Host.StandaloneResolvedImports[20] != 1
+                    || Host.StandaloneResolvedImports[21] != 1
+                    || Host.StandaloneResolvedImports[22] != 1
+                    || Host.StandaloneResolvedImports[23] != 1
+                    || Host.StandaloneResolvedImports[32] != 3
+                    || Host.StandaloneResolvedImports[33] != 2
+                    || Host.StandaloneResolvedImports[39] != 1
+                    || Host.StandaloneCallableTypeIds[1] != 1
+                    || Host.StandaloneCallableTypeIds[2] != 1
+                    || Host.StandaloneCallableEffects[1] != 0
+                    || Host.StandaloneCallableEffects[2] != 4) {
+                    return 29;
+                }
+                return 0;
+            }
+            if (Host.Expected[2] == 5) {
+                if (rootStatus != 1
+                    || Host.StandaloneResolvedRootCount[0] != 0
+                    || Host.StandaloneResolvedImportCount[0] != 0
+                    || Host.StandaloneResolvedExpectedImportCount[0] != 0) {
+                    return 30;
+                }
+                return 0;
+            }
+            if (Host.Expected[2] == 6) {
+                if (rootStatus != 2
+                    || Host.StandaloneResolvedRootCount[0] != 0
+                    || Host.StandaloneResolvedImportCount[0] != 0
+                    || Host.StandaloneResolvedExpectedImportCount[0] != 0) {
+                    return 31;
+                }
+                return 0;
+            }
+            if (Host.Expected[2] == 7) {
+                if (rootStatus != 3
+                    || Host.StandaloneResolvedRootCount[0] != 0
+                    || Host.StandaloneResolvedImportCount[0] != 0) {
+                    return 32;
+                }
+                return 0;
+            }
+            if (Host.Expected[2] == 8) {
+                if (rootStatus != 2
+                    || Host.StandaloneResolvedRootCount[0] != 0
+                    || Host.StandaloneResolvedImportCount[0] != 0) {
+                    return 33;
+                }
+                return 0;
+            }
+            if (Host.Expected[2] == 9) {
+                if (rootStatus != 3
+                    || Host.StandaloneResolvedRootCount[0] != 0
+                    || Host.StandaloneResolvedImportCount[0] != 0) {
+                    return 34;
+                }
+                return 0;
+            }
             if (Host.Expected[2] == 1) {
                 if (rootStatus != 0
                     || Host.StandaloneResolvedRootCount[0] != 2
-                    || Host.StandaloneResolvedEffects[0] != 0
-                    || Host.StandaloneResolvedEffects[1] != 0
-                    || Host.StandaloneResolvedRootTypeIds[0] != 1
-                    || Host.StandaloneResolvedRootTypeIds[1] != 1
+                    || Host.StandaloneCallableEffects[0] != 0
+                    || Host.StandaloneCallableEffects[1] != 0
+                    || Host.StandaloneCallableTypeIds[0] != 1
+                    || Host.StandaloneCallableTypeIds[1] != 1
                     || Host.StandaloneTypeFactCount[0] != 3
                     || Host.StandaloneTypeFacts[3] != 0
                     || Host.StandaloneTypeFacts[4] != 8
@@ -104,9 +181,9 @@ internal sealed class StandaloneMethodImportInputTests
             }
             if (Host.Expected[2] == 2) {
                 if (rootStatus != 0
-                    || Host.StandaloneResolvedEffects[0]
+                    || Host.StandaloneCallableEffects[0]
                         != Host.Expected[3]
-                    || Host.StandaloneResolvedEffects[1] != 0) {
+                    || Host.StandaloneCallableEffects[1] != 0) {
                     return 27;
                 }
                 return 0;
@@ -142,8 +219,8 @@ internal sealed class StandaloneMethodImportInputTests
             }
             if (rootStatus == 0
                 && (Host.StandaloneResolvedRootCount[0] != 2
-                    || Host.StandaloneResolvedEffects[0] != 0
-                    || Host.StandaloneResolvedEffects[1] != 0
+                    || Host.StandaloneCallableEffects[0] != 0
+                    || Host.StandaloneCallableEffects[1] != 0
                     || Host.StandaloneResolvedRoots[0] != 1
                     || Host.StandaloneResolvedRoots[1] != 0
                     || Host.StandaloneResolvedRoots[2] != 0
@@ -271,10 +348,14 @@ internal sealed class StandaloneMethodImportInputTests
                 "StandaloneContractFactCount",
                 "StandaloneContractFacts",
                 "StandaloneContractFactOrder",
+                "StandaloneResolvedImportCount",
+                "StandaloneResolvedImports",
+                "StandaloneResolvedImportOrder",
+                "StandaloneResolvedExpectedImportCount",
                 "StandaloneResolvedRootCount",
                 "StandaloneResolvedRoots",
-                "StandaloneResolvedRootTypeIds",
-                "StandaloneResolvedEffects",
+                "StandaloneCallableTypeIds",
+                "StandaloneCallableEffects",
             }));
         Assert.That(hostBuffers[2].Values,
             Is.EqualTo(new[] { 1, 2, 3, 4, 5 }));
@@ -314,6 +395,7 @@ internal sealed class StandaloneMethodImportInputTests
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodEffects.terrum",
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodOutputStates.terrum",
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodRoots.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodImports.terrum",
         };
         var root = RepositoryRoot();
         var components = new List<SyntaxTree>(sourcePaths.Length + 1);
@@ -731,6 +813,97 @@ internal sealed class StandaloneMethodImportInputTests
         Assert.That(Run(localOnlyProgram, localOnly, 1, 0),
             Is.EqualTo(0));
 
+        var imports = new StandaloneMethodImportInput(Agreement,
+            "consumer/module", [
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateMethodImporterArtifact(
+                        "provider/consumer-a", "provider/leaf")),
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateMethodImporterArtifact(
+                        "provider/consumer-b", "provider/leaf",
+                        effectsMask: 4)),
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateMinimalArtifact("provider/leaf")),
+            ], [
+                new StandaloneMethodRoot(2, "provider/leaf", "api/Run"),
+            ]);
+        var importsProgram = Compile(imports, 4, 0, verificationMode: 4);
+        Assert.That(Run(importsProgram, imports, 4, 0,
+                verificationMode: 4),
+            Is.EqualTo(0));
+
+        var missingProvider = new StandaloneMethodImportInput(Agreement,
+            "consumer/module", [
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateMethodImporterArtifact(
+                        "provider/consumer", "provider/missing")),
+            ], []);
+        var missingProviderProgram
+            = Compile(missingProvider, 2, 1, verificationMode: 5);
+        Assert.That(Run(missingProviderProgram, missingProvider, 2, 1,
+                verificationMode: 5),
+            Is.EqualTo(0));
+
+        var unsupportedImport = new StandaloneMethodImportInput(Agreement,
+            "consumer/module", [
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateMethodImporterArtifact(
+                        "provider/consumer", "provider/leaf",
+                        methodFlags: 0)),
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateMinimalArtifact("provider/leaf")),
+            ], []);
+        var unsupportedImportProgram
+            = Compile(unsupportedImport, 3, 2, verificationMode: 6);
+        Assert.That(Run(unsupportedImportProgram, unsupportedImport, 3, 2,
+                verificationMode: 6),
+            Is.EqualTo(0));
+
+        var bodyfulImport = new StandaloneMethodImportInput(Agreement,
+            "consumer/module", [
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateMethodImporterArtifact(
+                        "provider/consumer", "provider/leaf",
+                        bodyRow: 1)),
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateMinimalArtifact("provider/leaf")),
+            ], []);
+        var bodyfulImportProgram
+            = Compile(bodyfulImport, 3, 3, verificationMode: 7);
+        Assert.That(Run(bodyfulImportProgram, bodyfulImport, 3, 3,
+                verificationMode: 7),
+            Is.EqualTo(0));
+
+        var unsupportedRequirement = new StandaloneMethodImportInput(
+            Agreement, "consumer/module", [
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateMethodImporterArtifact(
+                        "provider/consumer", "provider/leaf",
+                        moduleRefTargetRequirement: 0)),
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateMinimalArtifact("provider/leaf")),
+            ], []);
+        var unsupportedRequirementProgram
+            = Compile(unsupportedRequirement, 3, 2, verificationMode: 8);
+        Assert.That(Run(unsupportedRequirementProgram,
+                unsupportedRequirement, 3, 2, verificationMode: 8),
+            Is.EqualTo(0));
+
+        var mismatchedOwner = new StandaloneMethodImportInput(Agreement,
+            "consumer/module", [
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateMethodImporterArtifact(
+                        "provider/consumer", "provider/leaf",
+                        methodOwnedBySecondModule: true)),
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateMinimalArtifact("provider/leaf")),
+            ], []);
+        var mismatchedOwnerProgram
+            = Compile(mismatchedOwner, 4, 3, verificationMode: 9);
+        Assert.That(Run(mismatchedOwnerProgram, mismatchedOwner, 4, 3,
+                verificationMode: 9),
+            Is.EqualTo(0));
+
         BoundProgram Compile(StandaloneMethodImportInput request,
             int expectedModuleCount, int expectedRootStatus,
             int verificationMode = 0, int expectedEffectMask = 0,
@@ -771,6 +944,86 @@ internal sealed class StandaloneMethodImportInputTests
     private static string RepositoryRoot() =>
         Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..",
             "..", "..", "..", ".."));
+
+    private static byte[] CreateMethodImporterArtifact(
+        string moduleIdentity, string producerIdentity,
+        string exportKey = "api/Run", uint methodFlags = 2,
+        uint bodyRow = 0, uint moduleRefTargetRequirement = 1,
+        bool methodOwnedBySecondModule = false, uint effectsMask = 0)
+    {
+        var stringSection = TrRmStringTableWriter.EncodeNames([
+            (moduleIdentity, 0),
+            ("Expected", 0),
+            (exportKey, 0),
+            (producerIdentity, 0),
+            (moduleIdentity + "/other", 0),
+        ]);
+        var strings = new TrRmStringTableReader(stringSection, 5);
+        var moduleRows = methodOwnedBySecondModule
+            ? new[] {
+                new TrRmModuleRow(1, 1, 0, 0, 1, 1, 1, 1),
+                new TrRmModuleRow(5, 1, 0, 0, 2, 1, 1, 1),
+            }
+            : new[] {
+                new TrRmModuleRow(1, 1, 0, 0, 1, 1, 1, 1),
+            };
+        var moduleSection = TrRmModuleTableWriter.Encode(moduleRows,
+            strings, 1, 0, 1, 0, 0);
+        var modules = new TrRmModuleTableReader(moduleSection,
+            moduleRows.Length,
+            strings, 1, 0, 1, 0, 0);
+        var moduleRefSection = TrRmModuleRefTableWriter.Encode([
+            new TrRmModuleRefRow(4, moduleRefTargetRequirement, 0),
+        ], strings, modules);
+
+        var methodDefSection = new byte[28];
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            methodDefSection.AsSpan(4), 2);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            methodDefSection.AsSpan(8), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            methodDefSection.AsSpan(12), methodFlags);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            methodDefSection.AsSpan(24), bodyRow);
+        if (effectsMask != 0)
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                methodDefSection.AsSpan(16), 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                methodDefSection.AsSpan(20), 1);
+        }
+        var methodSigSection = new byte[24];
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            methodSigSection, 0xF200_0008);
+        var importSection = new byte[12];
+        BinaryPrimitives.WriteUInt32LittleEndian(importSection, 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            importSection.AsSpan(4), 3);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            importSection.AsSpan(8), 0x1600_0001);
+
+        var sections = new List<TrRmSection> {
+            new(0x0001, 0, (uint)moduleRows.Length, moduleSection),
+            new(0x0002, 0, 5, stringSection),
+            new TrRmSection(0x0010, 0, 1, moduleRefSection),
+            new TrRmSection(0x0016, 0, 1, methodDefSection),
+            new TrRmSection(0x0017, 0, 1, methodSigSection),
+            new TrRmSection(0x001C, 0, 1, importSection),
+        };
+        if (effectsMask != 0)
+        {
+            var effectsRow = new byte[12];
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                effectsRow, 0x1600_0001);
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                effectsRow.AsSpan(4), 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                effectsRow.AsSpan(8), effectsMask);
+            sections.Add(new TrRmSection(0x001B, 0, 1,
+                TrRmVariableTableWriter.EncodeBlobs([effectsRow])));
+        }
+        return TrRmArtifactWriter.Encode(sections);
+    }
 
     private static byte[] CreateMinimalArtifact(string moduleIdentity,
         string exportKey = "api/Run", uint methodFlags = 2,

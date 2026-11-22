@@ -60,7 +60,7 @@ bool TryGetStandaloneParameterTypeKind(int32 artifactOrdinal,
 }
 
 int32 TryValidateStandalonePublishedPredicateGraph(int32 artifactStart,
-    int32 artifactLength, int32 moduleRow, int32 rootOrdinal,
+    int32 artifactLength, int32 moduleRow, int32 callableSlot,
     uint32 predicateGraphRow, ref<init int32> nodeKindResult)
     ensure return == 0 ? *nodeKindResult is init : true
 {
@@ -244,14 +244,15 @@ int32 TryValidateStandalonePublishedPredicateGraph(int32 artifactStart,
         return 2;
     }
 
-    int32 rootTypeId
-        = Host.StandaloneResolvedRootTypeIds[rootOrdinal];
+    int32 callableResultTypeId
+        = Host.StandaloneCallableTypeIds[callableSlot];
     int32 typeFactCount = Host.StandaloneTypeFactCount[0];
-    if (rootTypeId <= 0 || rootTypeId > typeFactCount)
+    if (callableResultTypeId <= 0
+        || callableResultTypeId > typeFactCount)
     {
         return 3;
     }
-    int32 typeFactOffset = rootTypeId * 3;
+    int32 typeFactOffset = callableResultTypeId * 3;
     if (Host.StandaloneTypeFacts[typeFactOffset] != 0)
     {
         return 3;
@@ -341,7 +342,7 @@ bool TryRequireStandaloneModuleFeature(int32 artifactStart,
     return true;
 }
 
-int32 ValidateStandaloneOutputStateFacts(int32 rootOrdinal)
+int32 ValidateStandaloneOutputStateFacts()
 {
     init int32 outputStateCount;
     init int32 attachmentCount;

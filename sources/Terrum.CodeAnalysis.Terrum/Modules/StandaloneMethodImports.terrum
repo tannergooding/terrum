@@ -1,0 +1,837 @@
+namespace Terrum.CodeAnalysis;
+
+int32 CatalogStandaloneProviderImports(int32 rootCount)
+{
+    int32 importCapacity
+        = Host.StandaloneResolvedImports.Length / 20;
+    if (rootCount < 0
+        || rootCount != Host.StandaloneRequest[5]
+        || Host.StandaloneResolvedImportCount.Length != 1
+        || Host.StandaloneResolvedExpectedImportCount.Length != 1
+        || Host.StandaloneResolvedImportOrder.Length < importCapacity
+        || importCapacity <= 0)
+    {
+        return 3;
+    }
+
+    Host.StandaloneResolvedImportCount[0] = 0;
+    Host.StandaloneResolvedExpectedImportCount[0] = 0;
+    for (mut int32 index = 0;
+        index < Host.StandaloneResolvedImports.Length;
+        index = index + 1)
+    {
+        Host.StandaloneResolvedImports[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneResolvedImportOrder.Length;
+        index = index + 1)
+    {
+        Host.StandaloneResolvedImportOrder[index] = 0;
+    }
+
+    mut int32 importCount = 0;
+    for (mut int32 artifactOrdinal = 0;
+        artifactOrdinal < Host.StandaloneRequest[4];
+        artifactOrdinal = artifactOrdinal + 1)
+    {
+        if (!TryValidateStandaloneArtifactDirectory(artifactOrdinal))
+        {
+            return 3;
+        }
+
+        init int32 artifactStart;
+        init int32 artifactLength;
+        if (!TryGetStandaloneArtifactExtent(artifactOrdinal,
+                ref init artifactStart, ref init artifactLength))
+        {
+            return 3;
+        }
+
+        int32 moduleEntry = FindStandaloneArtifactSection(0x0001);
+        int32 stringEntry = FindStandaloneArtifactSection(0x0002);
+        int32 moduleRefCount
+            = GetStandaloneArtifactSectionCount(0x0010);
+        int32 importSectionCount
+            = GetStandaloneArtifactSectionCount(0x001C);
+        int32 moduleCount
+            = GetStandaloneArtifactSectionCount(0x0001);
+        int32 stringCount
+            = GetStandaloneArtifactSectionCount(0x0002);
+        if (moduleEntry == 0 || stringEntry == 0 || moduleCount <= 0
+            || stringCount <= 0
+            || !TryValidateStandaloneStringTable(artifactOrdinal,
+                Host.StandaloneSectionStarts[stringEntry],
+                Host.StandaloneSectionLengths[stringEntry],
+                stringCount))
+        {
+            return 3;
+        }
+
+        int32 moduleStart = Host.StandaloneSectionStarts[moduleEntry];
+        int32 stringStart = Host.StandaloneSectionStarts[stringEntry];
+        int32 stringLength = Host.StandaloneSectionLengths[stringEntry];
+        int32 moduleRefEntry = FindStandaloneArtifactSection(0x0010);
+        int32 importEntry = FindStandaloneArtifactSection(0x001C);
+        int32 moduleRefStart = moduleRefEntry == 0 ? 0
+            : Host.StandaloneSectionStarts[moduleRefEntry];
+        int32 moduleRefLength = moduleRefEntry == 0 ? 0
+            : Host.StandaloneSectionLengths[moduleRefEntry];
+        int32 importStart = importEntry == 0 ? 0
+            : Host.StandaloneSectionStarts[importEntry];
+        int32 moduleRefStatus = ValidateStandaloneProviderModuleRefs(
+            artifactOrdinal, artifactStart, artifactLength, moduleStart,
+            moduleCount, moduleRefStart, moduleRefLength,
+            moduleRefCount, stringStart, stringLength, stringCount);
+        if (moduleRefStatus != 0)
+        {
+            return moduleRefStatus;
+        }
+        if (importSectionCount == 0)
+        {
+            continue;
+        }
+
+        if (importEntry == 0
+            || Host.StandaloneResolvedImportOrder.Length
+                <= importCount + importSectionCount
+            || importCount + importSectionCount > importCapacity - 1
+            || !TryValidateStandaloneVariableTableIndex(artifactStart,
+                artifactLength, importStart,
+                Host.StandaloneSectionLengths[importEntry],
+                importSectionCount, 12, 1))
+        {
+            return 3;
+        }
+
+        for (mut int32 importRow = 1;
+            importRow <= importSectionCount;
+            importRow = importRow + 1)
+        {
+            init uint32 moduleRefRowValue;
+            init uint32 keyStringRow;
+            init uint32 expectedDefinition;
+            int32 importRowStart = importStart + ((importRow - 1) * 12);
+            if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                    artifactLength, importRowStart,
+                    ref init moduleRefRowValue)
+                || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                    artifactLength, importRowStart + 4,
+                    ref init keyStringRow)
+                || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                    artifactLength, importRowStart + 8,
+                    ref init expectedDefinition)
+                || moduleRefRowValue == 0
+                || moduleRefRowValue > uint32(moduleRefCount)
+                || keyStringRow == 0
+                || keyStringRow > uint32(stringCount)
+                || !TryValidateStandaloneStringName(artifactOrdinal,
+                    artifactStart, artifactLength, stringStart,
+                    stringLength, stringCount, int32(keyStringRow)))
+            {
+                return 3;
+            }
+
+            init int32 importerModuleRow;
+            if (!TryFindStandaloneModuleForRow(artifactStart,
+                    artifactLength, moduleStart, moduleCount,
+                    moduleRefCount, 32, int32(moduleRefRowValue),
+                    ref init importerModuleRow))
+            {
+                return 3;
+            }
+
+            init int32 expectedModuleRow;
+            init uint32 expectedVisibility;
+            init uint32 expectedOwnerType;
+            if (!TryResolveStandaloneExportDefinition(
+                    artifactStart, artifactLength, moduleStart,
+                    moduleCount, expectedDefinition,
+                    ref init expectedModuleRow,
+                    ref init expectedVisibility,
+                    ref init expectedOwnerType)
+                || expectedModuleRow != importerModuleRow)
+            {
+                return 3;
+            }
+            if (expectedDefinition >> 24 != 0x16)
+            {
+                return 2;
+            }
+            if (importCount + 1 >= importCapacity
+                || rootCount + importCount
+                    >= Host.StandaloneCallableTypeIds.Length
+                || rootCount + importCount
+                    >= Host.StandaloneCallableEffects.Length)
+            {
+                return 3;
+            }
+
+            int32 callableSlot = rootCount + importCount;
+            init int32 methodSigRow;
+            init int32 paramFirst;
+            init int32 paramCount;
+            init int32 contractFirst;
+            init int32 contractCount;
+            int32 methodStatus = ValidateStandaloneImportedMethod(
+                artifactOrdinal, artifactStart, artifactLength,
+                expectedModuleRow,
+                int32(expectedDefinition & 0x00FF_FFFF),
+                expectedVisibility, expectedOwnerType, callableSlot,
+                ref init methodSigRow, ref init paramFirst,
+                ref init paramCount, ref init contractFirst,
+                ref init contractCount);
+            if (methodStatus != 0)
+            {
+                return methodStatus;
+            }
+
+            int32 moduleRefOffset
+                = moduleRefStart + ((int32(moduleRefRowValue) - 1) * 12);
+            init uint32 producerStringRow;
+            init uint32 targetRequirement;
+            init uint32 runtimePolicy;
+            if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                    artifactLength, moduleRefOffset,
+                    ref init producerStringRow)
+                || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                    artifactLength, moduleRefOffset + 4,
+                    ref init targetRequirement)
+                || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                    artifactLength, moduleRefOffset + 8,
+                    ref init runtimePolicy))
+            {
+                return 3;
+            }
+            init int32 providerDirectoryRow;
+            if (!TryFindStandaloneModuleDirectoryRowForString(
+                    artifactOrdinal, stringStart, stringLength,
+                    stringCount, int32(producerStringRow),
+                    ref init providerDirectoryRow)
+                || Host.StandaloneModuleDirectory[
+                    providerDirectoryRow * 8] < 0)
+            {
+                return 1;
+            }
+
+            int32 providerDirectoryOffset = providerDirectoryRow * 8;
+            if (Host.StandaloneModuleDirectory[
+                    providerDirectoryOffset + 6]
+                    != int32(targetRequirement)
+                || Host.StandaloneModuleDirectory[
+                    providerDirectoryOffset + 7]
+                    != int32(runtimePolicy))
+            {
+                return 1;
+            }
+
+            int32 outputOffset = importCount * 20;
+            Host.StandaloneResolvedImports[outputOffset]
+                = artifactOrdinal;
+            Host.StandaloneResolvedImports[outputOffset + 1]
+                = importerModuleRow;
+            Host.StandaloneResolvedImports[outputOffset + 2]
+                = importRow;
+            Host.StandaloneResolvedImports[outputOffset + 3]
+                = int32(moduleRefRowValue);
+            Host.StandaloneResolvedImports[outputOffset + 4]
+                = providerDirectoryRow;
+            Host.StandaloneResolvedImports[outputOffset + 5]
+                = int32(expectedDefinition & 0x00FF_FFFF);
+            Host.StandaloneResolvedImports[outputOffset + 6]
+                = methodSigRow;
+            Host.StandaloneResolvedImports[outputOffset + 7]
+                = Host.StandaloneCallableTypeIds[callableSlot];
+            Host.StandaloneResolvedImports[outputOffset + 8]
+                = paramFirst;
+            Host.StandaloneResolvedImports[outputOffset + 9]
+                = paramCount;
+            Host.StandaloneResolvedImports[outputOffset + 10]
+                = contractFirst;
+            Host.StandaloneResolvedImports[outputOffset + 11]
+                = contractCount;
+            Host.StandaloneResolvedImports[outputOffset + 12]
+                = int32(keyStringRow);
+            Host.StandaloneResolvedImports[outputOffset + 13]
+                = callableSlot;
+            Host.StandaloneResolvedImports[outputOffset + 14]
+                = stringStart;
+            Host.StandaloneResolvedImports[outputOffset + 15]
+                = stringLength;
+            Host.StandaloneResolvedImports[outputOffset + 16]
+                = stringCount;
+            Host.StandaloneResolvedImports[outputOffset + 17]
+                = int32(targetRequirement);
+            Host.StandaloneResolvedImports[outputOffset + 18]
+                = int32(runtimePolicy);
+            Host.StandaloneResolvedImports[outputOffset + 19] = 0;
+            importCount = importCount + 1;
+        }
+    }
+
+    if (importCount + 1 > Host.StandaloneResolvedImportOrder.Length)
+    {
+        return 3;
+    }
+    for (mut int32 index = 1;
+        index <= importCount;
+        index = index + 1)
+    {
+        Host.StandaloneResolvedImportOrder[index] = index;
+    }
+    if (!SortStandaloneResolvedImportOrder(importCount))
+    {
+        return 3;
+    }
+
+    mut int32 expectedImportCount = 0;
+    for (mut int32 orderIndex = 1;
+        orderIndex <= importCount;
+        orderIndex = orderIndex + 1)
+    {
+        int32 catalogOrdinal
+            = Host.StandaloneResolvedImportOrder[orderIndex] - 1;
+        int32 outputOffset = catalogOrdinal * 20;
+        if (orderIndex == 1)
+        {
+            expectedImportCount = 1;
+        }
+        else
+        {
+            int32 previousOrdinal
+                = Host.StandaloneResolvedImportOrder[orderIndex - 1] - 1;
+            int32 previousOffset = previousOrdinal * 20;
+            init int32 comparison;
+            int32 groupStatus
+                = CompareStandaloneResolvedImportGroupKeys(
+                    previousOffset, outputOffset,
+                    ref init comparison);
+            if (groupStatus != 0)
+            {
+                return groupStatus;
+            }
+            if (comparison != 0)
+            {
+                expectedImportCount = expectedImportCount + 1;
+            }
+            else if (Host.StandaloneResolvedImports[
+                        previousOffset] == Host.StandaloneResolvedImports[
+                            outputOffset]
+                && Host.StandaloneResolvedImports[
+                        previousOffset + 3]
+                    == Host.StandaloneResolvedImports[outputOffset + 3]
+                && Host.StandaloneResolvedImports[
+                        previousOffset + 5]
+                    == Host.StandaloneResolvedImports[outputOffset + 5])
+            {
+                return 3;
+            }
+        }
+        Host.StandaloneResolvedImports[outputOffset + 19]
+            = expectedImportCount;
+    }
+
+    Host.StandaloneResolvedImportCount[0] = importCount;
+    Host.StandaloneResolvedExpectedImportCount[0]
+        = expectedImportCount;
+    return 0;
+}
+
+int32 ValidateStandaloneProviderModuleRefs(int32 artifactOrdinal,
+    int32 artifactStart, int32 artifactLength, int32 moduleStart,
+    int32 moduleCount, int32 moduleRefStart, int32 moduleRefLength,
+    int32 moduleRefCount, int32 stringStart, int32 stringLength,
+    int32 stringCount)
+{
+    if (moduleRefCount == 0)
+    {
+        return 0;
+    }
+    if (moduleRefStart == 0
+        || !TryValidateStandaloneVariableTableIndex(artifactStart,
+            artifactLength, moduleRefStart, moduleRefLength,
+            moduleRefCount, 12, 1))
+    {
+        return 3;
+    }
+
+    for (mut int32 row = 1; row <= moduleRefCount; row = row + 1)
+    {
+        init uint32 producerStringRow;
+        init uint32 targetRequirement;
+        init uint32 runtimePolicy;
+        int32 rowStart = moduleRefStart + ((row - 1) * 12);
+        if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, rowStart,
+                ref init producerStringRow)
+            || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, rowStart + 4,
+                ref init targetRequirement)
+            || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, rowStart + 8,
+                ref init runtimePolicy)
+            || producerStringRow == 0
+            || producerStringRow > uint32(stringCount)
+            || targetRequirement > 1 || runtimePolicy > 1
+            || !TryValidateStandaloneStringName(artifactOrdinal,
+                artifactStart, artifactLength, stringStart, stringLength,
+                stringCount, int32(producerStringRow)))
+        {
+            return 3;
+        }
+        if (targetRequirement != 1 || runtimePolicy != 0)
+        {
+            return 2;
+        }
+
+        init int32 importerModuleRow;
+        if (!TryFindStandaloneModuleForRow(artifactStart,
+                artifactLength, moduleStart, moduleCount,
+                moduleRefCount, 32, row,
+                ref init importerModuleRow))
+        {
+            return 3;
+        }
+        init int32 providerDirectoryRow;
+        if (!TryFindStandaloneModuleDirectoryRowForString(
+                artifactOrdinal, stringStart, stringLength, stringCount,
+                int32(producerStringRow),
+                ref init providerDirectoryRow)
+            || Host.StandaloneModuleDirectory[
+                providerDirectoryRow * 8] < 0)
+        {
+            return 1;
+        }
+        int32 providerDirectoryOffset = providerDirectoryRow * 8;
+        if (Host.StandaloneModuleDirectory[
+                providerDirectoryOffset + 6]
+                != int32(targetRequirement)
+            || Host.StandaloneModuleDirectory[
+                providerDirectoryOffset + 7]
+                != int32(runtimePolicy))
+        {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+int32 ValidateStandaloneImportedMethod(int32 artifactOrdinal,
+    int32 artifactStart, int32 artifactLength, int32 moduleRow,
+    int32 methodDefRow,
+    uint32 visibility, uint32 ownerType, int32 callableSlot,
+    ref<init int32> methodSigRowResult,
+    ref<init int32> paramFirstResult,
+    ref<init int32> paramCountResult,
+    ref<init int32> contractFirstResult,
+    ref<init int32> contractCountResult)
+    ensure return == 0 ? (*methodSigRowResult is init
+        && *paramFirstResult is init && *paramCountResult is init
+        && *contractFirstResult is init && *contractCountResult is init)
+        : true
+{
+    int32 methodEntry = FindStandaloneArtifactSection(0x0016);
+    int32 methodCount = GetStandaloneArtifactSectionCount(0x0016);
+    int32 signatureEntry = FindStandaloneArtifactSection(0x0017);
+    int32 signatureCount = GetStandaloneArtifactSectionCount(0x0017);
+    int32 contractCount = GetStandaloneArtifactSectionCount(0x001B);
+    int32 paramCount = GetStandaloneArtifactSectionCount(0x0018);
+    if (methodEntry == 0 || signatureEntry == 0
+        || methodDefRow <= 0 || methodDefRow > methodCount)
+    {
+        return 3;
+    }
+
+    int32 methodSectionStart
+        = Host.StandaloneSectionStarts[methodEntry];
+    int32 methodSectionLength
+        = Host.StandaloneSectionLengths[methodEntry];
+    int32 signatureSectionStart
+        = Host.StandaloneSectionStarts[signatureEntry];
+    int32 signatureSectionLength
+        = Host.StandaloneSectionLengths[signatureEntry];
+    if (!TryValidateStandaloneVariableTableIndex(artifactStart,
+            artifactLength, methodSectionStart, methodSectionLength,
+            methodCount, 28, methodDefRow))
+    {
+        return 3;
+    }
+
+    int32 methodOffset
+        = methodSectionStart + ((methodDefRow - 1) * 28);
+    init uint32 methodNameStringRow;
+    init uint32 methodSigRow;
+    init uint32 methodFlags;
+    init uint32 contractFirst;
+    init uint32 methodContractCount;
+    init uint32 bodyRow;
+    if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+            artifactLength, methodOffset + 4,
+            ref init methodNameStringRow)
+        || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+            artifactLength, methodOffset + 8,
+            ref init methodSigRow)
+        || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+            artifactLength, methodOffset + 12, ref init methodFlags)
+        || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+            artifactLength, methodOffset + 16,
+            ref init contractFirst)
+        || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+            artifactLength, methodOffset + 20,
+            ref init methodContractCount)
+        || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+            artifactLength, methodOffset + 24, ref init bodyRow)
+        || methodNameStringRow == 0
+        || !TryValidateStandaloneStringName(artifactOrdinal,
+            artifactStart, artifactLength,
+            Host.StandaloneSectionStarts[
+                FindStandaloneArtifactSection(0x0002)],
+            Host.StandaloneSectionLengths[
+                FindStandaloneArtifactSection(0x0002)],
+            GetStandaloneArtifactSectionCount(0x0002),
+            int32(methodNameStringRow))
+        || methodSigRow == 0
+        || methodSigRow > uint32(signatureCount)
+        || bodyRow != 0
+        || !IsStandaloneMetadataRange(contractFirst,
+            methodContractCount, contractCount))
+    {
+        return 3;
+    }
+    if (methodFlags > 3 || (methodFlags & 3) == 3)
+    {
+        return 3;
+    }
+    if (visibility != 2 || ownerType != 0 || methodFlags != 2)
+    {
+        return 2;
+    }
+
+    if (!TryValidateStandaloneVariableTableIndex(artifactStart,
+            artifactLength, signatureSectionStart,
+            signatureSectionLength, signatureCount, 24,
+            int32(methodSigRow)))
+    {
+        return 3;
+    }
+    int32 signatureOffset = signatureSectionStart
+        + ((int32(methodSigRow) - 1) * 24);
+    init uint32 resultTypeSpecRef;
+    init uint32 receiverTypeSpecRef;
+    init uint32 paramFirst;
+    init uint32 signatureParamCount;
+    init uint32 genericFirst;
+    init uint32 genericCount;
+    if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+            artifactLength, signatureOffset,
+            ref init resultTypeSpecRef)
+        || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+            artifactLength, signatureOffset + 4,
+            ref init receiverTypeSpecRef)
+        || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+            artifactLength, signatureOffset + 8, ref init paramFirst)
+        || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+            artifactLength, signatureOffset + 12,
+            ref init signatureParamCount)
+        || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+            artifactLength, signatureOffset + 16,
+            ref init genericFirst)
+        || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+            artifactLength, signatureOffset + 20,
+            ref init genericCount)
+        || resultTypeSpecRef == 0
+        || !IsStandaloneMetadataRange(paramFirst,
+            signatureParamCount, paramCount)
+        || !IsStandaloneMetadataRange(genericFirst, genericCount,
+            GetStandaloneArtifactSectionCount(0x0019)))
+    {
+        return 3;
+    }
+    if (receiverTypeSpecRef != 0)
+    {
+        return 3;
+    }
+    if (genericCount != 0)
+    {
+        return 2;
+    }
+
+    int32 callableTypeStatus
+        = ValidateStandaloneMethodCallableTypes(artifactOrdinal,
+            callableSlot, artifactStart, artifactLength,
+            int32(methodSigRow), resultTypeSpecRef,
+            int32(paramFirst), int32(signatureParamCount));
+    if (callableTypeStatus != 0)
+    {
+        return callableTypeStatus;
+    }
+
+    int32 contractStatus = ValidateStandaloneMethodContracts(
+        artifactOrdinal, moduleRow, callableSlot,
+        artifactStart, artifactLength, methodDefRow,
+        paramFirst, signatureParamCount,
+        contractFirst, methodContractCount);
+    if (contractStatus != 0)
+    {
+        return contractStatus;
+    }
+
+    *methodSigRowResult = int32(methodSigRow);
+    *paramFirstResult = int32(paramFirst);
+    *paramCountResult = int32(signatureParamCount);
+    *contractFirstResult = int32(contractFirst);
+    *contractCountResult = int32(methodContractCount);
+    return 0;
+}
+
+bool TryFindStandaloneModuleDirectoryRowForString(
+    int32 artifactOrdinal, int32 stringStart, int32 stringLength,
+    int32 stringCount, int32 stringRow,
+    ref<init int32> directoryRowResult)
+    ensure return ? *directoryRowResult is init : true
+{
+    if (Host.StandaloneModuleCount.Length != 1
+        || Host.StandaloneModuleCount[0] <= 0
+        || stringRow <= 0 || stringRow > stringCount)
+    {
+        return false;
+    }
+
+    mut int32 low = 1;
+    mut int32 high = Host.StandaloneModuleCount[0];
+    while (low <= high)
+    {
+        int32 middle = low + (high - low) / 2;
+        int32 directoryRow = Host.StandaloneModuleOrder[middle];
+        init int32 comparison;
+        if (!TryCompareStandaloneModuleDirectoryRowToString(
+                directoryRow, artifactOrdinal, stringStart,
+                stringLength, stringCount, stringRow,
+                ref init comparison))
+        {
+            return false;
+        }
+        if (comparison == 0)
+        {
+            *directoryRowResult = directoryRow;
+            return true;
+        }
+        if (comparison < 0)
+        {
+            low = middle + 1;
+        }
+        else
+        {
+            high = middle - 1;
+        }
+    }
+    return false;
+}
+
+bool TryCompareStandaloneModuleDirectoryRowToString(
+    int32 directoryRow, int32 artifactOrdinal, int32 stringStart,
+    int32 stringLength, int32 stringCount, int32 stringRow,
+    ref<init int32> comparison)
+    ensure return ? *comparison is init : true
+{
+    if (directoryRow <= 0
+        || directoryRow > Host.StandaloneModuleCount[0])
+    {
+        return false;
+    }
+
+    int32 directoryOffset = directoryRow * 8;
+    int32 directoryArtifact
+        = Host.StandaloneModuleDirectory[directoryOffset];
+    if (directoryArtifact < 0)
+    {
+        if (!TryCompareStandaloneStringRowToText(
+                artifactOrdinal, stringStart, stringLength, stringCount,
+                stringRow,
+                Host.StandaloneModuleDirectory[directoryOffset + 6],
+                Host.StandaloneModuleDirectory[directoryOffset + 7],
+                ref init *comparison))
+        {
+            return false;
+        }
+        *comparison = -*comparison;
+        return true;
+    }
+
+    return TryCompareStandaloneStringRows(
+        directoryArtifact,
+        Host.StandaloneModuleDirectory[directoryOffset + 3],
+        Host.StandaloneModuleDirectory[directoryOffset + 4],
+        Host.StandaloneModuleDirectory[directoryOffset + 5],
+        Host.StandaloneModuleDirectory[directoryOffset + 2],
+        artifactOrdinal, stringStart, stringLength, stringCount,
+        stringRow, ref init *comparison);
+}
+
+bool SortStandaloneResolvedImportOrder(int32 count)
+{
+    mut int32 root = count / 2;
+    while (root > 0)
+    {
+        if (!SiftStandaloneResolvedImportOrder(root, count))
+        {
+            return false;
+        }
+        root = root - 1;
+    }
+
+    mut int32 end = count;
+    while (end > 1)
+    {
+        mut int32 value = Host.StandaloneResolvedImportOrder[1];
+        Host.StandaloneResolvedImportOrder[1]
+            = Host.StandaloneResolvedImportOrder[end];
+        Host.StandaloneResolvedImportOrder[end] = value;
+        end = end - 1;
+        if (!SiftStandaloneResolvedImportOrder(1, end))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool SiftStandaloneResolvedImportOrder(int32 root, int32 end)
+{
+    mut int32 current = root;
+    while (current <= end / 2)
+    {
+        mut int32 child = current * 2;
+        init int32 comparison;
+        if (child < end
+            && !CompareStandaloneResolvedImports(
+                Host.StandaloneResolvedImportOrder[child],
+                Host.StandaloneResolvedImportOrder[child + 1],
+                ref init comparison))
+        {
+            return false;
+        }
+        if (child < end && comparison < 0)
+        {
+            child = child + 1;
+        }
+        if (!CompareStandaloneResolvedImports(
+                Host.StandaloneResolvedImportOrder[current],
+                Host.StandaloneResolvedImportOrder[child],
+                ref init comparison))
+        {
+            return false;
+        }
+        if (comparison >= 0)
+        {
+            return true;
+        }
+
+        mut int32 value
+            = Host.StandaloneResolvedImportOrder[current];
+        Host.StandaloneResolvedImportOrder[current]
+            = Host.StandaloneResolvedImportOrder[child];
+        Host.StandaloneResolvedImportOrder[child] = value;
+        current = child;
+    }
+    return true;
+}
+
+bool CompareStandaloneResolvedImports(int32 firstRow,
+    int32 secondRow, ref<init int32> comparison)
+    ensure return ? *comparison is init : true
+{
+    int32 firstOffset = (firstRow - 1) * 20;
+    int32 secondOffset = (secondRow - 1) * 20;
+    if (!CompareStandaloneModuleDirectoryRows(
+            Host.StandaloneResolvedImports[firstOffset + 4],
+            Host.StandaloneResolvedImports[secondOffset + 4],
+            true, ref init *comparison))
+    {
+        return false;
+    }
+    if (*comparison != 0)
+    {
+        return true;
+    }
+    if (!CompareStandaloneResolvedImportKeys(
+            firstOffset, secondOffset, ref init *comparison))
+    {
+        return false;
+    }
+    if (*comparison != 0)
+    {
+        return true;
+    }
+    if (Host.StandaloneResolvedImports[firstOffset]
+        < Host.StandaloneResolvedImports[secondOffset])
+    {
+        *comparison = -1;
+    }
+    else if (Host.StandaloneResolvedImports[firstOffset]
+        > Host.StandaloneResolvedImports[secondOffset])
+    {
+        *comparison = 1;
+    }
+    else if (Host.StandaloneResolvedImports[firstOffset + 3]
+        < Host.StandaloneResolvedImports[secondOffset + 3])
+    {
+        *comparison = -1;
+    }
+    else if (Host.StandaloneResolvedImports[firstOffset + 3]
+        > Host.StandaloneResolvedImports[secondOffset + 3])
+    {
+        *comparison = 1;
+    }
+    else if (Host.StandaloneResolvedImports[firstOffset + 5]
+        < Host.StandaloneResolvedImports[secondOffset + 5])
+    {
+        *comparison = -1;
+    }
+    else if (Host.StandaloneResolvedImports[firstOffset + 5]
+        > Host.StandaloneResolvedImports[secondOffset + 5])
+    {
+        *comparison = 1;
+    }
+    else
+    {
+        *comparison = 0;
+    }
+    return true;
+}
+
+int32 CompareStandaloneResolvedImportGroupKeys(int32 firstOffset,
+    int32 secondOffset, ref<init int32> comparison)
+    ensure return ? *comparison is init : true
+{
+    if (!CompareStandaloneModuleDirectoryRows(
+            Host.StandaloneResolvedImports[firstOffset + 4],
+            Host.StandaloneResolvedImports[secondOffset + 4],
+            true, ref init *comparison))
+    {
+        return 3;
+    }
+    if (*comparison != 0)
+    {
+        return 0;
+    }
+    return CompareStandaloneResolvedImportKeys(
+        firstOffset, secondOffset, ref init *comparison) ? 0 : 3;
+}
+
+bool CompareStandaloneResolvedImportKeys(int32 firstOffset,
+    int32 secondOffset, ref<init int32> comparison)
+    ensure return ? *comparison is init : true
+{
+    return TryCompareStandaloneStringRows(
+        Host.StandaloneResolvedImports[firstOffset],
+        Host.StandaloneResolvedImports[firstOffset + 14],
+        Host.StandaloneResolvedImports[firstOffset + 15],
+        Host.StandaloneResolvedImports[firstOffset + 16],
+        Host.StandaloneResolvedImports[firstOffset + 12],
+        Host.StandaloneResolvedImports[secondOffset],
+        Host.StandaloneResolvedImports[secondOffset + 14],
+        Host.StandaloneResolvedImports[secondOffset + 15],
+        Host.StandaloneResolvedImports[secondOffset + 16],
+        Host.StandaloneResolvedImports[secondOffset + 12],
+        ref init *comparison);
+}
