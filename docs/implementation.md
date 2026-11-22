@@ -1357,11 +1357,12 @@ parameter read; direct non-void and void-call Bodies can also nest up to 13
 scalar-returning, no-output FNI CallSites as explicit inputs (12 when staged
 locals reserve register 1), plus scalar literal inputs through typed
 ConstantMap/TypedFrozenValues loads, including mixed nested/literal inputs.
-The fallback conditional-output form separately supports up to 13 such nested
-CallSites or scalar literal inputs. For conditional-output Bodies, nested
-calls execute in source argument order before output reservation, and
-source-free re-emission preserves that order across formal remapping. The two
-conditional-output input forms cannot be mixed. Imported-provider source-free
+The fallback conditional-output form separately supports up to 13 total
+nested-call results and distinct scalar-literal register inputs, including
+mixed nested/literal inputs.
+For conditional-output Bodies, nested calls execute in source argument order
+before output reservation, and source-free re-emission preserves that order
+across formal remapping. Imported-provider source-free
 load/re-emission and Windows x64 success/partial-failure regressions remain
 unverified under the hold. The receiver is a direct parameter. One non-void
 call may reserve distinct local `init` Homes for each NativeOutput formal;

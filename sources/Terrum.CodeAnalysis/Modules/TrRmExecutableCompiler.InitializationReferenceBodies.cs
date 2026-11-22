@@ -1867,6 +1867,8 @@ public static partial class TrRmExecutableCompiler
         var outputContract = target.NativeOutputContracts[0];
         var seenParameters = new bool[target.ParameterCount];
         var constantInputCount = 0;
+        var constantInputs
+            = new HashSet<(PrimitiveType Type, ScalarBits Bits)>();
         var nestedInputCalls = new List<BoundCall>();
         for (var sourceArgument = 0;
             sourceArgument < boundCall.Arguments.Length;
@@ -1903,16 +1905,19 @@ public static partial class TrRmExecutableCompiler
                 }
             }
             else if (argument is BoundConstant constant
-                && nestedInputCalls.Count == 0
                 && DirectNativeImportContract.IsScalar(constant.Type)
                 && constant.Type == target.Variables[formal].Type
                 && constant.RepresentationType == constant.Type
                 && constant.Bits.IsCanonicalFor(constant.Type))
             {
                 constantInputCount++;
+                constantInputs.Add((constant.Type, constant.Bits));
+                if (constantInputs.Count + nestedInputCalls.Count > 13)
+                {
+                    return false;
+                }
             }
-            else if (constantInputCount == 0
-                && nestedInputCalls.Count < 13
+            else if (constantInputs.Count + nestedInputCalls.Count < 13
                 && GetNestedForeignInterfaceCall(argument)
                     is BoundCall nestedCall
                 && !nestedInputCalls.Any(candidate =>
@@ -3070,31 +3075,24 @@ public static partial class TrRmExecutableCompiler
             checked((ushort)(successOnTrue ? 2 : 1))));
         var entryCode = new List<byte>(26
             + (nestedCallSiteRecordIndexes.Count * 2)
-            + (nestedCallSiteRecordIndexes.Count == 0
-                ? constantLoads.Count * 2 : 0));
+            + (constantLoads.Count * 2));
         // Finish input preparation before reserving the output Home.
-        if (nestedCallSiteRecordIndexes.Count != 0)
+        foreach (var nestedRecord in nestedCallSiteRecordIndexes)
         {
-            foreach (var nestedRecord in nestedCallSiteRecordIndexes)
-            {
-                entryCode.Add(0x90);
-                entryCode.Add(checked((byte)nestedRecord));
-            }
+            entryCode.Add(0x90);
+            entryCode.Add(checked((byte)nestedRecord));
         }
-        else
+        foreach (var (constantMapIndex, register) in constantLoads)
         {
-            foreach (var (constantMapIndex, register) in constantLoads)
+            if (constantMapIndex >= 16)
             {
-                if (constantMapIndex >= 16)
-                {
-                    throw Unsupported(
-                        "The Standard F+I conditional-output Body requires short ConstantMap loads.");
-                }
-
-                entryCode.Add(0x16);
-                entryCode.Add(checked((byte)(
-                    (constantMapIndex << 4) | register)));
+                throw Unsupported(
+                    "The Standard F+I conditional-output Body requires short ConstantMap loads.");
             }
+
+            entryCode.Add(0x16);
+            entryCode.Add(checked((byte)(
+                (constantMapIndex << 4) | register)));
         }
         entryCode.Add(0xDF);
         entryCode.Add(0);
@@ -3205,13 +3203,14 @@ public static partial class TrRmExecutableCompiler
                 return existingRegister;
             }
 
-            if (constantLoads.Count == 13)
+            if (constantLoads.Count + nestedCalls.Count == 13)
             {
                 throw Unsupported(
-                    "The Standard F+I conditional-output Body has too many distinct ConstantMap inputs.");
+                    "The Standard F+I conditional-output Body has too many distinct register inputs.");
             }
 
-            var register = checked((byte)(constantLoads.Count + 1));
+            var register = checked((byte)(
+                nestedCalls.Count + constantLoads.Count + 1));
             var mapIndex = GetConstantMapIndex(constant);
             constantLoads.Add((mapIndex, register));
             constantRegisterByValue.Add(key, register);
@@ -7335,7 +7334,10 @@ public static partial class TrRmExecutableCompiler
             offset += 2;
         }
 
-        return offset > 0 && offset < code.Length && code[offset] == 0xDF
+        return offset > 0 && offset < code.Length
+            && (code[offset] == 0xDF
+                || GetStandardForeignInterfaceConditionalOutputConstantPrefixLength(
+                    code[offset..]) > 0)
             ? offset : -1;
     }
 
@@ -7393,12 +7395,14 @@ public static partial class TrRmExecutableCompiler
         var nestedCallCount = nestedCallPrefixLength > 0
             ? nestedCallPrefixLength / 2 : 0;
         var hasNestedCalls = nestedCallCount != 0;
+        var constantPrefixOffset = hasNestedCalls
+            ? nestedCallPrefixLength : 0;
         var constantPrefixLength
             = GetStandardForeignInterfaceConditionalOutputConstantPrefixLength(
-                rawEntryCode);
+                rawEntryCode[constantPrefixOffset..]);
         var hasConstantInputs = constantPrefixLength > 0;
-        var entryPrefixLength = hasNestedCalls ? nestedCallPrefixLength
-            : hasConstantInputs ? constantPrefixLength : 0;
+        var entryPrefixLength = constantPrefixOffset
+            + (hasConstantInputs ? constantPrefixLength : 0);
         var entryCode = entryPrefixLength == 0
             ? rawEntryCode : rawEntryCode[entryPrefixLength..];
         if (!body.Schema.UsesForeignNativeInterface()
@@ -7658,8 +7662,10 @@ public static partial class TrRmExecutableCompiler
         var registerInputs = new Dictionary<ushort, BoundExpression>();
         if (hasConstantInputs)
         {
-            var constantOffset = 0;
-            while (constantOffset < constantPrefixLength)
+            var constantOffset = constantPrefixOffset;
+            var constantPrefixEnd
+                = constantPrefixOffset + constantPrefixLength;
+            while (constantOffset < constantPrefixEnd)
             {
                 var opcode = rawEntryCode[constantOffset];
                 byte destination;
@@ -7695,7 +7701,13 @@ public static partial class TrRmExecutableCompiler
                         "The Standard F+I conditional-output ConstantMap load is outside the scalar register subset.");
                 }
 
-                registerInputs[destination] = scalarConstants[constantIndex];
+                if (!registerInputs.TryAdd(destination,
+                        scalarConstants[constantIndex]))
+                {
+                    throw Invalid(
+                        "The Standard F+I conditional-output Body reuses a ConstantMap register.");
+                }
+
                 constantOffset += instructionLength;
             }
         }
@@ -7861,8 +7873,14 @@ public static partial class TrRmExecutableCompiler
                     .. Enumerable.Range(0, nestedMember.Parameters.Length),
                 ],
             };
-            registerInputs.Add(checked((ushort)(nestedIndex + 1)),
-                new BoundUnsafeExpression(nestedCall, default));
+            var nestedResultRegister
+                = checked((ushort)(nestedIndex + 1));
+            if (!registerInputs.TryAdd(nestedResultRegister,
+                    new BoundUnsafeExpression(nestedCall, default)))
+            {
+                throw Invalid(
+                    "The Standard F+I conditional-output Body reuses a nested result register.");
+            }
         }
 
         var argumentsByFormal = new BoundExpression?[
