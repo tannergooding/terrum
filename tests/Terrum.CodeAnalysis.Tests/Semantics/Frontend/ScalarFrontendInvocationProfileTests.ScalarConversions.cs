@@ -17,6 +17,98 @@ internal sealed partial class ScalarFrontendInvocationProfileTests
 {
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task ScalarFrontendSourceProducerAcceptsEveryAllowedConversionPairAsync(
+        BoundRuntimePolicy policy)
+    {
+        var compilerSource = SourceText.From("int32 Main() { return 42; }");
+        var trees = await ReadComponentsAsync(s_frontendComponents, """
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                if (!TryPublishScalarFrontend()) { return -1; }
+                return 42;
+            }
+            """).ConfigureAwait(true);
+        var compilation = CreateWithLayoutCore(trees,
+            ScalarFrontendHost.CreateBuffers(compilerSource), policy);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var compiler = compilation.Program
+            ?? throw new AssertionException(
+                "Expected a bound standalone frontend.");
+        var integerTypes = new[] { 1, 2, 3, 4, 6 };
+        var floatingTypes = new[] { 7, 8 };
+        var acceptedPairs = integerTypes.SelectMany(sourceType =>
+                integerTypes.Concat(floatingTypes).Select(targetType =>
+                    (SourceType: sourceType, TargetType: targetType)))
+            .Concat(floatingTypes.SelectMany(sourceType =>
+                integerTypes.Take(4).Concat(floatingTypes).Select(targetType =>
+                    (SourceType: sourceType, TargetType: targetType))))
+            .ToArray();
+
+        for (var batchStart = 0; batchStart < acceptedPairs.Length;
+            batchStart += 31)
+        {
+            var batch = acceptedPairs.Skip(batchStart).Take(31).ToArray();
+            var functions = batch.Select((pair, ordinal) =>
+                $"{TypeName(pair.TargetType)} Convert{batchStart + ordinal}"
+                + $"({TypeName(pair.SourceType)} value) {{ "
+                + $"return {TypeName(pair.TargetType)}(value); }}");
+            var source = SourceText.From(
+                "int32 Main() { return 42; } "
+                + string.Join(' ', functions));
+            var invocation = NativeJit.ExecuteWithScalarFrontendProfile(
+                compiler, source, (NativeRuntimePolicy)policy);
+            Assert.That(invocation.Frontend.Projection.IsValid, Is.True,
+                source.ToString());
+            var subject = invocation.Frontend.Program
+                ?? throw new AssertionException(
+                    "The conversion matrix produced no bound subject.");
+            for (var ordinal = 0; ordinal < batch.Length; ordinal++)
+            {
+                var pair = batch[ordinal];
+                var function = subject.Functions.Single(candidate =>
+                    candidate.Name == $"Convert{batchStart + ordinal}");
+                Assert.That(function.ReturnType,
+                    Is.EqualTo(PrimitiveTypeFor(pair.TargetType)));
+                var returned = function.Body.Statements.Single()
+                    as BoundReturn
+                    ?? throw new AssertionException(
+                        $"Convert{batchStart + ordinal} has no return.");
+                var cast = returned.Value as BoundCast
+                    ?? throw new AssertionException(
+                        $"Convert{batchStart + ordinal} has no cast.");
+                Assert.That(cast.Type,
+                    Is.EqualTo(PrimitiveTypeFor(pair.TargetType)));
+                Assert.That(cast.Operand.Type,
+                    Is.EqualTo(PrimitiveTypeFor(pair.SourceType)));
+            }
+        }
+
+        static string TypeName(int type) => type switch {
+            1 => "int32",
+            2 => "uint32",
+            3 => "int64",
+            4 => "uint64",
+            6 => "char16",
+            7 => "float32",
+            8 => "float64",
+            _ => throw new ArgumentOutOfRangeException(nameof(type)),
+        };
+
+        static PrimitiveType PrimitiveTypeFor(int type) => type switch {
+            1 => PrimitiveType.Int32,
+            2 => PrimitiveType.UInt32,
+            3 => PrimitiveType.Int64,
+            4 => PrimitiveType.UInt64,
+            6 => PrimitiveType.Char16,
+            7 => PrimitiveType.Float32,
+            8 => PrimitiveType.Float64,
+            _ => throw new ArgumentOutOfRangeException(nameof(type)),
+        };
+    }
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task ScalarFrontendProgramReaderMatchesConversionPairMatrixAsync(
         BoundRuntimePolicy policy)
     {
