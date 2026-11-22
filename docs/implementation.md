@@ -1337,8 +1337,8 @@ A2 key from a non-first co-located Module. The nested chain is also rebound
 with provider order reversed and a compatible Middle TypeDef/FieldDef/Layout
 row shift; the FNI artifact places Prefix in Module 1 and selects Middle from
 Module 2. These paths are source-free re-emitted/reloaded and remain
-unverified. Broader multi-populated co-located FNI Module composition and
-raw-row/dependency-composition permutations remain open.
+unverified. Multiple FNI-bearing Modules co-located in one artifact and
+broader raw-row/dependency-composition permutations remain open.
 Typed-pointer/function-pointer aggregate fields and full
 Import/Export/PS1/Contract/graph row remapping remain open. FNI call
 lowering now stages the receiver before source-order arguments, maps explicit

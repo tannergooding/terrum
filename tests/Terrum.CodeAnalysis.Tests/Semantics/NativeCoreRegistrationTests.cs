@@ -3859,29 +3859,32 @@ internal sealed class NativeCoreRegistrationTests
             var program = compilation.Program
                 ?? throw new AssertionException(
                     "Expected a bound middle FNI provider.");
-            var member = program.Interfaces.Single(
-                static definition => definition.QualifiedName == "IMiddle")
-                .Members.Single();
-            return TrRmExecutableCompiler.EmitStandard(program,
-                "middle.module", schemaIdentity, 1, [
-                    new TrRmSourceTypeExport("", "Middle",
-                        "middle/Middle") {
-                        FieldExports = [
-                            new TrRmSourceFieldExport("Child",
-                                "middle/Middle.Child"),
-                        ],
-                    },
-                    new TrRmSourceTypeExport("", "IMiddle",
-                        "middle/IMiddle") {
-                        GenericArity = 0,
-                        InterfaceMethodExports = [
+            var typeExports = new List<TrRmSourceTypeExport> {
+                new("", "Middle", "middle/Middle") {
+                    FieldExports = [
+                        new TrRmSourceFieldExport("Child",
+                            "middle/Middle.Child"),
+                    ],
+                },
+            };
+            foreach (var definition in program.Interfaces)
+            {
+                var exportKey = $"middle/{definition.QualifiedName}";
+                typeExports.Add(new TrRmSourceTypeExport("",
+                    definition.QualifiedName, exportKey) {
+                    GenericArity = 0,
+                    InterfaceMethodExports = [
+                        .. definition.Members.Select(member =>
                             new TrRmSourceInterfaceMethodExport(
                                 member.SourceInputOrdinal,
                                 member.SourceDeclarationSpan,
-                                "middle/IMiddle.Read"),
-                        ],
-                    },
-                ]);
+                                $"{exportKey}.{member.Name}")),
+                    ],
+                });
+            }
+
+            return TrRmExecutableCompiler.EmitStandard(program,
+                "middle.module", schemaIdentity, 1, typeExports);
         }
 
         byte[] AddLeadingPrefixModule(byte[] source)
@@ -3969,6 +3972,11 @@ internal sealed class NativeCoreRegistrationTests
                 public Leaf Child;
             }
             [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+            [ForeignNativeInterface(VTableByteOffset: uint32(0))]
+            public interface IExtra {
+                public unsafe int32 Ping(int32 value);
+            }
+            [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
             [ForeignNativeInterface(VTableByteOffset: uint32(8))]
             public interface IMiddle {
                 public unsafe int32 Read(ptr<Middle> middle);
@@ -3990,6 +3998,15 @@ internal sealed class NativeCoreRegistrationTests
             "middle/Middle", out var relocatedMiddleDefinitionId), Is.True);
         Assert.That(relocatedMiddleDefinitionId,
             Is.Not.EqualTo(middleDefinitionId));
+        Assert.That(middleTables.Exports.TryGetDefinitionForKey(1,
+            "middle/IMiddle.Read", out var middleMethodDefinitionId), Is.True);
+        Assert.That(relocatedMiddleTables.Exports.TryGetDefinitionForKey(1,
+            "middle/IMiddle.Read",
+            out var relocatedMiddleMethodDefinitionId), Is.True);
+        Assert.That(relocatedMiddleMethodDefinitionId,
+            Is.Not.EqualTo(middleMethodDefinitionId));
+        Assert.That(relocatedMiddleTables.Exports.TryGetDefinitionForKey(1,
+            "middle/IExtra.Ping", out _), Is.True);
         var coLocatedMiddleTables = TrRmStructuralMetadataValidator
             .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
                 coLocatedRelocatedMiddleArtifact, schema));
