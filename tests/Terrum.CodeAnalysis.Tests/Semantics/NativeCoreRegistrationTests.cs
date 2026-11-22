@@ -7333,6 +7333,8 @@ internal sealed class NativeCoreRegistrationTests
                 public Coordinates Position;
                 public ptr<int32> Link;
                 public ptr<Coordinates> Related;
+                public [NativeCallConv(NativeCallingConvention.Cdecl)]
+                    fnptr<ptr<Coordinates>, int32> Callback;
             }
             [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
             [ForeignNativeInterface(VTableByteOffset: uint32(0))]
@@ -7378,6 +7380,8 @@ internal sealed class NativeCoreRegistrationTests
                                 "provider/Point.Link"),
                             new TrRmSourceFieldExport("Related",
                                 "provider/Point.Related"),
+                            new TrRmSourceFieldExport("Callback",
+                                "provider/Point.Callback"),
                         ],
                     },
                     new TrRmSourceTypeExport("", "IProbe",
@@ -7401,6 +7405,8 @@ internal sealed class NativeCoreRegistrationTests
                 public Coordinates Position;
                 public ptr<int32> Link;
                 public ptr<Coordinates> Related;
+                public [NativeCallConv(NativeCallingConvention.Cdecl)]
+                    fnptr<ptr<Coordinates>, int32> Callback;
             }
             [Blittable] [Layout(LayoutKind.Sequential)]
             public struct Coordinates {
@@ -7494,6 +7500,13 @@ internal sealed class NativeCoreRegistrationTests
                 && consumerTables.Imports.GetBindingForImportRow(importRow)
                     .ExportKey == "provider/Point.Related"),
             Is.True);
+        Assert.That(Enumerable.Range(1, consumerTables.Imports.Count)
+            .Any(importRow =>
+                (consumerTables.Imports.GetExpectedDefinitionForImportRow(
+                    importRow) >> 24) == 0x14
+                && consumerTables.Imports.GetBindingForImportRow(importRow)
+                    .ExportKey == "provider/Point.Callback"),
+            Is.True);
 
         var reboundReference = TrRmExecutableCompiler
             .CreateStandardReference(
@@ -7521,6 +7534,31 @@ internal sealed class NativeCoreRegistrationTests
             (int)reboundRelatedPointee - 100];
         Assert.That(reboundCoordinates.Name, Is.EqualTo("Coordinates"));
         Assert.That(reboundCoordinates.StandardTypeOrigin?.Provider
+            .ModuleIdentity, Is.EqualTo("provider.module"));
+        var reboundCallbackType = reboundPoint.Fields.Single(
+            static field => field.Name == "Callback").Type;
+        Assert.That(NativeFunctionPointerTypes.IsType(reboundCallbackType),
+            Is.True);
+        var reboundCallbackSignature
+            = reboundReference.NativeFunctionPointerSignatures[
+                NativeFunctionPointerTypes.Index(reboundCallbackType)];
+        Assert.That(reboundCallbackSignature.CallingConvention,
+            Is.EqualTo(NativeCallingConvention.Cdecl));
+        Assert.That(reboundCallbackSignature.ReturnType,
+            Is.EqualTo(PrimitiveType.Int32));
+        var reboundCallbackParameter
+            = reboundCallbackSignature.ParameterTypes.Single();
+        Assert.That(NativePointerTypes.IsType(reboundCallbackParameter),
+            Is.True);
+        var reboundCallbackPointee = reboundReference.NativePointerTypes[
+            NativePointerTypes.Index(reboundCallbackParameter)].PointeeType;
+        Assert.That((int)reboundCallbackPointee,
+            Is.GreaterThanOrEqualTo(100));
+        var reboundCallbackCoordinates = reboundReference.Structures[
+            (int)reboundCallbackPointee - 100];
+        Assert.That(reboundCallbackCoordinates.Name,
+            Is.EqualTo("Coordinates"));
+        Assert.That(reboundCallbackCoordinates.StandardTypeOrigin?.Provider
             .ModuleIdentity, Is.EqualTo("provider.module"));
         Assert.That(reboundReference.Structures.Count(
             static structure => structure.StandardLayoutOnly),
@@ -7585,6 +7623,13 @@ internal sealed class NativeCoreRegistrationTests
                     .ExportKey == "provider/Point.Related"),
             Is.True);
         Assert.That(Enumerable.Range(1, reemittedTables.Imports.Count)
+            .Any(importRow =>
+                (reemittedTables.Imports.GetExpectedDefinitionForImportRow(
+                    importRow) >> 24) == 0x14
+                && reemittedTables.Imports.GetBindingForImportRow(importRow)
+                    .ExportKey == "provider/Point.Callback"),
+            Is.True);
+        Assert.That(Enumerable.Range(1, reemittedTables.Imports.Count)
             .Where(importRow => (reemittedTables.Imports
                 .GetExpectedDefinitionForImportRow(importRow) >> 24)
                     == 0x13
@@ -7621,6 +7666,31 @@ internal sealed class NativeCoreRegistrationTests
         Assert.That(reloadedCoordinates.Name, Is.EqualTo("Coordinates"));
         Assert.That(reloadedCoordinates.StandardTypeOrigin?.Provider
             .ModuleIdentity, Is.EqualTo("provider.module"));
+        var reloadedCallbackType = reloadedPoint.Fields.Single(
+            static field => field.Name == "Callback").Type;
+        Assert.That(NativeFunctionPointerTypes.IsType(reloadedCallbackType),
+            Is.True);
+        var reloadedCallbackSignature
+            = reloadedReference.NativeFunctionPointerSignatures[
+                NativeFunctionPointerTypes.Index(reloadedCallbackType)];
+        Assert.That(reloadedCallbackSignature.CallingConvention,
+            Is.EqualTo(NativeCallingConvention.Cdecl));
+        Assert.That(reloadedCallbackSignature.ReturnType,
+            Is.EqualTo(PrimitiveType.Int32));
+        var reloadedCallbackParameter
+            = reloadedCallbackSignature.ParameterTypes.Single();
+        Assert.That(NativePointerTypes.IsType(reloadedCallbackParameter),
+            Is.True);
+        var reloadedCallbackPointee = reloadedReference.NativePointerTypes[
+            NativePointerTypes.Index(reloadedCallbackParameter)].PointeeType;
+        Assert.That((int)reloadedCallbackPointee,
+            Is.GreaterThanOrEqualTo(100));
+        var reloadedCallbackCoordinates = reloadedReference.Structures[
+            (int)reloadedCallbackPointee - 100];
+        Assert.That(reloadedCallbackCoordinates.Name,
+            Is.EqualTo("Coordinates"));
+        Assert.That(reloadedCallbackCoordinates.StandardTypeOrigin?.Provider
+            .ModuleIdentity, Is.EqualTo("provider.module"));
         var reloadedConsumer = Compilation.CreateLibrary(
             SyntaxTree.Parse("""
                 int32 Invoke(ptr<void> receiver, ptr<Point> point) {
@@ -7651,6 +7721,19 @@ internal sealed class NativeCoreRegistrationTests
                     consumerArtifact), "consumer.module", [
                     new TrRmStandardArtifactInput(schemaIdentity,
                         incompatiblePointerArtifact),
+                ]));
+
+        var incompatibleCallbackArtifact = EmitProvider(
+            relocatedProviderSource.Replace(
+                "fnptr<ptr<Coordinates>, int32> Callback",
+                "fnptr<ptr<int32>, int32> Callback",
+                StringComparison.Ordinal));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    consumerArtifact), "consumer.module", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        incompatibleCallbackArtifact),
                 ]));
     }
 

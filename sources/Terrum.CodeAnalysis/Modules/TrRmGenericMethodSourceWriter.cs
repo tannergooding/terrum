@@ -5730,7 +5730,8 @@ public static partial class TrRmExecutableCompiler
             = foreignNativeInterface
                 ? GetForeignNativeFunctionPointerSignatureIndexes(
                     emissions.Select(static emission =>
-                        emission.Definition), program)
+                        emission.Definition), program,
+                    foreignNativeInterfaceStructureIndexes)
                 : ImmutableArray<int>.Empty;
         var foreignFunctionPointerAnchorMethodRows
             = new Dictionary<int, int>(
@@ -6749,7 +6750,8 @@ public static partial class TrRmExecutableCompiler
             = foreignNativeInterface
                 ? GetForeignNativeFunctionPointerSignatureIndexes(
                     emissions.Select(static emission =>
-                        emission.Definition), program)
+                        emission.Definition), program,
+                    foreignNativeInterfaceStructureIndexes)
                 : ImmutableArray<int>.Empty;
         var foreignFunctionPointerAnchorMethodRows
             = new Dictionary<int, int>(
@@ -8246,7 +8248,7 @@ public static partial class TrRmExecutableCompiler
     private static ImmutableArray<int>
         GetForeignNativeFunctionPointerSignatureIndexes(
         IEnumerable<BoundInterfaceDefinition> definitions,
-        BoundProgram program)
+        BoundProgram program, ImmutableArray<int> structureIndexes)
     {
         var signatures = program.NativeFunctionPointerSignatures;
         var pointerTypes = program.NativePointerTypes;
@@ -8319,6 +8321,27 @@ public static partial class TrRmExecutableCompiler
                 {
                     Visit(parameter.Type.PrimitiveType, 0);
                 }
+            }
+        }
+
+        foreach (var structureIndex in structureIndexes.IsDefault
+                     ? ImmutableArray<int>.Empty : structureIndexes)
+        {
+            if ((uint)structureIndex >= (uint)program.Structures.Length)
+            {
+                throw Unsupported(
+                    "A ForeignNativeInterface aggregate references an invalid structure.");
+            }
+
+            foreach (var field in program.Structures[structureIndex].Fields)
+            {
+                if (field is null)
+                {
+                    throw Unsupported(
+                        "A ForeignNativeInterface aggregate contains a missing field.");
+                }
+
+                Visit(field.Type, 0);
             }
         }
 

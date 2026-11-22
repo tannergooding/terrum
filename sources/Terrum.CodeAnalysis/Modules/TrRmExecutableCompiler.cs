@@ -11776,7 +11776,9 @@ public static partial class TrRmExecutableCompiler
         IReadOnlyDictionary<uint, PrimitiveType>?
             nominalClassTypesByTypeSpecReference = null,
         IReadOnlyDictionary<int, int>?
-            existingStructureTypeIndexesByTypeDef = null)
+            existingStructureTypeIndexesByTypeDef = null,
+        int[]? functionPointerSignatureIndexByTypeSpecRow = null,
+        Action<int[]>? beforeFieldLoad = null)
     {
         fixedArrayTypes ??= ImmutableArray<BoundNativeFixedArrayType>.Empty;
         if (!targetProfiles.TryGetProfile(1, 1, out var windowsX64ProfileRow))
@@ -11875,6 +11877,8 @@ public static partial class TrRmExecutableCompiler
             });
         }
 
+        beforeFieldLoad?.Invoke(structureTypeByTypeDef);
+
         foreach (var row in structureRows)
         {
             if (selectedTypeDefRows is not null
@@ -11920,7 +11924,9 @@ public static partial class TrRmExecutableCompiler
                         fieldTypeSpecRef, nativePointerTypes,
                         structureTypeByTypeDef, imports,
                         nominalClassTypesByTypeSpecReference:
-                            nominalClassTypesByTypeSpecReference);
+                            nominalClassTypesByTypeSpecReference,
+                        functionPointerSignatureIndexByAnchorTypeSpec:
+                            functionPointerSignatureIndexByTypeSpecRow);
                 }
                 var fieldFlags = fields.GetFlags(fieldRow);
                 structureFields.Add(new BoundStructField(fields.GetName(fieldRow),
@@ -11997,13 +12003,32 @@ public static partial class TrRmExecutableCompiler
         Dictionary<CheckedReferenceTypeDefinition, int>?
             checkedReferenceTypeIndexes = null,
         IReadOnlyDictionary<uint, PrimitiveType>?
-            nominalClassTypesByTypeSpecReference = null)
+            nominalClassTypesByTypeSpecReference = null,
+        int[]? functionPointerSignatureIndexByAnchorTypeSpec = null)
     {
         if (nominalClassTypesByTypeSpecReference is not null
             && nominalClassTypesByTypeSpecReference.TryGetValue(
                 typeSpecRef, out var nominalClassType))
         {
             return nominalClassType;
+        }
+
+        var typeSpecReference = types.GetTypeSpecRef(typeSpecRef);
+        if (typeSpecReference.IsRow && typeSpecReference.Form == 0x0D)
+        {
+            if (functionPointerSignatureIndexByAnchorTypeSpec is null
+                || (uint)typeSpecReference.Row
+                    >= (uint)functionPointerSignatureIndexByAnchorTypeSpec.Length
+                || functionPointerSignatureIndexByAnchorTypeSpec[
+                    typeSpecReference.Row] < 0)
+            {
+                throw Invalid(
+                    "A native Blittable field has an unmapped function-pointer anchor.");
+            }
+
+            return NativeFunctionPointerTypes.Type(
+                functionPointerSignatureIndexByAnchorTypeSpec[
+                    typeSpecReference.Row]);
         }
 
         var type = types.GetTypeSpecBytes(typeSpecRef);
@@ -12028,7 +12053,8 @@ public static partial class TrRmExecutableCompiler
                 nativePointerTypes, structureTypeByTypeDef, imports,
                 checkedReferenceTypeDefinitions,
                 checkedReferenceTypeIndexes,
-                nominalClassTypesByTypeSpecReference);
+                nominalClassTypesByTypeSpecReference,
+                functionPointerSignatureIndexByAnchorTypeSpec);
             return pointeeType == PrimitiveType.Void && type[1] == 0
                 ? PrimitiveType.NativeRawPointer
                 : GetNativePointerType(nativePointerTypes, pointeeType,
@@ -12042,7 +12068,8 @@ public static partial class TrRmExecutableCompiler
                 nativePointerTypes, structureTypeByTypeDef, imports,
                 checkedReferenceTypeDefinitions,
                 checkedReferenceTypeIndexes,
-                nominalClassTypesByTypeSpecReference);
+                nominalClassTypesByTypeSpecReference,
+                functionPointerSignatureIndexByAnchorTypeSpec);
             return pointeeType == PrimitiveType.Void && type[1] == 0
                 ? PrimitiveType.NativeRawPointer
                 : GetNativePointerType(nativePointerTypes, pointeeType, type[1] != 0);
@@ -12065,7 +12092,8 @@ public static partial class TrRmExecutableCompiler
                 nativePointerTypes, structureTypeByTypeDef, imports,
                 checkedReferenceTypeDefinitions,
                 checkedReferenceTypeIndexes,
-                nominalClassTypesByTypeSpecReference);
+                nominalClassTypesByTypeSpecReference,
+                functionPointerSignatureIndexByAnchorTypeSpec);
             var isInitialization = type[0] == 0x0E;
             var qualifiers = type[1];
             var definition = new CheckedReferenceTypeDefinition(

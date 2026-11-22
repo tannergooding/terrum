@@ -173,13 +173,16 @@ public static partial class TrRmExecutableCompiler
 
         _ = LoadForeignNativeInterfaceStructures(tables, context,
             artifactIndex, moduleRow, includedTypeDefRows,
-            out var structureTypeByTypeDef);
+            out var structureTypeByTypeDef,
+            signatureIndexByAnchorMethod,
+            signatureIndexByAnchorTypeSpec);
         BindForeignNativeInterfaceStructureImports(tables, context,
             artifactIndex, moduleRow, structureImportRows,
             structureTypeByTypeDef, usedImportRows);
         ReadForeignNativeInterfaceFunctionPointerAnchors(tables, context,
             moduleRow, pointerTypeIndexes, signatureIndexByAnchorMethod,
-            signatureIndexByAnchorTypeSpec, structureTypeByTypeDef);
+            signatureIndexByAnchorTypeSpec, structureTypeByTypeDef,
+            includedTypeDefRows);
         var foreignInterfaceRowsByOwner
             = new Dictionary<int, int>(tables.ForeignNativeInterfaces.Count);
         for (var foreignInterfaceRow = 1;
@@ -438,7 +441,9 @@ public static partial class TrRmExecutableCompiler
         TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
         GenericMethodReadContext context, int artifactIndex, int moduleRow,
         HashSet<int> includedTypeDefRows,
-        out int[] structureTypeByTypeDef)
+        out int[] structureTypeByTypeDef,
+        int[]? signatureIndexByAnchorMethod = null,
+        int[]? signatureIndexByAnchorTypeSpec = null)
     {
         var moduleKey = (artifactIndex, moduleRow);
         structureTypeByTypeDef = new int[tables.TypeDefs.Count + 1];
@@ -467,6 +472,24 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
+        static int[] CreateUnmappedSignatureIndexes(int count)
+        {
+            var indexes = new int[count + 1];
+            Array.Fill(indexes, -1);
+            return indexes;
+        }
+
+        var anchorMethodMap = signatureIndexByAnchorMethod
+            ?? CreateUnmappedSignatureIndexes(tables.Methods.Count);
+        var anchorTypeSpecMap = signatureIndexByAnchorTypeSpec
+            ?? CreateUnmappedSignatureIndexes(tables.TypeSpecs.Count);
+        if (anchorMethodMap.Length != tables.Methods.Count + 1
+            || anchorTypeSpecMap.Length != tables.TypeSpecs.Count + 1)
+        {
+            throw Invalid(
+                "A ForeignNativeInterface function-pointer anchor map has an invalid extent.");
+        }
+
         var structures = LoadBlittableStructures(tables.TypeDefs,
             tables.Fields, tables.Layouts, tables.LayoutFields,
             tables.TargetProfiles, tables.TypeSpecs,
@@ -476,7 +499,16 @@ public static partial class TrRmExecutableCompiler
             includedTypeDefRows: includedTypeDefRows,
             allowDuplicateImportedViews: true,
             existingStructureTypeIndexesByTypeDef:
-                existingStructureIndexesByTypeDef);
+                existingStructureIndexesByTypeDef,
+            functionPointerSignatureIndexByTypeSpecRow:
+                anchorTypeSpecMap,
+            beforeFieldLoad: structureMap =>
+                ReadForeignNativeInterfaceFunctionPointerAnchors(
+                    tables, context, moduleRow,
+                    context.ForeignNativeInterfacePointerTypes,
+                    anchorMethodMap, anchorTypeSpecMap, structureMap,
+                    includedTypeDefRows,
+                    validateNativePointerTypes: false));
         var structuresWithOrigins = structures.ToBuilder();
         foreach (var typeDefRow in includedTypeDefRows)
         {
@@ -600,6 +632,15 @@ public static partial class TrRmExecutableCompiler
             context.ForeignNativeInterfaceStructureIndexesByTypeDef[
                 (artifactIndex, moduleRow, typeDefRow)]
                 = structureTypeByTypeDef[typeDefRow];
+        }
+
+        if (!NativePointerTypeContract.IsValidTable(
+                [.. context.ForeignNativeInterfacePointerTypes],
+                [.. context.ForeignNativeInterfaceStructures],
+                [.. context.ForeignNativeInterfaceFunctionPointerSignatures]))
+        {
+            throw Invalid(
+                "The selected FNI aggregate contains an invalid pointer or function-pointer type closure.");
         }
 
         return structuresWithOrigins.ToImmutable();
@@ -868,12 +909,56 @@ public static partial class TrRmExecutableCompiler
     {
         var structures = context.ForeignNativeInterfaceStructures;
         var pointerTypes = context.ForeignNativeInterfacePointerTypes;
+        var functionPointerSignatures
+            = context.ForeignNativeInterfaceFunctionPointerSignatures;
         var pendingStructures = new Queue<(int Expected, int Provider)>();
         var comparedStructures = new HashSet<(int Expected, int Provider)>();
         var comparedTypes = new HashSet<(PrimitiveType Expected,
             PrimitiveType Provider)>();
         pendingStructures.Enqueue((expectedStructureIndex,
             providerStructureIndex));
+
+        bool FunctionPointerSignaturesEqual(int expectedIndex,
+            int providerIndex)
+        {
+            if ((uint)expectedIndex >= (uint)functionPointerSignatures.Count
+                || (uint)providerIndex
+                    >= (uint)functionPointerSignatures.Count)
+            {
+                return false;
+            }
+
+            var expectedSignature
+                = functionPointerSignatures[expectedIndex];
+            var providerSignature
+                = functionPointerSignatures[providerIndex];
+            if (expectedSignature.ParameterTypes.IsDefault
+                || providerSignature.ParameterTypes.IsDefault
+                || expectedSignature.ParameterTypes.Length
+                    != providerSignature.ParameterTypes.Length
+                || !TypesEqual(expectedSignature.ReturnType,
+                    providerSignature.ReturnType))
+            {
+                return false;
+            }
+
+            for (var ordinal = 0;
+                ordinal < expectedSignature.ParameterTypes.Length; ordinal++)
+            {
+                if (!TypesEqual(
+                        expectedSignature.ParameterTypes[ordinal],
+                        providerSignature.ParameterTypes[ordinal]))
+                {
+                    return false;
+                }
+            }
+
+            return NativeFunctionPointerContract.AreEquivalent(
+                expectedSignature with {
+                    ReturnType = providerSignature.ReturnType,
+                    ParameterTypes = providerSignature.ParameterTypes,
+                }, providerSignature);
+        }
 
         bool TypesEqual(PrimitiveType expected, PrimitiveType provider)
         {
@@ -937,7 +1022,11 @@ public static partial class TrRmExecutableCompiler
             if (NativeFunctionPointerTypes.IsType(expected)
                 || NativeFunctionPointerTypes.IsType(provider))
             {
-                return false;
+                return NativeFunctionPointerTypes.IsType(expected)
+                    && NativeFunctionPointerTypes.IsType(provider)
+                    && FunctionPointerSignaturesEqual(
+                        NativeFunctionPointerTypes.Index(expected),
+                        NativeFunctionPointerTypes.Index(provider));
             }
 
             return false;
@@ -1346,7 +1435,9 @@ public static partial class TrRmExecutableCompiler
         List<NativePointerTypeDefinition> nativePointerTypeDefinitions,
         int[] signatureIndexByAnchorMethod,
         int[] signatureIndexByAnchorTypeSpec,
-        int[] structureTypeByTypeDef)
+        int[] structureTypeByTypeDef,
+        HashSet<int> includedTypeDefRows,
+        bool validateNativePointerTypes = true)
     {
         var typeStates = new byte[tables.TypeSpecs.Count + 1];
         var anchorStates = new byte[tables.TypeSpecs.Count + 1];
@@ -1536,10 +1627,12 @@ public static partial class TrRmExecutableCompiler
                     .Append(signature).ToImmutableArray();
                 if (!NativeFunctionPointerContract.IsValidTable(
                         candidateSignatures)
-                    || !NativePointerTypeContract.IsValidTable(
-                        [.. nativePointerTypeDefinitions],
-                        [.. context.ForeignNativeInterfaceStructures],
-                        candidateSignatures))
+                    || (validateNativePointerTypes
+                        && !NativePointerTypeContract.IsValidTable(
+                            [.. nativePointerTypeDefinitions],
+                            [.. context
+                                .ForeignNativeInterfaceStructures],
+                            candidateSignatures)))
                 {
                     throw Invalid(
                         "A ForeignNativeInterface function-pointer anchor has an invalid signature.");
@@ -1607,6 +1700,16 @@ public static partial class TrRmExecutableCompiler
                 }
                 EnsureTypeSpec(tables.Signatures.GetResultTypeSpec(
                     signatureRow), 0);
+            }
+        }
+
+        foreach (var typeDef in includedTypeDefRows)
+        {
+            var (firstField, endField)
+                = tables.TypeDefs.GetFieldRange(typeDef);
+            for (var fieldRow = firstField; fieldRow < endField; fieldRow++)
+            {
+                EnsureTypeSpec(tables.Fields.GetTypeSpecRef(fieldRow), 0);
             }
         }
 

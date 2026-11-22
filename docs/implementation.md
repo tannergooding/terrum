@@ -1325,17 +1325,22 @@ reconstructs local layouts and emits TypeDef Imports for imported aggregate
 views. Source-free loading binds those expectations to the selected provider,
 compares the retained layout and field contract, and uses the selected
 provider's structure identity in the FNI ABI view. This bounded
-producer/consumer slice supports scalar, raw-pointer, typed-pointer fields with
-scalar or inline-struct pointees, and inline-struct fields;
-nested inline-struct provider TypeDefs, compatible provider TypeDef-row
-relocation, a two-provider nested aggregate chain, missing/duplicate/misselected
+producer/consumer slice supports scalar, raw-pointer and inline-struct fields;
+typed-pointer fields with scalar or inline-struct pointees; and
+function-pointer fields with the selected Standard `0x0D` anchor subset and
+scalar/pointer signatures. Nested inline-struct provider TypeDefs, compatible
+provider TypeDef-row relocation, a two-provider nested aggregate chain,
+missing/duplicate/misselected
 Imports, wrong provider ModuleRefs, expected-TypeDef-owner substitution,
 invalid ModuleRef owners, requirement mismatches, incompatible-layout
 replacement and source-free re-emission regressions are added but unverified
 under the active hold. Typed-pointer fields with scalar and inline-struct
 pointees now round-trip through the selected provider and source-free
 re-emission, including an inline-pointee TypeDef row shift; changed pointee
-types reject. These regressions remain unverified. Source emission retains the
+types reject. Function-pointer fields with pointer-to-aggregate signature
+inputs now round-trip through selected-provider rebinding and source-free
+re-emission across the same TypeDef-row shift; incompatible signatures reject.
+These regressions remain unverified. Source emission retains the
 exact selected provider ExportKey and refuses ambiguous aliases; a regression selects the non-first
 A2 key from a non-first co-located Module. The nested chain is also rebound
 with provider order reversed and a compatible Middle TypeDef/FieldDef/Layout
@@ -1345,8 +1350,8 @@ in Module 1 and selects Middle from Module 2. These paths are source-free
 re-emitted/reloaded and remain unverified. Provider v4 intentionally selects
 one FNI Module root; independent multi-root FNI composition is not selected by
 the proposal.
-Function-pointer aggregate fields, broader pointer-to-aggregate provider
-chains and full Import/Export/PS1/Contract/graph row remapping remain open. FNI call
+Broader pointer-to-aggregate provider chains and full
+Import/Export/PS1/Contract/graph row remapping remain open. FNI call
 lowering now stages the receiver before source-order arguments, maps explicit
 formals to the receiver-first Windows x64 ABI, and dispatches through the
 selected member ordinal and full-width vtable offset. NativeOutput reservations
