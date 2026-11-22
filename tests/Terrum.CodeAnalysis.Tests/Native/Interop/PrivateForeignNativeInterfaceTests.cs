@@ -2,6 +2,7 @@
 
 using System;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using NUnit.Framework;
@@ -171,6 +172,82 @@ internal sealed class PrivateForeignNativeInterfaceTests
             await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
                 .ConfigureAwait(true);
         }
+    }
+
+    [Test]
+    public void PrivateFniGraphProducerRetainsSemanticOwnerWithoutReexportingIt()
+    {
+        const string schemaIdentity
+            = "terrum/private-semantic-111-foreign-native-interfaces-1";
+        const string graphIdentity = "PrivateFniGraph";
+        const string ownerKey = "graph.iprobe";
+        const string memberKey = "graph.iprobe.get";
+
+        var dependencyCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(
+                "public int32 Add(int32 value) { return value + 1; }"));
+        Assert.That(dependencyCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                dependencyCompilation.Diagnostics));
+        var dependency = NativeModuleCompiler.CreateProducerWithSchema(
+            dependencyCompilation.Program!, ["Add"], "PrivateFniLeaf",
+            schemaIdentity, NativeRuntimePolicy.FailFast);
+        var dependencyReference
+            = NativeModuleCompiler.CreateReferenceWithSchema(dependency,
+                schemaIdentity);
+
+        var source = SyntaxTree.Parse("""
+            using Terrum.Interop;
+            public int32 Forward(ptr<void> receiver, int32 value) {
+                unsafe { return IProbe.Get(receiver, Add(value)); }
+            }
+            [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+            [ForeignNativeInterface(VTableByteOffset: uint32(0))]
+            public interface IProbe {
+                public unsafe int32 Get(int32 value);
+            }
+            """);
+        var sourceNativeRegistration
+            = NativeCoreRegistrationTests.CreateRegistration(
+                includeForeignNativeInterface: true);
+        var graphBindings = CoreProviderModuleBindings.Create(
+            graphIdentity,
+            sourceNativeRegistration.ModuleBindings.Providers,
+            sourceNativeRegistration.ModuleBindings.Declarations);
+        var nativeRegistration = NativeCoreRegistrationSet.Create(
+            graphBindings, sourceNativeRegistration.CallingConventions,
+            sourceNativeRegistration.ResolutionModes,
+            sourceNativeRegistration.ResolutionPolicies,
+            sourceNativeRegistration.NativeImport,
+            sourceNativeRegistration.NativeCallable,
+            sourceNativeRegistration.NativeCallConv,
+            sourceNativeRegistration.NativeExport,
+            sourceNativeRegistration.ForeignNativeInterface);
+        var compilation = Compilation.CreateLibrary(source,
+            dependencyReference, new CompilationOptions {
+                NativeCoreRegistration = nativeRegistration,
+                RuntimePolicy = BoundRuntimePolicy.FailFast,
+            });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        var identityInputs = PrivateModuleIdentityInputs.CreateFromSelectors(
+            program, graphIdentity, [], [], [], [], [
+                new PrivateForeignInterfaceDefinitionAssignment(0,
+                    ownerKey, false, [
+                        new PrivateForeignInterfaceMemberDefinitionAssignment(
+                            0, memberKey),
+                    ]),
+            ], []);
+        var graph = NativeModuleCompiler.CreateGraphProducerWithSchema(
+            program, ["Forward"], graphIdentity, [dependency],
+            schemaIdentity, NativeRuntimePolicy.FailFast, identityInputs);
+        var reference = NativeModuleCompiler.CreateGraphReferenceWithSchema(
+            [graph, dependency], schemaIdentity);
+
+        Assert.That(reference.Functions.Select(static function => function.Name),
+            Is.EquivalentTo(["Add", "Forward"]));
+        Assert.That(reference.Interfaces, Is.Empty);
     }
 
     private static int PublishOutput(IntPtr receiver, IntPtr output)
