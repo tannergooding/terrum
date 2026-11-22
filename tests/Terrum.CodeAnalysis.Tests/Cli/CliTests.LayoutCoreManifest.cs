@@ -708,7 +708,7 @@ internal sealed partial class CliTests
         {
             await File.WriteAllTextAsync(manifestPath,
                 CreateLayoutCoreManifest()).ConfigureAwait(false);
-            var source = Encoding.UTF8.GetBytes(LayoutCoreSource);
+            var source = new byte[] { 0xFF };
             var commandCases = new[] {
                 new[] {
                     "build", "-", "--frontend-command", "frontend-build",
@@ -764,7 +764,7 @@ internal sealed partial class CliTests
                 .ConfigureAwait(false);
             await File.WriteAllBytesAsync(libraryPath, sentinel)
                 .ConfigureAwait(false);
-            var source = Encoding.UTF8.GetBytes(LayoutCoreSource);
+            var source = new byte[] { 0xFF };
             var projectDirectory
                 = TerrumProjectPaths.SourceDirectory(RepositoryRoot());
             var (buildExit, buildOutput, buildError) = await RunAsync(source,
