@@ -2709,7 +2709,7 @@ public static partial class TrRmExecutableCompiler
                     }
                 }
                 else if (allowNestedInputs
-                    && GetNestedForeignInterfaceCall(argument)
+                    && GetUnwrappedBoundCall(argument)
                         is BoundCall nestedCall
                     && nestedCall.Type == formalType
                     && !nestedInputBuilder.Any(existing =>
@@ -2812,14 +2812,24 @@ public static partial class TrRmExecutableCompiler
             PrimitiveType expectedType,
             BoundInterfaceMemberIdentity outerMember)
         {
+            if (nestedCall.Type != expectedType
+                || !DirectNativeImportContract.IsScalar(nestedCall.Type))
+            {
+                return false;
+            }
+
+            if (nestedCall.ForeignInterfaceCall is null)
+            {
+                return TryValidateLocalScalarInputCall(nestedCall,
+                    expectedType);
+            }
+
             if (nestedCall.Function != BoundCall.ForeignInterfaceFunction
                 || nestedCall.ForeignInterfaceCall is not
                     BoundForeignInterfaceCall nestedForeignCall
                 || !nestedCall.IsUnsafeAuthorized
                 || nestedForeignCall.DoesNotReturn
                 || nestedForeignCall.Member == outerMember
-                || !DirectNativeImportContract.IsScalar(nestedCall.Type)
-                || nestedCall.Type != expectedType
                 || !ForeignNativeInterfaceContract.TryCreateCallTarget(
                     nestedForeignCall, program, out var nestedTarget)
                 || nestedTarget.ReturnType != expectedType
@@ -2866,6 +2876,106 @@ public static partial class TrRmExecutableCompiler
                 else if (argument is BoundConstant constant
                     && DirectNativeImportContract.IsScalar(
                         constant.Type)
+                    && constant.Type == formalType
+                    && constant.RepresentationType == constant.Type
+                    && constant.Bits.IsCanonicalFor(constant.Type))
+                {
+                    constantInputs.Add((constant.Type, constant.Bits));
+                    if (constantInputs.Count
+                        + nestedInputBuilder.Count > 13)
+                    {
+                        return false;
+                    }
+                }
+                else
+                {
+                    return false;
+                }
+
+                seenParameters[formal] = true;
+            }
+
+            return seenParameters.All(static seen => seen);
+        }
+
+        bool TryValidateLocalScalarInputCall(BoundCall nestedCall,
+            PrimitiveType expectedType)
+        {
+            if (nestedCall.ForeignInterfaceCall is not null
+                || nestedCall.Function == BoundCall.ForeignInterfaceFunction
+                || (uint)nestedCall.Function >= (uint)program.Functions.Length
+                || nestedCall.InterfaceCallIdentity is not null
+                || nestedCall.GenericMethodCall is not null
+                || nestedCall.ImportedGenericMethodCall is not null
+                || !nestedCall.ImportedGenericMethodTypeArguments
+                    .IsDefaultOrEmpty
+                || nestedCall.Type != expectedType
+                || nestedCall.Arguments.IsDefault)
+            {
+                return false;
+            }
+
+            var target = program.Functions[nestedCall.Function];
+            if (target.IsExternal
+                || target.ModuleImport is not null
+                || target.DeclaringStruct is not null
+                || target.DirectNativeImport is not null
+                || target.NativeVTableMethod is not null
+                || target.NativeFunctionPointerType is not null
+                || target.GenericMethodInstantiation is not null
+                || target.ImportedGenericMethod is not null
+                || target.InterfaceRequirement is not null
+                || target.IsConstEval
+                || target.RequiresUnsafeCaller
+                || target.DoesNotReturn
+                || target.IsConstructor
+                || target.IsCleanup
+                || target.ReturnType != expectedType
+                || !target.NativeOutputContracts.IsEmpty
+                || target.ParameterCount != nestedCall.Arguments.Length
+                || target.Variables.Length != target.ParameterCount
+                || target.Variables.Any(static variable =>
+                    variable.IsOut || variable.IsInit
+                    || variable.IsImplicitRef
+                    || variable.IsImplicitReferenceTemporary
+                    || variable.IsInitializationLocal
+                    || !(DirectNativeImportContract.IsScalar(
+                            variable.Type)
+                        || variable.Type
+                            == PrimitiveType.NativeRawPointer
+                        || NativePointerTypes.IsType(variable.Type))))
+            {
+                return false;
+            }
+
+            var seenParameters = new bool[target.ParameterCount];
+            for (var argumentIndex = 0;
+                argumentIndex < nestedCall.Arguments.Length;
+                argumentIndex++)
+            {
+                var formal = nestedCall.ParameterIndex(argumentIndex);
+                var argument = nestedCall.Arguments[argumentIndex];
+                if ((uint)formal >= (uint)target.ParameterCount
+                    || seenParameters[formal])
+                {
+                    return false;
+                }
+
+                var formalType = target.Variables[formal].Type;
+                if (argument is BoundRead read)
+                {
+                    if ((uint)read.Variable >= (uint)function.ParameterCount
+                        || read.Type != formalType
+                        || function.Variables[read.Variable].Type
+                            != formalType
+                        || function.Variables[read.Variable].IsOut
+                        || function.Variables[read.Variable].IsInit)
+                    {
+                        return false;
+                    }
+                }
+                else if (argument is BoundConstant constant
+                    && DirectNativeImportContract.IsScalar(constant.Type)
                     && constant.Type == formalType
                     && constant.RepresentationType == constant.Type
                     && constant.Bits.IsCanonicalFor(constant.Type))
@@ -2995,32 +3105,48 @@ public static partial class TrRmExecutableCompiler
             nestedIndex++)
         {
             var nestedCall = nestedCalls[nestedIndex];
-            var nestedForeignCall = nestedCall.ForeignInterfaceCall
-                ?? throw Invalid(
-                    "A nested F+I call sequence input has no selected InterfaceMethod identity.");
-            if (!ForeignNativeInterfaceContract.TryCreateCallTarget(
-                    nestedForeignCall, program, out var nestedTarget)
-                || !nestedCall.IsUnsafeAuthorized
-                || nestedForeignCall.DoesNotReturn
-                || nestedForeignCall.Member == outerForeignCall?.Member
-                || nestedCall.Type != nestedTarget.ReturnType
-                || !DirectNativeImportContract.IsScalar(
-                    nestedTarget.ReturnType)
-                || !nestedTarget.NativeOutputContracts.IsEmpty
-                || nestedTarget.ParameterCount != nestedCall.Arguments.Length
-                || nestedCall.Arguments.IsDefault
-                || nestedForeignCall.Receiver is not BoundRead receiver
-                || (uint)receiver.Variable >= (uint)function.ParameterCount
-                || receiver.Type != PrimitiveType.NativeRawPointer
-                || function.Variables[receiver.Variable].Type
-                    != PrimitiveType.NativeRawPointer)
+            var nestedMethodMapToken = 0u;
+            if (nestedCall.ForeignInterfaceCall is
+                BoundForeignInterfaceCall nestedForeignCall)
+            {
+                if (!ForeignNativeInterfaceContract.TryCreateCallTarget(
+                        nestedForeignCall, program, out var nestedTarget)
+                    || !nestedCall.IsUnsafeAuthorized
+                    || nestedForeignCall.DoesNotReturn
+                    || nestedForeignCall.Member == outerForeignCall?.Member
+                    || nestedCall.Type != nestedTarget.ReturnType
+                    || !DirectNativeImportContract.IsScalar(
+                        nestedTarget.ReturnType)
+                    || !nestedTarget.NativeOutputContracts.IsEmpty
+                    || nestedTarget.ParameterCount
+                        != nestedCall.Arguments.Length
+                    || nestedCall.Arguments.IsDefault
+                    || nestedForeignCall.Receiver is not BoundRead receiver
+                    || (uint)receiver.Variable
+                        >= (uint)function.ParameterCount
+                    || receiver.Type != PrimitiveType.NativeRawPointer
+                    || function.Variables[receiver.Variable].Type
+                        != PrimitiveType.NativeRawPointer)
+                {
+                    throw Unsupported(
+                        $"Function '{function.Name}' has a nested F+I sequence input outside the scalar no-output subset.");
+                }
+
+                nestedMethodMapToken
+                    = methodMapTokenForForeignInterface(
+                        nestedForeignCall.Member);
+            }
+            else if (GetLocalScalarCallTarget(nestedCall) is not null)
+            {
+                nestedMethodMapToken
+                    = methodMapTokenForFunction(nestedCall.Function);
+            }
+            else
             {
                 throw Unsupported(
-                    $"Function '{function.Name}' has a nested F+I sequence input outside the scalar no-output subset.");
+                    $"Function '{function.Name}' has a nested F+I sequence input outside the scalar local or F+I no-output subset.");
             }
 
-            var nestedMethodMapToken = methodMapTokenForForeignInterface(
-                nestedForeignCall.Member);
             if (hasFinalCall
                 && nestedMethodMapToken == outerMethodMapToken)
             {
@@ -3212,7 +3338,7 @@ public static partial class TrRmExecutableCompiler
         TrRmRegisterBodyCallInput CreateInput(
             BoundExpression expression, PrimitiveType expectedType)
         {
-            if (GetNestedForeignInterfaceCall(expression)
+            if (GetUnwrappedBoundCall(expression)
                     is BoundCall nestedCall
                 && nestedCall.Type == expectedType
                 && nestedRegisterByCall.TryGetValue(nestedCall,
@@ -3252,9 +3378,15 @@ public static partial class TrRmExecutableCompiler
         {
             if (call.ForeignInterfaceCall is null)
             {
-                if (resultKind != 0 || resultIndex != 0
-                    || GetLocalVoidCallTarget(call)
-                        is not BoundFunction localTarget)
+                var localTarget = resultKind switch {
+                    0 => GetLocalVoidCallTarget(call),
+                    1 => GetLocalScalarCallTarget(call),
+                    _ => null,
+                };
+                if (localTarget is null
+                    || (resultKind == 0 && resultIndex != 0)
+                    || (resultKind == 1
+                        && resultIndex is 0 or >= 14))
                 {
                     throw Invalid(
                         "A Standard F+I call sequence local CallSite has an invalid target or result form.");
@@ -3403,6 +3535,95 @@ public static partial class TrRmExecutableCompiler
                     || function.Variables[read.Variable].Type != read.Type
                     || function.Variables[read.Variable].IsOut
                     || function.Variables[read.Variable].IsInit)
+                {
+                    return null;
+                }
+
+                seenParameters[formal] = true;
+            }
+
+            return seenParameters.All(static seen => seen) ? target : null;
+        }
+
+        BoundFunction? GetLocalScalarCallTarget(BoundCall call)
+        {
+            if (call.ForeignInterfaceCall is not null
+                || call.Function == BoundCall.ForeignInterfaceFunction
+                || call.InterfaceCallIdentity is not null
+                || call.GenericMethodCall is not null
+                || call.ImportedGenericMethodCall is not null
+                || !call.ImportedGenericMethodTypeArguments.IsDefaultOrEmpty
+                || (uint)call.Function >= (uint)program.Functions.Length
+                || call.Arguments.IsDefault
+                || !DirectNativeImportContract.IsScalar(call.Type))
+            {
+                return null;
+            }
+
+            var target = program.Functions[call.Function];
+            if (target.IsExternal
+                || target.ModuleImport is not null
+                || target.DeclaringStruct is not null
+                || target.DirectNativeImport is not null
+                || target.NativeVTableMethod is not null
+                || target.NativeFunctionPointerType is not null
+                || target.GenericMethodInstantiation is not null
+                || target.ImportedGenericMethod is not null
+                || target.InterfaceRequirement is not null
+                || target.IsConstEval
+                || target.RequiresUnsafeCaller
+                || target.DoesNotReturn
+                || target.IsConstructor
+                || target.IsCleanup
+                || target.ReturnType != call.Type
+                || !target.NativeOutputContracts.IsEmpty
+                || target.ParameterCount != call.Arguments.Length
+                || target.Variables.Length != target.ParameterCount
+                || target.Variables.Any(static variable =>
+                    variable.IsOut || variable.IsInit
+                    || variable.IsImplicitRef
+                    || variable.IsImplicitReferenceTemporary
+                    || variable.IsInitializationLocal
+                    || !(DirectNativeImportContract.IsScalar(
+                            variable.Type)
+                        || variable.Type
+                            == PrimitiveType.NativeRawPointer
+                        || NativePointerTypes.IsType(variable.Type))))
+            {
+                return null;
+            }
+
+            var seenParameters = new bool[target.ParameterCount];
+            for (var argumentIndex = 0;
+                argumentIndex < call.Arguments.Length;
+                argumentIndex++)
+            {
+                var formal = call.ParameterIndex(argumentIndex);
+                var argument = call.Arguments[argumentIndex];
+                if ((uint)formal >= (uint)target.ParameterCount
+                    || seenParameters[formal])
+                {
+                    return null;
+                }
+
+                var formalType = target.Variables[formal].Type;
+                if (argument is BoundRead read)
+                {
+                    if ((uint)read.Variable >= (uint)function.ParameterCount
+                        || read.Type != formalType
+                        || function.Variables[read.Variable].Type
+                            != formalType
+                        || function.Variables[read.Variable].IsOut
+                        || function.Variables[read.Variable].IsInit)
+                    {
+                        return null;
+                    }
+                }
+                else if (argument is not BoundConstant constant
+                    || !DirectNativeImportContract.IsScalar(constant.Type)
+                    || constant.Type != formalType
+                    || constant.RepresentationType != constant.Type
+                    || !constant.Bits.IsCanonicalFor(constant.Type))
                 {
                     return null;
                 }
@@ -6790,7 +7011,7 @@ public static partial class TrRmExecutableCompiler
         var foreignInterfaceCalls = 0;
         var foreignInterfaceNonReturningCalls = 0;
         var foreignInterfaceOutputReservations = 0;
-        var foreignInterfaceValueResultRegisters = new List<ushort>();
+        var callSiteValueResultRegisters = new List<ushort>();
         var forwardedInitializationReference = false;
         var nativeOutputReservationsByRecord
             = new Dictionary<int, (int CallSiteRecordIndex, int HomeIndex,
@@ -7409,7 +7630,7 @@ public static partial class TrRmExecutableCompiler
                                 member.Parameters.Length];
                             var nestedFormalByRegister
                                 = new Dictionary<ushort, int>(
-                                    foreignInterfaceValueResultRegisters.Count);
+                                    callSiteValueResultRegisters.Count);
                             var nestedFormalIndices = new HashSet<int>();
                             var inputOffset = 24;
                             for (var formal = 0;
@@ -7481,8 +7702,8 @@ public static partial class TrRmExecutableCompiler
                                         out var registerArgument)
                                     && registerArgument.Type == formalType)
                                 {
-                                    if (GetNestedForeignInterfaceCall(
-                                            registerArgument) is not null
+                                    if (callSiteValueResultRegisters.Contains(
+                                            selectorIndex)
                                         && (!nestedFormalByRegister.TryAdd(
                                                 selectorIndex, formal)
                                             || !nestedFormalIndices.Add(
@@ -7530,7 +7751,7 @@ public static partial class TrRmExecutableCompiler
 
                             if (nestedFormalByRegister.Count != 0
                                 && nestedFormalByRegister.Count
-                                != foreignInterfaceValueResultRegisters.Count)
+                                != callSiteValueResultRegisters.Count)
                             {
                                 throw Invalid(
                                     "A ForeignNativeInterface CallSite does not consume each earlier nested result exactly once.");
@@ -7545,7 +7766,7 @@ public static partial class TrRmExecutableCompiler
                                     member.Parameters.Length);
                             var orderedNestedInputCount = 0;
                             foreach (var nestedRegister
-                                in foreignInterfaceValueResultRegisters)
+                                in callSiteValueResultRegisters)
                             {
                                 if (!nestedFormalByRegister.TryGetValue(
                                         nestedRegister, out var formal))
@@ -7618,8 +7839,7 @@ public static partial class TrRmExecutableCompiler
                             }
                             if (hasValueResult)
                             {
-                                foreignInterfaceValueResultRegisters.Add(
-                                    resultIndex);
+                                callSiteValueResultRegisters.Add(resultIndex);
                             }
                             if (!hasValueResult)
                             {
@@ -7717,6 +7937,124 @@ public static partial class TrRmExecutableCompiler
                         break;
                     }
 
+                    if (body.Schema.UsesForeignNativeInterface()
+                        && !body.UsesNativePointerLoads
+                        && !construction2MethodLinking
+                        && resultKind == 1
+                        && record[4] == 1
+                        && resultIndex < 14
+                        && preparationCount == 0
+                        && targetMethodMapIndex < body.MethodCount)
+                    {
+                        var localMethodToken
+                            = BinaryPrimitives.ReadUInt32LittleEndian(
+                                body.MethodMap[(targetMethodMapIndex
+                                    * sizeof(uint))..]);
+                        if ((localMethodToken >> 24) == 0x16)
+                        {
+                            var localTargetFunction
+                                = ResolveStandardInitializationBodyMethodMapFunction(
+                                    localMethodToken, imports,
+                                    functionIndexByMethodRow, functions);
+                            var localTarget = functions[
+                                localTargetFunction];
+                            if (IsValidLocalScalarInputTarget(localTarget)
+                                && inputCount
+                                    == (uint)localTarget.ParameterCount)
+                            {
+                                if (resultIndex == 0)
+                                {
+                                    throw Invalid(
+                                        "A Standard F+I local value CallSite overwrites the outer result register.");
+                                }
+
+                                var localArguments
+                                    = ImmutableArray.CreateBuilder<
+                                        BoundExpression>(
+                                        localTarget.ParameterCount);
+                                var localInputOffset = 20;
+                                for (var formal = 0;
+                                    formal < localTarget.ParameterCount;
+                                    formal++)
+                                {
+                                    var selectorKind
+                                        = record[localInputOffset];
+                                    var sourceUse
+                                        = record[localInputOffset + 1];
+                                    var selectorIndex
+                                        = BinaryPrimitives
+                                            .ReadUInt16LittleEndian(
+                                                record[(localInputOffset + 2)
+                                                    ..]);
+                                    var parameter
+                                        = localTarget.Variables[formal];
+                                    if (selectorKind == 1
+                                        && sourceUse == 1
+                                        && selectorIndex < 14
+                                        && valueByRegister.TryGetValue(
+                                            selectorIndex,
+                                            out var localRegisterInput)
+                                        && localRegisterInput
+                                            is BoundConstant constant
+                                        && constant.Type == parameter.Type
+                                        && DirectNativeImportContract
+                                            .IsScalar(constant.Type)
+                                        && constant.RepresentationType
+                                            == constant.Type
+                                        && constant.Bits.IsCanonicalFor(
+                                            constant.Type))
+                                    {
+                                        localArguments.Add(constant);
+                                    }
+                                    else if (selectorKind == 2
+                                        && sourceUse == 1
+                                        && selectorIndex
+                                            < homeVariables.Length
+                                        && homeRoles[selectorIndex] == 2
+                                        && homeVariables[selectorIndex] >= 0
+                                        && homeVariables[selectorIndex]
+                                            < function.ParameterCount
+                                        && !variables[homeVariables[
+                                            selectorIndex]].IsOut
+                                        && !variables[homeVariables[
+                                            selectorIndex]].IsInit
+                                        && variables[homeVariables[
+                                            selectorIndex]].Type
+                                            == parameter.Type)
+                                    {
+                                        localArguments.Add(new BoundRead(
+                                            homeVariables[selectorIndex],
+                                            parameter.Type, default));
+                                    }
+                                    else
+                                    {
+                                        throw Invalid(
+                                            "A Standard F+I local value CallSite has an unsupported direct input.");
+                                    }
+
+                                    localInputOffset += 4;
+                                }
+
+                                if (!valueByRegister.TryAdd(resultIndex,
+                                        new BoundCall(localTargetFunction,
+                                            localArguments.MoveToImmutable(),
+                                            localTarget.ReturnType, default) {
+                                            IsUnsafeAuthorized =
+                                                localTarget
+                                                    .RequiresUnsafeCaller,
+                                        }))
+                                {
+                                    throw Invalid(
+                                        "A Standard F+I local value CallSite overwrites an existing register.");
+                                }
+
+                                callSiteValueResultRegisters.Add(resultIndex);
+                                calls++;
+                                break;
+                            }
+                        }
+                    }
+
                     if (resultKind == 1
                         && construction2MethodLinking)
                     {
@@ -7803,6 +8141,12 @@ public static partial class TrRmExecutableCompiler
                             throw Invalid(
                                 "A Construction-2 Method CallSite overwrites an existing value register.");
                         }
+                        if (body.Schema.UsesForeignNativeInterface()
+                            && IsValidLocalScalarInputTarget(target))
+                        {
+                            callSiteValueResultRegisters.Add(resultIndex);
+                        }
+
                         calls++;
                         break;
                     }
@@ -8393,10 +8737,114 @@ public static partial class TrRmExecutableCompiler
 
         var nestedInputCalls = nestedInputOuterCall is BoundCall outerCall
             ? outerCall.Arguments
-                .Select(GetNestedForeignInterfaceCall)
+                .Select(GetNestedSequenceInputCall)
                 .OfType<BoundCall>()
                 .ToArray()
             : Array.Empty<BoundCall>();
+        BoundCall? GetNestedSequenceInputCall(BoundExpression expression)
+        {
+            var call = GetUnwrappedBoundCall(expression);
+            return call is not null
+                && (call.ForeignInterfaceCall is not null
+                    || IsValidLocalScalarInputCall(call))
+                ? call : null;
+        }
+
+        bool IsValidLocalScalarInputTarget(BoundFunction target)
+            => !target.IsExternal
+                && target.ModuleImport is null
+                && target.DeclaringStruct is null
+                && target.DirectNativeImport is null
+                && target.NativeVTableMethod is null
+                && target.NativeFunctionPointerType is null
+                && target.GenericMethodInstantiation is null
+                && target.ImportedGenericMethod is null
+                && target.InterfaceRequirement is null
+                && !target.IsConstEval
+                && !target.RequiresUnsafeCaller
+                && !target.DoesNotReturn
+                && !target.IsConstructor
+                && !target.IsCleanup
+                && DirectNativeImportContract.IsScalar(
+                    target.ReturnType)
+                && target.NativeOutputContracts.IsEmpty
+                && target.ParameterCount == target.Variables.Length
+                && target.Variables.All(static variable =>
+                    !variable.IsOut && !variable.IsInit
+                    && !variable.IsImplicitRef
+                    && !variable.IsImplicitReferenceTemporary
+                    && !variable.IsInitializationLocal
+                    && (DirectNativeImportContract.IsScalar(
+                            variable.Type)
+                        || variable.Type
+                            == PrimitiveType.NativeRawPointer
+                        || NativePointerTypes.IsType(variable.Type)));
+
+        bool IsValidLocalScalarInputCall(BoundCall nestedCall)
+        {
+            if (nestedCall.ForeignInterfaceCall is not null
+                || nestedCall.Function == BoundCall.ForeignInterfaceFunction
+                || (uint)nestedCall.Function >= (uint)functions.Count
+                || nestedCall.InterfaceCallIdentity is not null
+                || nestedCall.GenericMethodCall is not null
+                || nestedCall.ImportedGenericMethodCall is not null
+                || !nestedCall.ImportedGenericMethodTypeArguments
+                    .IsDefaultOrEmpty
+                || nestedCall.Arguments.IsDefault
+                || !DirectNativeImportContract.IsScalar(nestedCall.Type))
+            {
+                return false;
+            }
+
+            var target = functions[nestedCall.Function];
+            if (!IsValidLocalScalarInputTarget(target)
+                || nestedCall.Type != target.ReturnType
+                || target.ParameterCount != nestedCall.Arguments.Length
+                || !target.NativeOutputContracts.IsEmpty)
+            {
+                return false;
+            }
+
+            var seenParameters = new bool[target.ParameterCount];
+            for (var argumentIndex = 0;
+                argumentIndex < nestedCall.Arguments.Length;
+                argumentIndex++)
+            {
+                var formal = nestedCall.ParameterIndex(argumentIndex);
+                var argument = nestedCall.Arguments[argumentIndex];
+                if ((uint)formal >= (uint)target.ParameterCount
+                    || seenParameters[formal])
+                {
+                    return false;
+                }
+
+                var formalType = target.Variables[formal].Type;
+                if (argument is BoundRead read)
+                {
+                    if ((uint)read.Variable >= (uint)function.ParameterCount
+                        || read.Type != formalType
+                        || variables[read.Variable].Type != formalType
+                        || variables[read.Variable].IsOut
+                        || variables[read.Variable].IsInit)
+                    {
+                        return false;
+                    }
+                }
+                else if (argument is not BoundConstant constant
+                    || !DirectNativeImportContract.IsScalar(constant.Type)
+                    || constant.Type != formalType
+                    || constant.RepresentationType != constant.Type
+                    || !constant.Bits.IsCanonicalFor(constant.Type))
+                {
+                    return false;
+                }
+
+                seenParameters[formal] = true;
+            }
+
+            return seenParameters.All(static seen => seen);
+        }
+
         bool IsValidLocalVoidPrefixCall(BoundCall prefixCall)
         {
             if (prefixCall.ForeignInterfaceCall is not null
@@ -8594,6 +9042,9 @@ public static partial class TrRmExecutableCompiler
                         && constant.Bits.IsCanonicalFor(constant.Type))
                 && nestedInputPrefixCallsValid
                 && variables.Count == function.ParameterCount;
+        var nestedInputLocalCallCount
+            = nestedInputCalls.Count(static nested =>
+                nested.ForeignInterfaceCall is null);
         var nestedInputCallsValid
             = nestedInputOuterCall?.ForeignInterfaceCall is
                 BoundForeignInterfaceCall outerForeignCall
@@ -8602,29 +9053,35 @@ public static partial class TrRmExecutableCompiler
                 ReferenceEqualityComparer.Instance).Count()
                 == nestedInputCalls.Length
             && nestedInputCalls.All(nested =>
-                nested.IsUnsafeAuthorized
-                && DirectNativeImportContract.IsScalar(nested.Type)
-                && nested.ForeignInterfaceCall is
+                DirectNativeImportContract.IsScalar(nested.Type)
+                && (nested.ForeignInterfaceCall is
                     BoundForeignInterfaceCall nestedForeignCall
-                && !nestedForeignCall.DoesNotReturn
-                && nestedForeignCall.NativeOutputContracts.IsEmpty
-                && nestedForeignCall.Member != outerForeignCall.Member
-                && nestedForeignCall.Receiver is BoundRead {
-                    Type: PrimitiveType.NativeRawPointer,
-                }
-                && nested.Arguments.All(static argument =>
-                    argument is BoundRead
-                    || argument is BoundConstant constant
-                        && DirectNativeImportContract.IsScalar(
-                            constant.Type)
-                        && constant.RepresentationType == constant.Type
-                        && constant.Bits.IsCanonicalFor(constant.Type)));
+                    ? nested.Function
+                            == BoundCall.ForeignInterfaceFunction
+                        && nested.IsUnsafeAuthorized
+                        && !nestedForeignCall.DoesNotReturn
+                        && nestedForeignCall.NativeOutputContracts.IsEmpty
+                        && nestedForeignCall.Member != outerForeignCall.Member
+                        && nestedForeignCall.Receiver is BoundRead {
+                            Type: PrimitiveType.NativeRawPointer,
+                        }
+                        && nested.Arguments.All(static argument =>
+                            argument is BoundRead
+                            || argument is BoundConstant constant
+                                && DirectNativeImportContract.IsScalar(
+                                    constant.Type)
+                                && constant.RepresentationType
+                                    == constant.Type
+                                && constant.Bits.IsCanonicalFor(
+                                    constant.Type))
+                    : IsValidLocalScalarInputCall(nested));
         var foreignInterfaceNestedCall
             = stores == 0
                 && calls == nestedInputPrefixCallCount
                     + nestedInputCalls.Length + 1
                 && foreignInterfaceCalls
                     == calls - nestedInputLocalPrefixCallCount
+                        - nestedInputLocalCallCount
                 && (nestedInputOuterTerminal
                     ? function.DoesNotReturn
                         && foreignInterfaceNonReturningCalls == 1

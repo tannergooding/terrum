@@ -1208,6 +1208,19 @@ internal sealed class NativeCoreRegistrationTests
                 }
             }
 
+            int32 GetIndexViaFni(ptr<void> receiver, ptr<int32> source) {
+                unsafe { return IProbe.GetIndex(receiver, source); }
+            }
+
+            int32 InvokeNestedLocalValueSequence(ptr<void> receiver,
+                ptr<int32> source) {
+                unsafe {
+                    IProbe.TouchValue(receiver, 42);
+                    return IProbe.UseIndex(receiver,
+                        GetIndexViaFni(receiver, source));
+                }
+            }
+
             int32 InvokeConstant(ptr<void> receiver) {
                 unsafe { return IProbe.UseIndex(receiver, 42); }
             }
@@ -1540,6 +1553,19 @@ internal sealed class NativeCoreRegistrationTests
                 }
             }
 
+            int32 GetIndexViaFni(ptr<void> receiver, ptr<int32> source) {
+                unsafe { return IProbe.GetIndex(receiver, source); }
+            }
+
+            int32 InvokeNestedLocalValueSequence(ptr<void> receiver,
+                ptr<int32> source) {
+                unsafe {
+                    IProbe.TouchValue(receiver, 42);
+                    return IProbe.UseIndex(receiver,
+                        GetIndexViaFni(receiver, source));
+                }
+            }
+
             int32 InvokeConstant(ptr<void> receiver) {
                 unsafe { return IProbe.UseIndex(receiver, 42); }
             }
@@ -1845,6 +1871,15 @@ internal sealed class NativeCoreRegistrationTests
             providerTables.Bodies.GetRegisterBody(
                 providerTables.Methods.GetBodyRow(providerHelperSequenceRow),
                 providerTables.Contracts.Count), 0x16);
+        var providerLocalValueSequenceRow
+            = Enumerable.Range(1, providerTables.Methods.Count).Single(row =>
+                providerTables.Methods.GetName(row)
+                    == "InvokeNestedLocalValueSequence");
+        AssertLocalValueHelperFniSequenceBody(
+            providerTables.Bodies.GetRegisterBody(
+                providerTables.Methods.GetBodyRow(
+                    providerLocalValueSequenceRow),
+                providerTables.Contracts.Count), 0x16);
 
         var loadedProvider = TrRmExecutableCompiler.LoadStandard(
             providerInput, "provider.module", []);
@@ -1911,6 +1946,7 @@ internal sealed class NativeCoreRegistrationTests
         AssertNestedFniNestedValueSequence(loadedProvider, null);
         AssertNestedFniNestedPairSequence(loadedProvider, null);
         AssertLocalHelperFniSequence(loadedProvider, null);
+        AssertLocalValueHelperFniSequence(loadedProvider, null);
         AssertNestedFniMixedConstantCall(loadedProvider, null);
         var reference = TrRmExecutableCompiler.CreateStandardReference(
             providerInput, "provider.module", []);
@@ -2233,6 +2269,17 @@ internal sealed class NativeCoreRegistrationTests
                 consumerTables.Contracts.Count);
         AssertLocalHelperFniSequenceBody(
             consumerHelperSequenceBody, 0x1C);
+        var consumerLocalValueSequenceRow
+            = Enumerable.Range(1, consumerTables.Methods.Count).Single(row =>
+                consumerTables.Methods.GetName(row)
+                    == "InvokeNestedLocalValueSequence");
+        var consumerLocalValueSequenceBody
+            = consumerTables.Bodies.GetRegisterBody(
+                consumerTables.Methods.GetBodyRow(
+                    consumerLocalValueSequenceRow),
+                consumerTables.Contracts.Count);
+        AssertLocalValueHelperFniSequenceBody(
+            consumerLocalValueSequenceBody, 0x1C);
 
         var providers = new[] { providerInput };
         var malformedIndex = new TrRmArtifactIndex(consumerArtifact,
@@ -2280,6 +2327,17 @@ internal sealed class NativeCoreRegistrationTests
             consumerNestedConstantCorrelatedRow,
             consumerNestedConstantCorrelatedBody,
             (section, codeStart, _, _) => section[codeStart + 1] = 1);
+        AssertMalformedNestedFniBodyRejected(
+            consumerLocalValueSequenceRow,
+            consumerLocalValueSequenceBody,
+            (section, _, nestedCallRecordStart, _) =>
+                section[nestedCallRecordStart + 5] = 0);
+        AssertMalformedNestedFniBodyRejected(
+            consumerLocalValueSequenceRow,
+            consumerLocalValueSequenceBody,
+            (section, _, nestedCallRecordStart, _) =>
+                BinaryPrimitives.WriteUInt16LittleEndian(
+                    section.AsSpan(nestedCallRecordStart + 10), 0));
 
         var loadedConsumer = TrRmExecutableCompiler.LoadStandard(
             consumerInput, "consumer.module", providers);
@@ -2358,6 +2416,8 @@ internal sealed class NativeCoreRegistrationTests
         AssertNestedFniNestedPairSequence(
             loadedConsumer, "provider.module");
         AssertLocalHelperFniSequence(
+            loadedConsumer, "provider.module");
+        AssertLocalValueHelperFniSequence(
             loadedConsumer, "provider.module");
         AssertNestedFniMixedConstantCall(
             loadedConsumer, "provider.module");
@@ -2534,6 +2594,15 @@ internal sealed class NativeCoreRegistrationTests
                 reemittedTables.Methods.GetBodyRow(
                     reemittedHelperSequenceRow),
                 reemittedTables.Contracts.Count), 0x1C);
+        var reemittedLocalValueSequenceRow
+            = Enumerable.Range(1, reemittedTables.Methods.Count).Single(row =>
+                reemittedTables.Methods.GetName(row)
+                    == "InvokeNestedLocalValueSequence");
+        AssertLocalValueHelperFniSequenceBody(
+            reemittedTables.Bodies.GetRegisterBody(
+                reemittedTables.Methods.GetBodyRow(
+                    reemittedLocalValueSequenceRow),
+                reemittedTables.Contracts.Count), 0x1C);
         var reloadedConsumer = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(schemaIdentity,
                 reemittedArtifact), "consumer.module", providers);
@@ -2612,6 +2681,8 @@ internal sealed class NativeCoreRegistrationTests
         AssertNestedFniNestedPairSequence(
             reloadedConsumer, "provider.module");
         AssertLocalHelperFniSequence(
+            reloadedConsumer, "provider.module");
+        AssertLocalValueHelperFniSequence(
             reloadedConsumer, "provider.module");
         AssertNestedFniMixedConstantCall(
             reloadedConsumer, "provider.module");
@@ -3232,6 +3303,69 @@ internal sealed class NativeCoreRegistrationTests
             Assert.That(body.GetBlockCode(0).ToArray(),
                 Is.EqualTo(new byte[] {
                     0x90, 1, 0x90, 2, 0x17, 0,
+                }));
+        }
+
+        static void AssertLocalValueHelperFniSequenceBody(
+            TrRmRegisterBodyReader body, byte foreignMethodTokenKind)
+        {
+            Assert.That(body.BlockCount, Is.EqualTo(1));
+            Assert.That(body.RecordCount, Is.EqualTo(4));
+            Assert.That(body.MethodCount, Is.EqualTo(3));
+            Assert.That(body.ConstantCount, Is.EqualTo(1));
+            Assert.That(body.ConstantMap.Length, Is.EqualTo(8));
+
+            var prefixCall = body.GetRecord(1);
+            var helperCall = body.GetRecord(2);
+            var outerCall = body.GetRecord(3);
+            var prefixMethodMapIndex
+                = BinaryPrimitives.ReadUInt16LittleEndian(prefixCall[8..]);
+            var helperMethodMapIndex
+                = BinaryPrimitives.ReadUInt16LittleEndian(helperCall[8..]);
+            var outerMethodMapIndex
+                = BinaryPrimitives.ReadUInt16LittleEndian(outerCall[8..]);
+            Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                body.MethodMap[(prefixMethodMapIndex * sizeof(uint))..])
+                    >> 24,
+                Is.EqualTo((uint)foreignMethodTokenKind));
+            Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                body.MethodMap[(helperMethodMapIndex * sizeof(uint))..])
+                    >> 24,
+                Is.EqualTo(0x16u));
+            Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                body.MethodMap[(outerMethodMapIndex * sizeof(uint))..])
+                    >> 24,
+                Is.EqualTo((uint)foreignMethodTokenKind));
+            Assert.That((prefixCall[5], helperCall[5],
+                    BinaryPrimitives.ReadUInt16LittleEndian(
+                        helperCall[10..]),
+                    BinaryPrimitives.ReadUInt32LittleEndian(
+                        helperCall[12..])),
+                Is.EqualTo(((byte)0, (byte)1, (ushort)2, 2u)));
+            Assert.That((helperCall[20], helperCall[21],
+                    BinaryPrimitives.ReadUInt16LittleEndian(
+                        helperCall[22..]),
+                    helperCall[24], helperCall[25],
+                    BinaryPrimitives.ReadUInt16LittleEndian(
+                        helperCall[26..])),
+                Is.EqualTo(((byte)2, (byte)1, (ushort)0,
+                    (byte)2, (byte)1, (ushort)1)));
+            Assert.That((outerCall[5],
+                    BinaryPrimitives.ReadUInt16LittleEndian(
+                        outerCall[10..]),
+                    outerCall[20], outerCall[21],
+                    BinaryPrimitives.ReadUInt16LittleEndian(
+                        outerCall[22..]),
+                    outerCall[24], outerCall[25],
+                    BinaryPrimitives.ReadUInt16LittleEndian(
+                        outerCall[26..])),
+                Is.EqualTo(((byte)1, (ushort)0,
+                    (byte)2, (byte)1, (ushort)0,
+                    (byte)1, (byte)1, (ushort)2)));
+            Assert.That(body.GetBlockCode(0).ToArray(),
+                Is.EqualTo(new byte[] {
+                    0x16, 1, 0x90, 1, 0x90, 2, 0x90, 3,
+                    0x17, 0,
                 }));
         }
 
@@ -4270,6 +4404,86 @@ internal sealed class NativeCoreRegistrationTests
                 Is.EqualTo("TouchValue"));
             Assert.That(((BoundConstant)helperCalls.Single().Arguments.Single())
                 .Value, Is.EqualTo(42L));
+            foreach (var call in foreignCalls.Concat(helperCalls))
+            {
+                Assert.That(call.ForeignInterfaceCall!.Member
+                    .DeclaringInterface.ModuleImport?.ProducerIdentity,
+                    Is.EqualTo(expectedProvider));
+            }
+        }
+
+        static void AssertLocalValueHelperFniSequence(
+            BoundProgram program, string? expectedProvider)
+        {
+            var invoke = program.Functions.Single(function =>
+                function.Name == "InvokeNestedLocalValueSequence");
+            var helper = program.Functions.Single(function =>
+                function.Name == "GetIndexViaFni");
+            var members = program.Interfaces.Single().Members;
+            string GetMemberName(BoundCall call)
+                => members.Single(member => member.Ordinal
+                    == call.ForeignInterfaceCall!.Member.MemberOrdinal).Name;
+
+            static BoundCall? UnwrapCall(BoundExpression expression)
+            {
+                while (expression is BoundUnsafeExpression unsafeCall)
+                {
+                    expression = unsafeCall.Expression;
+                }
+
+                return expression as BoundCall;
+            }
+
+            var localCalls = new List<BoundCall>();
+            var foreignCalls = new List<BoundCall>();
+            Assert.That(BoundTreeTraversal.VisitExpressions(invoke.Body,
+                expression =>
+                {
+                    if (expression is BoundCall call)
+                    {
+                        if (call.ForeignInterfaceCall is null)
+                        {
+                            localCalls.Add(call);
+                        }
+                        else
+                        {
+                            foreignCalls.Add(call);
+                        }
+                    }
+                }), Is.True);
+            Assert.That(localCalls, Has.Count.EqualTo(1));
+            Assert.That(foreignCalls, Has.Count.EqualTo(2));
+            Assert.That(program.Functions[localCalls.Single().Function].Name,
+                Is.EqualTo("GetIndexViaFni"));
+            Assert.That(localCalls.Single().Arguments.Select(argument =>
+                    ((BoundRead)argument).Variable),
+                Is.EqualTo(new[] { 0, 1 }));
+
+            var prefixCall = foreignCalls.Single(call =>
+                GetMemberName(call) == "TouchValue");
+            var outerCall = foreignCalls.Single(call =>
+                GetMemberName(call) == "UseIndex");
+            Assert.That(((BoundConstant)prefixCall.Arguments.Single()).Value,
+                Is.EqualTo(42L));
+            Assert.That(UnwrapCall(outerCall.Arguments.Single()),
+                Is.SameAs(localCalls.Single()));
+
+            var helperCalls = new List<BoundCall>();
+            Assert.That(BoundTreeTraversal.VisitExpressions(helper.Body,
+                expression =>
+                {
+                    if (expression is BoundCall {
+                            ForeignInterfaceCall: not null,
+                        } call)
+                    {
+                        helperCalls.Add(call);
+                    }
+                }), Is.True);
+            Assert.That(helperCalls, Has.Count.EqualTo(1));
+            Assert.That(GetMemberName(helperCalls.Single()),
+                Is.EqualTo("GetIndex"));
+            Assert.That(((BoundRead)helperCalls.Single().Arguments.Single())
+                .Variable, Is.EqualTo(1));
             foreach (var call in foreignCalls.Concat(helperCalls))
             {
                 Assert.That(call.ForeignInterfaceCall!.Member
