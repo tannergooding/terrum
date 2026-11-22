@@ -2145,9 +2145,22 @@ public static partial class TrRmExecutableCompiler
     {
         opcode = 0;
         control = 0;
-        if (unary.Operator != TokenKind.Minus
-            || unary.Operand.Type != unary.Type
+        if (unary.Operand.Type != unary.Type
             || !DirectNativeImportContract.IsScalar(unary.Type))
+        {
+            return false;
+        }
+
+        if ((PrimitiveTypeFacts.IsIntegerOrWide(unary.Type)
+                && unary.Operator == TokenKind.Tilde)
+            || (unary.Type == PrimitiveType.Bool
+                && unary.Operator == TokenKind.Bang))
+        {
+            opcode = 0x33;
+            return true;
+        }
+
+        if (unary.Operator != TokenKind.Minus)
         {
             return false;
         }
@@ -2190,6 +2203,20 @@ public static partial class TrRmExecutableCompiler
             || !DirectNativeImportContract.IsScalar(binary.Type))
         {
             return false;
+        }
+
+        if ((PrimitiveTypeFacts.IsIntegerOrWide(binary.Type)
+                || binary.Type == PrimitiveType.Bool)
+            && binary.Operator is TokenKind.Ampersand or TokenKind.Pipe
+                or TokenKind.Caret)
+        {
+            opcode = binary.Operator switch {
+                TokenKind.Ampersand => 0x30,
+                TokenKind.Pipe => 0x31,
+                TokenKind.Caret => 0x32,
+                _ => 0,
+            };
+            return opcode != 0;
         }
 
         if (PrimitiveTypeFacts.IsIntegerOrWide(binary.Type)
@@ -7827,6 +7854,7 @@ public static partial class TrRmExecutableCompiler
                     break;
                 }
                 case >= 0x20 and <= 0x2B:
+                case >= 0x30 and <= 0x33:
                 {
                     if (!foreignInterfaceDirectCallBody)
                     {
@@ -7847,7 +7875,7 @@ public static partial class TrRmExecutableCompiler
                             "A Standard F+I scalar operation has an invalid or reserved result register.");
                     }
 
-                    if (opcode is 0x20 or 0x26)
+                    if (opcode is 0x20 or 0x26 or 0x33)
                     {
                         if (!valueByRegister.TryGetValue(sourceRegister,
                                 out var operand))
@@ -7856,7 +7884,11 @@ public static partial class TrRmExecutableCompiler
                                 "A Standard F+I unary operation reads an uninitialized register.");
                         }
 
-                        var unary = new BoundUnary(TokenKind.Minus, operand,
+                        var unaryOperator = opcode == 0x33
+                            ? operand.Type == PrimitiveType.Bool
+                                ? TokenKind.Bang : TokenKind.Tilde
+                            : TokenKind.Minus;
+                        var unary = new BoundUnary(unaryOperator, operand,
                             operand.Type, default) {
                             OverflowBehavior = opcode == 0x20
                                 ? BoundIntegerOverflowBehavior.Wrapping
@@ -7891,6 +7923,9 @@ public static partial class TrRmExecutableCompiler
                         0x23 or 0x29 => TokenKind.Star,
                         0x2A => TokenKind.Slash,
                         0x2B => TokenKind.Percent,
+                        0x30 => TokenKind.Ampersand,
+                        0x31 => TokenKind.Pipe,
+                        0x32 => TokenKind.Caret,
                         _ => throw Unsupported(
                             "A Standard F+I binary operation uses an unsupported opcode."),
                     };
@@ -10341,7 +10376,8 @@ public static partial class TrRmExecutableCompiler
                 offset += 4;
             }
             else if ((code[offset] == 0x11
-                    || code[offset] is >= 0x20 and <= 0x2B)
+                    || code[offset] is >= 0x20 and <= 0x2B
+                        or >= 0x30 and <= 0x33)
                 && code.Length - offset >= 2)
             {
                 hasScalarExpressions = true;
@@ -10532,7 +10568,8 @@ public static partial class TrRmExecutableCompiler
                 preparationOffset += 4;
             }
             else if (rawEntryCode[preparationOffset] == 0x11
-                || rawEntryCode[preparationOffset] is >= 0x20 and <= 0x2B)
+                || rawEntryCode[preparationOffset] is >= 0x20 and <= 0x2B
+                    or >= 0x30 and <= 0x33)
             {
                 preparationOffset += 2;
             }
@@ -10688,7 +10725,8 @@ public static partial class TrRmExecutableCompiler
                 continue;
             }
             if (opcode == 0x11
-                || opcode is >= 0x20 and <= 0x2B)
+                || opcode is >= 0x20 and <= 0x2B
+                    or >= 0x30 and <= 0x33)
             {
                 constantOffset += 2;
                 continue;
@@ -11129,7 +11167,8 @@ public static partial class TrRmExecutableCompiler
                 continue;
             }
 
-            if (opcode is not (>= 0x20 and <= 0x2B)
+            if (opcode is not (>= 0x20 and <= 0x2B
+                    or >= 0x30 and <= 0x33)
                 || destinationRegister is 0 or >= 14
                 || sourceRegister is 0 or >= 14
                 || !availableRegisters.Contains(destinationRegister)
@@ -11144,7 +11183,7 @@ public static partial class TrRmExecutableCompiler
             var leftExpression = registerInputs[destinationRegister];
             var rightExpression = registerInputs[sourceRegister];
             BoundExpression operation;
-            if (opcode is 0x20 or 0x26)
+            if (opcode is 0x20 or 0x26 or 0x33)
             {
                 if (sourceRegister != destinationRegister)
                 {
@@ -11152,7 +11191,11 @@ public static partial class TrRmExecutableCompiler
                         "The Standard F+I conditional-output unary operation has an invalid register mapping.");
                 }
 
-                var unary = new BoundUnary(TokenKind.Minus, leftExpression,
+                var unaryOperator = opcode == 0x33
+                    ? leftExpression.Type == PrimitiveType.Bool
+                        ? TokenKind.Bang : TokenKind.Tilde
+                    : TokenKind.Minus;
+                var unary = new BoundUnary(unaryOperator, leftExpression,
                     leftExpression.Type, default) {
                     OverflowBehavior = opcode == 0x20
                         ? BoundIntegerOverflowBehavior.Wrapping
@@ -11176,6 +11219,9 @@ public static partial class TrRmExecutableCompiler
                     0x23 or 0x29 => TokenKind.Star,
                     0x2A => TokenKind.Slash,
                     0x2B => TokenKind.Percent,
+                    0x30 => TokenKind.Ampersand,
+                    0x31 => TokenKind.Pipe,
+                    0x32 => TokenKind.Caret,
                     _ => throw Unsupported(
                         "A Standard F+I conditional-output binary operation uses an unsupported opcode."),
                 };

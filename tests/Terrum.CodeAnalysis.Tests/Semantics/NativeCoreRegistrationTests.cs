@@ -634,6 +634,24 @@ internal sealed class NativeCoreRegistrationTests
     [TestCase("int32", "value % 2", (byte)0xC0, TokenKind.Percent, false,
         SourceArithmeticProfile.Development,
         BoundIntegerOverflowBehavior.Checked, (ushort)2, false)]
+    [TestCase("int32", "~value", (byte)0x33, TokenKind.Tilde, true,
+        SourceArithmeticProfile.Development,
+        BoundIntegerOverflowBehavior.Checked, (ushort)1, false)]
+    [TestCase("int32", "value & 2", (byte)0x30,
+        TokenKind.Ampersand, false, SourceArithmeticProfile.Development,
+        BoundIntegerOverflowBehavior.Checked, (ushort)2, false)]
+    [TestCase("int32", "value | 2", (byte)0x31,
+        TokenKind.Pipe, false, SourceArithmeticProfile.Development,
+        BoundIntegerOverflowBehavior.Checked, (ushort)2, false)]
+    [TestCase("int32", "value ^ 2", (byte)0x32,
+        TokenKind.Caret, false, SourceArithmeticProfile.Development,
+        BoundIntegerOverflowBehavior.Checked, (ushort)2, false)]
+    [TestCase("bool", "!value", (byte)0x33, TokenKind.Bang, true,
+        SourceArithmeticProfile.Development,
+        BoundIntegerOverflowBehavior.Checked, (ushort)1, false)]
+    [TestCase("bool", "value & true", (byte)0x30,
+        TokenKind.Ampersand, false, SourceArithmeticProfile.Development,
+        BoundIntegerOverflowBehavior.Checked, (ushort)2, false)]
     [TestCase("int32", "value + 1", (byte)0x21, TokenKind.Plus, false,
         SourceArithmeticProfile.Release, BoundIntegerOverflowBehavior.Wrapping,
         (ushort)2, true)]
@@ -763,6 +781,7 @@ internal sealed class NativeCoreRegistrationTests
             var expectedType = typeName switch {
                 "int32" => PrimitiveType.Int32,
                 "float64" => PrimitiveType.Float64,
+                "bool" => PrimitiveType.Bool,
                 _ => throw new AssertionException(
                     "The test selected an unsupported scalar type."),
             };
@@ -867,7 +886,7 @@ internal sealed class NativeCoreRegistrationTests
                     init int32 value;
                     unsafe {
                         int32 status = IProbe.TryReadPair(receiver,
-                            first + second, second * 2, &init value);
+                            first + second, second | 2, &init value);
                         if (status >= 0) { return value; }
                         return fallback;
                     }
@@ -923,7 +942,7 @@ internal sealed class NativeCoreRegistrationTests
         var entryCode = body.GetBlockCode(0).ToArray();
         Assert.That(entryCode, Does.Contain((byte)0x11));
         Assert.That(entryCode, Does.Contain((byte)0x21));
-        Assert.That(entryCode, Does.Contain((byte)0x23));
+        Assert.That(entryCode, Does.Contain((byte)0x31));
         var callSite = body.GetRecord(1);
         Assert.That((callSite[24], callSite[25],
                 BinaryPrimitives.ReadUInt16LittleEndian(callSite[26..])),
@@ -1061,9 +1080,9 @@ internal sealed class NativeCoreRegistrationTests
             Assert.That(((BoundRead)first.Left).Variable, Is.EqualTo(1));
             Assert.That(first.Right, Is.TypeOf<BoundRead>());
             Assert.That(((BoundRead)first.Right).Variable, Is.EqualTo(2));
-            Assert.That(second.Operator, Is.EqualTo(TokenKind.Star));
+            Assert.That(second.Operator, Is.EqualTo(TokenKind.Pipe));
             Assert.That(second.OverflowBehavior,
-                Is.EqualTo(BoundIntegerOverflowBehavior.Wrapping));
+                Is.EqualTo(BoundIntegerOverflowBehavior.Checked));
             Assert.That(second.Left, Is.TypeOf<BoundRead>());
             Assert.That(((BoundRead)second.Left).Variable, Is.EqualTo(2));
             Assert.That(second.Right, Is.TypeOf<BoundConstant>());
