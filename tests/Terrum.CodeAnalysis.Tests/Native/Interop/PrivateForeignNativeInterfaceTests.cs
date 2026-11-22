@@ -532,6 +532,34 @@ internal sealed class PrivateForeignNativeInterfaceTests
     }
 
     [Test]
+    public void PrivateFniDirectoryRejectsOwnerCountMismatch()
+    {
+        const string schemaIdentity
+            = "terrum/private-semantic-111-foreign-native-interfaces-1";
+        const string moduleIdentity = "PrivateFniOwnerCount";
+        var producer = CreateTwoMemberFniProvider(moduleIdentity);
+        _ = ModuleCompiler.CreateReferenceWithSchema(producer,
+            schemaIdentity);
+        var ownerKey = Encoding.UTF8.GetBytes(moduleIdentity + ".owner");
+        var ownerKeyOffset = producer.AsSpan().IndexOf(ownerKey);
+        Assert.That(ownerKeyOffset, Is.GreaterThanOrEqualTo(0));
+        var directoryCountOffset = ownerKeyOffset - sizeof(int)
+            - sizeof(int) - Encoding.UTF8.GetByteCount(moduleIdentity)
+            - sizeof(byte) - sizeof(bool) - sizeof(ushort) - sizeof(int);
+        Assert.That(directoryCountOffset, Is.GreaterThanOrEqualTo(0));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(
+            producer.AsSpan(directoryCountOffset, sizeof(int))),
+            Is.EqualTo(1));
+
+        var malformed = (byte[])producer.Clone();
+        BinaryPrimitives.WriteInt32LittleEndian(
+            malformed.AsSpan(directoryCountOffset, sizeof(int)), 2);
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReferenceWithSchema(malformed,
+                schemaIdentity));
+    }
+
+    [Test]
     public void PrivateFniCallRejectsTargetOutsideTheOwnerDirectory()
     {
         const string schemaIdentity
