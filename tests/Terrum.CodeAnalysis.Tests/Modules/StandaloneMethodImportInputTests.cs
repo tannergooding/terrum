@@ -91,19 +91,22 @@ internal sealed class StandaloneMethodImportInputTests
                     || Host.StandaloneResolvedImports[2] != 1
                     || Host.StandaloneResolvedImports[3] != 1
                     || Host.StandaloneResolvedImports[4]
-                        != Host.StandaloneResolvedImports[28]
+                        != Host.StandaloneResolvedImports[36]
                     || Host.StandaloneResolvedImports[12] != 3
                     || Host.StandaloneResolvedImports[13] != 1
                     || Host.StandaloneResolvedImports[19] != 1
                     || Host.StandaloneResolvedImports[20] != 1
-                    || Host.StandaloneResolvedImports[24] != 1
-                    || Host.StandaloneResolvedImports[25] != 1
-                    || Host.StandaloneResolvedImports[26] != 1
-                    || Host.StandaloneResolvedImports[27] != 1
-                    || Host.StandaloneResolvedImports[36] != 3
-                    || Host.StandaloneResolvedImports[37] != 2
-                    || Host.StandaloneResolvedImports[43] != 1
-                    || Host.StandaloneResolvedImports[44] != 2
+                    || Host.StandaloneResolvedImports[32] != 1
+                    || Host.StandaloneResolvedImports[33] != 1
+                    || Host.StandaloneResolvedImports[34] != 1
+                    || Host.StandaloneResolvedImports[35] != 1
+                    || Host.StandaloneResolvedImports[44] != 3
+                    || Host.StandaloneResolvedImports[45] != 2
+                    || Host.StandaloneResolvedImports[51] != 1
+                    || Host.StandaloneResolvedImports[52] != 2
+                    || Host.StandaloneResolvedImports[53] != 1
+                    || Host.StandaloneResolvedImports[54] != 1
+                    || Host.StandaloneResolvedImports[60] != 0
                     || Host.StandaloneCallableTypeIds[1] != 1
                     || Host.StandaloneCallableTypeIds[2] != 1
                     || Host.StandaloneCallableEffects[1] != 0
@@ -120,8 +123,9 @@ internal sealed class StandaloneMethodImportInputTests
                     || Host.StandaloneResolvedProviderGroupCount[0] != 2
                     || Host.StandaloneResolvedImports[19] != 1
                     || Host.StandaloneResolvedImports[20] != 1
-                    || Host.StandaloneResolvedImports[43] != 2
-                    || Host.StandaloneResolvedImports[44] != 1
+                    || Host.StandaloneResolvedImports[51] != 2
+                    || Host.StandaloneResolvedImports[52] != 1
+                    || Host.StandaloneResolvedImports[53] != 1
                     || Host.StandaloneCallableTypeIds[1] != 1
                     || Host.StandaloneCallableTypeIds[2] != 1) {
                     return 35;
@@ -172,6 +176,19 @@ internal sealed class StandaloneMethodImportInputTests
                     || Host.StandaloneResolvedImportCount[0] != 0
                     || Host.StandaloneResolvedProviderGroupCount[0] != 0) {
                     return 34;
+                }
+                return 0;
+            }
+            if (Host.Expected[2] == 11
+                || Host.Expected[2] == 12
+                || Host.Expected[2] == 13
+                || Host.Expected[2] == 14) {
+                if (rootStatus != 1
+                    || Host.StandaloneResolvedRootCount[0] != 0
+                    || Host.StandaloneResolvedImportCount[0] != 0
+                    || Host.StandaloneResolvedExpectedImportCount[0] != 0
+                    || Host.StandaloneResolvedProviderGroupCount[0] != 0) {
+                    return 36;
                 }
                 return 0;
             }
@@ -374,6 +391,9 @@ internal sealed class StandaloneMethodImportInputTests
                 "StandaloneContractFactCount",
                 "StandaloneContractFacts",
                 "StandaloneContractFactOrder",
+                "StandaloneContractComparisonFactCount",
+                "StandaloneContractComparisonFacts",
+                "StandaloneContractComparisonFactOrder",
                 "StandaloneResolvedImportCount",
                 "StandaloneResolvedImports",
                 "StandaloneResolvedImportOrder",
@@ -424,6 +444,7 @@ internal sealed class StandaloneMethodImportInputTests
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodOutputStates.terrum",
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodRoots.terrum",
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodImports.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodImportBindings.terrum",
         };
         var root = RepositoryRoot();
         var components = new List<SyntaxTree>(sourcePaths.Length + 1);
@@ -951,6 +972,69 @@ internal sealed class StandaloneMethodImportInputTests
                 verificationMode: 9),
             Is.EqualTo(0));
 
+        var incompatibleSignature = new StandaloneMethodImportInput(
+            Agreement, "consumer/module", [
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateMethodImporterArtifact(
+                        "provider/consumer", "provider/leaf")),
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateMethodProviderArtifact("provider/leaf",
+                        "api/Run", resultTypeSpecRef: 0xF200_0001)),
+            ], []);
+        var incompatibleSignatureProgram
+            = Compile(incompatibleSignature, 3, 1, verificationMode: 11);
+        Assert.That(Run(incompatibleSignatureProgram,
+                incompatibleSignature, 3, 1, verificationMode: 11),
+            Is.EqualTo(0));
+
+        var unsafeReplacement = new StandaloneMethodImportInput(Agreement,
+            "consumer/module", [
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateMethodImporterArtifact(
+                        "provider/consumer", "provider/leaf")),
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateMethodProviderArtifact("provider/leaf",
+                        "api/Run", effectsMask: 4)),
+            ], []);
+        var unsafeReplacementProgram
+            = Compile(unsafeReplacement, 3, 1, verificationMode: 12);
+        Assert.That(Run(unsafeReplacementProgram, unsafeReplacement, 3, 1,
+                verificationMode: 12),
+            Is.EqualTo(0));
+
+        var conflictingAliases = new StandaloneMethodImportInput(
+            Agreement, "consumer/module", [
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateMethodImporterArtifact(
+                        "provider/consumer", "provider/leaf",
+                        sharedExpectedAliases: true)),
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateConflictingAliasedProviderArtifact(
+                        "provider/leaf")),
+            ], [
+                new StandaloneMethodRoot(1, "provider/leaf", "api/Run"),
+            ]);
+        var conflictingAliasesProgram
+            = Compile(conflictingAliases, 3, 1, verificationMode: 13);
+        Assert.That(Run(conflictingAliasesProgram, conflictingAliases, 3, 1,
+                verificationMode: 13),
+            Is.EqualTo(0));
+
+        var missingExport = new StandaloneMethodImportInput(Agreement,
+            "consumer/module", [
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateMethodImporterArtifact(
+                        "provider/consumer", "provider/leaf",
+                        exportKey: "api/Missing")),
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateMinimalArtifact("provider/leaf")),
+            ], []);
+        var missingExportProgram
+            = Compile(missingExport, 3, 1, verificationMode: 14);
+        Assert.That(Run(missingExportProgram, missingExport, 3, 1,
+                verificationMode: 14),
+            Is.EqualTo(0));
+
         BoundProgram Compile(StandaloneMethodImportInput request,
             int expectedModuleCount, int expectedRootStatus,
             int verificationMode = 0, int expectedEffectMask = 0,
@@ -1032,6 +1116,113 @@ internal sealed class StandaloneMethodImportInputTests
             new TrRmSection(0x0017, 0, 1, methodSigSection),
             new TrRmSection(0x001D, 0, 2, exportSection),
         ]);
+    }
+
+    private static byte[] CreateConflictingAliasedProviderArtifact(
+        string moduleIdentity)
+    {
+        var stringSection = TrRmStringTableWriter.EncodeNames([
+            (moduleIdentity, 0),
+            ("Implementation1", 0),
+            ("api/Run", 0),
+            ("api/RunAlias", 0),
+            ("Implementation2", 0),
+        ]);
+        var strings = new TrRmStringTableReader(stringSection, 5);
+        var moduleSection = TrRmModuleTableWriter.Encode([
+            new TrRmModuleRow(1, 1, 0, 0, 1, 1, 1, 1),
+        ], strings, 0, 0, 2, 0, 0);
+        var methodDefSection = new byte[56];
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            methodDefSection.AsSpan(4), 2);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            methodDefSection.AsSpan(8), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            methodDefSection.AsSpan(12), 2);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            methodDefSection.AsSpan(32), 5);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            methodDefSection.AsSpan(36), 2);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            methodDefSection.AsSpan(40), 2);
+        var methodSigSection = new byte[48];
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            methodSigSection, 0xF200_0008);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            methodSigSection.AsSpan(24), 0xF200_0008);
+        var exportSection = new byte[16];
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            exportSection, 0x1600_0001);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            exportSection.AsSpan(4), 3);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            exportSection.AsSpan(8), 0x1600_0002);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            exportSection.AsSpan(12), 4);
+        return TrRmArtifactWriter.Encode([
+            new TrRmSection(0x0001, 0, 1, moduleSection),
+            new TrRmSection(0x0002, 0, 5, stringSection),
+            new TrRmSection(0x0016, 0, 2, methodDefSection),
+            new TrRmSection(0x0017, 0, 2, methodSigSection),
+            new TrRmSection(0x001D, 0, 2, exportSection),
+        ]);
+    }
+
+    private static byte[] CreateMethodProviderArtifact(
+        string moduleIdentity, string exportKey,
+        uint resultTypeSpecRef = 0xF200_0008, uint effectsMask = 0)
+    {
+        var stringSection = TrRmStringTableWriter.EncodeNames([
+            (moduleIdentity, 0),
+            ("Implementation", 0),
+            (exportKey, 0),
+        ]);
+        var strings = new TrRmStringTableReader(stringSection, 3);
+        var moduleSection = TrRmModuleTableWriter.Encode([
+            new TrRmModuleRow(1, 1, 0, 0, 1, 1, 1, 1),
+        ], strings, 0, 0, 1, 0, 0);
+        var methodDefSection = new byte[28];
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            methodDefSection.AsSpan(4), 2);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            methodDefSection.AsSpan(8), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            methodDefSection.AsSpan(12), 2);
+        if (effectsMask != 0)
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                methodDefSection.AsSpan(16), 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                methodDefSection.AsSpan(20), 1);
+        }
+        var methodSigSection = new byte[24];
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            methodSigSection, resultTypeSpecRef);
+        var exportSection = new byte[8];
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            exportSection, 0x1600_0001);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            exportSection.AsSpan(4), 3);
+        var sections = new List<TrRmSection> {
+            new(0x0001, 0, 1, moduleSection),
+            new(0x0002, 0, 3, stringSection),
+            new(0x0016, 0, 1, methodDefSection),
+            new(0x0017, 0, 1, methodSigSection),
+            new(0x001D, 0, 1, exportSection),
+        };
+        if (effectsMask != 0)
+        {
+            var effectsRow = new byte[12];
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                effectsRow, 0x1600_0001);
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                effectsRow.AsSpan(4), 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                effectsRow.AsSpan(8), effectsMask);
+            sections.Add(new TrRmSection(0x001B, 0, 1,
+                TrRmVariableTableWriter.EncodeBlobs([effectsRow])));
+        }
+        return TrRmArtifactWriter.Encode(sections);
     }
 
     private static byte[] CreateMethodImporterArtifact(

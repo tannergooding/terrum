@@ -3,7 +3,7 @@ namespace Terrum.CodeAnalysis;
 int32 CatalogStandaloneProviderImports(int32 rootCount)
 {
     int32 importCapacity
-        = Host.StandaloneResolvedImports.Length / 24;
+        = Host.StandaloneResolvedImports.Length / 32;
     if (rootCount < 0
         || rootCount != Host.StandaloneRequest[5]
         || Host.StandaloneResolvedImportCount.Length != 1
@@ -182,14 +182,16 @@ int32 CatalogStandaloneProviderImports(int32 rootCount)
             init int32 paramCount;
             init int32 contractFirst;
             init int32 contractCount;
-            int32 methodStatus = ValidateStandaloneImportedMethod(
+            init int32 bodyRow;
+            int32 methodStatus = ValidateStandaloneCallableMethod(
                 artifactOrdinal, artifactStart, artifactLength,
                 expectedModuleRow,
                 int32(expectedDefinition & 0x00FF_FFFF),
                 expectedVisibility, expectedOwnerType, callableSlot,
+                requireBodyless: true,
                 ref init methodSigRow, ref init paramFirst,
                 ref init paramCount, ref init contractFirst,
-                ref init contractCount);
+                ref init contractCount, ref init bodyRow);
             if (methodStatus != 0)
             {
                 return methodStatus;
@@ -234,7 +236,7 @@ int32 CatalogStandaloneProviderImports(int32 rootCount)
                 return 1;
             }
 
-            int32 outputOffset = importCount * 24;
+            int32 outputOffset = importCount * 32;
             Host.StandaloneResolvedImports[outputOffset]
                 = artifactOrdinal;
             Host.StandaloneResolvedImports[outputOffset + 1]
@@ -275,6 +277,12 @@ int32 CatalogStandaloneProviderImports(int32 rootCount)
                 = int32(runtimePolicy);
             Host.StandaloneResolvedImports[outputOffset + 19] = 0;
             Host.StandaloneResolvedImports[outputOffset + 20] = 0;
+            for (mut int32 outputIndex = 21;
+                outputIndex < 32;
+                outputIndex = outputIndex + 1)
+            {
+                Host.StandaloneResolvedImports[outputOffset + outputIndex] = 0;
+            }
             importCount = importCount + 1;
         }
     }
@@ -303,7 +311,7 @@ int32 CatalogStandaloneProviderImports(int32 rootCount)
     {
         int32 catalogOrdinal
             = Host.StandaloneResolvedImportOrder[orderIndex] - 1;
-        int32 outputOffset = catalogOrdinal * 24;
+        int32 outputOffset = catalogOrdinal * 32;
         if (orderIndex == 1)
         {
             providerGroupCount = 1;
@@ -312,7 +320,7 @@ int32 CatalogStandaloneProviderImports(int32 rootCount)
         {
             int32 previousOrdinal
                 = Host.StandaloneResolvedImportOrder[orderIndex - 1] - 1;
-            int32 previousOffset = previousOrdinal * 24;
+            int32 previousOffset = previousOrdinal * 32;
             init int32 comparison;
             int32 groupStatus
                 = CompareStandaloneResolvedImportGroupKeys(
@@ -361,7 +369,7 @@ int32 CatalogStandaloneProviderImports(int32 rootCount)
     {
         int32 catalogOrdinal
             = Host.StandaloneResolvedExpectedImportOrder[orderIndex] - 1;
-        int32 outputOffset = catalogOrdinal * 24;
+        int32 outputOffset = catalogOrdinal * 32;
         if (orderIndex == 1)
         {
             expectedImportCount = 1;
@@ -371,7 +379,7 @@ int32 CatalogStandaloneProviderImports(int32 rootCount)
             int32 previousOrdinal
                 = Host.StandaloneResolvedExpectedImportOrder[
                     orderIndex - 1] - 1;
-            int32 previousOffset = previousOrdinal * 24;
+            int32 previousOffset = previousOrdinal * 32;
             init int32 comparison;
             if (!CompareStandaloneResolvedExpectedGroupKeys(
                     previousOffset, outputOffset,
@@ -392,7 +400,7 @@ int32 CatalogStandaloneProviderImports(int32 rootCount)
     Host.StandaloneResolvedExpectedImportCount[0]
         = expectedImportCount;
     Host.StandaloneResolvedProviderGroupCount[0] = providerGroupCount;
-    return 0;
+    return BindStandaloneProviderImports(rootCount);
 }
 
 int32 ValidateStandaloneProviderModuleRefs(int32 artifactOrdinal,
@@ -474,18 +482,21 @@ int32 ValidateStandaloneProviderModuleRefs(int32 artifactOrdinal,
     return 0;
 }
 
-int32 ValidateStandaloneImportedMethod(int32 artifactOrdinal,
+int32 ValidateStandaloneCallableMethod(int32 artifactOrdinal,
     int32 artifactStart, int32 artifactLength, int32 moduleRow,
     int32 methodDefRow,
     uint32 visibility, uint32 ownerType, int32 callableSlot,
+    bool requireBodyless,
     ref<init int32> methodSigRowResult,
     ref<init int32> paramFirstResult,
     ref<init int32> paramCountResult,
     ref<init int32> contractFirstResult,
-    ref<init int32> contractCountResult)
+    ref<init int32> contractCountResult,
+    ref<init int32> bodyRowResult)
     ensure return == 0 ? (*methodSigRowResult is init
         && *paramFirstResult is init && *paramCountResult is init
-        && *contractFirstResult is init && *contractCountResult is init)
+        && *contractFirstResult is init && *contractCountResult is init
+        && *bodyRowResult is init)
         : true
 {
     int32 methodEntry = FindStandaloneArtifactSection(0x0016);
@@ -494,6 +505,7 @@ int32 ValidateStandaloneImportedMethod(int32 artifactOrdinal,
     int32 signatureCount = GetStandaloneArtifactSectionCount(0x0017);
     int32 contractCount = GetStandaloneArtifactSectionCount(0x001B);
     int32 paramCount = GetStandaloneArtifactSectionCount(0x0018);
+    int32 bodyCount = GetStandaloneArtifactSectionCount(0x0020);
     if (methodEntry == 0 || signatureEntry == 0
         || methodDefRow <= 0 || methodDefRow > methodCount)
     {
@@ -550,7 +562,8 @@ int32 ValidateStandaloneImportedMethod(int32 artifactOrdinal,
             int32(methodNameStringRow))
         || methodSigRow == 0
         || methodSigRow > uint32(signatureCount)
-        || bodyRow != 0
+        || bodyRow > uint32(bodyCount)
+        || (requireBodyless && bodyRow != 0)
         || !IsStandaloneMetadataRange(contractFirst,
             methodContractCount, contractCount))
     {
@@ -613,6 +626,20 @@ int32 ValidateStandaloneImportedMethod(int32 artifactOrdinal,
     {
         return 2;
     }
+    int32 typeSpecEntry = FindStandaloneArtifactSection(0x0003);
+    int32 typeSpecCount = GetStandaloneArtifactSectionCount(0x0003);
+    init bool hasNativePointerAnchor;
+    int32 anchorStatus = TryGetStandaloneMethodNativePointerAnchor(
+        artifactStart, artifactLength, typeSpecEntry, typeSpecCount,
+        methodDefRow, ref init hasNativePointerAnchor);
+    if (anchorStatus != 0)
+    {
+        return anchorStatus;
+    }
+    if (hasNativePointerAnchor)
+    {
+        return 2;
+    }
 
     int32 callableTypeStatus
         = ValidateStandaloneMethodCallableTypes(artifactOrdinal,
@@ -639,6 +666,7 @@ int32 ValidateStandaloneImportedMethod(int32 artifactOrdinal,
     *paramCountResult = int32(signatureParamCount);
     *contractFirstResult = int32(contractFirst);
     *contractCountResult = int32(methodContractCount);
+    *bodyRowResult = int32(bodyRow);
     return 0;
 }
 
@@ -870,8 +898,8 @@ bool CompareStandaloneResolvedImports(int32 firstRow,
     int32 secondRow, ref<init int32> comparison)
     ensure return ? *comparison is init : true
 {
-    int32 firstOffset = (firstRow - 1) * 24;
-    int32 secondOffset = (secondRow - 1) * 24;
+    int32 firstOffset = (firstRow - 1) * 32;
+    int32 secondOffset = (secondRow - 1) * 32;
     if (!CompareStandaloneModuleDirectoryRows(
             Host.StandaloneResolvedImports[firstOffset + 4],
             Host.StandaloneResolvedImports[secondOffset + 4],
@@ -952,8 +980,8 @@ bool CompareStandaloneResolvedExpectedImports(int32 firstRow,
     int32 secondRow, ref<init int32> comparison)
     ensure return ? *comparison is init : true
 {
-    int32 firstOffset = (firstRow - 1) * 24;
-    int32 secondOffset = (secondRow - 1) * 24;
+    int32 firstOffset = (firstRow - 1) * 32;
+    int32 secondOffset = (secondRow - 1) * 32;
     if (!CompareStandaloneResolvedExpectedGroupKeys(
             firstOffset, secondOffset, ref init *comparison))
     {

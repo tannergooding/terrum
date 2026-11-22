@@ -24,9 +24,14 @@ public static int32 ValidateStandaloneMethodImportInput()
             != (Host.StandaloneArtifacts.Length / 20 + 1) * 7
         || Host.StandaloneContractFactOrder.Length
             != Host.StandaloneArtifacts.Length / 20 + 1
+        || Host.StandaloneContractComparisonFactCount.Length != 1
+        || Host.StandaloneContractComparisonFacts.Length
+            != (Host.StandaloneArtifacts.Length / 20 + 1) * 7
+        || Host.StandaloneContractComparisonFactOrder.Length
+            != Host.StandaloneArtifacts.Length / 20 + 1
         || Host.StandaloneResolvedImportCount.Length != 1
         || Host.StandaloneResolvedImports.Length
-            != (Host.StandaloneArtifacts.Length / 12 + 1) * 24
+            != (Host.StandaloneArtifacts.Length / 12 + 1) * 32
         || Host.StandaloneResolvedImportOrder.Length
             != Host.StandaloneArtifacts.Length / 12 + 1
         || Host.StandaloneResolvedExpectedImportCount.Length != 1
@@ -35,10 +40,10 @@ public static int32 ValidateStandaloneMethodImportInput()
             != Host.StandaloneArtifacts.Length / 12 + 1
         || Host.StandaloneCallableTypeIds.Length
             != Host.StandaloneMethodRoots.Length / 5
-                + Host.StandaloneArtifacts.Length / 12 + 1
+                + ((Host.StandaloneArtifacts.Length / 12 + 1) * 2)
         || Host.StandaloneCallableEffects.Length
             != Host.StandaloneMethodRoots.Length / 5
-                + Host.StandaloneArtifacts.Length / 12 + 1
+                + ((Host.StandaloneArtifacts.Length / 12 + 1) * 2)
         || Host.StandaloneSectionKinds.Length
             != Host.StandaloneArtifacts.Length / 16 + 1
         || Host.StandaloneSectionFlags.Length

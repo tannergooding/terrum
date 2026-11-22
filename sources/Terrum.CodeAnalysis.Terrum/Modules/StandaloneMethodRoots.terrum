@@ -203,6 +203,7 @@ void ClearStandaloneResolvedRoots()
     }
     Host.StandaloneTypeFactCount[0] = 0;
     Host.StandaloneContractFactCount[0] = 0;
+    Host.StandaloneContractComparisonFactCount[0] = 0;
     Host.StandaloneResolvedImportCount[0] = 0;
     Host.StandaloneResolvedExpectedImportCount[0] = 0;
     Host.StandaloneResolvedProviderGroupCount[0] = 0;

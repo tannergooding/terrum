@@ -1,0 +1,1002 @@
+namespace Terrum.CodeAnalysis;
+
+int32 BindStandaloneProviderImports(int32 rootCount)
+{
+    int32 importCount = Host.StandaloneResolvedImportCount[0];
+    if (importCount == 0)
+    {
+        return 0;
+    }
+
+    int32 importCapacity
+        = Host.StandaloneResolvedImports.Length / 32;
+    mut int32 orderIndex = 1;
+    while (orderIndex <= importCount)
+    {
+        int32 catalogOrdinal
+            = Host.StandaloneResolvedImportOrder[orderIndex] - 1;
+        int32 firstOffset = catalogOrdinal * 32;
+        int32 providerGroupId
+            = Host.StandaloneResolvedImports[firstOffset + 19];
+        int32 providerDirectoryRow
+            = Host.StandaloneResolvedImports[firstOffset + 4];
+        int32 providerCallableSlot
+            = rootCount + importCapacity + providerGroupId - 1;
+        if (providerGroupId <= 0
+            || providerGroupId
+                > Host.StandaloneResolvedProviderGroupCount[0]
+            || providerCallableSlot
+                >= Host.StandaloneCallableTypeIds.Length
+            || providerCallableSlot
+                >= Host.StandaloneCallableEffects.Length)
+        {
+            return 3;
+        }
+
+        init int32 providerMethodDefRow;
+        init int32 providerExportRow;
+        init int32 providerMethodSigRow;
+        init int32 providerParamFirst;
+        init int32 providerParamCount;
+        init int32 providerContractFirst;
+        init int32 providerContractCount;
+        init int32 providerBodyRow;
+        int32 providerStatus = TryFindStandaloneProviderMethod(
+            firstOffset, providerDirectoryRow, providerCallableSlot,
+            ref init providerMethodDefRow, ref init providerExportRow,
+            ref init providerMethodSigRow, ref init providerParamFirst,
+            ref init providerParamCount, ref init providerContractFirst,
+            ref init providerContractCount, ref init providerBodyRow);
+        if (providerStatus != 0)
+        {
+            return providerStatus;
+        }
+
+        int32 providerDirectoryOffset = providerDirectoryRow * 8;
+        int32 providerArtifactOrdinal
+            = Host.StandaloneModuleDirectory[providerDirectoryOffset];
+        if (providerArtifactOrdinal < 0)
+        {
+            return 3;
+        }
+        int32 providerModuleRow
+            = Host.StandaloneModuleDirectory[
+                providerDirectoryOffset + 1];
+        int32 canonicalizationStatus
+            = CanonicalizeStandaloneCallableContractFacts();
+        if (canonicalizationStatus != 0
+            || !CopyStandaloneContractFactsToComparison())
+        {
+            return canonicalizationStatus != 0
+                ? canonicalizationStatus : 3;
+        }
+
+        mut int32 groupEnd = orderIndex;
+        while (groupEnd <= importCount)
+        {
+            int32 memberOrdinal
+                = Host.StandaloneResolvedImportOrder[groupEnd] - 1;
+            int32 memberOffset = memberOrdinal * 32;
+            if (Host.StandaloneResolvedImports[memberOffset + 19]
+                != providerGroupId)
+            {
+                break;
+            }
+
+            Host.StandaloneResolvedImports[memberOffset + 21]
+                = providerMethodDefRow;
+            Host.StandaloneResolvedImports[memberOffset + 22]
+                = providerExportRow;
+            Host.StandaloneResolvedImports[memberOffset + 23]
+                = providerMethodSigRow;
+            Host.StandaloneResolvedImports[memberOffset + 24]
+                = providerParamFirst;
+            Host.StandaloneResolvedImports[memberOffset + 25]
+                = providerParamCount;
+            Host.StandaloneResolvedImports[memberOffset + 26]
+                = providerContractFirst;
+            Host.StandaloneResolvedImports[memberOffset + 27]
+                = providerContractCount;
+            Host.StandaloneResolvedImports[memberOffset + 28]
+                = providerBodyRow;
+            Host.StandaloneResolvedImports[memberOffset + 29]
+                = providerCallableSlot;
+
+            int32 expectedArtifactOrdinal
+                = Host.StandaloneResolvedImports[memberOffset];
+            if (!TryValidateStandaloneArtifactDirectory(
+                    expectedArtifactOrdinal))
+            {
+                return 3;
+            }
+            init int32 expectedArtifactStart;
+            init int32 expectedArtifactLength;
+            if (!TryGetStandaloneArtifactExtent(expectedArtifactOrdinal,
+                    ref init expectedArtifactStart,
+                    ref init expectedArtifactLength))
+            {
+                return 3;
+            }
+            int32 moduleEntry = FindStandaloneArtifactSection(0x0001);
+            int32 moduleCount
+                = GetStandaloneArtifactSectionCount(0x0001);
+            int32 moduleStart = moduleEntry == 0 ? 0
+                : Host.StandaloneSectionStarts[moduleEntry];
+            init int32 expectedModuleRow;
+            init uint32 expectedVisibility;
+            init uint32 expectedOwnerType;
+            uint32 expectedDefinition = 0x1600_0000
+                | uint32(Host.StandaloneResolvedImports[
+                    memberOffset + 5]);
+            if (!TryResolveStandaloneExportDefinition(
+                    expectedArtifactStart, expectedArtifactLength,
+                    moduleStart, moduleCount, expectedDefinition,
+                    ref init expectedModuleRow,
+                    ref init expectedVisibility,
+                    ref init expectedOwnerType)
+                || expectedModuleRow
+                    != Host.StandaloneResolvedImports[memberOffset + 1])
+            {
+                return 3;
+            }
+
+            int32 expectedCallableSlot
+                = Host.StandaloneResolvedImports[memberOffset + 13];
+            init int32 expectedMethodSigRow;
+            init int32 expectedParamFirst;
+            init int32 expectedParamCount;
+            init int32 expectedContractFirst;
+            init int32 expectedContractCount;
+            init int32 expectedBodyRow;
+            int32 expectedStatus = ValidateStandaloneCallableMethod(
+                expectedArtifactOrdinal, expectedArtifactStart,
+                expectedArtifactLength, expectedModuleRow,
+                int32(Host.StandaloneResolvedImports[
+                    memberOffset + 5]),
+                expectedVisibility, expectedOwnerType,
+                expectedCallableSlot, requireBodyless: true,
+                ref init expectedMethodSigRow,
+                ref init expectedParamFirst,
+                ref init expectedParamCount,
+                ref init expectedContractFirst,
+                ref init expectedContractCount,
+                ref init expectedBodyRow);
+            if (expectedStatus != 0)
+            {
+                return expectedStatus;
+            }
+            if (expectedMethodSigRow
+                    != Host.StandaloneResolvedImports[memberOffset + 6]
+                || expectedParamFirst
+                    != Host.StandaloneResolvedImports[memberOffset + 8]
+                || expectedParamCount
+                    != Host.StandaloneResolvedImports[memberOffset + 9]
+                || expectedContractFirst
+                    != Host.StandaloneResolvedImports[memberOffset + 10]
+                || expectedContractCount
+                    != Host.StandaloneResolvedImports[memberOffset + 11]
+                || expectedBodyRow != 0)
+            {
+                return 3;
+            }
+
+            canonicalizationStatus
+                = CanonicalizeStandaloneCallableContractFacts();
+            if (canonicalizationStatus != 0)
+            {
+                return canonicalizationStatus;
+            }
+            int32 signatureStatus = CompareStandaloneCallableSignatures(
+                expectedArtifactOrdinal, expectedCallableSlot,
+                expectedParamFirst, expectedParamCount,
+                providerArtifactOrdinal, providerCallableSlot,
+                providerParamFirst, providerParamCount);
+            if (signatureStatus != 0)
+            {
+                return signatureStatus;
+            }
+            if (!StandaloneCallableEffectsSatisfy(
+                    Host.StandaloneCallableEffects[
+                        expectedCallableSlot],
+                    Host.StandaloneCallableEffects[
+                        providerCallableSlot]))
+            {
+                return 1;
+            }
+            int32 contractStatus
+                = CompareStandaloneCallableContractFacts();
+            if (contractStatus != 0)
+            {
+                return contractStatus;
+            }
+
+            groupEnd = groupEnd + 1;
+        }
+        orderIndex = groupEnd;
+    }
+
+    for (mut int32 index = 2;
+        index <= importCount;
+        index = index + 1)
+    {
+        int32 previousOrdinal
+            = Host.StandaloneResolvedExpectedImportOrder[index - 1] - 1;
+        int32 currentOrdinal
+            = Host.StandaloneResolvedExpectedImportOrder[index] - 1;
+        int32 previousOffset = previousOrdinal * 32;
+        int32 currentOffset = currentOrdinal * 32;
+        if (Host.StandaloneResolvedImports[previousOffset + 20]
+                == Host.StandaloneResolvedImports[currentOffset + 20]
+            && (Host.StandaloneResolvedImports[previousOffset + 4]
+                    != Host.StandaloneResolvedImports[currentOffset + 4]
+                || Host.StandaloneResolvedImports[previousOffset + 21]
+                    != Host.StandaloneResolvedImports[
+                        currentOffset + 21]))
+        {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+int32 TryFindStandaloneProviderMethod(int32 importOffset,
+    int32 providerDirectoryRow, int32 callableSlot,
+    ref<init int32> methodDefRowResult,
+    ref<init int32> exportRowResult,
+    ref<init int32> methodSigRowResult,
+    ref<init int32> paramFirstResult,
+    ref<init int32> paramCountResult,
+    ref<init int32> contractFirstResult,
+    ref<init int32> contractCountResult,
+    ref<init int32> bodyRowResult)
+    ensure return == 0 ? (*methodDefRowResult is init
+        && *exportRowResult is init && *methodSigRowResult is init
+        && *paramFirstResult is init && *paramCountResult is init
+        && *contractFirstResult is init && *contractCountResult is init
+        && *bodyRowResult is init) : true
+{
+    if (providerDirectoryRow <= 0
+        || providerDirectoryRow > Host.StandaloneModuleCount[0])
+    {
+        return 3;
+    }
+
+    int32 providerDirectoryOffset = providerDirectoryRow * 8;
+    int32 artifactOrdinal
+        = Host.StandaloneModuleDirectory[providerDirectoryOffset];
+    int32 moduleRow
+        = Host.StandaloneModuleDirectory[providerDirectoryOffset + 1];
+    if (artifactOrdinal < 0 || moduleRow <= 0
+        || !TryValidateStandaloneArtifactDirectory(artifactOrdinal))
+    {
+        return 3;
+    }
+
+    init int32 artifactStart;
+    init int32 artifactLength;
+    if (!TryGetStandaloneArtifactExtent(artifactOrdinal,
+            ref init artifactStart, ref init artifactLength))
+    {
+        return 3;
+    }
+    int32 moduleEntry = FindStandaloneArtifactSection(0x0001);
+    int32 stringEntry = FindStandaloneArtifactSection(0x0002);
+    int32 exportEntry = FindStandaloneArtifactSection(0x001D);
+    int32 moduleCount = GetStandaloneArtifactSectionCount(0x0001);
+    int32 stringCount = GetStandaloneArtifactSectionCount(0x0002);
+    int32 exportCount = GetStandaloneArtifactSectionCount(0x001D);
+    if (moduleEntry == 0 || stringEntry == 0 || exportEntry == 0
+        || moduleRow > moduleCount || exportCount == 0)
+    {
+        return 1;
+    }
+
+    int32 moduleStart = Host.StandaloneSectionStarts[moduleEntry];
+    int32 stringStart = Host.StandaloneSectionStarts[stringEntry];
+    int32 stringLength = Host.StandaloneSectionLengths[stringEntry];
+    int32 exportStart = Host.StandaloneSectionStarts[exportEntry];
+    int32 exportLength = Host.StandaloneSectionLengths[exportEntry];
+    if (!TryValidateStandaloneStringTable(artifactOrdinal,
+            stringStart, stringLength, stringCount)
+        || !TryValidateStandaloneVariableTableIndex(artifactStart,
+            artifactLength, exportStart, exportLength, exportCount, 8, 1))
+    {
+        return 3;
+    }
+
+    mut int32 matchingExportRow = 0;
+    mut uint32 matchingDefinition = 0;
+    mut uint32 matchingVisibility = 0;
+    mut uint32 matchingOwnerType = 0;
+    for (mut int32 exportRow = 1;
+        exportRow <= exportCount;
+        exportRow = exportRow + 1)
+    {
+        int32 rowStart = exportStart + ((exportRow - 1) * 8);
+        init uint32 definition;
+        init uint32 keyStringRow;
+        if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, rowStart, ref init definition)
+            || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, rowStart + 4,
+                ref init keyStringRow)
+            || keyStringRow == 0
+            || keyStringRow > uint32(stringCount)
+            || !TryValidateStandaloneStringName(artifactOrdinal,
+                artifactStart, artifactLength, stringStart,
+                stringLength, stringCount, int32(keyStringRow)))
+        {
+            return 3;
+        }
+
+        init int32 comparison;
+        if (!TryCompareStandaloneStringRows(
+                artifactOrdinal, stringStart, stringLength, stringCount,
+                int32(keyStringRow),
+                Host.StandaloneResolvedImports[importOffset],
+                Host.StandaloneResolvedImports[importOffset + 14],
+                Host.StandaloneResolvedImports[importOffset + 15],
+                Host.StandaloneResolvedImports[importOffset + 16],
+                Host.StandaloneResolvedImports[importOffset + 12],
+                ref init comparison))
+        {
+            return 3;
+        }
+        if (comparison != 0)
+        {
+            continue;
+        }
+
+        init int32 definitionModuleRow;
+        init uint32 visibility;
+        init uint32 ownerType;
+        if (!TryResolveStandaloneExportDefinition(
+                artifactStart, artifactLength, moduleStart,
+                moduleCount, definition, ref init definitionModuleRow,
+                ref init visibility, ref init ownerType))
+        {
+            return 3;
+        }
+        if (definitionModuleRow != moduleRow)
+        {
+            continue;
+        }
+        if (matchingExportRow != 0)
+        {
+            return 3;
+        }
+        matchingExportRow = exportRow;
+        matchingDefinition = definition;
+        matchingVisibility = visibility;
+        matchingOwnerType = ownerType;
+    }
+
+    if (matchingExportRow == 0)
+    {
+        return 1;
+    }
+    if (matchingDefinition >> 24 != 0x16)
+    {
+        return 2;
+    }
+
+    if (IsStandaloneMethodExpectedImport(artifactStart,
+            artifactLength,
+            int32(matchingDefinition & 0x00FF_FFFF)))
+    {
+        return 2;
+    }
+
+    init int32 methodSigRow;
+    init int32 paramFirst;
+    init int32 paramCount;
+    init int32 contractFirst;
+    init int32 contractCount;
+    init int32 bodyRow;
+    int32 methodStatus = ValidateStandaloneCallableMethod(
+        artifactOrdinal, artifactStart, artifactLength, moduleRow,
+        int32(matchingDefinition & 0x00FF_FFFF),
+        matchingVisibility, matchingOwnerType, callableSlot,
+        requireBodyless: false, ref init methodSigRow,
+        ref init paramFirst, ref init paramCount,
+        ref init contractFirst, ref init contractCount,
+        ref init bodyRow);
+    if (methodStatus != 0)
+    {
+        return methodStatus;
+    }
+
+    *methodDefRowResult
+        = int32(matchingDefinition & 0x00FF_FFFF);
+    *exportRowResult = matchingExportRow;
+    *methodSigRowResult = methodSigRow;
+    *paramFirstResult = paramFirst;
+    *paramCountResult = paramCount;
+    *contractFirstResult = contractFirst;
+    *contractCountResult = contractCount;
+    *bodyRowResult = bodyRow;
+    return 0;
+}
+
+int32 CompareStandaloneCallableSignatures(int32 expectedArtifactOrdinal,
+    int32 expectedCallableSlot, int32 expectedParamFirst,
+    int32 expectedParamCount, int32 providerArtifactOrdinal,
+    int32 providerCallableSlot, int32 providerParamFirst,
+    int32 providerParamCount)
+{
+    if (Host.StandaloneCallableTypeIds[expectedCallableSlot]
+            != Host.StandaloneCallableTypeIds[providerCallableSlot]
+        || expectedParamCount != providerParamCount)
+    {
+        return 1;
+    }
+
+    for (mut int32 ordinal = 0;
+        ordinal < expectedParamCount;
+        ordinal = ordinal + 1)
+    {
+        int32 expectedParameterRow = expectedParamFirst + ordinal;
+        int32 providerParameterRow = providerParamFirst + ordinal;
+        int32 expectedGlobalRow
+            = Host.StandaloneArtifactParameterStarts[
+                expectedArtifactOrdinal] + expectedParameterRow;
+        int32 providerGlobalRow
+            = Host.StandaloneArtifactParameterStarts[
+                providerArtifactOrdinal] + providerParameterRow;
+        if (expectedGlobalRow <= 0
+            || expectedGlobalRow >= Host.StandaloneParameterTypeIds.Length
+            || providerGlobalRow <= 0
+            || providerGlobalRow
+                >= Host.StandaloneParameterTypeIds.Length)
+        {
+            return 3;
+        }
+        if (Host.StandaloneParameterTypeIds[expectedGlobalRow]
+            != Host.StandaloneParameterTypeIds[providerGlobalRow])
+        {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+bool StandaloneCallableEffectsSatisfy(int32 expectedEffects,
+    int32 providerEffects)
+{
+    bool expectedRequiresUnsafe = (expectedEffects & 4) != 0;
+    bool providerRequiresUnsafe = (providerEffects & 4) != 0;
+    bool expectedDoesNotReturn = (expectedEffects & 2) != 0;
+    bool providerDoesNotReturn = (providerEffects & 2) != 0;
+    return (!providerRequiresUnsafe || expectedRequiresUnsafe)
+        && (!expectedDoesNotReturn || providerDoesNotReturn);
+}
+
+int32 CanonicalizeStandaloneCallableContractFacts()
+{
+    int32 factCount = Host.StandaloneContractFactCount[0];
+    if (factCount <= 0)
+    {
+        return 0;
+    }
+    if (factCount >= Host.StandaloneContractFacts.Length / 7)
+    {
+        return 3;
+    }
+    init int32 attachmentCount;
+    if (!BuildStandaloneContractFactOrder(11,
+            ref init attachmentCount)
+        || !SortStandaloneContractFactOrder(attachmentCount, 3))
+    {
+        return 3;
+    }
+
+    for (mut int32 row = 1; row <= factCount; row = row + 1)
+    {
+        int32 offset = row * 7;
+        if (Host.StandaloneContractFacts[offset] != 2)
+        {
+            continue;
+        }
+        int32 graphRow
+            = Host.StandaloneContractFacts[offset + 2];
+        mut int32 foundRow = 0;
+        mut int32 low = 1;
+        mut int32 high = attachmentCount;
+        while (low <= high)
+        {
+            int32 middle = low + (high - low) / 2;
+            int32 attachmentRow
+                = Host.StandaloneContractFactOrder[middle];
+            int32 attachmentOffset = attachmentRow * 7;
+            int32 attachmentGraphRow
+                = Host.StandaloneContractFacts[attachmentOffset + 3];
+            if (attachmentGraphRow == graphRow)
+            {
+                foundRow = attachmentRow;
+                break;
+            }
+            if (attachmentGraphRow < graphRow)
+            {
+                low = middle + 1;
+            }
+            else
+            {
+                high = middle - 1;
+            }
+        }
+        if (foundRow == 0)
+        {
+            return 3;
+        }
+        Host.StandaloneContractFacts[offset + 2]
+            = Host.StandaloneContractFacts[foundRow * 7 + 4];
+    }
+
+    for (mut int32 row = 1; row <= factCount; row = row + 1)
+    {
+        int32 offset = row * 7;
+        if (Host.StandaloneContractFacts[offset] == 11)
+        {
+            Host.StandaloneContractFacts[offset + 3]
+                = Host.StandaloneContractFacts[offset + 4];
+            Host.StandaloneContractFacts[offset + 5] = 0;
+            Host.StandaloneContractFacts[offset + 6] = 0;
+        }
+    }
+    return 0;
+}
+
+bool CopyStandaloneContractFactsToComparison()
+{
+    if (Host.StandaloneContractComparisonFactCount.Length != 1
+        || Host.StandaloneContractComparisonFacts.Length
+            != Host.StandaloneContractFacts.Length
+        || Host.StandaloneContractComparisonFactOrder.Length
+            != Host.StandaloneContractFactOrder.Length
+        || Host.StandaloneContractFactCount[0]
+            >= Host.StandaloneContractComparisonFacts.Length / 7)
+    {
+        return false;
+    }
+
+    for (mut int32 index = 0;
+        index < Host.StandaloneContractFacts.Length;
+        index = index + 1)
+    {
+        Host.StandaloneContractComparisonFacts[index]
+            = Host.StandaloneContractFacts[index];
+    }
+    Host.StandaloneContractComparisonFactCount[0]
+        = Host.StandaloneContractFactCount[0];
+    return true;
+}
+
+int32 CompareStandaloneCallableContractFacts()
+{
+    int32 expectedCount = Host.StandaloneContractFactCount[0];
+    int32 providerCount
+        = Host.StandaloneContractComparisonFactCount[0];
+    if (expectedCount != providerCount)
+    {
+        return 1;
+    }
+
+    for (mut int32 row = 1; row <= expectedCount; row = row + 1)
+    {
+        Host.StandaloneContractFactOrder[row] = row;
+        Host.StandaloneContractComparisonFactOrder[row] = row;
+    }
+    if (!SortStandaloneContractFactOrder(expectedCount,
+            useComparison: false)
+        || !SortStandaloneContractFactOrder(providerCount,
+            useComparison: true))
+    {
+        return 3;
+    }
+    mut int32 expectedIndex = 1;
+    mut int32 providerIndex = 1;
+    expectedIndex = SkipStandaloneDependencyFacts(false,
+        expectedCount, expectedIndex);
+    providerIndex = SkipStandaloneDependencyFacts(true,
+        providerCount, providerIndex);
+    while (expectedIndex <= expectedCount
+        && providerIndex <= providerCount)
+    {
+        init int32 comparison;
+        int32 providerRow
+            = Host.StandaloneContractComparisonFactOrder[providerIndex];
+        int32 expectedRow
+            = Host.StandaloneContractFactOrder[expectedIndex];
+        if (!CompareStandaloneContractFactRows(false, expectedRow,
+                true, providerRow, ref init comparison))
+        {
+            return 3;
+        }
+        if (comparison != 0)
+        {
+            return 1;
+        }
+        expectedIndex = expectedIndex + 1;
+        providerIndex = providerIndex + 1;
+        expectedIndex = SkipStandaloneDependencyFacts(false,
+            expectedCount, expectedIndex);
+        providerIndex = SkipStandaloneDependencyFacts(true,
+            providerCount, providerIndex);
+    }
+    if (expectedIndex <= expectedCount || providerIndex <= providerCount)
+    {
+        return 1;
+    }
+    return StandaloneCallableDependenciesSatisfy();
+}
+
+int32 SkipStandaloneDependencyFacts(bool useComparison, int32 count,
+    int32 index)
+{
+    while (index <= count)
+    {
+        int32 row = ReadStandaloneContractFactOrder(useComparison, index);
+        int32 kind = useComparison
+            ? Host.StandaloneContractComparisonFacts[row * 7]
+            : Host.StandaloneContractFacts[row * 7];
+        if (kind != 4)
+        {
+            return index;
+        }
+        index = index + 1;
+    }
+    return index;
+}
+
+int32 StandaloneCallableDependenciesSatisfy()
+{
+    int32 expectedCount = Host.StandaloneContractFactCount[0];
+    int32 providerCount
+        = Host.StandaloneContractComparisonFactCount[0];
+    mut int32 expectedStart = 1;
+    while (expectedStart <= expectedCount)
+    {
+        int32 row = Host.StandaloneContractFactOrder[expectedStart];
+        if (Host.StandaloneContractFacts[row * 7] >= 4)
+        {
+            break;
+        }
+        expectedStart = expectedStart + 1;
+    }
+    mut int32 expectedEnd = expectedStart;
+    while (expectedEnd <= expectedCount)
+    {
+        int32 row = Host.StandaloneContractFactOrder[expectedEnd];
+        if (Host.StandaloneContractFacts[row * 7] != 4)
+        {
+            break;
+        }
+        expectedEnd = expectedEnd + 1;
+    }
+
+    mut int32 providerStart = 1;
+    while (providerStart <= providerCount)
+    {
+        int32 row
+            = Host.StandaloneContractComparisonFactOrder[providerStart];
+        if (Host.StandaloneContractComparisonFacts[row * 7] >= 4)
+        {
+            break;
+        }
+        providerStart = providerStart + 1;
+    }
+    mut int32 providerEnd = providerStart;
+    while (providerEnd <= providerCount)
+    {
+        int32 row
+            = Host.StandaloneContractComparisonFactOrder[providerEnd];
+        if (Host.StandaloneContractComparisonFacts[row * 7] != 4)
+        {
+            break;
+        }
+        providerEnd = providerEnd + 1;
+    }
+
+    for (mut int32 index = providerStart;
+        index < providerEnd;
+        index = index + 1)
+    {
+        int32 providerRow
+            = Host.StandaloneContractComparisonFactOrder[index];
+        int32 providerOffset = providerRow * 7;
+        int32 sourceKind
+            = Host.StandaloneContractComparisonFacts[
+                providerOffset + 2];
+        if (sourceKind == 0)
+        {
+            continue;
+        }
+        if (sourceKind != 1)
+        {
+            return 2;
+        }
+
+        mut int32 low = expectedStart;
+        mut int32 high = expectedEnd - 1;
+        mut int32 matchingExpectedRow = 0;
+        while (low <= high)
+        {
+            int32 middle = low + (high - low) / 2;
+            int32 expectedRow
+                = Host.StandaloneContractFactOrder[middle];
+            init int32 comparison;
+            if (!CompareStandaloneDependencyKeys(providerRow,
+                    expectedRow, ref init comparison))
+            {
+                return 3;
+            }
+            if (comparison == 0)
+            {
+                matchingExpectedRow = expectedRow;
+                break;
+            }
+            if (comparison < 0)
+            {
+                high = middle - 1;
+            }
+            else
+            {
+                low = middle + 1;
+            }
+        }
+        if (matchingExpectedRow == 0)
+        {
+            return 1;
+        }
+        int32 expectedRelation
+            = Host.StandaloneContractFacts[
+                matchingExpectedRow * 7 + 3];
+        int32 providerRelation
+            = Host.StandaloneContractComparisonFacts[
+                providerOffset + 3];
+        int32 expectedRelationshipMask
+            = StandaloneDependencyRelationshipMask(expectedRelation);
+        int32 providerRelationshipMask
+            = StandaloneDependencyRelationshipMask(providerRelation);
+        if (expectedRelationshipMask == 0
+            || providerRelationshipMask == 0
+            || (providerRelationshipMask
+                & ~expectedRelationshipMask) != 0)
+        {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+bool CompareStandaloneDependencyKeys(int32 providerRow,
+    int32 expectedRow, ref<init int32> comparison)
+    ensure return ? *comparison is init : true
+{
+    for (mut int32 keyIndex = 0;
+        keyIndex < 5;
+        keyIndex = keyIndex + 1)
+    {
+        int32 field = keyIndex == 0 ? 1
+            : keyIndex == 1 ? 5
+            : keyIndex == 2 ? 4
+            : keyIndex == 3 ? 2 : 6;
+        int32 providerValue
+            = GetStandaloneContractFactValue(true, providerRow, field);
+        int32 expectedValue
+            = GetStandaloneContractFactValue(false, expectedRow, field);
+        if (providerValue < expectedValue)
+        {
+            *comparison = -1;
+            return true;
+        }
+        if (providerValue > expectedValue)
+        {
+            *comparison = 1;
+            return true;
+        }
+    }
+    *comparison = 0;
+    return true;
+}
+
+int32 GetStandaloneContractFactValue(bool useComparison,
+    int32 row, int32 column)
+{
+    int32 offset = row * 7 + column;
+    return useComparison
+        ? Host.StandaloneContractComparisonFacts[offset]
+        : Host.StandaloneContractFacts[offset];
+}
+
+int32 StandaloneDependencyRelationshipMask(int32 relationship)
+{
+    if (relationship == 1) { return 1; }
+    if (relationship == 2) { return 2; }
+    if (relationship == 3) { return 3; }
+    return 0;
+}
+
+bool SortStandaloneContractFactOrder(int32 count,
+    bool useComparison)
+{
+    mut int32 root = count / 2;
+    while (root > 0)
+    {
+        if (!SiftStandaloneContractFactOrder(root, count,
+                useComparison))
+        {
+            return false;
+        }
+        root = root - 1;
+    }
+
+    mut int32 end = count;
+    while (end > 1)
+    {
+        mut int32 value;
+        if (useComparison)
+        {
+            value = Host.StandaloneContractComparisonFactOrder[1];
+            Host.StandaloneContractComparisonFactOrder[1]
+                = Host.StandaloneContractComparisonFactOrder[end];
+            Host.StandaloneContractComparisonFactOrder[end] = value;
+        }
+        else
+        {
+            value = Host.StandaloneContractFactOrder[1];
+            Host.StandaloneContractFactOrder[1]
+                = Host.StandaloneContractFactOrder[end];
+            Host.StandaloneContractFactOrder[end] = value;
+        }
+        end = end - 1;
+        if (!SiftStandaloneContractFactOrder(1, end,
+                useComparison))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool SiftStandaloneContractFactOrder(int32 root, int32 end,
+    bool useComparison)
+{
+    mut int32 current = root;
+    while (current <= end / 2)
+    {
+        mut int32 child = current * 2;
+        init int32 comparison;
+        int32 leftRow = ReadStandaloneContractFactOrder(
+            useComparison, child);
+        int32 rightRow = child < end
+            ? ReadStandaloneContractFactOrder(
+                useComparison, child + 1) : 0;
+        if (child < end
+            && !CompareStandaloneContractFactRows(
+                useComparison, leftRow, useComparison, rightRow,
+                ref init comparison))
+        {
+            return false;
+        }
+        if (child < end && comparison < 0)
+        {
+            child = child + 1;
+        }
+
+        if (!CompareStandaloneContractFactRows(
+                useComparison,
+                ReadStandaloneContractFactOrder(useComparison, current),
+                useComparison,
+                ReadStandaloneContractFactOrder(useComparison, child),
+                ref init comparison))
+        {
+            return false;
+        }
+        if (comparison >= 0)
+        {
+            return true;
+        }
+
+        mut int32 value
+            = ReadStandaloneContractFactOrder(useComparison, current);
+        WriteStandaloneContractFactOrder(useComparison, current,
+            ReadStandaloneContractFactOrder(useComparison, child));
+        WriteStandaloneContractFactOrder(useComparison, child, value);
+        current = child;
+    }
+    return true;
+}
+
+int32 ReadStandaloneContractFactOrder(bool useComparison,
+    int32 index)
+{
+    return useComparison
+        ? Host.StandaloneContractComparisonFactOrder[index]
+        : Host.StandaloneContractFactOrder[index];
+}
+
+void WriteStandaloneContractFactOrder(bool useComparison,
+    int32 index, int32 value)
+{
+    if (useComparison)
+    {
+        Host.StandaloneContractComparisonFactOrder[index] = value;
+    }
+    else
+    {
+        Host.StandaloneContractFactOrder[index] = value;
+    }
+}
+
+bool CompareStandaloneContractFactRows(bool firstComparison,
+    int32 firstRow, bool secondComparison, int32 secondRow,
+    ref<init int32> comparison)
+    ensure return ? *comparison is init : true
+{
+    int32 firstCount = firstComparison
+        ? Host.StandaloneContractComparisonFactCount[0]
+        : Host.StandaloneContractFactCount[0];
+    int32 secondCount = secondComparison
+        ? Host.StandaloneContractComparisonFactCount[0]
+        : Host.StandaloneContractFactCount[0];
+    if (firstRow <= 0 || firstRow > firstCount
+        || secondRow <= 0 || secondRow > secondCount)
+    {
+        return false;
+    }
+
+    int32 firstKind
+        = GetStandaloneContractFactValue(firstComparison, firstRow, 0);
+    int32 secondKind
+        = GetStandaloneContractFactValue(secondComparison, secondRow, 0);
+    if (firstKind < secondKind)
+    {
+        *comparison = -1;
+        return true;
+    }
+    if (firstKind > secondKind)
+    {
+        *comparison = 1;
+        return true;
+    }
+
+    mut int32 columnIndex = 0;
+    mut int32 comparedFields = 7;
+    if (firstKind == 4)
+    {
+        comparedFields = 6;
+    }
+    while (columnIndex < comparedFields)
+    {
+        int32 firstColumn = columnIndex;
+        int32 secondColumn = columnIndex;
+        if (firstKind == 4)
+        {
+            firstColumn = columnIndex == 0 ? 1
+                : columnIndex == 1 ? 5
+                : columnIndex == 2 ? 4
+                : columnIndex == 3 ? 2
+                : columnIndex == 4 ? 6 : 3;
+            secondColumn = firstColumn;
+        }
+        int32 firstValue = GetStandaloneContractFactValue(
+            firstComparison, firstRow, firstColumn);
+        int32 secondValue = GetStandaloneContractFactValue(
+            secondComparison, secondRow, secondColumn);
+        if (firstValue < secondValue)
+        {
+            *comparison = -1;
+            return true;
+        }
+        if (firstValue > secondValue)
+        {
+            *comparison = 1;
+            return true;
+        }
+        columnIndex = columnIndex + 1;
+    }
+    *comparison = 0;
+    return true;
+}
