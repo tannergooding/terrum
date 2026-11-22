@@ -149,10 +149,16 @@ internal sealed partial class ScalarFrontendInvocationProfileTests
             (NativeRuntimePolicy)policy).ExitCode, Is.EqualTo(42));
     }
 
-    [TestCase(BoundRuntimePolicy.FailFast)]
-    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
-    public async Task ScalarFrontendRejectsUnsupportedFloatToChar16ConversionAsync(
-        BoundRuntimePolicy policy)
+    [TestCase(BoundRuntimePolicy.FailFast, "float64", "char16")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions, "float64", "char16")]
+    [TestCase(BoundRuntimePolicy.FailFast, "bool", "int32")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions, "bool", "int32")]
+    [TestCase(BoundRuntimePolicy.FailFast, "int32", "bool")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions, "int32", "bool")]
+    [TestCase(BoundRuntimePolicy.FailFast, "bool", "bool")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions, "bool", "bool")]
+    public async Task ScalarFrontendRejectsUnsupportedConversionPairsAsync(
+        BoundRuntimePolicy policy, string sourceType, string targetType)
     {
         var trees = await ReadComponentsAsync(s_frontendComponents, """
             namespace Terrum.CodeAnalysis;
@@ -163,7 +169,8 @@ internal sealed partial class ScalarFrontendInvocationProfileTests
             """).ConfigureAwait(true);
         var source = SourceText.From(
             "int32 Main() { return 42; } "
-            + "char16 Convert(float64 value) { return char16(value); }");
+                + $"{targetType} Convert({sourceType} value) "
+                + $"{{ return {targetType}(value); }}");
         var compilation = CreateWithLayoutCore(trees,
             ScalarFrontendHost.CreateBuffers(source), policy);
         Assert.That(compilation.HasErrors, Is.False,
