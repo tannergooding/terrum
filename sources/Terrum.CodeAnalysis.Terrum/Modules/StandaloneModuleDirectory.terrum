@@ -183,14 +183,18 @@ public static bool TryBuildStandaloneModuleDirectory()
         }
     }
 
-    if (!SortStandaloneModuleDirectory(moduleCount, byName: false))
+    for (mut int32 row = 1; row <= moduleCount; row = row + 1)
+    {
+        Host.StandaloneModuleOrder[row] = row;
+    }
+    if (!SortStandaloneModuleOrder(moduleCount, byName: false))
     {
         return false;
     }
     for (mut int32 row = 1; row < moduleCount; row = row + 1)
     {
-        int32 left = row * 8;
-        int32 right = (row + 1) * 8;
+        int32 left = Host.StandaloneModuleOrder[row] * 8;
+        int32 right = Host.StandaloneModuleOrder[row + 1] * 8;
         if (Host.StandaloneModuleDirectory[left]
                 == Host.StandaloneModuleDirectory[right]
             && Host.StandaloneModuleDirectory[left + 2]
@@ -200,14 +204,20 @@ public static bool TryBuildStandaloneModuleDirectory()
         }
     }
 
-    if (!SortStandaloneModuleDirectory(moduleCount, byName: true))
+    for (mut int32 row = 1; row <= moduleCount; row = row + 1)
+    {
+        Host.StandaloneModuleOrder[row] = row;
+    }
+    if (!SortStandaloneModuleOrder(moduleCount, byName: true))
     {
         return false;
     }
     for (mut int32 row = 1; row < moduleCount; row = row + 1)
     {
         init int32 comparison;
-        if (!TryCompareStandaloneModuleDirectoryRows(row, row + 1,
+        if (!TryCompareStandaloneModuleDirectoryRows(
+                Host.StandaloneModuleOrder[row],
+                Host.StandaloneModuleOrder[row + 1],
                 ref init comparison)
             || comparison == 0)
         {
@@ -272,12 +282,12 @@ void WriteStandaloneModuleDirectoryRow(int32 row,
     Host.StandaloneModuleDirectory[offset + 7] = directTextLength;
 }
 
-bool SortStandaloneModuleDirectory(int32 count, bool byName)
+bool SortStandaloneModuleOrder(int32 count, bool byName)
 {
     mut int32 root = count / 2;
     while (root > 0)
     {
-        if (!SiftStandaloneModuleDirectory(root, count, byName))
+        if (!SiftStandaloneModuleOrder(root, count, byName))
         {
             return false;
         }
@@ -287,9 +297,11 @@ bool SortStandaloneModuleDirectory(int32 count, bool byName)
     mut int32 end = count;
     while (end > 1)
     {
-        SwapStandaloneModuleDirectoryRows(1, end);
+        mut int32 value = Host.StandaloneModuleOrder[1];
+        Host.StandaloneModuleOrder[1] = Host.StandaloneModuleOrder[end];
+        Host.StandaloneModuleOrder[end] = value;
         end = end - 1;
-        if (!SiftStandaloneModuleDirectory(1, end, byName))
+        if (!SiftStandaloneModuleOrder(1, end, byName))
         {
             return false;
         }
@@ -297,7 +309,7 @@ bool SortStandaloneModuleDirectory(int32 count, bool byName)
     return true;
 }
 
-bool SiftStandaloneModuleDirectory(int32 root, int32 end,
+bool SiftStandaloneModuleOrder(int32 root, int32 end,
     bool byName)
 {
     mut int32 current = root;
@@ -307,7 +319,9 @@ bool SiftStandaloneModuleDirectory(int32 root, int32 end,
         init int32 comparison;
         if (child < end
             && !CompareStandaloneModuleDirectoryRows(
-                child, child + 1, byName, ref init comparison))
+                Host.StandaloneModuleOrder[child],
+                Host.StandaloneModuleOrder[child + 1],
+                byName, ref init comparison))
         {
             return false;
         }
@@ -317,7 +331,9 @@ bool SiftStandaloneModuleDirectory(int32 root, int32 end,
         }
 
         if (!CompareStandaloneModuleDirectoryRows(
-                current, child, byName, ref init comparison))
+                Host.StandaloneModuleOrder[current],
+                Host.StandaloneModuleOrder[child],
+                byName, ref init comparison))
         {
             return false;
         }
@@ -326,22 +342,13 @@ bool SiftStandaloneModuleDirectory(int32 root, int32 end,
             return true;
         }
 
-        SwapStandaloneModuleDirectoryRows(current, child);
+        mut int32 value = Host.StandaloneModuleOrder[current];
+        Host.StandaloneModuleOrder[current]
+            = Host.StandaloneModuleOrder[child];
+        Host.StandaloneModuleOrder[child] = value;
         current = child;
     }
     return true;
-}
-
-void SwapStandaloneModuleDirectoryRows(int32 firstRow, int32 secondRow)
-{
-    for (mut int32 field = 0; field < 8; field = field + 1)
-    {
-        mut int32 value = Host.StandaloneModuleDirectory[
-            firstRow * 8 + field];
-        Host.StandaloneModuleDirectory[firstRow * 8 + field]
-            = Host.StandaloneModuleDirectory[secondRow * 8 + field];
-        Host.StandaloneModuleDirectory[secondRow * 8 + field] = value;
-    }
 }
 
 bool CompareStandaloneModuleDirectoryRows(int32 firstRow,

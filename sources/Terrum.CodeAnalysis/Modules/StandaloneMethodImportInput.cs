@@ -115,6 +115,7 @@ internal readonly record struct CapturedStandaloneMethodImportInput(
                 checked(Artifacts.Length * 4));
         var methodRoots = ImmutableArray.CreateBuilder<int>(
             checked(MethodRoots.Length * 5));
+        var resolvedRootsCapacity = checked(MethodRoots.Length * 20);
         var sectionCapacity = checked((artifactByteLength / 16) + 1);
         var moduleCapacity = checked((artifactByteLength / 48) + 2);
         var moduleDirectoryCapacity = checked(moduleCapacity * 8);
@@ -182,6 +183,13 @@ internal readonly record struct CapturedStandaloneMethodImportInput(
             new HostBuffer("StandaloneModuleDirectory",
                 PrimitiveType.Int32,
                 [.. new int[moduleDirectoryCapacity]], true),
+            new HostBuffer("StandaloneModuleOrder", PrimitiveType.Int32,
+                [.. new int[moduleCapacity]], true),
+            new HostBuffer("StandaloneResolvedRootCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneResolvedRoots",
+                PrimitiveType.UInt32,
+                [.. new int[resolvedRootsCapacity]], true),
         ];
 
         int AppendText(string value)

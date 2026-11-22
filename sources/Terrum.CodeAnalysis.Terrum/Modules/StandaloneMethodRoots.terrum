@@ -1,0 +1,1023 @@
+namespace Terrum.CodeAnalysis;
+
+// 0 binds every root; 1 is missing or mismatched; 2 is unsupported;
+// 3 is malformed or ambiguous.
+public static int32 BindStandaloneMethodRoots()
+{
+    if (Host.StandaloneResolvedRootCount.Length != 1)
+    {
+        return 3;
+    }
+
+    Host.StandaloneResolvedRootCount[0] = 0;
+    ClearStandaloneResolvedRoots();
+
+    if (!TryBuildStandaloneModuleDirectory())
+    {
+        return 3;
+    }
+
+    init int32 usingModuleDirectoryRow;
+    if (!TryFindStandaloneModuleDirectoryRow(
+            Host.StandaloneRequest[2], Host.StandaloneRequest[3],
+            ref init usingModuleDirectoryRow))
+    {
+        return 1;
+    }
+    int32 usingModuleId = usingModuleDirectoryRow - 1;
+    int32 rootCount = Host.StandaloneRequest[5];
+    for (mut int32 rootOrdinal = 0;
+        rootOrdinal < rootCount;
+        rootOrdinal = rootOrdinal + 1)
+    {
+        int32 rootOffset = rootOrdinal * 5;
+        int32 artifactOrdinal
+            = Host.StandaloneMethodRoots[rootOffset];
+        int32 moduleTextStart
+            = Host.StandaloneMethodRoots[rootOffset + 1];
+        int32 moduleTextLength
+            = Host.StandaloneMethodRoots[rootOffset + 2];
+        int32 exportTextStart
+            = Host.StandaloneMethodRoots[rootOffset + 3];
+        int32 exportTextLength
+            = Host.StandaloneMethodRoots[rootOffset + 4];
+        init int32 directoryRow;
+        if (!TryFindStandaloneModuleDirectoryRow(moduleTextStart,
+                moduleTextLength, ref init directoryRow))
+        {
+            ClearStandaloneResolvedRoots();
+            return 1;
+        }
+
+        int32 moduleDirectoryOffset = directoryRow * 8;
+        if (Host.StandaloneModuleDirectory[moduleDirectoryOffset]
+                != artifactOrdinal
+            || Host.StandaloneModuleDirectory[
+                moduleDirectoryOffset + 1] <= 0)
+        {
+            ClearStandaloneResolvedRoots();
+            return 1;
+        }
+
+        init int32 exportRow;
+        init int32 methodDefRow;
+        init int32 methodNameStringRow;
+        init int32 methodSigRow;
+        init uint32 resultTypeSpecRef;
+        init uint32 receiverTypeSpecRef;
+        init uint32 paramFirst;
+        init uint32 paramCount;
+        init uint32 genericFirst;
+        init uint32 genericCount;
+        init uint32 contractFirst;
+        init uint32 contractCount;
+        init uint32 bodyRow;
+        init uint32 methodFlags;
+        init int32 exportKeyStringRow;
+        int32 bindingStatus
+            = FindStandaloneMethodRootExport(artifactOrdinal,
+                Host.StandaloneModuleDirectory[
+                    moduleDirectoryOffset + 1],
+                Host.StandaloneModuleDirectory[
+                    moduleDirectoryOffset + 3],
+                Host.StandaloneModuleDirectory[
+                    moduleDirectoryOffset + 4],
+                Host.StandaloneModuleDirectory[
+                    moduleDirectoryOffset + 5],
+                exportTextStart, exportTextLength,
+                ref init exportRow, ref init methodDefRow,
+                ref init methodNameStringRow, ref init methodSigRow,
+                ref init resultTypeSpecRef,
+                ref init receiverTypeSpecRef, ref init paramFirst,
+                ref init paramCount, ref init genericFirst,
+                ref init genericCount, ref init contractFirst,
+                ref init contractCount, ref init bodyRow,
+                ref init methodFlags, ref init exportKeyStringRow);
+        if (bindingStatus != 0)
+        {
+            ClearStandaloneResolvedRoots();
+            return bindingStatus;
+        }
+
+        int32 resultOffset = rootOrdinal * 20;
+        Host.StandaloneResolvedRoots[resultOffset]
+            = uint32(directoryRow - 1);
+        Host.StandaloneResolvedRoots[resultOffset + 1]
+            = uint32(usingModuleId);
+        Host.StandaloneResolvedRoots[resultOffset + 2]
+            = uint32(artifactOrdinal);
+        Host.StandaloneResolvedRoots[resultOffset + 3]
+            = uint32(Host.StandaloneModuleDirectory[
+                moduleDirectoryOffset + 1]);
+        Host.StandaloneResolvedRoots[resultOffset + 4]
+            = uint32(exportRow);
+        Host.StandaloneResolvedRoots[resultOffset + 5]
+            = uint32(methodDefRow);
+        Host.StandaloneResolvedRoots[resultOffset + 6]
+            = uint32(methodNameStringRow);
+        Host.StandaloneResolvedRoots[resultOffset + 7]
+            = uint32(methodSigRow);
+        Host.StandaloneResolvedRoots[resultOffset + 8]
+            = resultTypeSpecRef;
+        Host.StandaloneResolvedRoots[resultOffset + 9]
+            = receiverTypeSpecRef;
+        Host.StandaloneResolvedRoots[resultOffset + 10]
+            = paramFirst;
+        Host.StandaloneResolvedRoots[resultOffset + 11]
+            = paramCount;
+        Host.StandaloneResolvedRoots[resultOffset + 12]
+            = genericFirst;
+        Host.StandaloneResolvedRoots[resultOffset + 13]
+            = genericCount;
+        Host.StandaloneResolvedRoots[resultOffset + 14]
+            = contractFirst;
+        Host.StandaloneResolvedRoots[resultOffset + 15]
+            = contractCount;
+        Host.StandaloneResolvedRoots[resultOffset + 16]
+            = bodyRow;
+        Host.StandaloneResolvedRoots[resultOffset + 17]
+            = methodFlags;
+        Host.StandaloneResolvedRoots[resultOffset + 18]
+            = uint32(exportKeyStringRow);
+        Host.StandaloneResolvedRoots[resultOffset + 19]
+            = uint32(rootOrdinal);
+    }
+
+    Host.StandaloneResolvedRootCount[0] = rootCount;
+    return 0;
+}
+
+void ClearStandaloneResolvedRoots()
+{
+    for (mut int32 index = 0;
+        index < Host.StandaloneResolvedRoots.Length;
+        index = index + 1)
+    {
+        Host.StandaloneResolvedRoots[index] = 0;
+    }
+}
+
+bool TryFindStandaloneModuleDirectoryRow(int32 textStart,
+    int32 textLength, ref<init int32> directoryRowResult)
+    ensure return ? *directoryRowResult is init : true
+{
+    if (Host.StandaloneModuleCount.Length != 1
+        || Host.StandaloneModuleCount[0] <= 0
+        || !IsWellFormedStandaloneIdentity(textStart, textLength))
+    {
+        return false;
+    }
+
+    mut int32 low = 1;
+    mut int32 high = Host.StandaloneModuleCount[0];
+    while (low <= high)
+    {
+        int32 middle = low + (high - low) / 2;
+        int32 directoryRow
+            = Host.StandaloneModuleOrder[middle];
+        init int32 comparison;
+        if (!TryCompareStandaloneModuleDirectoryRowToText(directoryRow,
+                textStart, textLength, ref init comparison))
+        {
+            return false;
+        }
+        if (comparison == 0)
+        {
+            *directoryRowResult = directoryRow;
+            return true;
+        }
+        if (comparison < 0)
+        {
+            low = middle + 1;
+        }
+        else
+        {
+            high = middle - 1;
+        }
+    }
+
+    return false;
+}
+
+bool TryCompareStandaloneModuleDirectoryRowToText(int32 directoryRow,
+    int32 textStart, int32 textLength, ref<init int32> comparison)
+    ensure return ? *comparison is init : true
+{
+    if (directoryRow <= 0
+        || directoryRow > Host.StandaloneModuleCount[0])
+    {
+        return false;
+    }
+
+    int32 offset = directoryRow * 8;
+    int32 artifactOrdinal
+        = Host.StandaloneModuleDirectory[offset];
+    if (artifactOrdinal < 0)
+    {
+        return CompareStandaloneTextRanges(
+            Host.StandaloneModuleDirectory[offset + 6],
+            Host.StandaloneModuleDirectory[offset + 7],
+            textStart, textLength, ref init *comparison);
+    }
+
+    return TryCompareStandaloneStringRowToText(
+        artifactOrdinal,
+        Host.StandaloneModuleDirectory[offset + 3],
+        Host.StandaloneModuleDirectory[offset + 4],
+        Host.StandaloneModuleDirectory[offset + 5],
+        Host.StandaloneModuleDirectory[offset + 2],
+        textStart, textLength, ref init *comparison);
+}
+
+int32 FindStandaloneMethodRootExport(int32 artifactOrdinal,
+    int32 moduleRow, int32 stringSectionStart,
+    int32 stringSectionLength, int32 stringCount,
+    int32 exportTextStart, int32 exportTextLength,
+    ref<init int32> exportRowResult,
+    ref<init int32> methodDefRowResult,
+    ref<init int32> methodNameStringRowResult,
+    ref<init int32> methodSigRowResult,
+    ref<init uint32> resultTypeSpecRefResult,
+    ref<init uint32> receiverTypeSpecRefResult,
+    ref<init uint32> paramFirstResult,
+    ref<init uint32> paramCountResult,
+    ref<init uint32> genericFirstResult,
+    ref<init uint32> genericCountResult,
+    ref<init uint32> contractFirstResult,
+    ref<init uint32> contractCountResult,
+    ref<init uint32> bodyRowResult,
+    ref<init uint32> methodFlagsResult,
+    ref<init int32> exportKeyStringRowResult)
+{
+    if (!IsWellFormedStandaloneIdentity(exportTextStart,
+            exportTextLength)
+        || !TryValidateStandaloneArtifactDirectory(artifactOrdinal))
+    {
+        return 3;
+    }
+
+    int32 moduleEntry = FindStandaloneArtifactSection(0x0001);
+    int32 exportEntry = FindStandaloneArtifactSection(0x001D);
+    int32 methodEntry = FindStandaloneArtifactSection(0x0016);
+    int32 signatureEntry = FindStandaloneArtifactSection(0x0017);
+    int32 typeSpecEntry = FindStandaloneArtifactSection(0x0003);
+    if (moduleEntry == 0 || exportEntry == 0
+        || methodEntry == 0 || signatureEntry == 0)
+    {
+        return 1;
+    }
+
+    int32 moduleSectionStart
+        = Host.StandaloneSectionStarts[moduleEntry];
+    int32 moduleCount = Host.StandaloneSectionCounts[moduleEntry];
+    int32 exportSectionStart
+        = Host.StandaloneSectionStarts[exportEntry];
+    int32 exportCount = Host.StandaloneSectionCounts[exportEntry];
+    int32 methodSectionStart
+        = Host.StandaloneSectionStarts[methodEntry];
+    int32 methodCount = Host.StandaloneSectionCounts[methodEntry];
+    int32 signatureSectionStart
+        = Host.StandaloneSectionStarts[signatureEntry];
+    int32 signatureCount
+        = Host.StandaloneSectionCounts[signatureEntry];
+    int32 typeSpecCount = typeSpecEntry == 0 ? 0
+        : Host.StandaloneSectionCounts[typeSpecEntry];
+    int32 paramCount = GetStandaloneArtifactSectionCount(0x0018);
+    int32 genericParamCount
+        = GetStandaloneArtifactSectionCount(0x0015);
+    int32 contractCount = GetStandaloneArtifactSectionCount(0x001B);
+    int32 bodyCount = GetStandaloneArtifactSectionCount(0x0020);
+    init int32 artifactStart;
+    init int32 artifactLength;
+    if (moduleRow <= 0 || moduleRow > moduleCount
+        || exportCount == 0 || methodCount == 0
+        || signatureCount == 0
+        || !TryGetStandaloneArtifactExtent(artifactOrdinal,
+            ref init artifactStart, ref init artifactLength))
+    {
+        return 1;
+    }
+
+    init int32 methodFirst;
+    init int32 methodEnd;
+    if (!TryGetStandaloneModuleMethodDefRange(artifactStart,
+            artifactLength, moduleSectionStart, moduleCount,
+            methodCount, moduleRow, ref init methodFirst,
+            ref init methodEnd))
+    {
+        return 3;
+    }
+
+    mut int32 foundCount = 0;
+    for (mut int32 exportRow = 1;
+        exportRow <= exportCount;
+        exportRow = exportRow + 1)
+    {
+        int32 exportOffset = exportSectionStart
+            + ((exportRow - 1) * 8);
+        init uint32 definition;
+        init uint32 keyStringRow;
+        if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, exportOffset, ref init definition)
+            || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, exportOffset + 4,
+                ref init keyStringRow)
+            || keyStringRow == 0
+            || keyStringRow > uint32(stringCount)
+            || !TryValidateStandaloneStringName(artifactOrdinal,
+                artifactStart, artifactLength, stringSectionStart,
+                stringSectionLength, stringCount,
+                int32(keyStringRow)))
+        {
+            return 3;
+        }
+
+        init int32 keyComparison;
+        if (!TryCompareStandaloneStringRowToText(artifactOrdinal,
+                stringSectionStart, stringSectionLength, stringCount,
+                int32(keyStringRow), exportTextStart, exportTextLength,
+                ref init keyComparison))
+        {
+            return 3;
+        }
+        if (keyComparison != 0)
+        {
+            continue;
+        }
+
+        init int32 definitionModuleRow;
+        init uint32 definitionVisibility;
+        init uint32 definitionOwnerType;
+        if (!TryResolveStandaloneExportDefinition(artifactStart,
+                artifactLength, moduleSectionStart, moduleCount,
+                definition, ref init definitionModuleRow,
+                ref init definitionVisibility,
+                ref init definitionOwnerType))
+        {
+            return 3;
+        }
+        if (definitionModuleRow != moduleRow)
+        {
+            continue;
+        }
+        if (foundCount != 0)
+        {
+            return 3;
+        }
+        foundCount = foundCount + 1;
+        uint32 row = definition & 0x00FF_FFFF;
+        if (definition >> 24 != 0x16)
+        {
+            return 2;
+        }
+        if (row == 0 || row > uint32(methodCount))
+        {
+            return 3;
+        }
+        if (row < uint32(methodFirst) || row >= uint32(methodEnd))
+        {
+            return 3;
+        }
+
+        init uint32 ownerType;
+        init uint32 methodNameStringRow;
+        init uint32 signatureRow;
+        init uint32 methodFlags;
+        init uint32 contractFirst;
+        init uint32 methodContractCount;
+        init uint32 bodyRow;
+        int32 methodOffset = methodSectionStart
+            + ((int32(row) - 1) * 28);
+        if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, methodOffset, ref init ownerType)
+            || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, methodOffset + 4,
+                ref init methodNameStringRow)
+            || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, methodOffset + 8,
+                ref init signatureRow)
+            || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, methodOffset + 12,
+                ref init methodFlags)
+            || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, methodOffset + 16,
+                ref init contractFirst)
+            || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, methodOffset + 20,
+                ref init methodContractCount)
+            || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, methodOffset + 24, ref init bodyRow)
+            || ownerType != definitionOwnerType
+            || ownerType != 0 || methodFlags != 2
+            || definitionVisibility != 2
+            || methodNameStringRow == 0
+            || methodNameStringRow > uint32(stringCount)
+            || signatureRow == 0
+            || signatureRow > uint32(signatureCount)
+            || bodyRow > uint32(bodyCount)
+            || !IsStandaloneMetadataRange(contractFirst,
+                methodContractCount, contractCount)
+            || !TryValidateStandaloneStringName(artifactOrdinal,
+                artifactStart, artifactLength, stringSectionStart,
+                stringSectionLength, stringCount,
+                int32(methodNameStringRow))
+            || IsStandaloneMethodExpectedImport(artifactStart,
+                artifactLength, int32(row)))
+        {
+            return 2;
+        }
+
+        int32 signatureOffset = signatureSectionStart
+            + ((int32(signatureRow) - 1) * 24);
+        init uint32 resultTypeSpecRef;
+        init uint32 receiverTypeSpecRef;
+        init uint32 paramFirst;
+        init uint32 signatureParamCount;
+        init uint32 genericFirst;
+        init uint32 signatureGenericCount;
+        if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, signatureOffset,
+                ref init resultTypeSpecRef)
+            || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, signatureOffset + 4,
+                ref init receiverTypeSpecRef)
+            || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, signatureOffset + 8,
+                ref init paramFirst)
+            || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, signatureOffset + 12,
+                ref init signatureParamCount)
+            || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, signatureOffset + 16,
+                ref init genericFirst)
+            || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, signatureOffset + 20,
+                ref init signatureGenericCount))
+        {
+            return 3;
+        }
+        if (resultTypeSpecRef == 0 || receiverTypeSpecRef != 0
+            || genericFirst != 0 || signatureGenericCount != 0
+            || !IsStandaloneMetadataRange(paramFirst,
+                signatureParamCount, paramCount))
+        {
+            return 2;
+        }
+
+        init bool nativePointerAnchor;
+        int32 nativePointerAnchorStatus
+            = TryGetStandaloneMethodNativePointerAnchor(
+                artifactStart, artifactLength, typeSpecEntry,
+                typeSpecCount, int32(row),
+                ref init nativePointerAnchor);
+        if (nativePointerAnchorStatus != 0)
+        {
+            return nativePointerAnchorStatus;
+        }
+        if (nativePointerAnchor)
+        {
+            return 2;
+        }
+
+        *exportRowResult = exportRow;
+        *methodDefRowResult = int32(row);
+        *methodNameStringRowResult = int32(methodNameStringRow);
+        *methodSigRowResult = int32(signatureRow);
+        *resultTypeSpecRefResult = resultTypeSpecRef;
+        *receiverTypeSpecRefResult = receiverTypeSpecRef;
+        *paramFirstResult = paramFirst;
+        *paramCountResult = signatureParamCount;
+        *genericFirstResult = genericFirst;
+        *genericCountResult = signatureGenericCount;
+        *contractFirstResult = contractFirst;
+        *contractCountResult = methodContractCount;
+        *bodyRowResult = bodyRow;
+        *methodFlagsResult = methodFlags;
+        *exportKeyStringRowResult = int32(keyStringRow);
+    }
+
+    return foundCount == 1 ? 0 : 1;
+}
+
+bool TryResolveStandaloneExportDefinition(int32 artifactStart,
+    int32 artifactLength, int32 moduleSectionStart, int32 moduleCount,
+    uint32 definition, ref<init int32> moduleRowResult,
+    ref<init uint32> visibilityResult,
+    ref<init uint32> ownerTypeResult)
+    ensure return ? (*moduleRowResult is init
+        && *visibilityResult is init && *ownerTypeResult is init) : true
+{
+    uint32 definitionKind = definition >> 24;
+    uint32 row = definition & 0x00FF_FFFF;
+    if (row == 0)
+    {
+        return false;
+    }
+
+    int32 typeEntry = FindStandaloneArtifactSection(0x0013);
+    int32 typeCount = GetStandaloneArtifactSectionCount(0x0013);
+    int32 ownerType = 0;
+    int32 cursorOffset = 36;
+    uint32 visibility;
+    if (definitionKind == 0x13)
+    {
+        if (row > uint32(typeCount) || typeEntry == 0)
+        {
+            return false;
+        }
+        int32 typeOffset = Host.StandaloneSectionStarts[typeEntry]
+            + ((int32(row) - 1) * 44);
+        init uint32 flags;
+        if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, typeOffset + 8, ref init flags))
+        {
+            return false;
+        }
+        visibility = flags & 3;
+    }
+    else if (definitionKind == 0x14)
+    {
+        int32 fieldEntry = FindStandaloneArtifactSection(0x0014);
+        int32 fieldCount = GetStandaloneArtifactSectionCount(0x0014);
+        if (row > uint32(fieldCount) || fieldEntry == 0)
+        {
+            return false;
+        }
+        int32 fieldOffset = Host.StandaloneSectionStarts[fieldEntry]
+            + ((int32(row) - 1) * 16);
+        init uint32 fieldOwnerType;
+        init uint32 flags;
+        if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, fieldOffset, ref init fieldOwnerType)
+            || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, fieldOffset + 12, ref init flags)
+            || fieldOwnerType == 0
+            || fieldOwnerType > uint32(typeCount)
+            || (flags & 0x10) != 0)
+        {
+            return false;
+        }
+        ownerType = int32(fieldOwnerType);
+        visibility = flags & 3;
+    }
+    else if (definitionKind == 0x16)
+    {
+        int32 methodEntry = FindStandaloneArtifactSection(0x0016);
+        int32 methodCount = GetStandaloneArtifactSectionCount(0x0016);
+        if (row > uint32(methodCount) || methodEntry == 0)
+        {
+            return false;
+        }
+        int32 methodOffset = Host.StandaloneSectionStarts[methodEntry]
+            + ((int32(row) - 1) * 28);
+        init uint32 methodOwnerType;
+        init uint32 flags;
+        if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, methodOffset, ref init methodOwnerType)
+            || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, methodOffset + 12, ref init flags)
+            || methodOwnerType > uint32(typeCount))
+        {
+            return false;
+        }
+        ownerType = int32(methodOwnerType);
+        visibility = flags & 3;
+        cursorOffset = 40;
+    }
+    else if (definitionKind == 0x1E)
+    {
+        int32 propertyEntry = FindStandaloneArtifactSection(0x001E);
+        int32 propertyCount = GetStandaloneArtifactSectionCount(0x001E);
+        if (row > uint32(propertyCount) || propertyEntry == 0)
+        {
+            return false;
+        }
+        int32 propertyOffset
+            = Host.StandaloneSectionStarts[propertyEntry]
+                + ((int32(row) - 1) * 20);
+        init uint32 propertyOwnerType;
+        init uint32 flags;
+        if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, propertyOffset,
+                ref init propertyOwnerType)
+            || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, propertyOffset + 16,
+                ref init flags)
+            || propertyOwnerType == 0
+            || propertyOwnerType > uint32(typeCount))
+        {
+            return false;
+        }
+        ownerType = int32(propertyOwnerType);
+        visibility = flags & 3;
+    }
+    else if (definitionKind == 0x20)
+    {
+        int32 associatedTypeEntry
+            = FindStandaloneArtifactSection(0x0027);
+        int32 associatedTypeCount
+            = GetStandaloneArtifactSectionCount(0x0027);
+        int32 interfaceEntry
+            = FindStandaloneArtifactSection(0x0025);
+        int32 interfaceCount
+            = GetStandaloneArtifactSectionCount(0x0025);
+        if (row > uint32(associatedTypeCount)
+            || associatedTypeEntry == 0 || interfaceEntry == 0)
+        {
+            return false;
+        }
+        init uint32 ownerInterface;
+        int32 associatedTypeOffset
+            = Host.StandaloneSectionStarts[associatedTypeEntry]
+                + ((int32(row) - 1) * 12);
+        if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, associatedTypeOffset,
+                ref init ownerInterface)
+            || ownerInterface == 0
+            || ownerInterface > uint32(interfaceCount))
+        {
+            return false;
+        }
+        int32 interfaceOffset
+            = Host.StandaloneSectionStarts[interfaceEntry]
+                + ((int32(ownerInterface) - 1) * 48);
+        init uint32 ownerTypeRow;
+        init uint32 flags;
+        if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, interfaceOffset,
+                ref init ownerTypeRow)
+            || ownerTypeRow == 0 || ownerTypeRow > uint32(typeCount)
+            || typeEntry == 0
+            || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength,
+                Host.StandaloneSectionStarts[typeEntry]
+                    + ((int32(ownerTypeRow) - 1) * 44) + 8,
+                ref init flags))
+        {
+            return false;
+        }
+        ownerType = int32(ownerTypeRow);
+        visibility = flags & 3;
+    }
+    else
+    {
+        return false;
+    }
+
+    init int32 declarationModuleRow;
+    if (!TryFindStandaloneModuleForRow(artifactStart, artifactLength,
+            moduleSectionStart, moduleCount,
+            ownerType > 0 ? typeCount
+                : cursorOffset == 40
+                    ? GetStandaloneArtifactSectionCount(0x0016)
+                    : typeCount,
+            ownerType > 0 ? 36 : cursorOffset,
+            ownerType > 0 ? ownerType : int32(row),
+            ref init declarationModuleRow))
+    {
+        return false;
+    }
+
+    if (ownerType > 0 && cursorOffset == 40)
+    {
+        init int32 methodModuleRow;
+        if (!TryFindStandaloneModuleForRow(artifactStart,
+                artifactLength, moduleSectionStart, moduleCount,
+                GetStandaloneArtifactSectionCount(0x0016), 40,
+                int32(row), ref init methodModuleRow)
+            || methodModuleRow != declarationModuleRow)
+        {
+            return false;
+        }
+    }
+    *moduleRowResult = declarationModuleRow;
+
+    *visibilityResult = visibility;
+    *ownerTypeResult = uint32(ownerType);
+    return true;
+}
+
+bool TryFindStandaloneModuleForRow(int32 artifactStart,
+    int32 artifactLength, int32 moduleSectionStart, int32 moduleCount,
+    int32 tableCount, int32 cursorOffset, int32 row,
+    ref<init int32> moduleRowResult)
+    ensure return ? *moduleRowResult is init : true
+{
+    if (moduleCount <= 0 || tableCount <= 0 || row <= 0
+        || row > tableCount || (cursorOffset != 36 && cursorOffset != 40))
+    {
+        return false;
+    }
+
+    mut int32 low = 1;
+    mut int32 high = moduleCount;
+    while (low <= high)
+    {
+        int32 middle = low + (high - low) / 2;
+        init uint32 first;
+        int32 firstOffset = moduleSectionStart
+            + ((middle - 1) * 48) + cursorOffset;
+        if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, firstOffset, ref init first)
+            || first == 0 || first > uint32(tableCount + 1))
+        {
+            return false;
+        }
+        mut uint32 end = uint32(tableCount + 1);
+        if (middle < moduleCount
+            && (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                    artifactLength,
+                    moduleSectionStart + (middle * 48) + cursorOffset,
+                    ref init end)
+                || end < first || end > uint32(tableCount + 1)))
+        {
+            return false;
+        }
+        if (row < int32(first))
+        {
+            high = middle - 1;
+        }
+        else if (row >= int32(end))
+        {
+            low = middle + 1;
+        }
+        else
+        {
+            *moduleRowResult = middle;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool TryGetStandaloneModuleMethodDefRange(int32 artifactStart,
+    int32 artifactLength, int32 moduleSectionStart, int32 moduleCount,
+    int32 methodCount, int32 moduleRow,
+    ref<init int32> methodFirstResult,
+    ref<init int32> methodEndResult)
+    ensure return ? (*methodFirstResult is init
+        && *methodEndResult is init) : true
+{
+    if (moduleRow <= 0 || moduleRow > moduleCount
+        || methodCount < 0 || methodCount > 0xFF_FFFF)
+    {
+        return false;
+    }
+
+    init uint32 methodFirst;
+    if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+            artifactLength,
+            moduleSectionStart + ((moduleRow - 1) * 48) + 40,
+            ref init methodFirst))
+    {
+        return false;
+    }
+    mut int32 methodEnd = methodCount + 1;
+    if (moduleRow < moduleCount)
+    {
+        init uint32 nextMethodFirst;
+        if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength,
+                moduleSectionStart + (moduleRow * 48) + 40,
+                ref init nextMethodFirst)
+            || nextMethodFirst > 0x100_0000)
+        {
+            return false;
+        }
+        methodEnd = int32(nextMethodFirst);
+    }
+
+    if (methodFirst == 0 || methodFirst > 0x100_0000
+        || methodEnd < int32(methodFirst)
+        || methodEnd > methodCount + 1)
+    {
+        return false;
+    }
+
+    *methodFirstResult = int32(methodFirst);
+    *methodEndResult = methodEnd;
+    return true;
+}
+
+bool IsStandaloneMetadataRange(uint32 first, uint32 count,
+    int32 tableCount)
+{
+    if (tableCount < 0 || tableCount > 0xFF_FFFF)
+    {
+        return false;
+    }
+    if (count == 0)
+    {
+        return first == 0;
+    }
+    return first != 0 && first <= uint32(tableCount)
+        && count <= uint32(tableCount) - first + 1;
+}
+
+bool IsStandaloneMethodExpectedImport(int32 artifactStart,
+    int32 artifactLength, int32 methodDefRow)
+{
+    int32 importEntry = FindStandaloneArtifactSection(0x001C);
+    if (importEntry == 0)
+    {
+        return false;
+    }
+
+    int32 importStart
+        = Host.StandaloneSectionStarts[importEntry];
+    int32 importCount
+        = Host.StandaloneSectionCounts[importEntry];
+    uint32 methodReference = 0x1600_0000
+        | uint32(methodDefRow);
+    for (mut int32 row = 1; row <= importCount; row = row + 1)
+    {
+        init uint32 expected;
+        int32 rowStart = importStart + ((row - 1) * 12) + 8;
+        if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, rowStart, ref init expected))
+        {
+            return true;
+        }
+        if (expected == methodReference)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+int32 TryGetStandaloneMethodNativePointerAnchor(int32 artifactStart,
+    int32 artifactLength, int32 typeSpecEntry, int32 typeSpecCount,
+    int32 methodDefRow, ref<init bool> hasAnchorResult)
+    ensure return == 0 ? *hasAnchorResult is init : true
+{
+    if (typeSpecEntry == 0 || typeSpecCount == 0)
+    {
+        *hasAnchorResult = false;
+        return 0;
+    }
+
+    int32 sectionStart
+        = Host.StandaloneSectionStarts[typeSpecEntry];
+    int32 sectionLength
+        = Host.StandaloneSectionLengths[typeSpecEntry];
+    if (!TryValidateStandaloneVariableTableIndex(artifactStart,
+            artifactLength, sectionStart, sectionLength,
+            typeSpecCount, 2, 1))
+    {
+        return 3;
+    }
+
+    for (mut int32 row = 1; row <= typeSpecCount; row = row + 1)
+    {
+        init int32 rowStart;
+        init int32 rowLength;
+        if (!TryGetStandaloneVariableTableRowExtent(
+                artifactStart, artifactLength, sectionStart,
+                sectionLength, typeSpecCount, 2, 1, row,
+                ref init rowStart, ref init rowLength))
+        {
+            return 3;
+        }
+        if (rowLength != 7)
+        {
+            continue;
+        }
+        init int32 typeForm;
+        if (!TryReadStandaloneArtifactAbsoluteByte(artifactStart,
+                artifactLength, rowStart, ref init typeForm))
+        {
+            return 3;
+        }
+        if (typeForm != 0x0D)
+        {
+            continue;
+        }
+
+        init uint32 anchoredMethod;
+        if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, rowStart + 3,
+                ref init anchoredMethod))
+        {
+            return 3;
+        }
+        if (anchoredMethod == uint32(methodDefRow))
+        {
+            *hasAnchorResult = true;
+            return 0;
+        }
+    }
+    *hasAnchorResult = false;
+    return 0;
+}
+
+bool TryGetStandaloneVariableTableIndexLength(int32 sectionLength,
+    int32 rowCount, int32 minimumRowBytes,
+    ref<init int32> indexLengthResult)
+    ensure return ? *indexLengthResult is init : true
+{
+    if (sectionLength < 0 || rowCount < 0 || rowCount > 0xFF_FFFF
+        || minimumRowBytes <= 0)
+    {
+        return false;
+    }
+
+    int32 indexLength = (rowCount + 1) * 4;
+    if (indexLength > sectionLength
+        || int64(rowCount) * minimumRowBytes
+            > int64(sectionLength - indexLength))
+    {
+        return false;
+    }
+    *indexLengthResult = indexLength;
+    return true;
+}
+
+bool TryValidateStandaloneVariableTableIndex(int32 artifactStart,
+    int32 artifactLength, int32 sectionStart, int32 sectionLength,
+    int32 rowCount, int32 minimumRowBytes, int32 rowAlignment)
+{
+    init int32 indexLength;
+    if (rowAlignment != 1 && rowAlignment != 4
+        || !TryGetStandaloneVariableTableIndexLength(sectionLength,
+            rowCount, minimumRowBytes, ref init indexLength)
+        || sectionStart < artifactStart
+        || sectionStart > artifactStart + artifactLength
+        || sectionLength > artifactStart + artifactLength - sectionStart)
+    {
+        return false;
+    }
+
+    int32 dataLength = sectionLength - indexLength;
+    init uint32 firstOffset;
+    if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+            artifactLength, sectionStart, ref init firstOffset)
+        || firstOffset != 0)
+    {
+        return false;
+    }
+
+    mut uint32 previousOffset = firstOffset;
+    for (mut int32 row = 1; row <= rowCount; row = row + 1)
+    {
+        init uint32 nextOffset;
+        if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, sectionStart + row * 4,
+                ref init nextOffset)
+            || nextOffset > uint32(dataLength)
+            || previousOffset
+                > uint32(dataLength - minimumRowBytes)
+            || nextOffset
+                < previousOffset + uint32(minimumRowBytes)
+            || (rowAlignment == 4 && (nextOffset & 3) != 0))
+        {
+            return false;
+        }
+        previousOffset = nextOffset;
+    }
+
+    return previousOffset == uint32(dataLength);
+}
+
+bool TryGetStandaloneVariableTableRowExtent(int32 artifactStart,
+    int32 artifactLength, int32 sectionStart, int32 sectionLength,
+    int32 rowCount, int32 minimumRowBytes, int32 rowAlignment,
+    int32 row, ref<init int32> rowStartResult,
+    ref<init int32> rowLengthResult)
+    ensure return ? (*rowStartResult is init && *rowLengthResult is init)
+        : true
+{
+    init int32 indexLength;
+    if (rowCount <= 0 || rowCount > 0xFF_FFFF
+        || minimumRowBytes < 0
+        || (rowAlignment != 1 && rowAlignment != 4)
+        || row <= 0 || row > rowCount
+        || !TryGetStandaloneVariableTableIndexLength(sectionLength,
+            rowCount, minimumRowBytes, ref init indexLength)
+        || sectionStart < artifactStart
+        || sectionStart > artifactStart + artifactLength
+        || sectionLength > artifactStart + artifactLength - sectionStart)
+    {
+        return false;
+    }
+
+    int32 dataLength = sectionLength - indexLength;
+    init uint32 start;
+    init uint32 end;
+    if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+            artifactLength, sectionStart + ((row - 1) * 4),
+            ref init start)
+        || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+            artifactLength, sectionStart + (row * 4), ref init end)
+        || end > uint32(dataLength)
+        || start > uint32(dataLength - minimumRowBytes)
+        || end < start + uint32(minimumRowBytes)
+        || (rowAlignment == 4 && ((start | end) & 3) != 0))
+    {
+        return false;
+    }
+
+    *rowStartResult = sectionStart + indexLength + int32(start);
+    *rowLengthResult = int32(end - start);
+    return true;
+}

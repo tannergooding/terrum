@@ -10,6 +10,8 @@ public static int32 ValidateStandaloneMethodImportInput()
         || Host.StandaloneSectionCount.Length != 1
         || Host.StandaloneSectionArtifactOrdinal.Length != 1
         || Host.StandaloneModuleCount.Length != 1
+        || Host.StandaloneResolvedRootCount.Length != 1
+        || Host.StandaloneResolvedRoots.Length % 20 != 0
         || Host.StandaloneSectionKinds.Length
             != Host.StandaloneArtifacts.Length / 16 + 1
         || Host.StandaloneSectionFlags.Length
@@ -24,6 +26,8 @@ public static int32 ValidateStandaloneMethodImportInput()
             != Host.StandaloneArtifacts.Length / 16 + 1
         || Host.StandaloneModuleDirectory.Length
             != (Host.StandaloneArtifacts.Length / 48 + 2) * 8)
+        || Host.StandaloneModuleOrder.Length
+            != Host.StandaloneArtifacts.Length / 48 + 2)
     {
         return 1;
     }
@@ -38,6 +42,7 @@ public static int32 ValidateStandaloneMethodImportInput()
         || artifactCount != Host.StandaloneArtifactInputs.Length / 4
         || rootCount < 0
         || rootCount != Host.StandaloneMethodRoots.Length / 5
+        || rootCount != Host.StandaloneResolvedRoots.Length / 20
         || (rootCount != 0 && artifactCount == 0)
         || agreementStart != 0
         || !IsStandaloneTextRange(agreementStart, agreementLength)

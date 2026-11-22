@@ -1,5 +1,6 @@
 using System;
 using System.Buffers.Binary;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.IO;
@@ -46,11 +47,64 @@ internal sealed class StandaloneMethodImportInputTests
             }
             if (Host.StandaloneModuleCount[0] != 3
                 || Host.StandaloneModuleDirectory[8] != -1
-                || Host.StandaloneModuleDirectory[16] != 1
+                || Host.StandaloneModuleDirectory[16] != 0
                 || Host.StandaloneModuleDirectory[17] != 1
-                || Host.StandaloneModuleDirectory[24] != 0
+                || Host.StandaloneModuleDirectory[24] != 1
                 || Host.StandaloneModuleDirectory[25] != 1) {
                 return 22;
+            }
+            if (Host.StandaloneModuleOrder[1] != 1
+                || Host.StandaloneModuleOrder[2] != 3
+                || Host.StandaloneModuleOrder[3] != 2) {
+                return 22;
+            }
+            int32 rootStatus = BindStandaloneMethodRoots();
+            if (rootStatus != Host.Expected[1]) { return 23; }
+            if (rootStatus != 0
+                && Host.StandaloneResolvedRootCount[0] != 0) {
+                return 25;
+            }
+            if (rootStatus == 0
+                && (Host.StandaloneResolvedRootCount[0] != 2
+                    || Host.StandaloneResolvedRoots[0] != 1
+                    || Host.StandaloneResolvedRoots[1] != 0
+                    || Host.StandaloneResolvedRoots[2] != 0
+                    || Host.StandaloneResolvedRoots[3] != 1
+                    || Host.StandaloneResolvedRoots[4] != 1
+                    || Host.StandaloneResolvedRoots[5] != 1
+                    || Host.StandaloneResolvedRoots[6] != 2
+                    || Host.StandaloneResolvedRoots[7] != 1
+                    || Host.StandaloneResolvedRoots[9] != 0
+                    || Host.StandaloneResolvedRoots[10] != 0
+                    || Host.StandaloneResolvedRoots[11] != 0
+                    || Host.StandaloneResolvedRoots[12] != 0
+                    || Host.StandaloneResolvedRoots[13] != 0
+                    || Host.StandaloneResolvedRoots[14] != 0
+                    || Host.StandaloneResolvedRoots[15] != 0
+                    || Host.StandaloneResolvedRoots[16] != 0
+                    || Host.StandaloneResolvedRoots[17] != 2
+                    || Host.StandaloneResolvedRoots[18] != 3
+                    || Host.StandaloneResolvedRoots[19] != 0
+                    || Host.StandaloneResolvedRoots[20] != 2
+                    || Host.StandaloneResolvedRoots[21] != 0
+                    || Host.StandaloneResolvedRoots[22] != 1
+                    || Host.StandaloneResolvedRoots[23] != 1
+                    || Host.StandaloneResolvedRoots[24] != 1
+                    || Host.StandaloneResolvedRoots[25] != 1
+                    || Host.StandaloneResolvedRoots[26] != 2
+                    || Host.StandaloneResolvedRoots[27] != 1
+                    || Host.StandaloneResolvedRoots[29] != 0
+                    || Host.StandaloneResolvedRoots[30] != 0
+                    || Host.StandaloneResolvedRoots[31] != 0
+                    || Host.StandaloneResolvedRoots[32] != 0
+                    || Host.StandaloneResolvedRoots[33] != 0
+                    || Host.StandaloneResolvedRoots[34] != 0
+                    || Host.StandaloneResolvedRoots[35] != 0
+                    || Host.StandaloneResolvedRoots[36] != 0
+                    || Host.StandaloneResolvedRoots[37] != 2
+                    || Host.StandaloneResolvedRoots[38] != 3
+                    || Host.StandaloneResolvedRoots[39] != 1)) {
+                return 24;
             }
             if (!TryValidateStandaloneArtifactDirectory(0)) { return 11; }
             init int32 found;
@@ -130,6 +184,9 @@ internal sealed class StandaloneMethodImportInputTests
                 "StandaloneSectionOrder",
                 "StandaloneModuleCount",
                 "StandaloneModuleDirectory",
+                "StandaloneModuleOrder",
+                "StandaloneResolvedRootCount",
+                "StandaloneResolvedRoots",
             }));
         Assert.That(hostBuffers[2].Values,
             Is.EqualTo(new[] { 1, 2, 3, 4, 5 }));
@@ -141,7 +198,7 @@ internal sealed class StandaloneMethodImportInputTests
 
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
-    public async Task TerrumImportPreflightValidatesRawArtifactsAndModuleIdentitiesAsync(
+    public async Task TerrumImportPreflightBindsExplicitMethodRootsAsync(
         BoundRuntimePolicy policy)
     {
         Assume.That(OperatingSystem.IsWindows()
@@ -155,9 +212,9 @@ internal sealed class StandaloneMethodImportInputTests
                     CreateMinimalArtifact("provider/a")),
             ], [
                 new StandaloneMethodRoot(0, "provider/b",
-                    "provider/b/Run"),
+                    "api/Run"),
                 new StandaloneMethodRoot(1, "provider/a",
-                    "provider/a/Run"),
+                    "api/Run"),
             ]);
         var sourcePaths = new[] {
             "sources/Terrum.CodeAnalysis.Terrum/Text/Utf16CodeUnits.terrum",
@@ -165,6 +222,7 @@ internal sealed class StandaloneMethodImportInputTests
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneArtifactDirectory.terrum",
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneStringTable.terrum",
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneModuleDirectory.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodRoots.terrum",
         };
         var root = RepositoryRoot();
         var components = new List<SyntaxTree>(sourcePaths.Length + 1);
@@ -180,13 +238,26 @@ internal sealed class StandaloneMethodImportInputTests
         components.Add(SyntaxTree.Parse(VerificationSource,
             "standalone-method-import-input-tests.terrum"));
 
-        var program = Compile(input, 3);
-        Assert.That(Run(program, input, 3), Is.EqualTo(0));
+        var program = Compile(input, 3, 0);
+        var boundRootsExecution = NativeJit.ExecuteWithData(program,
+            (NativeRuntimePolicy)policy);
+        Assert.That(boundRootsExecution.ExitCode, Is.EqualTo(0));
+        var resolvedRootsBuffer = Enumerable.Range(0,
+                program.Buffers.Length)
+            .Single(index =>
+                program.Buffers[index].Name == "StandaloneResolvedRoots");
+        var resolvedRootsOffset
+            = boundRootsExecution.BufferOffsets[resolvedRootsBuffer];
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                boundRootsExecution.Data.AsSpan(
+                    resolvedRootsOffset + (8 * sizeof(int)))),
+            Is.EqualTo(0xF200_0008u));
 
         var unsupportedAgreement = input with {
             Agreement = Agreement[..^1] + "2",
         };
-        Assert.That(Run(program, unsupportedAgreement, 3), Is.EqualTo(2));
+        Assert.That(Run(program, unsupportedAgreement, 3, 0),
+            Is.EqualTo(2));
 
         var unsupportedSchema = input with {
             Artifacts = [
@@ -196,7 +267,7 @@ internal sealed class StandaloneMethodImportInputTests
                 input.Artifacts[1],
             ],
         };
-        Assert.That(Run(program, unsupportedSchema, 3), Is.EqualTo(3));
+        Assert.That(Run(program, unsupportedSchema, 3, 0), Is.EqualTo(3));
 
         var malformedArtifact = input.Artifacts[0].Artifact.ToArray();
         malformedArtifact[0] = (byte)'X';
@@ -207,7 +278,7 @@ internal sealed class StandaloneMethodImportInputTests
                 input.Artifacts[1],
             ],
         };
-        Assert.That(Run(program, malformedArtifactInput, -3),
+        Assert.That(Run(program, malformedArtifactInput, -3, 0),
             Is.EqualTo(0));
 
         var duplicateRoot = input with {
@@ -216,7 +287,7 @@ internal sealed class StandaloneMethodImportInputTests
                 input.MethodRoots[0],
             ],
         };
-        Assert.That(Run(program, duplicateRoot, 3), Is.EqualTo(4));
+        Assert.That(Run(program, duplicateRoot, 3, 0), Is.EqualTo(4));
 
         var invalidRootOrdinal = input with {
             MethodRoots = [
@@ -225,7 +296,53 @@ internal sealed class StandaloneMethodImportInputTests
                     "provider/a/Run"),
             ],
         };
-        Assert.That(Run(program, invalidRootOrdinal, 3), Is.EqualTo(1));
+        Assert.That(Run(program, invalidRootOrdinal, 3, 0), Is.EqualTo(1));
+
+        var missingExport = input with {
+            MethodRoots = [
+                new StandaloneMethodRoot(0, "provider/b", "api/Missing"),
+                input.MethodRoots[1],
+            ],
+        };
+        var missingExportProgram = Compile(missingExport, 3, 1);
+        Assert.That(Run(missingExportProgram, missingExport, 3, 1),
+            Is.EqualTo(0));
+
+        var privateMethod = input with {
+            Artifacts = [
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateMinimalArtifact("provider/b", methodFlags: 1)),
+                input.Artifacts[1],
+            ],
+        };
+        var privateMethodProgram = Compile(privateMethod, 3, 2);
+        Assert.That(Run(privateMethodProgram, privateMethod, 3, 2),
+            Is.EqualTo(0));
+
+        var duplicateExportKey = input with {
+            Artifacts = [
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateMinimalArtifact("provider/b",
+                        duplicateMethodExport: true)),
+                input.Artifacts[1],
+            ],
+        };
+        var duplicateExportProgram = Compile(duplicateExportKey, 3, 3);
+        Assert.That(Run(duplicateExportProgram, duplicateExportKey, 3, 3),
+            Is.EqualTo(0));
+
+        var wrongDefinitionKind = input with {
+            Artifacts = [
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateTypeAndMethodArtifact("provider/b")),
+                input.Artifacts[1],
+            ],
+        };
+        var wrongDefinitionKindProgram
+            = Compile(wrongDefinitionKind, 3, 2);
+        Assert.That(Run(wrongDefinitionKindProgram, wrongDefinitionKind,
+                3, 2),
+            Is.EqualTo(0));
 
         var duplicateModule = input with {
             Artifacts = [
@@ -234,27 +351,29 @@ internal sealed class StandaloneMethodImportInputTests
                     CreateMinimalArtifact("provider/b")),
             ],
         };
-        Assert.That(Run(program, duplicateModule, -1), Is.EqualTo(0));
+        Assert.That(Run(program, duplicateModule, -1, 0), Is.EqualTo(0));
 
         var outOfOrderInput = new StandaloneMethodImportInput(Agreement,
             "consumer/module", [
                 new TrRmStandardArtifactInput(SchemaIdentity,
                     CreateOutOfOrderArtifact()),
             ], []);
-        var outOfOrderProgram = Compile(outOfOrderInput, -2);
-        Assert.That(Run(outOfOrderProgram, outOfOrderInput, -2),
+        var outOfOrderProgram = Compile(outOfOrderInput, -2, 0);
+        Assert.That(Run(outOfOrderProgram, outOfOrderInput, -2, 0),
             Is.EqualTo(0));
 
         var localOnly = new StandaloneMethodImportInput(Agreement,
             "consumer/module", [], []);
-        var localOnlyProgram = Compile(localOnly, 1);
-        Assert.That(Run(localOnlyProgram, localOnly, 1), Is.EqualTo(0));
+        var localOnlyProgram = Compile(localOnly, 1, 0);
+        Assert.That(Run(localOnlyProgram, localOnly, 1, 0),
+            Is.EqualTo(0));
 
         BoundProgram Compile(StandaloneMethodImportInput request,
-            int expectedModuleCount)
+            int expectedModuleCount, int expectedRootStatus)
         {
             var compilation = Compilation.Create(components,
-                Buffers(request, expectedModuleCount), policy);
+                Buffers(request, expectedModuleCount,
+                    expectedRootStatus), policy);
             Assert.That(compilation.HasErrors, Is.False,
                 string.Join(Environment.NewLine, compilation.Diagnostics));
             return compilation.Program
@@ -263,34 +382,114 @@ internal sealed class StandaloneMethodImportInputTests
         }
 
         int Run(BoundProgram boundProgram,
-            StandaloneMethodImportInput request, int expectedModuleCount)
+            StandaloneMethodImportInput request, int expectedModuleCount,
+            int expectedRootStatus)
             => NativeJit.Execute(boundProgram with {
-                Buffers = Buffers(request, expectedModuleCount),
+                Buffers = Buffers(request, expectedModuleCount,
+                    expectedRootStatus),
             }, (NativeRuntimePolicy)policy);
 
         ImmutableArray<HostBuffer> Buffers(
-            StandaloneMethodImportInput request, int expectedModuleCount)
+            StandaloneMethodImportInput request, int expectedModuleCount,
+            int expectedRootStatus)
             => request.Capture().CreateHostBuffers().Add(new HostBuffer(
                 "Expected", PrimitiveType.Int32,
-                [expectedModuleCount], false));
+                [expectedModuleCount, expectedRootStatus], false));
     }
 
     private static string RepositoryRoot() =>
         Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..",
             "..", "..", "..", ".."));
 
-    private static byte[] CreateMinimalArtifact(string moduleIdentity)
+    private static byte[] CreateMinimalArtifact(string moduleIdentity,
+        string exportKey = "api/Run", uint methodFlags = 2,
+        bool duplicateMethodExport = false)
+    {
+        var methodCount = duplicateMethodExport ? 2 : 1;
+        var stringSection = TrRmStringTableWriter.EncodeNames([
+            (moduleIdentity, 0),
+            ("Implementation", 0),
+            (exportKey, 0),
+        ]);
+        var strings = new TrRmStringTableReader(stringSection, 3);
+        var moduleSection = TrRmModuleTableWriter.Encode([
+            new TrRmModuleRow(1, 1, 0, 0, 1, 1, 1, 1),
+        ], strings, 0, 0, methodCount, 0);
+        var methodDefSection = new byte[methodCount * 28];
+        var methodSigSection = new byte[methodCount * 24];
+        var exportSection = new byte[methodCount * 8];
+        for (var row = 1; row <= methodCount; row++)
+        {
+            var methodOffset = (row - 1) * 28;
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                methodDefSection.AsSpan(methodOffset + 4), 2);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                methodDefSection.AsSpan(methodOffset + 8),
+                (uint)row);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                methodDefSection.AsSpan(methodOffset + 12), methodFlags);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                methodSigSection.AsSpan((row - 1) * 24),
+                0xF200_0008);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                exportSection.AsSpan((row - 1) * 8),
+                0x1600_0000u | (uint)row);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                exportSection.AsSpan(((row - 1) * 8) + 4), 3);
+        }
+        return TrRmArtifactWriter.Encode([
+            new TrRmSection(0x0001, 0, 1, moduleSection),
+            new TrRmSection(0x0002, 0, 3, stringSection),
+            new TrRmSection(0x0016, 0, methodCount, methodDefSection),
+            new TrRmSection(0x0017, 0, methodCount, methodSigSection),
+            new TrRmSection(0x001D, 0, methodCount, exportSection),
+        ]);
+    }
+
+    private static byte[] CreateTypeAndMethodArtifact(string moduleIdentity)
     {
         var stringSection = TrRmStringTableWriter.EncodeNames([
             (moduleIdentity, 0),
+            ("Implementation", 0),
+            ("api/Run", 0),
+            ("api/Method", 0),
+            ("PublicType", 0),
         ]);
-        var strings = new TrRmStringTableReader(stringSection, 1);
+        var strings = new TrRmStringTableReader(stringSection, 5);
         var moduleSection = TrRmModuleTableWriter.Encode([
             new TrRmModuleRow(1, 1, 0, 0, 1, 1, 1, 1),
-        ], strings, 0, 0, 0, 0);
+        ], strings, 0, 1, 1, 0);
+        var typeDefSection = new byte[44];
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            typeDefSection.AsSpan(4), 5);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            typeDefSection.AsSpan(8), 6);
+        var methodDefSection = new byte[28];
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            methodDefSection.AsSpan(4), 2);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            methodDefSection.AsSpan(8), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            methodDefSection.AsSpan(12), 2);
+        var methodSigSection = new byte[24];
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            methodSigSection, 0xF200_0008);
+        var exportSection = new byte[16];
+        BinaryPrimitives.WriteUInt32LittleEndian(exportSection,
+            0x1300_0001);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            exportSection.AsSpan(4), 3);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            exportSection.AsSpan(8), 0x1600_0001);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            exportSection.AsSpan(12), 4);
         return TrRmArtifactWriter.Encode([
             new TrRmSection(0x0001, 0, 1, moduleSection),
-            new TrRmSection(0x0002, 0, 1, stringSection),
+            new TrRmSection(0x0002, 0, 5, stringSection),
+            new TrRmSection(0x0013, 0, 1, typeDefSection),
+            new TrRmSection(0x0016, 0, 1, methodDefSection),
+            new TrRmSection(0x0017, 0, 1, methodSigSection),
+            new TrRmSection(0x001D, 0, 2, exportSection),
         ]);
     }
 
