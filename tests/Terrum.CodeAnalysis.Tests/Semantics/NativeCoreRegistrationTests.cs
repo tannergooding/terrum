@@ -2103,6 +2103,7 @@ internal sealed class NativeCoreRegistrationTests
                 [param(value): NativeOutput(
                     When: NativeOutputCondition.NonZero)]
                 public unsafe int32 TryGetPointer(ptr<int32> source,
+                    int32 tag,
                     [Terrum.CodeAnalysis.DependsOn(nameof(source))]
                     [Terrum.CodeAnalysis.ForwardsBacking(nameof(source))]
                     write ptr<ptr<int32>> value);
@@ -2114,11 +2115,12 @@ internal sealed class NativeCoreRegistrationTests
             [return: Terrum.CodeAnalysis.ForwardsBacking(
                 nameof(source), nameof(fallback))]
             ptr<int32> InvokePointer(ptr<void> receiver,
-                ptr<int32> source, ptr<int32> fallback) {
+                ptr<int32> source, int32 tag, ptr<int32> fallback) {
                 init ptr<int32> value;
                 unsafe {
                     int32 status = IPointerProbe.TryGetPointer(
-                        receiver, source, &init value);
+                        receiver, value: &init value, tag: tag,
+                        source: source);
                     if (status != 0) { return value; }
                     return fallback;
                 }
@@ -2186,9 +2188,9 @@ internal sealed class NativeCoreRegistrationTests
         var body = tables.Bodies.GetRegisterBody(
             tables.Methods.GetBodyRow(methodRow), tables.Contracts.Count);
         Assert.That(body.GetBlockCode(1).ToArray(),
-            Is.EqualTo(new byte[] { 0xD5, 0, 3, 0, 0x17, 0 }));
+            Is.EqualTo(new byte[] { 0xD5, 0, 4, 0, 0x17, 0 }));
         Assert.That(body.GetBlockCode(2).ToArray(),
-            Is.EqualTo(new byte[] { 0xD5, 0, 2, 0, 0x17, 0 }));
+            Is.EqualTo(new byte[] { 0xD5, 0, 3, 0, 0x17, 0 }));
 
         var loaded = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(schemaIdentity, consumerArtifact),

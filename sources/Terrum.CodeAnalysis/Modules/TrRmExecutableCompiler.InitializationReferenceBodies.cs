@@ -1712,8 +1712,8 @@ public static partial class TrRmExecutableCompiler
         statusVariable = -1;
         fallbackVariable = -1;
         successOnTrue = false;
-        if (function.IsExternal || function.ParameterCount != 3
-            || function.Variables.Length != 5
+        if (function.IsExternal || function.ParameterCount < 3
+            || function.Variables.Length != function.ParameterCount + 2
             || function.DoesNotReturn
             || (!DirectNativeImportContract.IsOutputPointee(
                     function.ReturnType)
@@ -1724,22 +1724,46 @@ public static partial class TrRmExecutableCompiler
             || function.Variables[0].IsOut || function.Variables[0].IsInit
             || function.Variables[0].IsImplicitRef
             || function.Variables[0].IsImplicitReferenceTemporary
-            || function.Variables[1].IsOut || function.Variables[1].IsInit
-            || function.Variables[1].IsImplicitRef
-            || function.Variables[1].IsImplicitReferenceTemporary
-            || function.Variables[2].Type != function.ReturnType
-            || function.Variables[2].IsOut || function.Variables[2].IsInit
-            || function.Variables[2].IsImplicitRef
-            || function.Variables[2].IsImplicitReferenceTemporary
-            || function.Variables[3].Type != function.ReturnType
-            || function.Variables[3].IsOut || function.Variables[3].IsInit
-            || !function.Variables[3].IsInitializationLocal
-            || function.Variables[4].Type is not (PrimitiveType.Int32
+            || function.Variables[0].IsInitializationLocal)
+        {
+            return false;
+        }
+
+        var fallbackLocal = function.ParameterCount - 1;
+        var outputLocal = function.ParameterCount;
+        var statusLocalIndex = outputLocal + 1;
+        for (var parameter = 1; parameter < function.ParameterCount;
+            parameter++)
+        {
+            var variable = function.Variables[parameter];
+            if (variable.IsOut || variable.IsInit
+                || variable.IsImplicitRef
+                || variable.IsImplicitReferenceTemporary
+                || variable.IsInitializationLocal)
+            {
+                return false;
+            }
+        }
+
+        var fallback = function.Variables[fallbackLocal];
+        var output = function.Variables[outputLocal];
+        var status = function.Variables[statusLocalIndex];
+        if (fallback.Type != function.ReturnType
+            || fallback.IsOut || fallback.IsInit
+            || fallback.IsImplicitRef
+            || fallback.IsImplicitReferenceTemporary
+            || fallback.IsInitializationLocal
+            || output.Type != function.ReturnType
+            || output.IsOut || output.IsInit
+            || output.IsImplicitRef
+            || output.IsImplicitReferenceTemporary
+            || !output.IsInitializationLocal
+            || status.Type is not (PrimitiveType.Int32
                 or PrimitiveType.UInt32)
-            || function.Variables[4].IsOut || function.Variables[4].IsInit
-            || function.Variables[4].IsImplicitRef
-            || function.Variables[4].IsImplicitReferenceTemporary
-            || function.Variables[4].IsInitializationLocal)
+            || status.IsOut || status.IsInit
+            || status.IsImplicitRef
+            || status.IsImplicitReferenceTemporary
+            || status.IsInitializationLocal)
         {
             return false;
         }
@@ -1776,14 +1800,11 @@ public static partial class TrRmExecutableCompiler
         }
 
         if (statements.Length != 4
-            || statements[0] is not BoundVacantLocal {
-                Variable: 3,
-            }
-            || statements[1] is not BoundLocal {
-                Variable: 4,
-            } statusLocal
-            || statusLocal.Initializer.Type is not (PrimitiveType.Int32
-                or PrimitiveType.UInt32)
+            || statements[0] is not BoundVacantLocal vacantLocal
+            || vacantLocal.Variable != outputLocal
+            || statements[1] is not BoundLocal statusDeclaration
+            || statusDeclaration.Variable != statusLocalIndex
+            || statusDeclaration.Initializer.Type != status.Type
             || statements[2] is not BoundIf {
                 Condition: BoundExpression condition,
                 Then: BoundBlock { Statements.Length: 1 } thenBlock,
@@ -1801,13 +1822,14 @@ public static partial class TrRmExecutableCompiler
             return false;
         }
 
-        if (!TryGetForeignNativeOutputComparison(condition, 4,
-                statusLocal.Initializer.Type, out var conditionOperator))
+        var statusType = statusDeclaration.Initializer.Type;
+        if (!TryGetForeignNativeOutputComparison(condition,
+                statusLocalIndex, statusType, out var conditionOperator))
         {
             return false;
         }
 
-        var callExpression = statusLocal.Initializer;
+        var callExpression = statusDeclaration.Initializer;
         if (callExpression is BoundUnsafeExpression unsafeCall)
         {
             callExpression = unsafeCall.Expression;
@@ -1819,39 +1841,76 @@ public static partial class TrRmExecutableCompiler
                 BoundForeignInterfaceCall foreignCall
             || !boundCall.IsUnsafeAuthorized
             || foreignCall.DoesNotReturn
-            || boundCall.Type != statusLocal.Initializer.Type
+            || boundCall.Type != statusType
             || !ForeignNativeInterfaceContract.TryCreateCallTarget(
                 foreignCall, program, out var target)
-            || target.ReturnType != statusLocal.Initializer.Type
-            || target.ParameterCount != 2
+            || target.ReturnType != statusType
+            || boundCall.Arguments.IsDefault
+            || target.ParameterCount != boundCall.Arguments.Length
             || target.NativeOutputContracts.Length != 1
-            || target.NativeOutputContracts[0].FormalOrdinal != 1
+            || (uint)target.NativeOutputContracts[0].FormalOrdinal
+                >= (uint)target.ParameterCount
             || target.NativeOutputContracts[0].PointeeType
                 != function.ReturnType
             || target.NativeOutputContracts[0].SuccessState
                 != NativeOutputState.Live
             || target.NativeOutputContracts[0].ComplementState
                 != NativeOutputState.Vacant
-            || boundCall.Arguments.IsDefault
-            || boundCall.Arguments.Length != 2
-            || boundCall.ParameterIndex(0) != 0
-            || boundCall.ParameterIndex(1) != 1
-            || foreignCall.Receiver is not BoundRead {
-                Variable: 0,
-                Type: PrimitiveType.NativeRawPointer,
-            }
-            || boundCall.Arguments[0] is not BoundRead sourceRead
-            || sourceRead.Variable != 1
-            || sourceRead.Type != target.Variables[0].Type
-            || boundCall.Arguments[1] is not
-                BoundNativeOutputReservation reservation
-            || reservation.Variable != 3
-            || reservation.PointeeType != function.ReturnType)
+            || foreignCall.Receiver is not BoundRead receiver
+            || receiver.Variable != 0
+            || receiver.Type != PrimitiveType.NativeRawPointer)
         {
             return false;
         }
 
         var outputContract = target.NativeOutputContracts[0];
+        if (function.ParameterCount != target.ParameterCount + 1)
+        {
+            return false;
+        }
+
+        var seenParameters = new bool[target.ParameterCount];
+        for (var sourceArgument = 0;
+            sourceArgument < boundCall.Arguments.Length;
+            sourceArgument++)
+        {
+            var formal = boundCall.ParameterIndex(sourceArgument);
+            if ((uint)formal >= (uint)target.ParameterCount
+                || seenParameters[formal])
+            {
+                return false;
+            }
+
+            var argument = boundCall.Arguments[sourceArgument];
+            if (formal == outputContract.FormalOrdinal)
+            {
+                if (argument is not BoundNativeOutputReservation reservation
+                    || reservation.Variable != outputLocal
+                    || reservation.PointeeType != function.ReturnType)
+                {
+                    return false;
+                }
+            }
+            else if (argument is not BoundRead read
+                || read.Variable <= 0
+                || read.Variable >= fallbackLocal
+                || read.Type != target.Variables[formal].Type
+                || function.Variables[read.Variable].Type
+                    != target.Variables[formal].Type
+                || function.Variables[read.Variable].IsOut
+                || function.Variables[read.Variable].IsInit)
+            {
+                return false;
+            }
+
+            seenParameters[formal] = true;
+        }
+
+        if (seenParameters.Any(static seen => !seen))
+        {
+            return false;
+        }
+
         var expectedOperator = GetForeignNativeOutputSuccessOperator(
             outputContract.SuccessSelector,
             outputContract.ComplementSelector, target.ReturnType);
@@ -1866,16 +1925,18 @@ public static partial class TrRmExecutableCompiler
 
         successOnTrue = conditionOperator == successOperator;
         if ((!successOnTrue && conditionOperator != failureOperator)
-            || thenRead.Variable != (successOnTrue ? 3 : 2)
-            || finalRead.Variable != (successOnTrue ? 2 : 3))
+            || thenRead.Variable != (successOnTrue
+                ? outputLocal : fallbackLocal)
+            || finalRead.Variable != (successOnTrue
+                ? fallbackLocal : outputLocal))
         {
             return false;
         }
 
         call = boundCall;
-        outputVariable = 3;
-        statusVariable = 4;
-        fallbackVariable = 2;
+        outputVariable = outputLocal;
+        statusVariable = statusLocalIndex;
+        fallbackVariable = fallbackLocal;
         return true;
     }
 
@@ -6567,13 +6628,14 @@ public static partial class TrRmExecutableCompiler
             IReadOnlyDictionary<int, ForeignNativeInterfaceBodyTarget>?
                 foreignInterfaceBodyTargets)
     {
-        var hasFallback = function.ParameterCount == 3;
+        var hasFallback = function.ParameterCount >= 3;
         var outputVariable = function.ParameterCount;
         var statusVariable = outputVariable + 1;
-        var fallbackVariable = hasFallback ? 2 : -1;
+        var fallbackVariable = hasFallback
+            ? function.ParameterCount - 1 : -1;
         if (!body.Schema.UsesForeignNativeInterface()
             || function.IsExternal || function.DoesNotReturn
-            || function.ParameterCount is not (2 or 3)
+            || function.ParameterCount < 2
             || variables.Count != function.ParameterCount + 2
             || body.BlockCount != 3 || body.RecordCount != 4
             || body.MethodCount != 1 || body.HomeCount != variables.Count
@@ -6597,7 +6659,7 @@ public static partial class TrRmExecutableCompiler
                 || homeTypes[fallbackVariable] != function.ReturnType)))
         {
             throw Unsupported(
-                "The Standard F+I conditional-output Body requires a supported result type, direct receiver/source formals, and bounded output/status Homes.");
+                "The Standard F+I conditional-output Body requires a supported result type, direct receiver/parameter Homes, and bounded output/status Homes.");
         }
 
         for (var parameter = 0; parameter < function.ParameterCount;
@@ -6676,7 +6738,9 @@ public static partial class TrRmExecutableCompiler
         if (callSite[0] != 0x02 || callPayload[0] != 1
             || callPayload[1] != 1
             || BinaryPrimitives.ReadUInt16LittleEndian(callPayload[6..]) != 0
-            || BinaryPrimitives.ReadUInt32LittleEndian(callPayload[8..]) != 3
+            || BinaryPrimitives.ReadUInt32LittleEndian(callPayload[8..])
+                != (uint)(function.ParameterCount
+                    + (hasFallback ? 0 : 1))
             || BinaryPrimitives.ReadUInt32LittleEndian(callPayload[12..]) != 0
             || targetMethodMapIndex >= body.MethodCount)
         {
@@ -6709,17 +6773,22 @@ public static partial class TrRmExecutableCompiler
 
         var member = foreignTarget.Member;
         var statusType = member.ResultType.PrimitiveType;
+        var memberOutputFormal
+            = member.NativeOutputContracts.IsEmpty
+                ? -1 : member.NativeOutputContracts[0].FormalOrdinal;
         if (member.ResultType.Kind != BoundInterfaceTypeKind.Primitive
             || statusType is not (PrimitiveType.Int32
                 or PrimitiveType.UInt32)
             || member.DoesNotReturn
-            || member.Parameters.Length != 2
+            || member.Parameters.Length
+                != function.ParameterCount - (hasFallback ? 1 : 0)
             || member.NativeCallableConvention is not
                 NativeCallingConvention convention
             || foreignTarget.Definition.ForeignNativeInterface is not
                 BoundForeignNativeInterfaceLayout layout
             || member.NativeOutputContracts.Length != 1
-            || member.NativeOutputContracts[0].FormalOrdinal != 1
+            || (uint)memberOutputFormal
+                >= (uint)member.Parameters.Length
             || member.NativeOutputContracts[0].PointeeType
                 != function.ReturnType)
         {
@@ -6759,7 +6828,8 @@ public static partial class TrRmExecutableCompiler
                 != callSiteRecordIndex
             || outputHomeIndex != outputVariable
             || BinaryPrimitives.ReadUInt32LittleEndian(
-                reservationPayload[4..]) != 2
+                reservationPayload[4..])
+                != (uint)(outputContract.FormalOrdinal + 1)
             || BinaryPrimitives.ReadUInt16LittleEndian(
                 entryCode[2..]) != reservationRecordIndex)
         {
@@ -6788,8 +6858,11 @@ public static partial class TrRmExecutableCompiler
         }
 
         var arguments
-            = ImmutableArray.CreateBuilder<BoundExpression>(2);
+            = ImmutableArray.CreateBuilder<BoundExpression>(
+                member.Parameters.Length);
         var inputOffset = 20;
+        var inputVariableLimit = hasFallback
+            ? fallbackVariable : function.ParameterCount;
         for (var formal = 0; formal < member.Parameters.Length; formal++)
         {
             var input = callPayload.Slice(inputOffset, 4);
@@ -6798,7 +6871,7 @@ public static partial class TrRmExecutableCompiler
             var homeIndex = BinaryPrimitives.ReadUInt16LittleEndian(
                 input[2..]);
             var formalType = member.Parameters[formal].Type.PrimitiveType;
-            if (formal == 1)
+            if (formal == outputContract.FormalOrdinal)
             {
                 if (selectorKind != 2 || sourceUse != 6
                     || homeIndex != outputHomeIndex
@@ -6814,9 +6887,12 @@ public static partial class TrRmExecutableCompiler
             }
             else
             {
-                if (selectorKind != 2 || sourceUse != 1
-                    || homeIndex != 1 || homeRoles[homeIndex] != 2
-                    || homeVariables[homeIndex] != 1
+                if (homeIndex >= body.HomeCount
+                    || selectorKind != 2 || sourceUse != 1
+                    || homeIndex == 0
+                    || homeIndex >= inputVariableLimit
+                    || homeRoles[homeIndex] != 2
+                    || homeVariables[homeIndex] != homeIndex
                     || homeTypes[homeIndex] != formalType)
                 {
                     throw Invalid(
@@ -6875,7 +6951,8 @@ public static partial class TrRmExecutableCompiler
                     memberIdentity, layout.VTableByteOffset, convention,
                     member.RequiresMutableReceiver, member.DoesNotReturn,
                     member.NativeOutputContracts),
-                ArgumentParameterIndices = [0, 1],
+                ArgumentParameterIndices = [.. Enumerable.Range(
+                    0, member.Parameters.Length)],
             };
         variables[outputHomeVariable] = variables[outputHomeVariable] with {
             IsInitializationLocal = true,
