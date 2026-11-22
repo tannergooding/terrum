@@ -78,15 +78,18 @@ public static partial class TrRmExecutableCompiler
             throw Unsupported(
                 "TypeDefBindingEquality is selected only by the combined method/type reference operation.");
         }
-        if (StringComparer.Ordinal.Equals(schemaIdentities[0],
-                StandardLayoutQueriesSchemaIdentity))
+        if (IsSelectedStandardLayoutQueriesSchemaIdentity(
+                schemaIdentities[0]))
         {
-            if (schemaIdentities.Any(static schemaIdentity =>
-                    !StringComparer.Ordinal.Equals(schemaIdentity,
-                        StandardLayoutQueriesSchemaIdentity)))
+            var selectedLayoutQueriesIdentity = schemaIdentities[0];
+            if (schemaIdentities.Any(schemaIdentity =>
+                    !IsSelectedStandardLayoutQueriesSchemaIdentity(
+                        schemaIdentity)
+                    || !StringComparer.Ordinal.Equals(schemaIdentity,
+                        selectedLayoutQueriesIdentity)))
             {
                 throw Unsupported(
-                    "The LayoutQueries source-reference projection requires exact LayoutQueries selections for every provider.");
+                    "The LayoutQueries source-reference projection requires one exact selected schema identity for every provider.");
             }
 
             return CreateLayoutQueriesSourceTypeReference(artifacts,
@@ -219,9 +222,8 @@ public static partial class TrRmExecutableCompiler
             throw Unsupported(
                 "TypeDefBindingEquality is selected only by the combined method/type reference operation.");
         }
-        if (schemaIdentities.All(static schemaIdentity =>
-                StringComparer.Ordinal.Equals(schemaIdentity,
-                    StandardLayoutQueriesSchemaIdentity)))
+        if (AreAllSelectedStandardLayoutQueriesSchemaIdentities(
+                schemaIdentities))
         {
             return CreateLayoutQueriesSourceTypeReference(artifacts,
                 schemaIdentities, moduleIdentity, typeKeys, fieldKeys);
@@ -277,8 +279,8 @@ public static partial class TrRmExecutableCompiler
 
         if (schemaIdentities.Length == 0
             || schemaIdentities.Any(static schemaIdentity =>
-                !StringComparer.Ordinal.Equals(schemaIdentity,
-                    StandardLayoutQueriesSchemaIdentity)
+                !IsSelectedStandardLayoutQueriesSchemaIdentity(
+                    schemaIdentity)
                 && !StringComparer.Ordinal.Equals(schemaIdentity,
                     StandardInitReferenceBodiesNestedFieldDestinationsSchemaIdentity)))
         {
@@ -6607,8 +6609,8 @@ public static partial class TrRmExecutableCompiler
         var program = LoadStandardProgram(artifacts, schemaIdentities,
             moduleIdentity, true, null, out _, out _,
             out _, out var moduleValidation, out _);
-        var index = new TrRmArtifactIndex(artifacts[0],
-            TrRmArtifactSchema.Standard);
+        var index = CreateForeignInvocationIndex(artifacts[0],
+            schemaIdentities[0]);
         var tables = TrRmStructuralMetadataValidator
             .ValidateAndGetExecutionTables(index);
         var moduleRow = moduleValidation.RootModuleRow;
@@ -6800,8 +6802,9 @@ public static partial class TrRmExecutableCompiler
             if (structure.StandardTypeOrigin is not null)
             {
                 if (structure.StandardTypeOrigin.ExportKeys.IsDefaultOrEmpty
-                    || structure.StandardTypeOrigin.Provider.SchemaIdentity
-                        != StandardLayoutQueriesSchemaIdentity)
+                    || !StringComparer.Ordinal.Equals(
+                        structure.StandardTypeOrigin.Provider.SchemaIdentity,
+                        schemaIdentities[0]))
                 {
                     throw Unsupported(
                         "A nested LayoutQueries TypeDef Import has no retained provider ExportKey origin.");
@@ -7958,9 +7961,8 @@ public static partial class TrRmExecutableCompiler
             || StringComparer.Ordinal.Equals(
                 schemaIdentities[consumerArtifactIndex],
                 StandardInitReferenceBodiesNestedFieldDestinationsSchemaIdentity)
-            || StringComparer.Ordinal.Equals(
-                schemaIdentities[consumerArtifactIndex],
-                StandardLayoutQueriesSchemaIdentity))
+            || IsSelectedStandardLayoutQueriesSchemaIdentity(
+                schemaIdentities[consumerArtifactIndex]))
             || tables.Schema is not (
                 TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
@@ -8021,8 +8023,9 @@ public static partial class TrRmExecutableCompiler
                     or StandardLocalAggregateLayoutSchemaIdentity
                     or StandardLocalAggregatePointerLoadsSchemaIdentity
                     or StandardInitReferenceBodiesLocalFieldLayoutSchemaIdentity
-                    or StandardInitReferenceBodiesNestedFieldDestinationsSchemaIdentity
-                    or StandardLayoutQueriesSchemaIdentity)
+                    or StandardInitReferenceBodiesNestedFieldDestinationsSchemaIdentity)
+                && !IsSelectedStandardLayoutQueriesSchemaIdentity(
+                    schemaIdentity)
                 && !IsC1M1MethodTypeSchemaIdentity(schemaIdentity))
             {
                 throw Unsupported(

@@ -229,7 +229,10 @@ public static partial class TrRmExecutableCompiler
                 = IsSelectedInitializationReferenceLocalFieldLayoutSchemaIdentity(
                     schemaIdentity)
                 ? schemaIdentity
-                : StandardLayoutQueriesSchemaIdentity;
+                : IsSelectedStandardLayoutQueriesSchemaIdentity(
+                    schemaIdentity)
+                    ? schemaIdentity
+                    : StandardLayoutQueriesSchemaIdentity;
             var mappings = new List<StandardSourceImportMapping>();
             var providerByIdentity = new Dictionary<string,
                 BoundSourceTypeProviderSnapshot>(StringComparer.Ordinal);

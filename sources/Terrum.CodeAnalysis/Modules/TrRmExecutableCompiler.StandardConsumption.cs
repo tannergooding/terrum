@@ -726,9 +726,8 @@ public static partial class TrRmExecutableCompiler
                         StandardInitReferenceBodiesNestedFieldDestinationsSchemaIdentity));
         var standardFieldProviderValidation
             = schemaIdentities.Length != 0
-                && (schemaIdentities.All(static schemaIdentity =>
-                        StringComparer.Ordinal.Equals(schemaIdentity,
-                            StandardLayoutQueriesSchemaIdentity))
+                && (AreAllSelectedStandardLayoutQueriesSchemaIdentities(
+                        schemaIdentities)
                     || includesInitializationReferenceNestedFieldDestinations
                     || schemaIdentities.All(
                         IsSelectedC1EnumClosureSchemaIdentity))
@@ -906,8 +905,8 @@ public static partial class TrRmExecutableCompiler
         }
 
         if (schemaIdentities.Length == 1
-            && StringComparer.Ordinal.Equals(schemaIdentities[0],
-                StandardLayoutQueriesSchemaIdentity)
+            && IsSelectedStandardLayoutQueriesSchemaIdentity(
+                schemaIdentities[0])
             && artifacts.Length == 1 && tables.Imports.Count == 0
             && tables.ModuleRefs.Count == 0)
         {
@@ -915,7 +914,9 @@ public static partial class TrRmExecutableCompiler
                 ? LoadStandardLayoutQueriesTypeLibrary(tables,
                     rootModuleRow, verifySemantics, allTypeProviderBindings,
                     standardFieldProviderValidation.FieldBindings)
-                : LoadDevelopment(artifacts[0], TrRmArtifactSchema.Standard);
+                : LoadDevelopment(artifacts[0],
+                    TrRmArtifactSchema.Standard,
+                    standardSchemaIdentity: schemaIdentities[0]);
             loadedProgram = RetainLoadedA2SourceTypeFacts(loadedProgram, artifacts,
                 schemaIdentities, tables, rootModuleRow,
                 allTypeProviderBindings,
@@ -1252,12 +1253,13 @@ public static partial class TrRmExecutableCompiler
         }
 
         if (methodImportRows.Count == 0
-            && StringComparer.Ordinal.Equals(schemaIdentities[0],
-                StandardLayoutQueriesSchemaIdentity)
+            && IsSelectedStandardLayoutQueriesSchemaIdentity(
+                schemaIdentities[0])
             && tables.Methods.Count != 0)
         {
             var loadedProgram = LoadDevelopment(artifacts[0],
-                TrRmArtifactSchema.Standard);
+                TrRmArtifactSchema.Standard,
+                standardSchemaIdentity: schemaIdentities[0]);
             loadedProgram = RetainLoadedA2SourceTypeFacts(loadedProgram,
                 artifacts, schemaIdentities, tables, rootModuleRow,
                 allTypeProviderBindings,
@@ -2298,8 +2300,8 @@ public static partial class TrRmExecutableCompiler
     {
         if (validation.TypeBindings.IsEmpty
             && validation.FieldBindings.IsEmpty
-            && !StringComparer.Ordinal.Equals(schemaIdentities[0],
-                StandardLayoutQueriesSchemaIdentity)
+            && !IsSelectedStandardLayoutQueriesSchemaIdentity(
+                schemaIdentities[0])
             && !StringComparer.Ordinal.Equals(schemaIdentities[0],
                 StandardInitReferenceBodiesNestedFieldDestinationsSchemaIdentity))
         {
@@ -4828,10 +4830,8 @@ public static partial class TrRmExecutableCompiler
             = IsConstruction2MethodProviderClosureSchemaSet(
                 schemaIdentities);
         var includesLayoutQueryProviderClosure
-            = schemaIdentities.Length != 0
-                && schemaIdentities.All(static schemaIdentity =>
-                    StringComparer.Ordinal.Equals(schemaIdentity,
-                        StandardLayoutQueriesSchemaIdentity));
+            = AreAllSelectedStandardLayoutQueriesSchemaIdentities(
+                schemaIdentities);
         var includesInitializationReferenceBodyClosure
             = schemaIdentities.Length != 0
                 && (schemaIdentities.All(schemaIdentity =>
@@ -4933,8 +4933,8 @@ public static partial class TrRmExecutableCompiler
                     = StringComparer.Ordinal.Equals(schemaIdentities[index],
                         StandardRegisterExceptionRegionsSchemaIdentity);
                 var supportsLayoutQueries
-                    = StringComparer.Ordinal.Equals(schemaIdentities[index],
-                        StandardLayoutQueriesSchemaIdentity)
+                    = IsSelectedStandardLayoutQueriesSchemaIdentity(
+                        schemaIdentities[index])
                     || supportsForeignNativeInterface
                     || supportsA2Features
                     || IsSelectedGeneralPredicateGraphsSchemaIdentity(
@@ -5186,8 +5186,8 @@ public static partial class TrRmExecutableCompiler
                 && rootTypeStart < rootTypeEnd
                 && tables.Modules.GetEntryMethod(rootModuleRow) == 0;
             var rootIsLayoutQueriesTypeLibrary = index == 0
-                && StringComparer.Ordinal.Equals(schemaIdentities[0],
-                    StandardLayoutQueriesSchemaIdentity)
+                && IsSelectedStandardLayoutQueriesSchemaIdentity(
+                    schemaIdentities[0])
                 && rootMethodStart == rootMethodEnd
                 && rootTypeStart < rootTypeEnd
                 && tables.Modules.GetEntryMethod(rootModuleRow) == 0;

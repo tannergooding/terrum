@@ -5059,10 +5059,13 @@ internal sealed class TrRmExecutableCompilerTests
                 ]));
     }
 
-    [Test]
-    public void StandardLayoutQueryBodyUsesImportedProviderLayout()
+    [TestCase("trrm/1-draft-layout-queries-1",
+        "trrm/1-draft-layout-queries-terrum-fnptr-1")]
+    [TestCase("trrm/1-draft-layout-queries-terrum-fnptr-1",
+        "trrm/1-draft-layout-queries-1")]
+    public void StandardLayoutQueryBodyUsesImportedProviderLayout(
+        string schemaIdentity, string mismatchedSchemaIdentity)
     {
-        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
         const uint targetRequirement
             = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
         var layoutOptions = new CompilationOptions {
@@ -5149,6 +5152,12 @@ internal sealed class TrRmExecutableCompilerTests
             ]);
         var pairInput = new TrRmStandardArtifactInput(schemaIdentity,
             providerArtifact);
+        _ = Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(pairInput,
+                "PairProvider", [
+                    new TrRmStandardArtifactInput(mismatchedSchemaIdentity,
+                        leafArtifact),
+                ], ["pair"], ["pair-inner", "pair-tag"]));
         var reference = TrRmExecutableCompiler.CreateStandardReference(
             pairInput,
             "PairProvider", [

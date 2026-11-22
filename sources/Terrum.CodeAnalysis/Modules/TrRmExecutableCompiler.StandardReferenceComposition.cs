@@ -127,8 +127,8 @@ public static partial class TrRmExecutableCompiler
         var sourceSchemaIdentity
             = providerClosures[0].SchemaIdentity;
         var isLayoutQueriesReference
-            = StringComparer.Ordinal.Equals(sourceSchemaIdentity,
-                StandardLayoutQueriesSchemaIdentity);
+            = IsSelectedStandardLayoutQueriesSchemaIdentity(
+                sourceSchemaIdentity);
         var isNestedFieldPathReference
             = StringComparer.Ordinal.Equals(sourceSchemaIdentity,
                 StandardInitReferenceBodiesNestedFieldDestinationsSchemaIdentity);
@@ -3256,8 +3256,7 @@ public static partial class TrRmExecutableCompiler
         var modulesByIdentity = new Dictionary<string,
             StandardQueryProviderModuleSnapshot>(StringComparer.Ordinal);
         var schemaIdentity = closures[0].SchemaIdentity;
-        if (!StringComparer.Ordinal.Equals(schemaIdentity,
-                StandardLayoutQueriesSchemaIdentity)
+        if (!IsSelectedStandardLayoutQueriesSchemaIdentity(schemaIdentity)
             && !StringComparer.Ordinal.Equals(schemaIdentity,
                 StandardInitReferenceBodiesNestedFieldDestinationsSchemaIdentity)
             && !IsC1M1MethodTypeSchemaIdentity(schemaIdentity)

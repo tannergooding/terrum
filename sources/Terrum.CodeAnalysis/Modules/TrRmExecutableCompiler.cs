@@ -297,6 +297,37 @@ public static partial class TrRmExecutableCompiler
             || StandardGenericMethodSchema.IsClassTypeBindingViews(
                 schemaIdentity);
 
+    internal static bool IsSelectedStandardLayoutQueriesSchemaIdentity(
+        string? schemaIdentity)
+        => StringComparer.Ordinal.Equals(schemaIdentity,
+                StandardLayoutQueriesSchemaIdentity)
+            || TrRmArtifactSchemaFacts
+                .IsSelectedTerrumFunctionPointerSchemaIdentity(
+                    schemaIdentity);
+
+    internal static bool AreAllSelectedStandardLayoutQueriesSchemaIdentities(
+        IReadOnlyList<string> schemaIdentities)
+    {
+        if (schemaIdentities.Count == 0
+            || !IsSelectedStandardLayoutQueriesSchemaIdentity(
+                schemaIdentities[0]))
+        {
+            return false;
+        }
+
+        var selectedIdentity = schemaIdentities[0];
+        for (var index = 1; index < schemaIdentities.Count; index++)
+        {
+            if (!StringComparer.Ordinal.Equals(
+                    schemaIdentities[index], selectedIdentity))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     internal static bool IsSelectedClassTypeDefBindingEqualitySchemaIdentity(
         string? schemaIdentity)
         => StandardGenericMethodSchema.IsClassTypeBindingViews(
@@ -378,8 +409,8 @@ public static partial class TrRmExecutableCompiler
         string schemaIdentity)
     {
         if (IsSelectedForeignNativeInterfaceSchemaIdentity(schemaIdentity)
-            || StringComparer.Ordinal.Equals(schemaIdentity,
-                StandardLayoutQueriesSchemaIdentity)
+            || IsSelectedStandardLayoutQueriesSchemaIdentity(
+                schemaIdentity)
             || IsSelectedInitializationReferenceLocalFieldLayoutSchemaIdentity(
                 schemaIdentity))
         {
@@ -616,8 +647,7 @@ public static partial class TrRmExecutableCompiler
             return EmitStandard(program, moduleIdentity, schemaIdentity,
                 moduleTargetRequirement);
         }
-        if (!StringComparer.Ordinal.Equals(schemaIdentity,
-                StandardLayoutQueriesSchemaIdentity)
+        if (!IsSelectedStandardLayoutQueriesSchemaIdentity(schemaIdentity)
             && !StringComparer.Ordinal.Equals(schemaIdentity,
                 StandardInitReferenceBodiesNestedFieldDestinationsSchemaIdentity)
             && !IsC1M1MethodTypeSchemaIdentity(schemaIdentity)
@@ -647,8 +677,7 @@ public static partial class TrRmExecutableCompiler
             throw Unsupported(
                 "Enum member-key assignments require the exact NominalEnumsDraft schema.");
         }
-        if (StringComparer.Ordinal.Equals(schemaIdentity,
-                StandardLayoutQueriesSchemaIdentity))
+        if (IsSelectedStandardLayoutQueriesSchemaIdentity(schemaIdentity))
         {
             if (program.EntryPoint != -1)
             {
@@ -1241,7 +1270,7 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
-        if (schemaIdentity == StandardLayoutQueriesSchemaIdentity
+        if (IsSelectedStandardLayoutQueriesSchemaIdentity(schemaIdentity)
             && moduleTargetRequirement
                 != TrRmModuleTableReader.WindowsX64NativeTargetRequirement)
         {
@@ -1373,6 +1402,12 @@ public static partial class TrRmExecutableCompiler
                 => EmitDevelopment(program, moduleIdentity,
                     TrRmArtifactSchema.Standard, moduleTargetRequirement,
                     sourceTypeExports),
+            TrRmArtifactSchemaFacts
+                .StandardTerrumFunctionPointerSchemaIdentity
+                => EmitDevelopment(program, moduleIdentity,
+                    TrRmArtifactSchema.Standard, moduleTargetRequirement,
+                    sourceTypeExports,
+                    standardSchemaIdentity: schemaIdentity),
             StandardInitReferenceBodiesSchemaIdentity
                 => EmitDevelopment(program, moduleIdentity,
                     TrRmArtifactSchema.Standard, moduleTargetRequirement,
@@ -2806,6 +2841,9 @@ public static partial class TrRmExecutableCompiler
                 ? StandardInitReferenceBodiesNestedFieldDestinationsSchemaIdentity
                 : schema.UsesInitializationReferenceLocalFieldLayout()
                     ? StandardInitReferenceBodiesLocalFieldLayoutSchemaIdentity
+                    : IsSelectedStandardLayoutQueriesSchemaIdentity(
+                        standardSchemaIdentity)
+                        ? standardSchemaIdentity!
                     : StandardLayoutQueriesSchemaIdentity;
             if ((!isMethodTypeSchema
                     && schema is not (TrRmArtifactSchema.Standard
@@ -5479,6 +5517,9 @@ public static partial class TrRmExecutableCompiler
                     ? StandardInitReferenceBodiesNestedFieldDestinationsSchemaIdentity
                     : schema.UsesInitializationReferenceLocalFieldLayout()
                         ? StandardInitReferenceBodiesLocalFieldLayoutSchemaIdentity
+                        : IsSelectedStandardLayoutQueriesSchemaIdentity(
+                            standardSchemaIdentity)
+                            ? standardSchemaIdentity!
                         : StandardLayoutQueriesSchemaIdentity,
                 structureTypeDefRows, structureFieldFirst, names);
         var pendingStandardImports
