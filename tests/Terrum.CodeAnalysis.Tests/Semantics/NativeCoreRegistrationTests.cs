@@ -9115,7 +9115,7 @@ internal sealed class NativeCoreRegistrationTests
                 VTableByteOffset: uint32(0))]
             public interface IExtra {
                 public unsafe int32 Prefix(ptr<float64> input,
-                    int32 offset = 2);
+                    int32 offset = 0);
                 public unsafe int32 Wide(int64 value);
             }
 
@@ -9186,12 +9186,18 @@ internal sealed class NativeCoreRegistrationTests
                 out var shiftedNameRow), Is.True);
         Assert.That(shiftedProviderTables.Strings.DecodeName(shiftedNameRow),
             Is.EqualTo("source"));
+        Assert.That(shiftedNameRow, Is.Not.EqualTo(providerNameRow));
+        Assert.That(shiftedNameRow, Is.Not.EqualTo(providerNameRow));
         Assert.That(providerTables.MethodParameterLabels
             .TryGetDefaultConstantSourceRow(providerReadRow, 1,
                 out var providerDefaultRow), Is.True);
         Assert.That(shiftedProviderTables.MethodParameterLabels
             .TryGetDefaultConstantSourceRow(shiftedReadRow, 1,
                 out var shiftedDefaultRow), Is.True);
+        Assert.That(shiftedDefaultRow,
+            Is.Not.EqualTo(providerDefaultRow));
+        Assert.That(shiftedDefaultRow,
+            Is.Not.EqualTo(providerDefaultRow));
         AssertDefaultPayload(providerTables, providerDefaultRow);
         AssertDefaultPayload(shiftedProviderTables, shiftedDefaultRow);
 
