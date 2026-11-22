@@ -355,11 +355,65 @@ internal sealed class PrivateForeignNativeInterfaceTests
             ModuleCompiler.Link(malformed, producer));
     }
 
-    private static byte[] CreateFniProvider(string moduleIdentity,
-        string interfaceName, string functionName, string payloadTypeName)
+    [Test]
+    public void PrivateFniCallRejectsDuplicateFormalMappings()
     {
         const string schemaIdentity
             = "terrum/private-semantic-111-foreign-native-interfaces-1";
+        const string providerIdentity = "PrivateFniMapProvider";
+        const string callText
+            = "IProbe.Get(receiver, second: second, first: first)";
+        var producer = CreateFniProvider(providerIdentity, "IProbe", "Add",
+            "Payload", useTwoScalarFormals: true);
+        var reference = ModuleCompiler.CreateReferenceWithSchema(producer,
+            schemaIdentity);
+        const string consumerSource = """
+            int32 Invoke(ptr<void> receiver, int32 first, int32 second) {
+                unsafe { return IProbe.Get(receiver, second: second, first: first); }
+            }
+            """;
+        var compilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(consumerSource), reference);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        var identities = PrivateModuleIdentityInputs.CreateFromSelectors(
+            program, "PrivateFniMapConsumer", [], [], [], [], [], [
+                new PrivateForeignInterfaceImportAssignment(0,
+                    "consumer.iprobe", providerIdentity,
+                    providerIdentity + ".owner", [
+                        new PrivateForeignInterfaceMemberImportAssignment(
+                            0, "consumer.iprobe.get",
+                            providerIdentity + ".member"),
+                    ]),
+            ]);
+        var consumer = ModuleCompiler.CreateConsumerWithSchema(program,
+            producer, schemaIdentity, identities);
+        var callOffset = FindExpressionOffset(consumer, 5,
+            (int)PrimitiveType.Int32,
+            consumerSource.IndexOf(callText, StringComparison.Ordinal),
+            callText.Length);
+        Assert.That(callOffset, Is.GreaterThanOrEqualTo(0));
+        Assert.That(consumer[callOffset + 22], Is.EqualTo(1));
+        var firstFormal = BinaryPrimitives.ReadInt32LittleEndian(
+            consumer.AsSpan(callOffset + 23, sizeof(int)));
+
+        var malformed = (byte[])consumer.Clone();
+        BinaryPrimitives.WriteInt32LittleEndian(
+            malformed.AsSpan(callOffset + 27, sizeof(int)), firstFormal);
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.Link(malformed, producer));
+    }
+
+    private static byte[] CreateFniProvider(string moduleIdentity,
+        string interfaceName, string functionName, string payloadTypeName,
+        bool useTwoScalarFormals = false)
+    {
+        const string schemaIdentity
+            = "terrum/private-semantic-111-foreign-native-interfaces-1";
+        var formalParameters = useTwoScalarFormals
+            ? "int32 first, int32 second"
+            : $"ptr<{payloadTypeName}> value";
         var source = SyntaxTree.Parse($$"""
             using Terrum.Interop;
             public int32 {{functionName}}(int32 value) { return value; }
@@ -370,7 +424,7 @@ internal sealed class PrivateForeignNativeInterfaceTests
             [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
             [ForeignNativeInterface(VTableByteOffset: uint32(0))]
             public interface {{interfaceName}} {
-                public unsafe int32 Get(ptr<{{payloadTypeName}}> value);
+                public unsafe int32 Get({{formalParameters}});
             }
             """);
         var nativeRegistration
