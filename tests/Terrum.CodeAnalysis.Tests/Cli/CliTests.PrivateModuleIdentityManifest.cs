@@ -669,6 +669,28 @@ internal sealed partial class CliTests
             Assert.That(payloadOffset, Is.GreaterThanOrEqualTo(0));
             var copyEvidenceOffset = payloadOffset + payloadName.Length + 12;
             Assert.That(artifactBytes[copyEvidenceOffset], Is.EqualTo(1));
+            var cleanupFlagOffset
+                = payloadOffset + payloadName.Length + 32;
+            Assert.That(artifactBytes[cleanupFlagOffset], Is.EqualTo(0));
+            var cleanupName = Encoding.UTF8.GetBytes("Close");
+            var malformedCleanup = new byte[artifactBytes.Length
+                + sizeof(int) + cleanupName.Length];
+            artifactBytes.AsSpan(0, cleanupFlagOffset).CopyTo(
+                malformedCleanup);
+            malformedCleanup[cleanupFlagOffset] = 1;
+            BinaryPrimitives.WriteInt32LittleEndian(
+                malformedCleanup.AsSpan(cleanupFlagOffset + 1,
+                    sizeof(int)), cleanupName.Length);
+            cleanupName.AsSpan().CopyTo(malformedCleanup.AsSpan(
+                cleanupFlagOffset + 1 + sizeof(int)));
+            artifactBytes.AsSpan(cleanupFlagOffset + 1).CopyTo(
+                malformedCleanup.AsSpan(cleanupFlagOffset + 1
+                    + sizeof(int) + cleanupName.Length));
+            var cleanupException = Assert.Throws<ModuleFormatException>(() =>
+                ModuleCompiler.CreateReferenceWithSchema(
+                    malformedCleanup, privateSchema));
+            Assert.That(cleanupException!.Message,
+                Does.Contain("Copy-positive structure"));
             var malformedCopyEvidence = (byte[])artifactBytes.Clone();
             malformedCopyEvidence[copyEvidenceOffset] = 0;
             _ = Assert.Throws<ModuleFormatException>(() =>
