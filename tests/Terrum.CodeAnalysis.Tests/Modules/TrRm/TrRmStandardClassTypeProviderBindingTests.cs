@@ -3197,14 +3197,14 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
                 TrRmArtifactIndex
                     .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
                         fieldPathArtifact));
-        Assert.That(fieldPathTables.FieldPaths.Count, Is.EqualTo(1));
+        Assert.That(fieldPathTables.FieldPaths.Count, Is.EqualTo(2));
         var fieldPathBody = fieldPathTables.Bodies.GetRegisterBody(
             fieldPathTables.Methods.GetBodyRow(artifactReadMethodRow),
             fieldPathTables.Contracts.Count);
         var fieldPathToken
             = BinaryPrimitives.ReadUInt32LittleEndian(
                 fieldPathBody.FieldMap);
-        Assert.That(fieldPathToken, Is.EqualTo(0x1D00_0001u));
+        Assert.That(fieldPathToken, Is.EqualTo(0x1D00_0002u));
 
         var fieldPathReference
             = TrRmExecutableCompiler.CreateStandardReference(
@@ -3283,6 +3283,10 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
                 .GetFieldReference(1, 0),
             Is.EqualTo(0x1C00_0000u
                 | checked((uint)fieldPathReemittedFieldImportRow)));
+        Assert.That(fieldPathReemittedTables.Imports
+                .GetBindingForImportRow(fieldPathReemittedFieldImportRow)
+                .ExportKey,
+            Is.EqualTo("Leaf.Value"));
         var fieldPathReemittedReadDefinition
             = fieldPathReemittedTables.Exports.GetExportsForModule(1)
                 .Single(static export =>
@@ -6264,12 +6268,15 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
                 "The FieldPath fixture requires a selected FieldDef Import.");
         }
 
+        var fieldPathRow
+            = new TrRmFieldPathRow(rootTypeSpecRef, [fieldReference]);
         var fieldPathBytes = TrRmFieldPathTableWriter.Encode([
-            new TrRmFieldPathRow(rootTypeSpecRef, [fieldReference]),
+            fieldPathRow,
+            fieldPathRow,
         ], tables.TypeSpecs, tables.Fields, tables.Imports);
         var fieldMap = body.FieldMap.ToArray();
         BinaryPrimitives.WriteUInt32LittleEndian(fieldMap,
-            0x1D00_0001u);
+            0x1D00_0002u);
 
         var blocks = new TrRmRegisterBodyBlock[body.BlockCount];
         for (var blockIndex = 0; blockIndex < body.BlockCount; blockIndex++)
@@ -6329,7 +6336,7 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
                 "The FieldPath fixture has no Body section.");
         }
 
-        sections.Add(new TrRmSection(0x004B, 0, 1, fieldPathBytes));
+        sections.Add(new TrRmSection(0x004B, 0, 2, fieldPathBytes));
         sections.Sort(static (left, right) =>
             left.Kind.CompareTo(right.Kind));
         return TrRmArtifactWriter.Encode(sections);
