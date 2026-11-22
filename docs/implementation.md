@@ -1379,7 +1379,9 @@ and success/complement edge orientations.
 Local/imported output
 reservations and conditional reads, provider load/re-emission, and malformed
 MethodMap, success-predicate, branch-target and reservation rejection are
-covered by regressions; they remain unverified under the hold. Aggregate
+covered by regressions; they remain unverified under the hold. Malformed FNI
+OutputState regressions also cover duplicate success publication and retargeting
+a state to a non-output formal; they remain unverified. Aggregate
 output consumption is being implemented under the distinct, unapproved AC1
 selection. Its current slice carries nominal Copy evidence, checks closed
 rootless aggregate storage and Feature 2/13 closure, and emits/decodes

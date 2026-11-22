@@ -3295,6 +3295,30 @@ internal sealed class NativeCoreRegistrationTests
         var index = new TrRmArtifactIndex(artifact, schema);
         var tables = TrRmStructuralMetadataValidator
             .ValidateAndGetExecutionTables(index);
+        byte[] RewriteContracts(TrRmContractRow[] contractRows)
+        {
+            var contractBytes
+                = TrRmContractTableWriter.EncodeForeignInvocationDraft(
+                    contractRows, tables.TypeDefs, tables.Methods,
+                    tables.Signatures, tables.Parameters, tables.TypeSpecs,
+                    tables.Features, tables.Modules,
+                    tables.PredicateGraphs.Count, schema);
+            var sections = new TrRmSection[index.SectionCount];
+            for (var sectionIndex = 0; sectionIndex < index.SectionCount;
+                sectionIndex++)
+            {
+                index.GetSection(sectionIndex, out var kind, out var flags,
+                    out var bytes, out var count);
+                sections[sectionIndex] = new TrRmSection(kind, flags,
+                    kind == 0x001B
+                        ? checked((uint)contractRows.Length)
+                        : checked((uint)count),
+                    kind == 0x001B ? contractBytes : bytes.ToArray());
+            }
+
+            return TrRmArtifactWriter.Encode(sections, schema);
+        }
+
         var rows = new TrRmContractRow[tables.Contracts.Count];
         var mutated = false;
         for (var row = 1; row <= tables.Contracts.Count; row++)
@@ -3312,24 +3336,7 @@ internal sealed class NativeCoreRegistrationTests
         }
         Assert.That(mutated, Is.True);
 
-        var malformedContracts
-            = TrRmContractTableWriter.EncodeForeignInvocationDraft(rows,
-                tables.TypeDefs, tables.Methods, tables.Signatures,
-                tables.Parameters, tables.TypeSpecs, tables.Features,
-                tables.Modules, tables.PredicateGraphs.Count, schema);
-        var malformedSections = new TrRmSection[index.SectionCount];
-        for (var sectionIndex = 0; sectionIndex < index.SectionCount;
-            sectionIndex++)
-        {
-            index.GetSection(sectionIndex, out var kind, out var flags,
-                out var bytes, out var count);
-            malformedSections[sectionIndex] = new TrRmSection(kind, flags,
-                kind == 0x001B
-                    ? checked((uint)rows.Length) : checked((uint)count),
-                kind == 0x001B ? malformedContracts : bytes.ToArray());
-        }
-        var malformedArtifact
-            = TrRmArtifactWriter.Encode(malformedSections, schema);
+        var malformedArtifact = RewriteContracts(rows);
         var malformedTables
             = TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
                 new TrRmArtifactIndex(malformedArtifact, schema));
@@ -3340,6 +3347,31 @@ internal sealed class NativeCoreRegistrationTests
             TrRmExecutableCompiler.CreateStandardReference(
                 new TrRmStandardArtifactInput(schemaIdentity,
                     malformedArtifact), "provider.module", []));
+
+        var wrongFormalRows = new TrRmContractRow[tables.Contracts.Count];
+        var wrongFormalMutated = false;
+        for (var row = 1; row <= tables.Contracts.Count; row++)
+        {
+            var data = tables.Contracts.GetRow(row);
+            var owner = BinaryPrimitives.ReadUInt32LittleEndian(data);
+            var kind = BinaryPrimitives.ReadUInt16LittleEndian(data[4..]);
+            var payload = data[8..].ToArray();
+            if (owner == 0x1600_0001 && kind == 2)
+            {
+                BinaryPrimitives.WriteUInt32LittleEndian(payload, 0);
+                wrongFormalMutated = true;
+            }
+
+            wrongFormalRows[row - 1] = new TrRmContractRow(owner, kind,
+                payload);
+        }
+        Assert.That(wrongFormalMutated, Is.True);
+        Assert.Throws<InvalidDataException>(() => {
+            var wrongFormalArtifact = RewriteContracts(wrongFormalRows);
+            _ = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    wrongFormalArtifact), "provider.module", []);
+        });
     }
 
     [Test]
