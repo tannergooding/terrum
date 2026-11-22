@@ -1504,12 +1504,17 @@ PS1 now admits pointer-valued FNI NativeOutput reads through the existing
 TypeSpec/D5 Body path, including non-first output-formal and named-input
 remapping; producer, source-free consumer, re-emission and Windows x64
 success/failure execution coverage, including NonNegative's zero-success
-boundary, is added but unverified under the hold. Other side-effecting
-argument expressions beyond the bounded nested-call forms, combinations of
-nested-call and ConstantMap inputs, declared FNI defaults and constant domains
-beyond scalar literals, additional outer FNI calls in one Body, condition selectors
-beyond NonZero/NonNegative, other Body control-flow shapes, nonreturning-call
-forms beyond the terminal subset and reservation cancellation remain open.
+boundary, is added but unverified under the hold. Fallback conditional-output
+Bodies now preserve a prefix of zero-parameter unit FNI calls before output
+reservation, within the shared 13-CallSite invocation limit; source-free
+loading and re-emission preserve that order. A Touch-before-output regression
+is added but remains unverified. Other side-effecting argument expressions
+beyond the bounded nested-call forms, combinations of nested-call and
+ConstantMap inputs, declared FNI defaults and constant domains beyond scalar
+literals, outer FNI call shapes beyond zero-parameter unit prelude calls,
+condition selectors beyond NonZero/NonNegative, other Body control-flow
+shapes, nonreturning-call forms beyond the terminal subset and reservation
+cancellation remain open.
 Supervised native execution, private persistence and dependent runtime work
 remain open. CLI qualification is still unverified. NativeParameter is not
 admitted on these methods or anchors, and neither FNI proposal is approved.

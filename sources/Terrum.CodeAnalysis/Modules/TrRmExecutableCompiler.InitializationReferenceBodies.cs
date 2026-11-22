@@ -1311,7 +1311,7 @@ public static partial class TrRmExecutableCompiler
                 out var conditionalSuccessOnTrue))
         {
             return EncodeForeignInterfaceConditionalOutputCallBody(
-                function, program, conditionalCall,
+                function, program, conditionalCall, [],
                 conditionalOutputVariable, conditionalStatusVariable, -1,
                 conditionalSuccessOnTrue, typeSpecRowFor,
                 foreignInterfaceMethodMapTokenForCall
@@ -1323,11 +1323,13 @@ public static partial class TrRmExecutableCompiler
         if (TryGetForeignInterfaceConditionalOutputCallWithFallback(
                 function, program, schema,
                 out var conditionalFallbackCall,
+                out var conditionalPreludeCalls,
                 out var fallbackOutputVariable, out var fallbackStatusVariable,
                 out var fallbackVariable, out var fallbackSuccessOnTrue))
         {
             return EncodeForeignInterfaceConditionalOutputCallBody(
                 function, program, conditionalFallbackCall,
+                conditionalPreludeCalls,
                 fallbackOutputVariable, fallbackStatusVariable,
                 fallbackVariable, fallbackSuccessOnTrue, typeSpecRowFor,
                 foreignInterfaceMethodMapTokenForCall
@@ -1723,10 +1725,12 @@ public static partial class TrRmExecutableCompiler
     private static bool TryGetForeignInterfaceConditionalOutputCallWithFallback(
         BoundFunction function, BoundProgram program,
         TrRmArtifactSchema schema, out BoundCall call,
+        out ImmutableArray<BoundCall> preludeCalls,
         out int outputVariable, out int statusVariable,
         out int fallbackVariable, out bool successOnTrue)
     {
         call = null!;
+        preludeCalls = [];
         outputVariable = -1;
         statusVariable = -1;
         fallbackVariable = -1;
@@ -1818,13 +1822,51 @@ public static partial class TrRmExecutableCompiler
             statements = statementBuilder.ToImmutable();
         }
 
-        if (statements.Length != 4
-            || statements[0] is not BoundVacantLocal vacantLocal
+        var preludeCallBuilder
+            = ImmutableArray.CreateBuilder<BoundCall>();
+        var conditionalStatement = 0;
+        while (conditionalStatement < statements.Length
+            && statements[conditionalStatement]
+                is BoundExpressionStatement {
+                    Expression: BoundExpression preludeExpression,
+                })
+        {
+            if (GetUnwrappedBoundCall(preludeExpression)
+                    is not BoundCall preludeCall
+                || preludeCall.Function
+                    != BoundCall.ForeignInterfaceFunction
+                || preludeCall.ForeignInterfaceCall is not
+                    BoundForeignInterfaceCall preludeForeignCall
+                || !preludeCall.IsUnsafeAuthorized
+                || preludeCall.Type != PrimitiveType.Void
+                || preludeForeignCall.DoesNotReturn
+                || preludeForeignCall.NativeOutputContracts.Length != 0
+                || !ForeignNativeInterfaceContract.TryCreateCallTarget(
+                    preludeForeignCall, program, out var preludeTarget)
+                || preludeTarget.ReturnType != PrimitiveType.Void
+                || preludeTarget.ParameterCount != 0
+                || !preludeTarget.NativeOutputContracts.IsEmpty
+                || preludeCall.Arguments.IsDefault
+                || preludeCall.Arguments.Length != 0
+                || preludeForeignCall.Receiver is not BoundRead {
+                    Variable: 0,
+                    Type: PrimitiveType.NativeRawPointer,
+                })
+            {
+                return false;
+            }
+
+            preludeCallBuilder.Add(preludeCall);
+            conditionalStatement++;
+        }
+
+        if (statements.Length - conditionalStatement != 4
+            || statements[conditionalStatement] is not BoundVacantLocal vacantLocal
             || vacantLocal.Variable != outputLocal
-            || statements[1] is not BoundLocal statusDeclaration
+            || statements[conditionalStatement + 1] is not BoundLocal statusDeclaration
             || statusDeclaration.Variable != statusLocalIndex
             || statusDeclaration.Initializer.Type != status.Type
-            || statements[2] is not BoundIf {
+            || statements[conditionalStatement + 2] is not BoundIf {
                 Condition: BoundExpression condition,
                 Then: BoundBlock { Statements.Length: 1 } thenBlock,
                 Else: null,
@@ -1833,7 +1875,7 @@ public static partial class TrRmExecutableCompiler
                 Value: BoundRead thenRead,
             }
             || thenRead.Type != function.ReturnType
-            || statements[3] is not BoundReturn {
+            || statements[conditionalStatement + 3] is not BoundReturn {
                 Value: BoundRead finalRead,
             }
             || finalRead.Type != function.ReturnType)
@@ -1987,6 +2029,7 @@ public static partial class TrRmExecutableCompiler
         }
 
         if (seenParameters.Any(static seen => !seen)
+            || preludeCallBuilder.Count + nestedInputCalls.Count > 13
             || (hasThrowingScalarExpression
                 && nestedInputCalls.Count != 0
                 && !CanMixCheckedForeignInterfaceExpressionsWithNestedCalls(
@@ -2019,6 +2062,7 @@ public static partial class TrRmExecutableCompiler
         }
 
         call = boundCall;
+        preludeCalls = preludeCallBuilder.ToImmutable();
         outputVariable = outputLocal;
         statusVariable = statusLocalIndex;
         fallbackVariable = fallbackLocal;
@@ -4734,6 +4778,7 @@ public static partial class TrRmExecutableCompiler
         var expressionRegisterByFormal = new Dictionary<int, byte>();
         var methodMapToken
             = methodMapTokenForForeignInterface(foreignCall.Member);
+
         var nestedCalls = new List<BoundCall>();
         foreach (var argument in call.Arguments)
         {
@@ -5263,6 +5308,7 @@ public static partial class TrRmExecutableCompiler
 
     private static byte[] EncodeForeignInterfaceConditionalOutputCallBody(
         BoundFunction function, BoundProgram program, BoundCall call,
+        ImmutableArray<BoundCall> preludeCalls,
         int outputVariable, int statusVariable, int fallbackVariable,
         bool successOnTrue,
         Func<PrimitiveType, int> typeSpecRowFor,
@@ -5295,6 +5341,37 @@ public static partial class TrRmExecutableCompiler
         var constantLoads = new List<(ushort MapIndex, byte Register)>();
         var methodMapToken
             = methodMapTokenForForeignInterface(foreignCall.Member);
+        var preludeMethodMapTokens
+            = new List<uint>(preludeCalls.Length);
+        foreach (var preludeCall in preludeCalls)
+        {
+            var preludeForeignCall = preludeCall.ForeignInterfaceCall
+                ?? throw Invalid(
+                    "A Standard F+I conditional-output prelude call has no InterfaceMethod identity.");
+            if (preludeCall.Function != BoundCall.ForeignInterfaceFunction
+                || !preludeCall.IsUnsafeAuthorized
+                || preludeCall.Type != PrimitiveType.Void
+                || preludeForeignCall.DoesNotReturn
+                || !ForeignNativeInterfaceContract.TryCreateCallTarget(
+                    preludeForeignCall, program, out var preludeTarget)
+                || preludeTarget.ReturnType != PrimitiveType.Void
+                || preludeTarget.ParameterCount != 0
+                || !preludeTarget.NativeOutputContracts.IsEmpty
+                || preludeCall.Arguments.IsDefault
+                || !preludeCall.Arguments.IsEmpty
+                || preludeForeignCall.Receiver is not BoundRead {
+                    Variable: 0,
+                    Type: PrimitiveType.NativeRawPointer,
+                })
+            {
+                throw Invalid(
+                    "A Standard F+I conditional-output prelude call is outside the zero-parameter unit subset.");
+            }
+
+            preludeMethodMapTokens.Add(methodMapTokenForForeignInterface(
+                preludeForeignCall.Member));
+        }
+
         var nestedCalls = new List<BoundCall>();
         foreach (var argument in call.Arguments)
         {
@@ -5313,6 +5390,12 @@ public static partial class TrRmExecutableCompiler
             }
 
             nestedCalls.Add(candidate);
+        }
+
+        if (preludeCalls.Length + nestedCalls.Count > 13)
+        {
+            throw Unsupported(
+                $"Function '{function.Name}' exceeds the conditional F+I CallSite invocation limit.");
         }
 
         var scalarExpressionRegisterCount = 0;
@@ -5382,7 +5465,9 @@ public static partial class TrRmExecutableCompiler
             nestedCalls.Count);
         var nestedRegisterByCall
             = new Dictionary<BoundCall, byte>(ReferenceEqualityComparer.Instance);
-        var methodMapTokens = new List<uint>(nestedCalls.Count + 1);
+        var methodMapTokens = new List<uint>(
+            preludeMethodMapTokens.Count + nestedCalls.Count + 1);
+        methodMapTokens.AddRange(preludeMethodMapTokens);
         for (var nestedIndex = 0;
             nestedIndex < nestedCalls.Count;
             nestedIndex++)
@@ -5507,7 +5592,8 @@ public static partial class TrRmExecutableCompiler
                 inputs[formal + 1] = new TrRmRegisterBodyCallInput(1, 1,
                     nestedRegister);
                 inputPreparationCode.Add(0x90);
-                inputPreparationCode.Add(nestedRegister);
+                inputPreparationCode.Add(checked((byte)(
+                    preludeCalls.Length + nestedRegister)));
             }
             else if (call.Arguments[sourceArgument] is BoundRead read
                 && (uint)read.Variable < (uint)function.ParameterCount)
@@ -5573,6 +5659,19 @@ public static partial class TrRmExecutableCompiler
         var records = new List<ReadOnlyMemory<byte>> {
             new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 },
         };
+        for (var preludeIndex = 0;
+            preludeIndex < preludeCalls.Length; preludeIndex++)
+        {
+            var receiver = (BoundRead)preludeCalls[preludeIndex]
+                .ForeignInterfaceCall!.Receiver;
+            records.Add(TrRmRegisterBodyRecordWriter.EncodeCallSite(1, 0,
+                maps.GetMethodMapIndex(
+                    preludeMethodMapTokens[preludeIndex]), 0,
+                [new TrRmRegisterBodyCallInput(2, 1,
+                    checked((ushort)receiver.Variable))], [],
+                schema: schema));
+        }
+
         foreach (var nestedCallSite in nestedCallSites)
         {
             records.Add(new(nestedCallSite));
@@ -5592,8 +5691,16 @@ public static partial class TrRmExecutableCompiler
             checked((ushort)(successOnTrue ? 2 : 1))));
         var entryCode = new List<byte>(26
             + (constantLoads.Count * 2)
-            + inputPreparationCode.Count);
+            + inputPreparationCode.Count
+            + (preludeCalls.Length * 2));
         // Finish input preparation before reserving the output Home.
+        for (var preludeIndex = 0;
+            preludeIndex < preludeCalls.Length; preludeIndex++)
+        {
+            entryCode.Add(0x90);
+            entryCode.Add(checked((byte)(preludeIndex + 1)));
+        }
+
         foreach (var (constantMapIndex, register) in constantLoads)
         {
             if (constantMapIndex >= 16)
@@ -10900,10 +11007,10 @@ public static partial class TrRmExecutableCompiler
 
     private static int
         GetStandardForeignInterfaceConditionalOutputPreparationPrefixLength(
-            ReadOnlySpan<byte> code, out int nestedCallCount,
+            ReadOnlySpan<byte> code, out int callSiteInvocationCount,
             out bool hasConstantInputs, out bool hasScalarExpressions)
     {
-        nestedCallCount = 0;
+        callSiteInvocationCount = 0;
         hasConstantInputs = false;
         hasScalarExpressions = false;
         var offset = 0;
@@ -10911,7 +11018,7 @@ public static partial class TrRmExecutableCompiler
         {
             if (code[offset] == 0x90 && code.Length - offset >= 2)
             {
-                nestedCallCount++;
+                callSiteInvocationCount++;
                 offset += 2;
             }
             else if (code[offset] == 0x16
@@ -10983,10 +11090,10 @@ public static partial class TrRmExecutableCompiler
         var rawEntryCode = body.GetBlockCode(0);
         var entryPrefixLength
             = GetStandardForeignInterfaceConditionalOutputPreparationPrefixLength(
-                rawEntryCode, out var nestedCallCount,
+                rawEntryCode, out var callSiteInvocationCount,
                 out var hasConstantInputs,
                 out var hasScalarExpressions);
-        var hasNestedCalls = nestedCallCount != 0;
+        var hasCallSiteInputs = callSiteInvocationCount != 0;
         var preparationPrefixLength = Math.Max(0, entryPrefixLength);
         var entryCode = preparationPrefixLength == 0
             ? rawEntryCode : rawEntryCode[entryPrefixLength..];
@@ -10994,12 +11101,12 @@ public static partial class TrRmExecutableCompiler
             || function.IsExternal || function.DoesNotReturn
             || function.ParameterCount < 2
             || variables.Count != function.ParameterCount + 2
-            || body.RecordCount != (nestedCallCount + 4)
-            || nestedCallCount > 13
-            || (!hasNestedCalls && body.MethodCount != 1)
-            || (hasNestedCalls && (body.MethodCount < 2
-                || body.MethodCount > nestedCallCount + 1))
-            || ((hasNestedCalls || hasConstantInputs) && !hasFallback)
+            || body.RecordCount != (callSiteInvocationCount + 4)
+            || callSiteInvocationCount > 13
+            || (!hasCallSiteInputs && body.MethodCount != 1)
+            || (hasCallSiteInputs && (body.MethodCount < 2
+                || body.MethodCount > callSiteInvocationCount + 1))
+            || ((hasCallSiteInputs || hasConstantInputs) && !hasFallback)
             || body.HomeCount != variables.Count
             || !HasEmptyEntryState(body, 0)
             || !HasEmptyEntryState(body, 1)
@@ -11097,28 +11204,92 @@ public static partial class TrRmExecutableCompiler
         if (callSiteRecordIndex >= body.RecordCount
             || reservationRecordIndex >= body.RecordCount
             || edgeRecordIndex >= body.RecordCount
-            || callSiteRecordIndex != nestedCallCount + 1
-            || reservationRecordIndex != nestedCallCount + 2
-            || edgeRecordIndex != nestedCallCount + 3)
+            || callSiteRecordIndex != callSiteInvocationCount + 1
+            || reservationRecordIndex != callSiteInvocationCount + 2
+            || edgeRecordIndex != callSiteInvocationCount + 3)
         {
             throw Invalid(
                 "The Standard F+I conditional-output Body references an invalid record.");
         }
 
+        var preludeCallCount = 0;
+        var nestedCallCount = 0;
+        var sawNestedCall = false;
+        for (var recordIndex = 1;
+            recordIndex < callSiteRecordIndex;
+            recordIndex++)
+        {
+            var inputCallSite = body.GetRecord(recordIndex);
+            if (inputCallSite.Length < 4)
+            {
+                throw Invalid(
+                    "The Standard F+I conditional-output input CallSite is truncated.");
+            }
+
+            var inputCallPayload = inputCallSite[4..];
+            if (inputCallSite[0] != 0x02
+                || inputCallPayload.Length < 16)
+            {
+                throw Invalid(
+                    "The Standard F+I conditional-output input CallSite is malformed.");
+            }
+
+            var resultKind = inputCallPayload[1];
+            var resultIndex = BinaryPrimitives.ReadUInt16LittleEndian(
+                inputCallPayload[6..]);
+            if (resultKind == 0 && !sawNestedCall && resultIndex == 0)
+            {
+                preludeCallCount++;
+            }
+            else if (resultKind == 1
+                && resultIndex == nestedCallCount + 1)
+            {
+                sawNestedCall = true;
+                nestedCallCount++;
+            }
+            else
+            {
+                throw Invalid(
+                    "The Standard F+I conditional-output input CallSites do not form a prelude followed by ordered scalar results.");
+            }
+        }
+
+        if (preludeCallCount + nestedCallCount
+            != callSiteInvocationCount)
+        {
+            throw Invalid(
+                "The Standard F+I conditional-output CallSite records do not match their invocation prefix.");
+        }
+
         var preparationOffset = 0;
-        var nestedCallIndex = 0;
+        for (var preludeIndex = 0;
+            preludeIndex < preludeCallCount;
+            preludeIndex++)
+        {
+            if (rawEntryCode[preparationOffset] != 0x90
+                || rawEntryCode[preparationOffset + 1]
+                    != preludeIndex + 1)
+            {
+                throw Invalid(
+                    "The Standard F+I conditional-output prelude CallSites are not invoked first in record order.");
+            }
+
+            preparationOffset += 2;
+        }
+
+        var nestedCallInvocation = 0;
         while (preparationOffset < preparationPrefixLength)
         {
             if (rawEntryCode[preparationOffset] == 0x90)
             {
                 if (rawEntryCode[preparationOffset + 1]
-                    != nestedCallIndex + 1)
+                    != preludeCallCount + nestedCallInvocation + 1)
                 {
                     throw Invalid(
                         "The Standard F+I conditional-output nested CallSites are not invoked in record order.");
                 }
 
-                nestedCallIndex++;
+                nestedCallInvocation++;
                 preparationOffset += 2;
             }
             else if (rawEntryCode[preparationOffset] == 0x16)
@@ -11147,12 +11318,13 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
-        if (nestedCallIndex != nestedCallCount)
+        if (nestedCallInvocation != nestedCallCount)
         {
             throw Invalid(
                 "The Standard F+I conditional-output nested CallSites are missing from the preparation prefix.");
         }
 
+        var hasNestedCalls = nestedCallCount != 0;
         var callSite = body.GetRecord(callSiteRecordIndex);
         var callPayload = callSite[4..];
         var targetMethodMapIndex
@@ -11280,6 +11452,139 @@ public static partial class TrRmExecutableCompiler
 
         var inputVariableLimit = hasFallback
             ? fallbackVariable : function.ParameterCount;
+        var preludeCallsBuilder
+            = ImmutableArray.CreateBuilder<BoundCall>(preludeCallCount);
+        for (var preludeIndex = 0;
+            preludeIndex < preludeCallCount;
+            preludeIndex++)
+        {
+            var preludeRecord = body.GetRecord(preludeIndex + 1);
+            if (preludeRecord.Length < 4)
+            {
+                throw Invalid(
+                    "The Standard F+I conditional-output prelude CallSite is truncated.");
+            }
+
+            var preludePayload = preludeRecord[4..];
+            var preludeMethodMapIndex
+                = BinaryPrimitives.ReadUInt16LittleEndian(
+                    preludePayload[4..]);
+            if (preludeRecord[0] != 0x02
+                || preludePayload.Length != 20
+                || preludePayload[0] != 1
+                || preludePayload[1] != 0
+                || BinaryPrimitives.ReadUInt16LittleEndian(
+                    preludePayload[2..]) != 0
+                || BinaryPrimitives.ReadUInt16LittleEndian(
+                    preludePayload[6..]) != 0
+                || BinaryPrimitives.ReadUInt32LittleEndian(
+                    preludePayload[8..]) != 1
+                || BinaryPrimitives.ReadUInt32LittleEndian(
+                    preludePayload[12..]) != 0
+                || preludeMethodMapIndex >= body.MethodCount)
+            {
+                throw Invalid(
+                    "The Standard F+I conditional-output prelude CallSite is outside the unit-call form.");
+            }
+
+            var preludeMethodToken = BinaryPrimitives
+                .ReadUInt32LittleEndian(body.MethodMap[
+                    (preludeMethodMapIndex * sizeof(uint))..]);
+            var preludeTokenKind
+                = checked((byte)(preludeMethodToken >> 24));
+            var preludeTokenRow = checked((int)(
+                preludeMethodToken & 0x00FF_FFFF));
+            var preludeMethodRow = preludeTokenKind switch {
+                0x16 => preludeTokenRow,
+                0x1C when preludeTokenRow > 0
+                    && preludeTokenRow <= imports.Count
+                    && (imports.GetExpectedDefinitionForImportRow(
+                        preludeTokenRow) >> 24) == 0x16
+                    => checked((int)(imports
+                        .GetExpectedDefinitionForImportRow(
+                            preludeTokenRow) & 0x00FF_FFFF)),
+                _ => 0,
+            };
+            if (preludeMethodRow == 0
+                || foreignInterfaceBodyTargets is null
+                || !foreignInterfaceBodyTargets.TryGetValue(
+                    preludeMethodRow, out var preludeForeignTarget))
+            {
+                throw Invalid(
+                    "The Standard F+I conditional-output prelude CallSite has no selected InterfaceMethod target.");
+            }
+
+            var preludeMember = preludeForeignTarget.Member;
+            if (preludeMember.ResultType.Kind
+                    != BoundInterfaceTypeKind.Primitive
+                || preludeMember.ResultType.PrimitiveType
+                    != PrimitiveType.Void
+                || preludeMember.DoesNotReturn
+                || !preludeMember.Parameters.IsEmpty
+                || !preludeMember.NativeOutputContracts.IsEmpty
+                || preludeMember.NativeCallableConvention is not
+                    NativeCallingConvention preludeConvention
+                || preludeForeignTarget.Definition.ForeignNativeInterface
+                    is not BoundForeignNativeInterfaceLayout
+                        preludeLayout)
+            {
+                throw Invalid(
+                    "The Standard F+I conditional-output prelude target is not a zero-parameter unit MethodDef without NativeOutput.");
+            }
+
+            var preludeReceiverInput = preludePayload[16..];
+            if (preludeReceiverInput[0] != 2
+                || preludeReceiverInput[1] != 1
+                || BinaryPrimitives.ReadUInt16LittleEndian(
+                    preludeReceiverInput[2..]) != 0)
+            {
+                throw Invalid(
+                    "The Standard F+I conditional-output prelude CallSite has no direct receiver Home.");
+            }
+
+            var preludeDeclarationKey = preludeMember.DeclarationKey;
+            if (preludeTokenKind == 0x1C)
+            {
+                preludeDeclarationKey = imports
+                    .GetBindingForImportRow(preludeTokenRow).ExportKey;
+                if (!StringComparer.Ordinal.Equals(
+                        preludeDeclarationKey,
+                        preludeMember.DeclarationKey)
+                    && !preludeMember.AdditionalDeclarationKeys.Contains(
+                        preludeDeclarationKey, StringComparer.Ordinal))
+                {
+                    throw Invalid(
+                        "A Standard F+I conditional-output prelude Import does not select one of the exact member ExportKeys.");
+                }
+            }
+
+            var preludeDeclaringInterface = new BoundInterfaceType(
+                BoundInterfaceTypeKind.Nominal, PrimitiveType.Void,
+                preludeForeignTarget.Definition.QualifiedName, -1, [],
+                false, false, false, false) {
+                ModuleImport
+                    = preludeForeignTarget.Definition.ModuleImport,
+            };
+            var preludeIdentity = new BoundInterfaceMemberIdentity(
+                preludeDeclaringInterface,
+                preludeForeignTarget.MemberOrdinal,
+                preludeDeclarationKey);
+            preludeCallsBuilder.Add(new BoundCall(
+                BoundCall.ForeignInterfaceFunction, [], PrimitiveType.Void,
+                default) {
+                IsUnsafeAuthorized = true,
+                ForeignInterfaceCall = new BoundForeignInterfaceCall(
+                    new BoundRead(homeVariables[0],
+                        PrimitiveType.NativeRawPointer, default),
+                    preludeIdentity, preludeLayout.VTableByteOffset,
+                    preludeConvention,
+                    preludeMember.RequiresMutableReceiver,
+                    preludeMember.DoesNotReturn,
+                    preludeMember.NativeOutputContracts),
+                ArgumentParameterIndices = [],
+            });
+        }
+
         var registerInputs = new Dictionary<ushort, BoundExpression>();
         var inputHomeVariables = new HashSet<int>();
         var constantOffset = 0;
@@ -11351,7 +11656,8 @@ public static partial class TrRmExecutableCompiler
             nestedIndex < nestedCallCount;
             nestedIndex++)
         {
-            var nestedCallSite = body.GetRecord(nestedIndex + 1);
+            var nestedCallSite = body.GetRecord(
+                preludeCallCount + nestedIndex + 1);
             var nestedPayload = nestedCallSite[4..];
             var nestedMethodMapIndex
                 = BinaryPrimitives.ReadUInt16LittleEndian(
@@ -11552,7 +11858,7 @@ public static partial class TrRmExecutableCompiler
         var pendingScalarComparison
             = ((BoundExpression Left, BoundExpression Right,
                 ushort Register, ushort RightRegister)?)null;
-        for (var preparationOffset = 0;
+        for (var preparationOffset = preludeCallCount * 2;
             preparationOffset < preparationPrefixLength;)
         {
             var opcode = rawEntryCode[preparationOffset];
@@ -12246,15 +12552,22 @@ public static partial class TrRmExecutableCompiler
             : statusRead;
         var thenValue = successOnTrue ? outputRead : complementValue;
         var finalValue = successOnTrue ? complementValue : outputRead;
-        return [
-            new BoundVacantLocal(outputVariable, default),
-            new BoundLocal(statusHomeVariable,
-                new BoundUnsafeExpression(call, default), default),
-            new BoundIf(condition, new BoundBlock([
-                new BoundReturn(thenValue, default),
-            ], default), null, default),
-            new BoundReturn(finalValue, default),
-        ];
+        var decodedStatements
+            = ImmutableArray.CreateBuilder<BoundStatement>(
+                preludeCallsBuilder.Count + 4);
+        foreach (var preludeCall in preludeCallsBuilder)
+        {
+            decodedStatements.Add(new BoundExpressionStatement(
+                new BoundUnsafeExpression(preludeCall, default), default));
+        }
+        decodedStatements.Add(new BoundVacantLocal(outputVariable, default));
+        decodedStatements.Add(new BoundLocal(statusHomeVariable,
+            new BoundUnsafeExpression(call, default), default));
+        decodedStatements.Add(new BoundIf(condition, new BoundBlock([
+            new BoundReturn(thenValue, default),
+        ], default), null, default));
+        decodedStatements.Add(new BoundReturn(finalValue, default));
+        return decodedStatements.MoveToImmutable();
 
         static bool HasEmptyEntryState(TrRmRegisterBodyReader body,
             int blockIndex)
