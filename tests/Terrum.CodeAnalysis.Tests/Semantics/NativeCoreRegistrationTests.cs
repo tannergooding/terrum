@@ -614,6 +614,182 @@ internal sealed class NativeCoreRegistrationTests
         }
     }
 
+    [TestCase("int32", "value + 1", (byte)0x21, TokenKind.Plus, false,
+        SourceArithmeticProfile.Release, BoundIntegerOverflowBehavior.Wrapping,
+        (ushort)2)]
+    [TestCase("int32", "value - 1", (byte)0x22, TokenKind.Minus, false,
+        SourceArithmeticProfile.Release, BoundIntegerOverflowBehavior.Wrapping,
+        (ushort)2)]
+    [TestCase("int32", "value * 2", (byte)0x23, TokenKind.Star, false,
+        SourceArithmeticProfile.Release, BoundIntegerOverflowBehavior.Wrapping,
+        (ushort)2)]
+    [TestCase("float64", "-value", (byte)0x26, TokenKind.Minus, true,
+        SourceArithmeticProfile.Development, BoundIntegerOverflowBehavior.Checked,
+        (ushort)1)]
+    [TestCase("float64", "value + 1", (byte)0x27, TokenKind.Plus, false,
+        SourceArithmeticProfile.Development, BoundIntegerOverflowBehavior.Checked,
+        (ushort)2)]
+    [TestCase("float64", "value - 1", (byte)0x28, TokenKind.Minus, false,
+        SourceArithmeticProfile.Development, BoundIntegerOverflowBehavior.Checked,
+        (ushort)2)]
+    [TestCase("float64", "value * 2", (byte)0x29, TokenKind.Star, false,
+        SourceArithmeticProfile.Development, BoundIntegerOverflowBehavior.Checked,
+        (ushort)2)]
+    [TestCase("float64", "value / 2", (byte)0x2A, TokenKind.Slash, false,
+        SourceArithmeticProfile.Development, BoundIntegerOverflowBehavior.Checked,
+        (ushort)2)]
+    [TestCase("float64", "value % 2", (byte)0x2B, TokenKind.Percent, false,
+        SourceArithmeticProfile.Development, BoundIntegerOverflowBehavior.Checked,
+        (ushort)2)]
+    public void StandardForeignNativeInterfaceDirectCallAcceptsScalarExpressionInputs(
+        string type, string expression, byte expectedOpcode,
+        TokenKind expectedOperator, bool unary,
+        SourceArithmeticProfile arithmeticProfile,
+        BoundIntegerOverflowBehavior expectedOverflowBehavior,
+        ushort expectedInputRegister)
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-native-interface-parameter-surface-1";
+        var registration = CreateRegistration(
+            includeForeignNativeInterface: true);
+        var options = new CompilationOptions {
+            NativeCoreRegistration = registration,
+            LayoutCoreRegistration = CreateLayoutRegistration(registration),
+            SourceArithmeticProfile = arithmeticProfile,
+        };
+        var providerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse($$"""
+                using Terrum.Interop;
+                [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+                [ForeignNativeInterface(VTableByteOffset: uint32(0))]
+                public interface IProbe {
+                    public unsafe {{type}} Read({{type}} value);
+                }
+                """), options);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+        var providerProgram = providerCompilation.Program
+            ?? throw new AssertionException("Expected a bound provider.");
+        var providerMember = providerProgram.Interfaces.Single()
+            .Members.Single();
+        var providerTypeExport = new TrRmSourceTypeExport("", "IProbe",
+            "provider/IProbe") {
+            GenericArity = 0,
+            InterfaceMethodExports = [
+                new TrRmSourceInterfaceMethodExport(
+                    providerMember.SourceInputOrdinal,
+                    providerMember.SourceDeclarationSpan,
+                    "provider/IProbe.Read"),
+            ],
+        };
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerProgram, "provider.module", schemaIdentity, 1,
+            [providerTypeExport]);
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            providerArtifact);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            providerInput, "provider.module", []);
+        var consumerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse($$"""
+                {{type}} InvokeComputed(ptr<void> receiver, {{type}} value) {
+                    unsafe { return IProbe.Read(receiver, {{expression}}); }
+                }
+                """), reference, options);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumerProgram = consumerCompilation.Program
+            ?? throw new AssertionException("Expected a bound consumer.");
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            consumerProgram, "consumer.module", schemaIdentity, 1, []);
+        var consumerTables = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
+                consumerArtifact,
+                TrRmArtifactSchema
+                    .ForeignNativeInterfaceParameterSurfaceDraft));
+        var invokeRow = Enumerable.Range(1, consumerTables.Methods.Count)
+            .Single(row =>
+                consumerTables.Methods.GetName(row) == "InvokeComputed");
+        var body = consumerTables.Bodies.GetRegisterBody(
+            consumerTables.Methods.GetBodyRow(invokeRow),
+            consumerTables.Contracts.Count);
+        Assert.That(body.GetBlockCode(0).ToArray(),
+            Does.Contain(expectedOpcode));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(body.MethodMap)
+                >> 24,
+            Is.EqualTo(0x1Cu));
+        var callSite = body.GetRecord(1);
+        Assert.That((callSite[24], callSite[25],
+                BinaryPrimitives.ReadUInt16LittleEndian(callSite[26..])),
+            Is.EqualTo(((byte)1, (byte)1, expectedInputRegister)));
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, consumerArtifact),
+            "consumer.module", [providerInput]);
+        AssertComputedInput(loaded, type, expectedOperator, unary,
+            expectedOverflowBehavior);
+        var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(loaded,
+            "consumer.module", schemaIdentity, 1, []);
+        var reloaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                reemittedArtifact), "consumer.module", [providerInput]);
+        AssertComputedInput(reloaded, type, expectedOperator, unary,
+            expectedOverflowBehavior);
+
+        static void AssertComputedInput(BoundProgram program, string typeName,
+            TokenKind operatorKind, bool unary,
+            BoundIntegerOverflowBehavior overflowBehavior)
+        {
+            var expectedType = typeName switch {
+                "int32" => PrimitiveType.Int32,
+                "float64" => PrimitiveType.Float64,
+                _ => throw new AssertionException(
+                    "The test selected an unsupported scalar type."),
+            };
+            var function = program.Functions.Single(
+                static candidate => candidate.Name == "InvokeComputed");
+            BoundCall? foreignCall = null;
+            Assert.That(BoundTreeTraversal.VisitExpressions(function.Body,
+                expression =>
+                {
+                    if (expression is BoundCall {
+                            ForeignInterfaceCall: not null,
+                        } call)
+                    {
+                        foreignCall = call;
+                    }
+                }), Is.True);
+            Assert.That(foreignCall?.Function,
+                Is.EqualTo(BoundCall.ForeignInterfaceFunction));
+            var argument = foreignCall!.Arguments.Single();
+            if (unary)
+            {
+                Assert.That(argument, Is.TypeOf<BoundUnary>());
+                var unaryExpression = (BoundUnary)argument;
+                Assert.That(unaryExpression.Operator,
+                    Is.EqualTo(operatorKind));
+                Assert.That(unaryExpression.OverflowBehavior,
+                    Is.EqualTo(overflowBehavior));
+                Assert.That(unaryExpression.Operand, Is.TypeOf<BoundRead>());
+                Assert.That(((BoundRead)unaryExpression.Operand).Variable,
+                    Is.EqualTo(1));
+                Assert.That(unaryExpression.Type, Is.EqualTo(expectedType));
+                return;
+            }
+
+            Assert.That(argument, Is.TypeOf<BoundBinary>());
+            var binary = (BoundBinary)argument;
+            Assert.That(binary.Operator, Is.EqualTo(operatorKind));
+            Assert.That(binary.OverflowBehavior,
+                Is.EqualTo(overflowBehavior));
+            Assert.That(binary.Left, Is.TypeOf<BoundRead>());
+            Assert.That(((BoundRead)binary.Left).Variable, Is.EqualTo(1));
+            Assert.That(binary.Right, Is.TypeOf<BoundConstant>());
+            Assert.That(binary.Right.Type, Is.EqualTo(expectedType));
+        }
+    }
+
     [Test]
     public void StandardForeignNativeInterfaceVoidCallBodiesRoundTrip()
     {
