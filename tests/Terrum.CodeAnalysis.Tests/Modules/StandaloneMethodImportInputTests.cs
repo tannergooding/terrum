@@ -425,7 +425,7 @@ internal sealed class StandaloneMethodImportInputTests
 
         var source = SourceText.From(
             "using api; int32 Main(int32 value) { "
-            + "Imported(value); return Imported(7); }");
+            + "Imported(Imported(value)); return Imported(7); }");
         var input = new StandaloneMethodImportInput(Agreement,
             "consumer/module", [
                 new TrRmStandardArtifactInput(SchemaIdentity,
@@ -463,6 +463,7 @@ internal sealed class StandaloneMethodImportInputTests
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodImports.terrum",
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodImportBindings.terrum",
             "sources/Terrum.CodeAnalysis.Terrum/Semantics/StandaloneOwnedSourceProgram.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Semantics/StandaloneOwnedSourceNormalization.terrum",
         };
         const string verificationSource = """
             namespace Terrum.CodeAnalysis;
@@ -470,18 +471,18 @@ internal sealed class StandaloneMethodImportInputTests
                 if (Scan() < 1) { return 40; }
                 int32 status = BindStandaloneOwnedSourceProgram();
                 if (status != 0) { return status; }
+                status = NormalizeStandaloneOwnedSourceProgram();
+                if (status != 0) { return status; }
                 if (Host.StandaloneSourceProgramStatus[0] != 0
+                    || Host.StandaloneNormalizedProgramStatus[0] != 0
                     || Host.StandaloneResolvedRootCount[0] != 1
                     || Host.StandaloneSourceImportedCallableCount[0] != 1
                     || Host.StandaloneLocalCallableCount[0] != 1
                     || Host.StandaloneSourceBodyCount[0] != 1
-                    || Host.StandaloneSourceExpressionCount[0] != 4
+                    || Host.StandaloneSourceExpressionCount[0] != 5
                     || Host.StandaloneSourceStatementCount[0] != 2
-                    || Host.StandaloneSourceDirectCallCount[0] != 2
-                    || Host.StandaloneSourceCallArgumentCount[0] != 2
-                    || Host.StandaloneLocalCallables[0] != 0
-                    || Host.StandaloneLocalCallables[1] != 1
-                    || Host.StandaloneLocalCallables[2] != 0
+                    || Host.StandaloneSourceDirectCallCount[0] != 3
+                    || Host.StandaloneSourceCallArgumentCount[0] != 3
                     || Host.StandaloneSourceDirectCalls[0] != 2
                     || Host.StandaloneSourceDirectCalls[1] != 0
                     || Host.StandaloneSourceDirectCalls[2] != 0
@@ -498,28 +499,101 @@ internal sealed class StandaloneMethodImportInputTests
                     || Host.StandaloneSourceDirectCalls[11] != 1
                     || Host.StandaloneSourceDirectCalls[12] != 1
                     || Host.StandaloneSourceDirectCalls[13] != -1
-                    || Host.StandaloneSourceCallArguments[0] != 0
+                    || Host.StandaloneSourceDirectCalls[14] != 2
+                    || Host.StandaloneSourceDirectCalls[15] != 0
+                    || Host.StandaloneSourceDirectCalls[16] != 0
+                    || Host.StandaloneSourceDirectCalls[17]
+                        != Host.StandaloneCallableTypeIds[0]
+                    || Host.StandaloneSourceDirectCalls[18] != 2
+                    || Host.StandaloneSourceDirectCalls[19] != 1
+                    || Host.StandaloneSourceDirectCalls[20] != -1
+                    || Host.StandaloneSourceCallArguments[0] != 1
                     || Host.StandaloneSourceCallArguments[1] != 0
                     || Host.StandaloneSourceCallArguments[2] != 1
-                    || Host.StandaloneSourceCallArguments[3] != 2
+                    || Host.StandaloneSourceCallArguments[3] != 0
                     || Host.StandaloneSourceCallArguments[4] != 0
                     || Host.StandaloneSourceCallArguments[5] != 1
+                    || Host.StandaloneSourceCallArguments[6] != 3
+                    || Host.StandaloneSourceCallArguments[7] != 0
+                    || Host.StandaloneSourceCallArguments[8] != 1
                     || Host.StandaloneSourceExpressions[0] != 1
                     || Host.StandaloneSourceExpressions[8] != 3
-                    || Host.StandaloneSourceExpressions[16] != 2
-                    || Host.StandaloneSourceExpressions[24] != 3
+                    || Host.StandaloneSourceExpressions[16] != 3
+                    || Host.StandaloneSourceExpressions[24] != 2
+                    || Host.StandaloneSourceExpressions[32] != 3
                     || Host.StandaloneSourceExpressionUseCounts[0] != 1
                     || Host.StandaloneSourceExpressionUseCounts[1] != 1
                     || Host.StandaloneSourceExpressionUseCounts[2] != 1
                     || Host.StandaloneSourceExpressionUseCounts[3] != 1
+                    || Host.StandaloneSourceExpressionUseCounts[4] != 1
                     || Host.StandaloneSourceDirectCallUseCounts[0] != 1
                     || Host.StandaloneSourceDirectCallUseCounts[1] != 1
+                    || Host.StandaloneSourceDirectCallUseCounts[2] != 1
                     || Host.StandaloneSourceCallArgumentOwners[0] != 1
                     || Host.StandaloneSourceCallArgumentOwners[1] != 2
+                    || Host.StandaloneSourceCallArgumentOwners[2] != 3
                     || Host.StandaloneSourceStatements[0] != 2
-                    || Host.StandaloneSourceStatements[1] != 1
+                    || Host.StandaloneSourceStatements[1] != 2
                     || Host.StandaloneSourceStatements[3] != 1
-                    || Host.StandaloneSourceStatements[4] != 3) {
+                    || Host.StandaloneSourceStatements[4] != 4
+                    || Host.StandaloneNormalizedBodyCount[0] != 1
+                    || Host.StandaloneNormalizedHomeCount[0] != 5
+                    || Host.StandaloneNormalizedConstantCount[0] != 1
+                    || Host.StandaloneInvokeCount[0] != 3
+                    || Host.StandaloneInvokeInputCount[0] != 3
+                    || Host.StandaloneNormalizedOperationCount[0] != 6
+                    || Host.StandaloneInvokeInputs[0] != 2
+                    || Host.StandaloneInvokeInputs[1] != 1
+                    || Host.StandaloneInvokeInputs[2] != 0
+                    || Host.StandaloneInvokeInputs[3] != 2
+                    || Host.StandaloneInvokeInputs[4] != 1
+                    || Host.StandaloneInvokeInputs[5] != 1
+                    || Host.StandaloneInvokeInputs[6] != 2
+                    || Host.StandaloneInvokeInputs[7] != 1
+                    || Host.StandaloneInvokeInputs[8] != 3
+                    || Host.StandaloneInvokes[0] != 2
+                    || Host.StandaloneInvokes[1] != 0
+                    || Host.StandaloneInvokes[2] != 0
+                    || Host.StandaloneInvokes[3] != 0
+                    || Host.StandaloneInvokes[4] != 1
+                    || Host.StandaloneInvokes[5] != 2
+                    || Host.StandaloneInvokes[6] != 1
+                    || Host.StandaloneInvokes[9] != -1
+                    || Host.StandaloneInvokes[10] != 2
+                    || Host.StandaloneInvokes[11] != 0
+                    || Host.StandaloneInvokes[12] != 0
+                    || Host.StandaloneInvokes[13] != 1
+                    || Host.StandaloneInvokes[14] != 1
+                    || Host.StandaloneInvokes[15] != 2
+                    || Host.StandaloneInvokes[16] != 2
+                    || Host.StandaloneInvokes[19] != -1
+                    || Host.StandaloneInvokes[20] != 2
+                    || Host.StandaloneInvokes[21] != 0
+                    || Host.StandaloneInvokes[22] != 0
+                    || Host.StandaloneInvokes[23] != 2
+                    || Host.StandaloneInvokes[24] != 1
+                    || Host.StandaloneInvokes[25] != 2
+                    || Host.StandaloneInvokes[26] != 4
+                    || Host.StandaloneInvokes[29] != -1
+                    || Host.StandaloneDirectCallInvokeMap[0] != 1
+                    || Host.StandaloneDirectCallInvokeMap[1] != 0
+                    || Host.StandaloneDirectCallInvokeMap[2] != 2
+                    || Host.StandaloneDirectCallTraversalCount[0] != 3
+                    || Host.StandaloneDirectCallTraversal[0] != 0
+                    || Host.StandaloneDirectCallTraversal[1] != 1
+                    || Host.StandaloneDirectCallTraversal[2] != 2
+                    || Host.StandaloneNormalizedOperations[0] != 3
+                    || Host.StandaloneNormalizedOperations[1] != 0
+                    || Host.StandaloneNormalizedOperations[4] != 3
+                    || Host.StandaloneNormalizedOperations[5] != 1
+                    || Host.StandaloneNormalizedOperations[8] != 1
+                    || Host.StandaloneNormalizedOperations[9] != 0
+                    || Host.StandaloneNormalizedOperations[12] != 2
+                    || Host.StandaloneNormalizedOperations[13] != 3
+                    || Host.StandaloneNormalizedOperations[16] != 3
+                    || Host.StandaloneNormalizedOperations[17] != 2
+                    || Host.StandaloneNormalizedOperations[20] != 4
+                    || Host.StandaloneNormalizedOperations[21] != 4) {
                     return 41;
                 }
                 return 0;
@@ -555,19 +629,21 @@ internal sealed class StandaloneMethodImportInputTests
 
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
-    public async Task TerrumOwnedSourceBinderRetainsImportedDirectCallsAsync(
+    public async Task TerrumOwnedSourceNormalizerTerminatesAtDoesNotReturnAsync(
         BoundRuntimePolicy policy)
     {
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
 
         var source = SourceText.From(
-            "using api; int32 Main(int32 value) { return Imported(value); }");
+            "using api; int32 Main(int32 value) { "
+            + "Imported(value); return Imported(7); }");
         var input = new StandaloneMethodImportInput(Agreement,
             "consumer/module", [
                 new TrRmStandardArtifactInput(SchemaIdentity,
                     CreateMethodProviderArtifact("provider/leaf",
-                        "api.Imported", scalarParameter: true)),
+                        "api.Imported", effectsMask: 2,
+                        scalarParameter: true)),
             ], [
                 new StandaloneMethodRoot(0, "provider/leaf",
                     "api.Imported"),
@@ -600,6 +676,7 @@ internal sealed class StandaloneMethodImportInputTests
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodImports.terrum",
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodImportBindings.terrum",
             "sources/Terrum.CodeAnalysis.Terrum/Semantics/StandaloneOwnedSourceProgram.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Semantics/StandaloneOwnedSourceNormalization.terrum",
         };
         const string verificationSource = """
             namespace Terrum.CodeAnalysis;
@@ -607,18 +684,18 @@ internal sealed class StandaloneMethodImportInputTests
                 if (Scan() < 1) { return 40; }
                 int32 status = BindStandaloneOwnedSourceProgram();
                 if (status != 0) { return status; }
+                status = NormalizeStandaloneOwnedSourceProgram();
+                if (status != 0) { return status; }
                 if (Host.StandaloneSourceProgramStatus[0] != 0
+                    || Host.StandaloneNormalizedProgramStatus[0] != 0
                     || Host.StandaloneResolvedRootCount[0] != 1
                     || Host.StandaloneSourceImportedCallableCount[0] != 1
                     || Host.StandaloneLocalCallableCount[0] != 1
                     || Host.StandaloneSourceBodyCount[0] != 1
-                    || Host.StandaloneSourceExpressionCount[0] != 2
-                    || Host.StandaloneSourceStatementCount[0] != 1
-                    || Host.StandaloneSourceDirectCallCount[0] != 1
-                    || Host.StandaloneSourceCallArgumentCount[0] != 1
-                    || Host.StandaloneLocalCallables[0] != 0
-                    || Host.StandaloneLocalCallables[1] != 1
-                    || Host.StandaloneLocalCallables[2] != 0
+                    || Host.StandaloneSourceExpressionCount[0] != 4
+                    || Host.StandaloneSourceStatementCount[0] != 2
+                    || Host.StandaloneSourceDirectCallCount[0] != 2
+                    || Host.StandaloneSourceCallArgumentCount[0] != 2
                     || Host.StandaloneSourceDirectCalls[0] != 2
                     || Host.StandaloneSourceDirectCalls[1] != 0
                     || Host.StandaloneSourceDirectCalls[2] != 0
@@ -627,13 +704,46 @@ internal sealed class StandaloneMethodImportInputTests
                     || Host.StandaloneSourceDirectCalls[4] != 0
                     || Host.StandaloneSourceDirectCalls[5] != 1
                     || Host.StandaloneSourceDirectCalls[6] != -1
+                    || Host.StandaloneSourceDirectCalls[7] != 2
+                    || Host.StandaloneSourceDirectCalls[8] != 0
+                    || Host.StandaloneSourceDirectCalls[9] != 0
+                    || Host.StandaloneSourceDirectCalls[10]
+                        != Host.StandaloneCallableTypeIds[0]
+                    || Host.StandaloneSourceDirectCalls[11] != 1
+                    || Host.StandaloneSourceDirectCalls[12] != 1
+                    || Host.StandaloneSourceDirectCalls[13] != -1
                     || Host.StandaloneSourceCallArguments[0] != 0
                     || Host.StandaloneSourceCallArguments[1] != 0
                     || Host.StandaloneSourceCallArguments[2] != 1
+                    || Host.StandaloneSourceCallArguments[3] != 2
+                    || Host.StandaloneSourceCallArguments[4] != 0
+                    || Host.StandaloneSourceCallArguments[5] != 1
                     || Host.StandaloneSourceExpressions[0] != 1
                     || Host.StandaloneSourceExpressions[8] != 3
-                    || Host.StandaloneSourceStatements[0] != 1
-                    || Host.StandaloneSourceStatements[1] != 1) {
+                    || Host.StandaloneSourceExpressions[16] != 2
+                    || Host.StandaloneSourceExpressions[24] != 3
+                    || Host.StandaloneSourceStatements[0] != 2
+                    || Host.StandaloneSourceStatements[1] != 1
+                    || Host.StandaloneSourceStatements[3] != 1
+                    || Host.StandaloneSourceStatements[4] != 3
+                    || Host.StandaloneNormalizedBodyCount[0] != 1
+                    || Host.StandaloneNormalizedHomeCount[0] != 1
+                    || Host.StandaloneNormalizedConstantCount[0] != 0
+                    || Host.StandaloneInvokeCount[0] != 1
+                    || Host.StandaloneInvokeInputCount[0] != 1
+                    || Host.StandaloneNormalizedOperationCount[0] != 1
+                    || Host.StandaloneNormalizedBodies[11] != 1
+                    || Host.StandaloneDirectCallInvokeMap[0] != 0
+                    || Host.StandaloneDirectCallInvokeMap[1] != -1
+                    || Host.StandaloneDirectCallTraversalCount[0] != 2
+                    || Host.StandaloneDirectCallTraversal[0] != 0
+                    || Host.StandaloneDirectCallTraversal[1] != 1
+                    || Host.StandaloneInvokeInputs[0] != 2
+                    || Host.StandaloneInvokeInputs[1] != 1
+                    || Host.StandaloneInvokeInputs[2] != 0
+                    || Host.StandaloneInvokes[5] != 0
+                    || Host.StandaloneInvokes[6] != 0
+                    || Host.StandaloneNormalizedOperations[0] != 3) {
                     return 41;
                 }
                 return 0;

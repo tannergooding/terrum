@@ -1,0 +1,1559 @@
+namespace Terrum.CodeAnalysis;
+
+public static int32 NormalizeStandaloneOwnedSourceProgram()
+{
+    if (Host.StandaloneNormalizedProgramStatus.Length != 1
+        || !ValidateStandaloneSourceCallBuffers()
+        || !ValidateStandaloneNormalizationBuffers())
+    {
+        return 3;
+    }
+
+    ClearStandaloneNormalizedProgram();
+    if (ValidateStandaloneMethodImportInput() != 0
+        || Host.StandaloneSourceProgramStatus[0] != 0
+        || VerifyStandaloneDirectCalls() != 0)
+    {
+        return FailStandaloneNormalization(3);
+    }
+
+    int32 traversalStatus = BuildStandaloneDirectCallTraversal();
+    if (traversalStatus != 0)
+    {
+        return FailStandaloneNormalization(traversalStatus);
+    }
+
+    int32 bodyCount = Host.StandaloneSourceBodyCount[0];
+    for (mut int32 bodyId = 0;
+        bodyId < bodyCount;
+        bodyId = bodyId + 1)
+    {
+        int32 sourceBodyOffset = bodyId * 12;
+        int32 normalizedBodyOffset = bodyId * 12;
+        int32 homeFirst = Host.StandaloneNormalizedHomeCount[0];
+        int32 constantFirst
+            = Host.StandaloneNormalizedConstantCount[0];
+        int32 invokeFirst = Host.StandaloneInvokeCount[0];
+        int32 inputFirst = Host.StandaloneInvokeInputCount[0];
+        int32 operationFirst
+            = Host.StandaloneNormalizedOperationCount[0];
+        Host.StandaloneNormalizedBodies[
+            normalizedBodyOffset] = bodyId;
+        Host.StandaloneNormalizedBodies[
+            normalizedBodyOffset + 1] = homeFirst;
+        Host.StandaloneNormalizedBodies[
+            normalizedBodyOffset + 3] = constantFirst;
+        Host.StandaloneNormalizedBodies[
+            normalizedBodyOffset + 5] = invokeFirst;
+        Host.StandaloneNormalizedBodies[
+            normalizedBodyOffset + 7] = inputFirst;
+        Host.StandaloneNormalizedBodies[
+            normalizedBodyOffset + 9] = operationFirst;
+
+        int32 parameterFirst
+            = Host.StandaloneSourceCallableInfo[bodyId * 12 + 5];
+        int32 parameterCount
+            = Host.StandaloneSourceCallableInfo[bodyId * 12 + 6];
+        for (mut int32 ordinal = 0;
+            ordinal < parameterCount;
+            ordinal = ordinal + 1)
+        {
+            int32 parameterRow = parameterFirst + ordinal;
+            int32 parameterOffset = parameterRow * 4;
+            int32 typeId
+                = Host.StandaloneSourceParameters[
+                    parameterOffset + 1];
+            int32 sourceUse = GetStandaloneSourceUse(typeId);
+            if (Host.StandaloneSourceParameters[
+                    parameterOffset] != bodyId
+                || sourceUse < 0)
+            {
+                return FailStandaloneNormalization(3);
+            }
+
+            if (sourceUse == 0)
+            {
+                Host.StandaloneNormalizedParameterHomeIds[
+                    parameterRow] = -1;
+                continue;
+            }
+            if (sourceUse != 1 && sourceUse != 5)
+            {
+                return FailStandaloneNormalization(2);
+            }
+
+            init int32 homeId;
+            int32 homeStatus = AppendStandaloneNormalizedHome(
+                bodyId, homeFirst, 2, typeId, ordinal,
+                ref init homeId);
+            if (homeStatus != 0)
+            {
+                return FailStandaloneNormalization(homeStatus);
+            }
+            Host.StandaloneNormalizedParameterHomeIds[
+                parameterRow] = homeId;
+        }
+
+        int32 statementFirst
+            = Host.StandaloneSourceBodies[sourceBodyOffset + 9];
+        int32 statementCount
+            = Host.StandaloneSourceBodies[sourceBodyOffset + 10];
+        mut int32 terminalKind = 0;
+        for (mut int32 statementIndex = 0;
+            statementIndex < statementCount;
+            statementIndex = statementIndex + 1)
+        {
+            int32 statementOffset
+                = (statementFirst + statementIndex) * 3;
+            int32 statementStatus = NormalizeStandaloneSourceStatement(
+                bodyId, statementOffset, ref init terminalKind);
+            if (statementStatus != 0)
+            {
+                return FailStandaloneNormalization(statementStatus);
+            }
+            if (terminalKind != 0)
+            {
+                break;
+            }
+        }
+
+        int32 homeCount
+            = Host.StandaloneNormalizedHomeCount[0] - homeFirst;
+        int32 constantCount
+            = Host.StandaloneNormalizedConstantCount[0]
+                - constantFirst;
+        int32 invokeCount
+            = Host.StandaloneInvokeCount[0] - invokeFirst;
+        int32 inputCount
+            = Host.StandaloneInvokeInputCount[0] - inputFirst;
+        int32 operationCount
+            = Host.StandaloneNormalizedOperationCount[0]
+                - operationFirst;
+        if (homeCount < 0 || homeCount > 65536
+            || constantCount < 0 || constantCount > 65536
+            || invokeCount < 0 || invokeCount > 65536
+            || inputCount < 0 || inputCount > 65536
+            || operationCount < 0)
+        {
+            return FailStandaloneNormalization(3);
+        }
+        Host.StandaloneNormalizedBodies[
+            normalizedBodyOffset + 2] = homeCount;
+        Host.StandaloneNormalizedBodies[
+            normalizedBodyOffset + 4] = constantCount;
+        Host.StandaloneNormalizedBodies[
+            normalizedBodyOffset + 6] = invokeCount;
+        Host.StandaloneNormalizedBodies[
+            normalizedBodyOffset + 8] = inputCount;
+        Host.StandaloneNormalizedBodies[
+            normalizedBodyOffset + 10] = operationCount;
+        Host.StandaloneNormalizedBodies[
+            normalizedBodyOffset + 11] = terminalKind;
+        Host.StandaloneNormalizedBodyCount[0] = bodyId + 1;
+    }
+
+    int32 verificationStatus = VerifyStandaloneNormalizedProgram();
+    if (verificationStatus != 0)
+    {
+        return FailStandaloneNormalization(verificationStatus);
+    }
+    Host.StandaloneNormalizedProgramStatus[0] = 0;
+    return 0;
+}
+
+bool ValidateStandaloneNormalizationBuffers()
+{
+    if (Host.Source.Length < 0
+        || Host.Source.Length > 16384
+        || Host.Source.Length > (int32.MaxValue / 12) - 1)
+    {
+        return false;
+    }
+    int32 tokenCapacity = Host.Source.Length + 1;
+    return Host.StandaloneNormalizedProgramStatus.Length == 1
+        && Host.StandaloneNormalizedBodyCount.Length == 1
+        && Host.StandaloneNormalizedBodies.Length
+            == tokenCapacity * 12
+        && Host.StandaloneNormalizedHomeCount.Length == 1
+        && Host.StandaloneNormalizedHomes.Length
+            == tokenCapacity * 10
+        && Host.StandaloneNormalizedParameterHomeIds.Length
+            == tokenCapacity
+        && Host.StandaloneNormalizedConstantCount.Length == 1
+        && Host.StandaloneNormalizedConstants.Length
+            == tokenCapacity * 4
+        && Host.StandaloneInvokeCount.Length == 1
+        && Host.StandaloneInvokes.Length
+            == tokenCapacity * 10
+        && Host.StandaloneInvokeUseCounts.Length
+            == tokenCapacity
+        && Host.StandaloneInvokeInputCount.Length == 1
+        && Host.StandaloneInvokeInputs.Length
+            == tokenCapacity * 3
+        && Host.StandaloneInvokeInputUseCounts.Length
+            == tokenCapacity
+        && Host.StandaloneNormalizedInputScratch.Length
+            == tokenCapacity * 3
+        && Host.StandaloneNormalizedOperationCount.Length == 1
+        && Host.StandaloneNormalizedOperations.Length
+            == tokenCapacity * 12
+        && Host.StandaloneDirectCallInvokeMap.Length
+            == tokenCapacity
+        && Host.StandaloneDirectCallTraversalCount.Length == 1
+        && Host.StandaloneDirectCallTraversal.Length
+            == tokenCapacity
+        && Host.StandaloneDirectCallTraversalSeen.Length
+            == tokenCapacity
+        && Host.StandaloneDirectCallTraversalExpressionStates.Length
+            == tokenCapacity;
+}
+
+void ClearStandaloneNormalizedProgram()
+{
+    Host.StandaloneNormalizedProgramStatus[0] = 0;
+    Host.StandaloneNormalizedBodyCount[0] = 0;
+    Host.StandaloneNormalizedHomeCount[0] = 0;
+    Host.StandaloneNormalizedConstantCount[0] = 0;
+    Host.StandaloneInvokeCount[0] = 0;
+    Host.StandaloneInvokeInputCount[0] = 0;
+    Host.StandaloneNormalizedOperationCount[0] = 0;
+    Host.StandaloneDirectCallTraversalCount[0] = 0;
+    for (mut int32 index = 0;
+        index < Host.StandaloneNormalizedBodies.Length;
+        index = index + 1)
+    {
+        Host.StandaloneNormalizedBodies[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneNormalizedHomes.Length;
+        index = index + 1)
+    {
+        Host.StandaloneNormalizedHomes[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneNormalizedParameterHomeIds.Length;
+        index = index + 1)
+    {
+        Host.StandaloneNormalizedParameterHomeIds[index] = -1;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneNormalizedConstants.Length;
+        index = index + 1)
+    {
+        Host.StandaloneNormalizedConstants[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneInvokes.Length;
+        index = index + 1)
+    {
+        Host.StandaloneInvokes[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneInvokeUseCounts.Length;
+        index = index + 1)
+    {
+        Host.StandaloneInvokeUseCounts[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneInvokeInputs.Length;
+        index = index + 1)
+    {
+        Host.StandaloneInvokeInputs[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneInvokeInputUseCounts.Length;
+        index = index + 1)
+    {
+        Host.StandaloneInvokeInputUseCounts[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneNormalizedInputScratch.Length;
+        index = index + 1)
+    {
+        Host.StandaloneNormalizedInputScratch[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneNormalizedOperations.Length;
+        index = index + 1)
+    {
+        Host.StandaloneNormalizedOperations[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneDirectCallInvokeMap.Length;
+        index = index + 1)
+    {
+        Host.StandaloneDirectCallInvokeMap[index] = -1;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneDirectCallTraversal.Length;
+        index = index + 1)
+    {
+        Host.StandaloneDirectCallTraversal[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneDirectCallTraversalSeen.Length;
+        index = index + 1)
+    {
+        Host.StandaloneDirectCallTraversalSeen[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneDirectCallTraversalExpressionStates.Length;
+        index = index + 1)
+    {
+        Host.StandaloneDirectCallTraversalExpressionStates[index] = 0;
+    }
+}
+
+int32 FailStandaloneNormalization(int32 status)
+{
+    ClearStandaloneNormalizedProgram();
+    Host.StandaloneNormalizedProgramStatus[0] = status;
+    return status;
+}
+
+int32 BuildStandaloneDirectCallTraversal()
+{
+    int32 bodyCount = Host.StandaloneSourceBodyCount[0];
+    for (mut int32 bodyId = 0;
+        bodyId < bodyCount;
+        bodyId = bodyId + 1)
+    {
+        int32 sourceBodyOffset = bodyId * 12;
+        int32 expressionFirst
+            = Host.StandaloneSourceBodies[sourceBodyOffset + 3];
+        int32 expressionCount
+            = Host.StandaloneSourceBodies[sourceBodyOffset + 4];
+        int32 statementFirst
+            = Host.StandaloneSourceBodies[sourceBodyOffset + 9];
+        int32 statementCount
+            = Host.StandaloneSourceBodies[sourceBodyOffset + 10];
+        for (mut int32 statementIndex = 0;
+            statementIndex < statementCount;
+            statementIndex = statementIndex + 1)
+        {
+            int32 statementOffset
+                = (statementFirst + statementIndex) * 3;
+            int32 expressionId
+                = Host.StandaloneSourceStatements[
+                    statementOffset + 1];
+            if (expressionId < 0)
+            {
+                continue;
+            }
+            int32 visitStatus = VisitStandaloneSourceExpression(
+                bodyId, expressionFirst, expressionCount,
+                expressionId, 0);
+            if (visitStatus != 0)
+            {
+                return visitStatus;
+            }
+        }
+    }
+
+    if (Host.StandaloneDirectCallTraversalCount[0]
+        != Host.StandaloneSourceDirectCallCount[0])
+    {
+        return 3;
+    }
+    for (mut int32 callIndex = 0;
+        callIndex < Host.StandaloneSourceDirectCallCount[0];
+        callIndex = callIndex + 1)
+    {
+        if (Host.StandaloneDirectCallTraversalSeen[callIndex] != 1)
+        {
+            return 3;
+        }
+    }
+    return 0;
+}
+
+int32 VisitStandaloneSourceExpression(int32 bodyId,
+    int32 expressionFirst, int32 expressionCount,
+    int32 expressionId, int32 depth)
+{
+    if (depth > 64 || expressionId < 0
+        || expressionId >= expressionCount)
+    {
+        return 3;
+    }
+    int32 expressionIndex = expressionFirst + expressionId;
+    if (expressionIndex < expressionFirst
+        || expressionIndex
+            >= Host.StandaloneSourceExpressionCount[0]
+        || Host.StandaloneDirectCallTraversalExpressionStates[
+            expressionIndex] != 0)
+    {
+        return 3;
+    }
+    Host.StandaloneDirectCallTraversalExpressionStates[
+        expressionIndex] = 1;
+    int32 expressionOffset = expressionIndex * 8;
+    int32 expressionKind
+        = Host.StandaloneSourceExpressions[expressionOffset];
+    if (expressionKind == 3)
+    {
+        int32 bodyOffset = bodyId * 12;
+        int32 bodyCallFirst
+            = Host.StandaloneSourceBodies[bodyOffset + 5];
+        int32 bodyCallCount
+            = Host.StandaloneSourceBodies[bodyOffset + 6];
+        int32 callLocalIndex
+            = Host.StandaloneSourceExpressions[
+                expressionOffset + 2];
+        if (callLocalIndex < 0
+            || callLocalIndex >= bodyCallCount)
+        {
+            return 3;
+        }
+        int32 callIndex = bodyCallFirst + callLocalIndex;
+        if (callIndex < 0
+            || callIndex
+                >= Host.StandaloneSourceDirectCallCount[0]
+            || Host.StandaloneDirectCallTraversalSeen[
+                callIndex] != 0)
+        {
+            return 3;
+        }
+        int32 traversalCount
+            = Host.StandaloneDirectCallTraversalCount[0];
+        if (traversalCount
+            >= Host.StandaloneDirectCallTraversal.Length)
+        {
+            return 3;
+        }
+        Host.StandaloneDirectCallTraversal[traversalCount]
+            = callIndex;
+        Host.StandaloneDirectCallTraversalSeen[callIndex] = 1;
+        Host.StandaloneDirectCallTraversalCount[0]
+            = traversalCount + 1;
+
+        int32 callOffset = callIndex * 7;
+        int32 argumentFirst
+            = Host.StandaloneSourceDirectCalls[callOffset + 4];
+        int32 argumentCount
+            = Host.StandaloneSourceDirectCalls[callOffset + 5];
+        int32 bodyArgumentFirst
+            = Host.StandaloneSourceBodies[bodyOffset + 7];
+        int32 bodyArgumentCount
+            = Host.StandaloneSourceBodies[bodyOffset + 8];
+        if (argumentFirst < 0 || argumentCount < 0
+            || argumentFirst > bodyArgumentCount - argumentCount)
+        {
+            return 3;
+        }
+        for (mut int32 ordinal = 0;
+            ordinal < argumentCount;
+            ordinal = ordinal + 1)
+        {
+            int32 argumentIndex
+                = bodyArgumentFirst + argumentFirst + ordinal;
+            int32 argumentOffset = argumentIndex * 3;
+            int32 childExpressionId
+                = Host.StandaloneSourceCallArguments[
+                    argumentOffset];
+            int32 visitStatus = VisitStandaloneSourceExpression(
+                bodyId, expressionFirst, expressionCount,
+                childExpressionId, depth + 1);
+            if (visitStatus != 0)
+            {
+                return visitStatus;
+            }
+        }
+    }
+    Host.StandaloneDirectCallTraversalExpressionStates[
+        expressionIndex] = 2;
+    return 0;
+}
+
+int32 AppendStandaloneNormalizedHome(int32 bodyId,
+    int32 homeFirst, int32 role, int32 typeId, int32 formalOrdinal,
+    ref<init int32> homeIdResult)
+    ensure return == 0 ? *homeIdResult is init : true
+{
+    int32 count = Host.StandaloneNormalizedHomeCount[0];
+    if (count < homeFirst
+        || count >= Host.StandaloneNormalizedHomes.Length / 5)
+    {
+        return 3;
+    }
+    int32 homeId = count - homeFirst;
+    if (homeId < 0 || homeId >= 65536
+        || typeId <= 0 || typeId > Host.StandaloneTypeFactCount[0]
+        || (role != 2 && role != 3))
+    {
+        return 3;
+    }
+    int32 offset = count * 5;
+    Host.StandaloneNormalizedHomes[offset] = bodyId;
+    Host.StandaloneNormalizedHomes[offset + 1] = role;
+    Host.StandaloneNormalizedHomes[offset + 2] = 0;
+    Host.StandaloneNormalizedHomes[offset + 3] = typeId;
+    Host.StandaloneNormalizedHomes[offset + 4]
+        = role == 2 ? formalOrdinal : 0;
+    *homeIdResult = homeId;
+    Host.StandaloneNormalizedHomeCount[0] = count + 1;
+    return 0;
+}
+
+int32 AppendStandaloneNormalizedConstant(int32 bodyId,
+    int32 constantFirst, int32 typeId, int32 valueLow,
+    int32 valueHigh, ref<init int32> constantIdResult)
+    ensure return == 0 ? *constantIdResult is init : true
+{
+    int32 count = Host.StandaloneNormalizedConstantCount[0];
+    if (count < constantFirst
+        || count >= Host.StandaloneNormalizedConstants.Length / 4
+        || typeId <= 0 || typeId > Host.StandaloneTypeFactCount[0])
+    {
+        return 3;
+    }
+    int32 constantId = count - constantFirst;
+    if (constantId < 0 || constantId >= 65536)
+    {
+        return 3;
+    }
+    int32 offset = count * 4;
+    Host.StandaloneNormalizedConstants[offset] = bodyId;
+    Host.StandaloneNormalizedConstants[offset + 1] = typeId;
+    Host.StandaloneNormalizedConstants[offset + 2] = valueLow;
+    Host.StandaloneNormalizedConstants[offset + 3] = valueHigh;
+    *constantIdResult = constantId;
+    Host.StandaloneNormalizedConstantCount[0] = count + 1;
+    return 0;
+}
+
+int32 AppendStandaloneNormalizedOperation(int32 bodyId,
+    int32 kind, int32 operand0, int32 operand1)
+{
+    int32 count = Host.StandaloneNormalizedOperationCount[0];
+    if (count < 0
+        || count >= Host.StandaloneNormalizedOperations.Length / 4
+        || bodyId < 0
+        || bodyId >= Host.StandaloneSourceBodyCount[0])
+    {
+        return 3;
+    }
+    int32 offset = count * 4;
+    Host.StandaloneNormalizedOperations[offset] = kind;
+    Host.StandaloneNormalizedOperations[offset + 1] = operand0;
+    Host.StandaloneNormalizedOperations[offset + 2] = operand1;
+    Host.StandaloneNormalizedOperations[offset + 3] = bodyId;
+    Host.StandaloneNormalizedOperationCount[0] = count + 1;
+    return 0;
+}
+
+int32 NormalizeStandaloneSourceStatement(int32 bodyId,
+    int32 statementOffset, ref<init int32> terminalKind)
+    ensure return == 0 ? *terminalKind is init : true
+{
+    int32 statementKind
+        = Host.StandaloneSourceStatements[statementOffset];
+    int32 expressionId
+        = Host.StandaloneSourceStatements[statementOffset + 1];
+    if (statementKind == 1 && expressionId < 0)
+    {
+        if (!IsStandaloneUnitType(
+                Host.StandaloneSourceCallableInfo[bodyId * 12 + 4]))
+        {
+            return 3;
+        }
+        return AppendStandaloneNormalizedOperation(
+            bodyId, 5, 0, 0);
+    }
+    if (expressionId < 0)
+    {
+        return 3;
+    }
+
+    init int32 selectorKind;
+    init int32 sourceUse;
+    init int32 selectorIndex;
+    init bool terminated;
+    int32 expressionStatus = NormalizeStandaloneSourceExpression(
+        bodyId, expressionId, 0, ref init selectorKind,
+        ref init sourceUse, ref init selectorIndex,
+        ref init terminated);
+    if (expressionStatus != 0)
+    {
+        return expressionStatus;
+    }
+    if (terminated)
+    {
+        *terminalKind = 1;
+        return 0;
+    }
+
+    if (statementKind == 1)
+    {
+        int32 resultTypeId
+            = Host.StandaloneSourceCallableInfo[bodyId * 12 + 4];
+        if (IsStandaloneUnitType(resultTypeId))
+        {
+            if (selectorKind != 0 || sourceUse != 0
+                || selectorIndex != 0)
+            {
+                return 3;
+            }
+            return AppendStandaloneNormalizedOperation(
+                bodyId, 5, 0, 0);
+        }
+        if (selectorKind != 2 || sourceUse != 1)
+        {
+            return 3;
+        }
+        return AppendStandaloneNormalizedOperation(
+            bodyId, 4, selectorIndex, 0);
+    }
+    if (statementKind == 2)
+    {
+        return 0;
+    }
+    return 3;
+}
+
+int32 NormalizeStandaloneSourceExpression(int32 bodyId,
+    int32 expressionId, int32 depth,
+    ref<init int32> selectorKindResult,
+    ref<init int32> sourceUseResult,
+    ref<init int32> selectorIndexResult,
+    ref<init bool> terminatedResult)
+    ensure return == 0 ? (*selectorKindResult is init
+        && *sourceUseResult is init
+        && *selectorIndexResult is init
+        && *terminatedResult is init) : true
+{
+    if (depth > 64 || bodyId < 0
+        || bodyId >= Host.StandaloneSourceBodyCount[0])
+    {
+        return 3;
+    }
+    int32 bodyOffset = bodyId * 12;
+    int32 expressionFirst
+        = Host.StandaloneSourceBodies[bodyOffset + 3];
+    int32 expressionCount
+        = Host.StandaloneSourceBodies[bodyOffset + 4];
+    if (expressionId < 0 || expressionId >= expressionCount)
+    {
+        return 3;
+    }
+    int32 expressionIndex = expressionFirst + expressionId;
+    int32 expressionOffset = expressionIndex * 8;
+    int32 expressionKind
+        = Host.StandaloneSourceExpressions[expressionOffset];
+    int32 typeId
+        = Host.StandaloneSourceExpressions[expressionOffset + 1];
+    if (typeId <= 0 || typeId > Host.StandaloneTypeFactCount[0])
+    {
+        return 3;
+    }
+
+    if (expressionKind == 1 || expressionKind == 4)
+    {
+        return NormalizeStandaloneParameterExpression(bodyId,
+            expressionKind, typeId,
+            Host.StandaloneSourceExpressions[expressionOffset + 2],
+            ref init *selectorKindResult,
+            ref init *sourceUseResult,
+            ref init *selectorIndexResult,
+            ref init *terminatedResult);
+    }
+    if (expressionKind == 2)
+    {
+        if (GetStandaloneSourceUse(typeId) != 1)
+        {
+            return 3;
+        }
+        int32 constantFirst
+            = Host.StandaloneNormalizedBodies[bodyId * 12 + 3];
+        int32 homeFirst
+            = Host.StandaloneNormalizedBodies[bodyId * 12 + 1];
+        init int32 constantId;
+        int32 constantStatus = AppendStandaloneNormalizedConstant(
+            bodyId, constantFirst, typeId,
+            Host.StandaloneSourceExpressions[expressionOffset + 4],
+            Host.StandaloneSourceExpressions[expressionOffset + 5],
+            ref init constantId);
+        if (constantStatus != 0)
+        {
+            return constantStatus;
+        }
+        init int32 homeId;
+        int32 homeStatus = AppendStandaloneNormalizedHome(
+            bodyId, homeFirst, 3, typeId, 0,
+            ref init homeId);
+        if (homeStatus != 0)
+        {
+            return homeStatus;
+        }
+        int32 loadStatus = AppendStandaloneNormalizedOperation(
+            bodyId, 1, constantId, 0);
+        if (loadStatus != 0)
+        {
+            return loadStatus;
+        }
+        int32 storeStatus = AppendStandaloneNormalizedOperation(
+            bodyId, 2, homeId, 0);
+        if (storeStatus != 0)
+        {
+            return storeStatus;
+        }
+        *selectorKindResult = 2;
+        *sourceUseResult = 1;
+        *selectorIndexResult = homeId;
+        *terminatedResult = false;
+        return 0;
+    }
+    if (expressionKind == 3)
+    {
+        return NormalizeStandaloneCallExpression(bodyId,
+            Host.StandaloneSourceExpressions[expressionOffset + 2],
+            depth, ref init *selectorKindResult,
+            ref init *sourceUseResult,
+            ref init *selectorIndexResult,
+            ref init *terminatedResult);
+    }
+    return 3;
+}
+
+int32 NormalizeStandaloneParameterExpression(int32 bodyId,
+    int32 expressionKind, int32 typeId, int32 parameterOrdinal,
+    ref<init int32> selectorKindResult,
+    ref<init int32> sourceUseResult,
+    ref<init int32> selectorIndexResult,
+    ref<init bool> terminatedResult)
+    ensure return == 0 ? (*selectorKindResult is init
+        && *sourceUseResult is init
+        && *selectorIndexResult is init
+        && *terminatedResult is init) : true
+{
+    int32 infoOffset = bodyId * 12;
+    int32 parameterFirst
+        = Host.StandaloneSourceCallableInfo[infoOffset + 5];
+    int32 parameterCount
+        = Host.StandaloneSourceCallableInfo[infoOffset + 6];
+    if (parameterOrdinal < 0 || parameterOrdinal >= parameterCount)
+    {
+        return 3;
+    }
+    int32 parameterRow = parameterFirst + parameterOrdinal;
+    int32 parameterOffset = parameterRow * 4;
+    if (Host.StandaloneSourceParameters[parameterOffset] != bodyId
+        || Host.StandaloneSourceParameters[
+            parameterOffset + 1] != typeId)
+    {
+        return 3;
+    }
+    int32 sourceUse = GetStandaloneSourceUse(typeId);
+    if (expressionKind == 4)
+    {
+        if (sourceUse != 5)
+        {
+            return 3;
+        }
+    }
+    else if (sourceUse != 0 && sourceUse != 1)
+    {
+        return 2;
+    }
+
+    if (sourceUse == 0)
+    {
+        *selectorKindResult = 0;
+        *sourceUseResult = 0;
+        *selectorIndexResult = 0;
+    }
+    else
+    {
+        int32 homeId
+            = Host.StandaloneNormalizedParameterHomeIds[parameterRow];
+        if (homeId < 0
+            || homeId
+                >= Host.StandaloneNormalizedHomeCount[0]
+                    - Host.StandaloneNormalizedBodies[
+                        bodyId * 12 + 1])
+        {
+            return 3;
+        }
+        *selectorKindResult = 2;
+        *sourceUseResult = sourceUse;
+        *selectorIndexResult = homeId;
+    }
+    *terminatedResult = false;
+    return 0;
+}
+
+int32 NormalizeStandaloneCallExpression(int32 bodyId,
+    int32 callLocalIndex, int32 depth,
+    ref<init int32> selectorKindResult,
+    ref<init int32> sourceUseResult,
+    ref<init int32> selectorIndexResult,
+    ref<init bool> terminatedResult)
+    ensure return == 0 ? (*selectorKindResult is init
+        && *sourceUseResult is init
+        && *selectorIndexResult is init
+        && *terminatedResult is init) : true
+{
+    int32 sourceBodyOffset = bodyId * 12;
+    int32 bodyCallFirst
+        = Host.StandaloneSourceBodies[sourceBodyOffset + 5];
+    int32 bodyCallCount
+        = Host.StandaloneSourceBodies[sourceBodyOffset + 6];
+    if (callLocalIndex < 0 || callLocalIndex >= bodyCallCount)
+    {
+        return 3;
+    }
+    int32 callIndex = bodyCallFirst + callLocalIndex;
+    int32 callOffset = callIndex * 7;
+    int32 targetKind
+        = Host.StandaloneSourceDirectCalls[callOffset];
+    int32 targetIndex
+        = Host.StandaloneSourceDirectCalls[callOffset + 1];
+    int32 expectedCallableId
+        = Host.StandaloneSourceDirectCalls[callOffset + 2];
+    int32 resultTypeId
+        = Host.StandaloneSourceDirectCalls[callOffset + 3];
+    int32 argumentFirst
+        = Host.StandaloneSourceDirectCalls[callOffset + 4];
+    int32 argumentCount
+        = Host.StandaloneSourceDirectCalls[callOffset + 5];
+    int32 locationId
+        = Host.StandaloneSourceDirectCalls[callOffset + 6];
+    init int32 resolvedCallableId;
+    init int32 targetResultTypeId;
+    init int32 parameterCount;
+    int32 signatureStatus = TryGetStandaloneCallableSignature(
+        targetKind, targetIndex, ref init resolvedCallableId,
+        ref init targetResultTypeId, ref init parameterCount);
+    if (signatureStatus != 0)
+    {
+        return signatureStatus;
+    }
+    if (resolvedCallableId != expectedCallableId
+        || expectedCallableId < 0
+        || expectedCallableId >= Host.StandaloneCallableEffects.Length
+        || targetResultTypeId != resultTypeId
+        || parameterCount != argumentCount)
+    {
+        return 3;
+    }
+
+    int32 bodyArgumentFirst
+        = Host.StandaloneSourceBodies[sourceBodyOffset + 7];
+    int32 bodyArgumentCount
+        = Host.StandaloneSourceBodies[sourceBodyOffset + 8];
+    if (argumentFirst < 0 || argumentCount < 0
+        || argumentFirst > bodyArgumentCount - argumentCount)
+    {
+        return 3;
+    }
+    for (mut int32 ordinal = 0;
+        ordinal < argumentCount;
+        ordinal = ordinal + 1)
+    {
+        int32 argumentIndex
+            = bodyArgumentFirst + argumentFirst + ordinal;
+        int32 argumentOffset = argumentIndex * 3;
+        int32 parameterOrdinal
+            = Host.StandaloneSourceCallArguments[
+                argumentOffset + 1];
+        int32 expectedSourceUse
+            = Host.StandaloneSourceCallArguments[
+                argumentOffset + 2];
+        if (parameterOrdinal != ordinal)
+        {
+            return 3;
+        }
+        init int32 parameterTypeId;
+        int32 parameterTypeStatus = GetStandaloneCallParameterTypeId(
+            targetKind, targetIndex, ordinal,
+            ref init parameterTypeId);
+        if (parameterTypeStatus != 0)
+        {
+            return parameterTypeStatus;
+        }
+        init int32 argumentSelectorKind;
+        init int32 argumentSourceUse;
+        init int32 argumentSelectorIndex;
+        init bool argumentTerminated;
+        int32 argumentStatus = NormalizeStandaloneSourceExpression(
+            bodyId,
+            Host.StandaloneSourceCallArguments[argumentOffset],
+            depth + 1, ref init argumentSelectorKind,
+            ref init argumentSourceUse,
+            ref init argumentSelectorIndex,
+            ref init argumentTerminated);
+        if (argumentStatus != 0)
+        {
+            return argumentStatus;
+        }
+        if (argumentTerminated)
+        {
+            *selectorKindResult = 0;
+            *sourceUseResult = 0;
+            *selectorIndexResult = 0;
+            *terminatedResult = true;
+            return 0;
+        }
+        if (argumentSourceUse != expectedSourceUse
+            || Host.StandaloneSourceExpressions[
+                (Host.StandaloneSourceBodies[
+                    sourceBodyOffset + 3]
+                    + Host.StandaloneSourceCallArguments[
+                        argumentOffset]) * 8 + 1]
+                != parameterTypeId
+            || (argumentSelectorKind == 0
+                && (expectedSourceUse != 0
+                    || argumentSelectorIndex != 0))
+            || (argumentSelectorKind != 0
+                && argumentSelectorKind != 2))
+        {
+            return 3;
+        }
+        int32 scratchOffset = argumentIndex * 3;
+        Host.StandaloneNormalizedInputScratch[scratchOffset]
+            = argumentSelectorKind;
+        Host.StandaloneNormalizedInputScratch[scratchOffset + 1]
+            = expectedSourceUse;
+        Host.StandaloneNormalizedInputScratch[scratchOffset + 2]
+            = argumentSelectorIndex;
+    }
+
+    int32 bodyInputFirst
+        = Host.StandaloneNormalizedBodies[
+            bodyId * 12 + 7];
+    int32 inputGlobalFirst
+        = Host.StandaloneInvokeInputCount[0];
+    int32 inputLocalFirst = argumentCount == 0 ? 0
+        : inputGlobalFirst - bodyInputFirst;
+    if (inputLocalFirst < 0
+        || inputLocalFirst > 65535
+        || inputGlobalFirst
+            > Host.StandaloneInvokeInputs.Length / 3
+                - argumentCount)
+    {
+        return 3;
+    }
+    for (mut int32 ordinal = 0;
+        ordinal < argumentCount;
+        ordinal = ordinal + 1)
+    {
+        int32 argumentIndex
+            = bodyArgumentFirst + argumentFirst + ordinal;
+        int32 scratchOffset = argumentIndex * 3;
+        int32 inputOffset = (inputGlobalFirst + ordinal) * 3;
+        Host.StandaloneInvokeInputs[inputOffset]
+            = Host.StandaloneNormalizedInputScratch[scratchOffset];
+        Host.StandaloneInvokeInputs[inputOffset + 1]
+            = Host.StandaloneNormalizedInputScratch[
+                scratchOffset + 1];
+        Host.StandaloneInvokeInputs[inputOffset + 2]
+            = Host.StandaloneNormalizedInputScratch[
+                scratchOffset + 2];
+    }
+    Host.StandaloneInvokeInputCount[0]
+        = inputGlobalFirst + argumentCount;
+
+    bool doesNotReturn
+        = (Host.StandaloneCallableEffects[expectedCallableId] & 2) != 0;
+    bool unitResult = IsStandaloneUnitType(resultTypeId);
+    int32 resultKind = 0;
+    int32 resultIndex = 0;
+    if (!doesNotReturn && !unitResult)
+    {
+        int32 homeFirst
+            = Host.StandaloneNormalizedBodies[
+                bodyId * 12 + 1];
+        init int32 resultHome;
+        int32 homeStatus = AppendStandaloneNormalizedHome(
+            bodyId, homeFirst, 3, resultTypeId, 0,
+            ref init resultHome);
+        if (homeStatus != 0)
+        {
+            return homeStatus;
+        }
+        resultKind = 2;
+        resultIndex = resultHome;
+    }
+
+    int32 invokeGlobal = Host.StandaloneInvokeCount[0];
+    if (invokeGlobal >= Host.StandaloneInvokes.Length / 10)
+    {
+        return 3;
+    }
+    int32 invokeLocal = invokeGlobal
+        - Host.StandaloneNormalizedBodies[
+            bodyId * 12 + 5];
+    if (invokeLocal < 0 || invokeLocal >= 65536)
+    {
+        return 3;
+    }
+    int32 invokeOffset = invokeGlobal * 10;
+    Host.StandaloneInvokes[invokeOffset] = targetKind;
+    Host.StandaloneInvokes[invokeOffset + 1] = targetIndex;
+    Host.StandaloneInvokes[invokeOffset + 2]
+        = expectedCallableId;
+    Host.StandaloneInvokes[invokeOffset + 3] = inputLocalFirst;
+    Host.StandaloneInvokes[invokeOffset + 4] = argumentCount;
+    Host.StandaloneInvokes[invokeOffset + 5] = resultKind;
+    Host.StandaloneInvokes[invokeOffset + 6] = resultIndex;
+    Host.StandaloneInvokes[invokeOffset + 7] = 0;
+    Host.StandaloneInvokes[invokeOffset + 8] = 0;
+    Host.StandaloneInvokes[invokeOffset + 9] = locationId;
+    Host.StandaloneInvokeCount[0] = invokeGlobal + 1;
+    Host.StandaloneDirectCallInvokeMap[callIndex] = invokeGlobal;
+    Host.StandaloneInvokeUseCounts[invokeGlobal] = 1;
+    int32 operationStatus = AppendStandaloneNormalizedOperation(
+        bodyId, 3, invokeLocal, 0);
+    if (operationStatus != 0)
+    {
+        return operationStatus;
+    }
+    if (doesNotReturn)
+    {
+        *selectorKindResult = 0;
+        *sourceUseResult = 0;
+        *selectorIndexResult = 0;
+        *terminatedResult = true;
+        return 0;
+    }
+    if (unitResult)
+    {
+        *selectorKindResult = 0;
+        *sourceUseResult = 0;
+        *selectorIndexResult = 0;
+    }
+    else
+    {
+        *selectorKindResult = 2;
+        *sourceUseResult = 1;
+        *selectorIndexResult = resultIndex;
+    }
+    *terminatedResult = false;
+    return 0;
+}
+
+int32 VerifyStandaloneNormalizedProgram()
+{
+    int32 bodyCount = Host.StandaloneNormalizedBodyCount[0];
+    int32 homeCount = Host.StandaloneNormalizedHomeCount[0];
+    int32 constantCount
+        = Host.StandaloneNormalizedConstantCount[0];
+    int32 invokeCount = Host.StandaloneInvokeCount[0];
+    int32 inputCount = Host.StandaloneInvokeInputCount[0];
+    int32 operationCount
+        = Host.StandaloneNormalizedOperationCount[0];
+    if (bodyCount != Host.StandaloneSourceBodyCount[0]
+        || bodyCount < 0
+        || bodyCount > Host.StandaloneNormalizedBodies.Length / 12
+        || homeCount < 0
+        || homeCount > Host.StandaloneNormalizedHomes.Length / 5
+        || constantCount < 0
+        || constantCount
+            > Host.StandaloneNormalizedConstants.Length / 4
+        || invokeCount < 0
+        || invokeCount > Host.StandaloneInvokes.Length / 10
+        || inputCount < 0
+        || inputCount > Host.StandaloneInvokeInputs.Length / 3
+        || operationCount < 0
+        || operationCount
+            > Host.StandaloneNormalizedOperations.Length / 4)
+    {
+        return 3;
+    }
+
+    for (mut int32 bodyId = 0;
+        bodyId < bodyCount;
+        bodyId = bodyId + 1)
+    {
+        int32 bodyOffset = bodyId * 12;
+        int32 homeFirst
+            = Host.StandaloneNormalizedBodies[bodyOffset + 1];
+        int32 bodyHomeCount
+            = Host.StandaloneNormalizedBodies[bodyOffset + 2];
+        int32 constantFirst
+            = Host.StandaloneNormalizedBodies[bodyOffset + 3];
+        int32 bodyConstantCount
+            = Host.StandaloneNormalizedBodies[bodyOffset + 4];
+        int32 invokeFirst
+            = Host.StandaloneNormalizedBodies[bodyOffset + 5];
+        int32 bodyInvokeCount
+            = Host.StandaloneNormalizedBodies[bodyOffset + 6];
+        int32 inputFirst
+            = Host.StandaloneNormalizedBodies[bodyOffset + 7];
+        int32 bodyInputCount
+            = Host.StandaloneNormalizedBodies[bodyOffset + 8];
+        int32 operationFirst
+            = Host.StandaloneNormalizedBodies[bodyOffset + 9];
+        int32 bodyOperationCount
+            = Host.StandaloneNormalizedBodies[bodyOffset + 10];
+        int32 terminalKind
+            = Host.StandaloneNormalizedBodies[bodyOffset + 11];
+        if (Host.StandaloneNormalizedBodies[bodyOffset] != bodyId
+            || homeFirst < 0 || bodyHomeCount < 0
+            || homeFirst > homeCount - bodyHomeCount
+            || constantFirst < 0 || bodyConstantCount < 0
+            || constantFirst > constantCount - bodyConstantCount
+            || invokeFirst < 0 || bodyInvokeCount < 0
+            || invokeFirst > invokeCount - bodyInvokeCount
+            || inputFirst < 0 || bodyInputCount < 0
+            || inputFirst > inputCount - bodyInputCount
+            || operationFirst < 0 || bodyOperationCount < 0
+            || operationFirst
+                > operationCount - bodyOperationCount
+            || (terminalKind != 0 && terminalKind != 1))
+        {
+            return 3;
+        }
+
+        int32 sourceInfoOffset = bodyId * 12;
+        int32 parameterFirst
+            = Host.StandaloneSourceCallableInfo[
+                sourceInfoOffset + 5];
+        int32 parameterCount
+            = Host.StandaloneSourceCallableInfo[
+                sourceInfoOffset + 6];
+        for (mut int32 ordinal = 0;
+            ordinal < parameterCount;
+            ordinal = ordinal + 1)
+        {
+            int32 parameterRow = parameterFirst + ordinal;
+            int32 parameterTypeId
+                = Host.StandaloneSourceParameters[
+                    parameterRow * 4 + 1];
+            int32 expectedUse
+                = GetStandaloneSourceUse(parameterTypeId);
+            int32 homeId
+                = Host.StandaloneNormalizedParameterHomeIds[
+                    parameterRow];
+            if (expectedUse < 0
+                || (expectedUse != 0
+                    && expectedUse != 1
+                    && expectedUse != 5))
+            {
+                return 3;
+            }
+            if (expectedUse == 0)
+            {
+                if (homeId != -1)
+                {
+                    return 3;
+                }
+                continue;
+            }
+            if (homeId < 0 || homeId >= bodyHomeCount)
+            {
+                return 3;
+            }
+            int32 homeOffset = (homeFirst + homeId) * 5;
+            if (Host.StandaloneNormalizedHomes[homeOffset] != bodyId
+                || Host.StandaloneNormalizedHomes[
+                    homeOffset + 1] != 2
+                || Host.StandaloneNormalizedHomes[
+                    homeOffset + 3] != parameterTypeId
+                || Host.StandaloneNormalizedHomes[
+                    homeOffset + 4] != ordinal)
+            {
+                return 3;
+            }
+        }
+
+        for (mut int32 constantLocal = 0;
+            constantLocal < bodyConstantCount;
+            constantLocal = constantLocal + 1)
+        {
+            int32 constantOffset
+                = (constantFirst + constantLocal) * 4;
+            int32 typeId
+                = Host.StandaloneNormalizedConstants[
+                    constantOffset + 1];
+            int32 valueLow
+                = Host.StandaloneNormalizedConstants[
+                    constantOffset + 2];
+            int32 valueHigh
+                = Host.StandaloneNormalizedConstants[
+                    constantOffset + 3];
+            if (Host.StandaloneNormalizedConstants[
+                    constantOffset] != bodyId
+                || typeId <= 0
+                || typeId > Host.StandaloneTypeFactCount[0]
+                || Host.StandaloneTypeFacts[typeId * 3] != 0)
+            {
+                return 3;
+            }
+            int32 typeCode
+                = Host.StandaloneTypeFacts[typeId * 3 + 1];
+            if (typeCode == 1)
+            {
+                if (valueHigh != 0
+                    || (valueLow != 0 && valueLow != 1))
+                {
+                    return 3;
+                }
+            }
+            else
+            {
+                uint64 magnitude = uint64(uint32(valueLow))
+                    | (uint64(uint32(valueHigh)) << 32);
+                if (!IsStandaloneIntegerLiteralInRange(
+                        typeCode, magnitude))
+                {
+                    return 3;
+                }
+            }
+        }
+
+        int32 bodyCallFirst
+            = Host.StandaloneSourceBodies[bodyId * 12 + 5];
+        int32 bodyCallCount
+            = Host.StandaloneSourceBodies[bodyId * 12 + 6];
+        int32 observedInvokeCount = 0;
+        for (mut int32 callLocalIndex = 0;
+            callLocalIndex < bodyCallCount;
+            callLocalIndex = callLocalIndex + 1)
+        {
+            int32 callIndex = bodyCallFirst + callLocalIndex;
+            int32 mappedInvoke
+                = Host.StandaloneDirectCallInvokeMap[callIndex];
+            if (mappedInvoke < 0)
+            {
+                if (mappedInvoke != -1)
+                {
+                    return 3;
+                }
+                continue;
+            }
+            if (mappedInvoke < invokeFirst
+                || mappedInvoke >= invokeFirst + bodyInvokeCount)
+            {
+                return 3;
+            }
+            observedInvokeCount = observedInvokeCount + 1;
+            int32 callOffset = callIndex * 7;
+            int32 invokeOffset = mappedInvoke * 10;
+            for (mut int32 field = 0; field < 3; field = field + 1)
+            {
+                if (Host.StandaloneSourceDirectCalls[
+                        callOffset + field]
+                    != Host.StandaloneInvokes[invokeOffset + field])
+                {
+                    return 3;
+                }
+            }
+            int32 argumentFirst
+                = Host.StandaloneSourceDirectCalls[callOffset + 4];
+            int32 argumentCount
+                = Host.StandaloneSourceDirectCalls[callOffset + 5];
+            int32 invokeInputFirst
+                = Host.StandaloneInvokes[invokeOffset + 3];
+            int32 invokeInputCount
+                = Host.StandaloneInvokes[invokeOffset + 4];
+            if (argumentCount != invokeInputCount
+                || invokeInputCount < 0
+                || invokeInputFirst < 0
+                || invokeInputFirst
+                    > bodyInputCount - invokeInputCount)
+            {
+                return 3;
+            }
+            int32 bodyArgumentFirst
+                = Host.StandaloneSourceBodies[bodyId * 12 + 7];
+            for (mut int32 ordinal = 0;
+                ordinal < argumentCount;
+                ordinal = ordinal + 1)
+            {
+                int32 argumentIndex
+                    = bodyArgumentFirst + argumentFirst + ordinal;
+                int32 argumentOffset = argumentIndex * 3;
+                int32 inputOffset
+                    = (inputFirst + invokeInputFirst + ordinal) * 3;
+                int32 normalizedInputIndex
+                    = inputFirst + invokeInputFirst + ordinal;
+                int32 argumentExpressionId
+                    = Host.StandaloneSourceCallArguments[
+                        argumentOffset];
+                int32 expectedSourceUse
+                    = Host.StandaloneSourceCallArguments[
+                        argumentOffset + 2];
+                int32 expressionTypeId
+                    = Host.StandaloneSourceExpressions[
+                        (Host.StandaloneSourceBodies[
+                            bodyId * 12 + 3]
+                            + argumentExpressionId) * 8 + 1];
+                int32 selectorKind
+                    = Host.StandaloneInvokeInputs[inputOffset];
+                int32 sourceUse
+                    = Host.StandaloneInvokeInputs[inputOffset + 1];
+                int32 selectorIndex
+                    = Host.StandaloneInvokeInputs[inputOffset + 2];
+                if (sourceUse != expectedSourceUse)
+                {
+                    return 3;
+                }
+                if (Host.StandaloneInvokeInputUseCounts[
+                        normalizedInputIndex] != 0)
+                {
+                    return 3;
+                }
+                Host.StandaloneInvokeInputUseCounts[
+                    normalizedInputIndex] = 1;
+                if (selectorKind == 0)
+                {
+                    if (sourceUse != 0 || selectorIndex != 0
+                        || !IsStandaloneUnitType(expressionTypeId))
+                    {
+                        return 3;
+                    }
+                }
+                else if (selectorKind == 2)
+                {
+                    if (selectorIndex < 0
+                        || selectorIndex >= bodyHomeCount)
+                    {
+                        return 3;
+                    }
+                    int32 homeOffset
+                        = (homeFirst + selectorIndex) * 5;
+                    if (Host.StandaloneNormalizedHomes[
+                            homeOffset] != bodyId
+                        || Host.StandaloneNormalizedHomes[
+                            homeOffset + 3] != expressionTypeId
+                        || GetStandaloneSourceUse(expressionTypeId)
+                            != sourceUse)
+                    {
+                        return 3;
+                    }
+                }
+                else
+                {
+                    return 3;
+                }
+            }
+
+            int32 expectedCallableId
+                = Host.StandaloneInvokes[invokeOffset + 2];
+            if (expectedCallableId < 0
+                || expectedCallableId
+                    >= Host.StandaloneCallableEffects.Length)
+            {
+                return 3;
+            }
+            int32 resultTypeId
+                = Host.StandaloneSourceDirectCalls[callOffset + 3];
+            bool doesNotReturn
+                = (Host.StandaloneCallableEffects[
+                    expectedCallableId] & 2) != 0;
+            bool unitResult = IsStandaloneUnitType(resultTypeId);
+            int32 resultKind
+                = Host.StandaloneInvokes[invokeOffset + 5];
+            int32 resultIndex
+                = Host.StandaloneInvokes[invokeOffset + 6];
+            if ((doesNotReturn || unitResult)
+                ? resultKind != 0 || resultIndex != 0
+                : resultKind != 2 || resultIndex < 0
+                    || resultIndex >= bodyHomeCount)
+            {
+                return 3;
+            }
+            if (resultKind == 2)
+            {
+                int32 resultHomeOffset
+                    = (homeFirst + resultIndex) * 5;
+                if (Host.StandaloneNormalizedHomes[
+                        resultHomeOffset] != bodyId
+                    || Host.StandaloneNormalizedHomes[
+                        resultHomeOffset + 1] != 3
+                    || Host.StandaloneNormalizedHomes[
+                        resultHomeOffset + 3] != resultTypeId)
+                {
+                    return 3;
+                }
+            }
+            if (Host.StandaloneInvokes[invokeOffset + 7] != 0
+                || Host.StandaloneInvokes[invokeOffset + 8] != 0
+                || Host.StandaloneInvokeUseCounts[mappedInvoke] != 1)
+            {
+                return 3;
+            }
+            Host.StandaloneInvokeUseCounts[mappedInvoke] = 2;
+        }
+        if (observedInvokeCount != bodyInvokeCount)
+        {
+            return 3;
+        }
+        for (mut int32 inputLocal = 0;
+            inputLocal < bodyInputCount;
+            inputLocal = inputLocal + 1)
+        {
+            if (Host.StandaloneInvokeInputUseCounts[
+                    inputFirst + inputLocal] != 1)
+            {
+                return 3;
+            }
+        }
+
+        int32 finalOperationKind = 0;
+        for (mut int32 localOperation = 0;
+            localOperation < bodyOperationCount;
+            localOperation = localOperation + 1)
+        {
+            int32 operationOffset
+                = (operationFirst + localOperation) * 4;
+            int32 kind
+                = Host.StandaloneNormalizedOperations[
+                    operationOffset];
+            int32 operand0
+                = Host.StandaloneNormalizedOperations[
+                    operationOffset + 1];
+            int32 operand1
+                = Host.StandaloneNormalizedOperations[
+                    operationOffset + 2];
+            if (Host.StandaloneNormalizedOperations[
+                    operationOffset + 3] != bodyId)
+            {
+                return 3;
+            }
+            finalOperationKind = kind;
+            if (kind == 1)
+            {
+                if (operand0 < 0
+                    || operand0 >= bodyConstantCount
+                    || operand1 != 0
+                    || Host.StandaloneNormalizedConstants[
+                        (constantFirst + operand0) * 4] != bodyId)
+                {
+                    return 3;
+                }
+            }
+            else if (kind == 2)
+            {
+                if (operand0 < 0 || operand0 >= bodyHomeCount
+                    || operand1 != 0 || localOperation == 0)
+                {
+                    return 3;
+                }
+                int32 previousOffset
+                    = (operationFirst + localOperation - 1) * 4;
+                if (Host.StandaloneNormalizedOperations[
+                        previousOffset] != 1)
+                {
+                    return 3;
+                }
+                int32 constantLocal
+                    = Host.StandaloneNormalizedOperations[
+                        previousOffset + 1];
+                int32 constantType
+                    = Host.StandaloneNormalizedConstants[
+                        (constantFirst + constantLocal) * 4 + 1];
+                int32 homeType
+                    = Host.StandaloneNormalizedHomes[
+                        (homeFirst + operand0) * 5 + 3];
+                if (constantType != homeType)
+                {
+                    return 3;
+                }
+            }
+            else if (kind == 3)
+            {
+                if (operand0 < 0 || operand0 >= bodyInvokeCount
+                    || operand1 != 0)
+                {
+                    return 3;
+                }
+                int32 invokeGlobal = invokeFirst + operand0;
+                if (Host.StandaloneInvokeUseCounts[
+                        invokeGlobal] != 2)
+                {
+                    return 3;
+                }
+                int32 invokedExpectedId
+                    = Host.StandaloneInvokes[
+                        invokeGlobal * 10 + 2];
+                if (invokedExpectedId < 0
+                    || invokedExpectedId
+                        >= Host.StandaloneCallableEffects.Length)
+                {
+                    return 3;
+                }
+                bool invokedDoesNotReturn
+                    = (Host.StandaloneCallableEffects[
+                        invokedExpectedId] & 2) != 0;
+                if (invokedDoesNotReturn
+                    && (terminalKind != 1
+                        || localOperation
+                            != bodyOperationCount - 1))
+                {
+                    return 3;
+                }
+                Host.StandaloneInvokeUseCounts[invokeGlobal] = 3;
+            }
+            else if (kind == 4)
+            {
+                if (operand0 < 0 || operand0 >= bodyHomeCount
+                    || operand1 != 0
+                    || localOperation != bodyOperationCount - 1
+                    || terminalKind != 0
+                    || Host.StandaloneNormalizedHomes[
+                        (homeFirst + operand0) * 5 + 3]
+                        != Host.StandaloneSourceCallableInfo[
+                            bodyId * 12 + 4])
+                {
+                    return 3;
+                }
+            }
+            else if (kind == 5)
+            {
+                if (operand0 != 0 || operand1 != 0
+                    || localOperation != bodyOperationCount - 1
+                    || terminalKind != 0
+                    || !IsStandaloneUnitType(
+                        Host.StandaloneSourceCallableInfo[
+                            bodyId * 12 + 4]))
+                {
+                    return 3;
+                }
+            }
+            else
+            {
+                return 3;
+            }
+        }
+        if (terminalKind == 1 && finalOperationKind != 3)
+        {
+            return 3;
+        }
+        if (terminalKind == 0
+            && !IsStandaloneUnitType(
+                Host.StandaloneSourceCallableInfo[bodyId * 12 + 4])
+            && finalOperationKind != 4)
+        {
+            return 3;
+        }
+        if (finalOperationKind == 3 && bodyOperationCount > 0)
+        {
+            int32 finalInvokeLocal
+                = Host.StandaloneNormalizedOperations[
+                    (operationFirst + bodyOperationCount - 1) * 4 + 1];
+            int32 finalExpectedId
+                = Host.StandaloneInvokes[
+                    (invokeFirst + finalInvokeLocal) * 10 + 2];
+            bool finalDoesNotReturn
+                = (Host.StandaloneCallableEffects[
+                    finalExpectedId] & 2) != 0;
+            if ((terminalKind == 1) != finalDoesNotReturn)
+            {
+                return 3;
+            }
+        }
+    }
+
+    for (mut int32 invokeIndex = 0;
+        invokeIndex < invokeCount;
+        invokeIndex = invokeIndex + 1)
+    {
+        if (Host.StandaloneInvokeUseCounts[invokeIndex] != 3)
+        {
+            return 3;
+        }
+    }
+    return 0;
+}
