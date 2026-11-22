@@ -12,6 +12,7 @@ using Terrum.CodeAnalysis.Semantics;
 namespace Terrum.Tools;
 
 internal sealed record PrivateModuleIdentityManifest(
+    int SchemaVersion,
     string UsingModuleIdentity,
     ImmutableArray<string> SourceSha256,
     string? ReferenceProducerSha256,
@@ -19,7 +20,11 @@ internal sealed record PrivateModuleIdentityManifest(
     ImmutableArray<PrivateNominalImportSelection> Imports,
     ImmutableArray<PrivateEnumMemberSelection> EnumMembers,
     ImmutableArray<PrivateSourceEnumDefinitionAssignment>
-        SourceEnumDefinitions);
+        SourceEnumDefinitions,
+    ImmutableArray<PrivateForeignInterfaceDefinitionAssignment>
+        ForeignInterfaceDefinitions,
+    ImmutableArray<PrivateForeignInterfaceImportAssignment>
+        ForeignInterfaceImports);
 
 internal static class PrivateModuleIdentityManifestReader
 {
@@ -62,17 +67,26 @@ internal static class PrivateModuleIdentityManifestReader
                     MaxDepth = 128,
                 });
             ValidateJsonText(document.RootElement, path, "$");
-            var root = RequireObject(document.RootElement, path, "$",
-                "schemaVersion", "usingModuleIdentity", "sourceSha256",
-                "referenceProducerSha256", "definitions", "imports",
-                "enumMembers", "sourceEnumDefinitions");
-            if (ReadUInt32(Property(root, "schemaVersion", path, "$"),
-                    path, "$.schemaVersion") != 1)
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
             {
-                throw Invalid(path, "$.schemaVersion",
-                    "only schema version 1 is supported");
+                throw Invalid(path, "$", "expected an object");
             }
-
+            var schemaVersion = ReadUInt32(Property(document.RootElement,
+                "schemaVersion", path, "$"), path, "$.schemaVersion");
+            var root = schemaVersion switch {
+                1 => RequireObject(document.RootElement, path, "$",
+                    "schemaVersion", "usingModuleIdentity", "sourceSha256",
+                    "referenceProducerSha256", "definitions", "imports",
+                    "enumMembers", "sourceEnumDefinitions"),
+                2 => RequireObject(document.RootElement, path, "$",
+                    "schemaVersion", "usingModuleIdentity", "sourceSha256",
+                    "referenceProducerSha256", "definitions", "imports",
+                    "enumMembers", "sourceEnumDefinitions",
+                    "foreignInterfaceDefinitions",
+                    "foreignInterfaceImports"),
+                _ => throw Invalid(path, "$.schemaVersion",
+                    "only schema versions 1 and 2 are supported"),
+            };
             var usingModuleIdentity = ReadString(Property(root,
                 "usingModuleIdentity", path, "$"), path,
                 "$.usingModuleIdentity");
@@ -120,13 +134,30 @@ internal static class PrivateModuleIdentityManifestReader
                 throw Invalid(path, "$.enumMembers",
                     "consumer manifests cannot assign Core enum-member identities");
             }
+            var foreignInterfaceDefinitions = schemaVersion == 2
+                ? ReadForeignInterfaceDefinitions(Property(root,
+                    "foreignInterfaceDefinitions", path, "$"), path)
+                : ImmutableArray<
+                    PrivateForeignInterfaceDefinitionAssignment>.Empty;
+            var foreignInterfaceImports = schemaVersion == 2
+                ? ReadForeignInterfaceImports(Property(root,
+                    "foreignInterfaceImports", path, "$"), path)
+                : ImmutableArray<
+                    PrivateForeignInterfaceImportAssignment>.Empty;
+            if (producer && !foreignInterfaceImports.IsEmpty)
+            {
+                throw Invalid(path, "$.foreignInterfaceImports",
+                    "producer manifests cannot assign foreign-interface imports");
+            }
 
             return new PrivateModuleIdentityManifest(
-                usingModuleIdentity, sourceSha256,
+                (int)schemaVersion, usingModuleIdentity, sourceSha256,
                 referenceProducerSha256, definitions, imports,
                 enumMembers,
                 ReadSourceEnumDefinitions(Property(root,
-                    "sourceEnumDefinitions", path, "$"), path));
+                    "sourceEnumDefinitions", path, "$"), path),
+                foreignInterfaceDefinitions,
+                foreignInterfaceImports);
         }
         catch (JsonException exception)
         {
@@ -339,6 +370,125 @@ internal static class PrivateModuleIdentityManifestReader
                 ReadBoolean(Property(item, "isExported", path, itemPath),
                     path, itemPath + ".isExported"),
                 memberKeys.MoveToImmutable()));
+        }
+        return result.MoveToImmutable();
+    }
+
+    private static ImmutableArray<
+        PrivateForeignInterfaceDefinitionAssignment>
+        ReadForeignInterfaceDefinitions(JsonElement element, string path)
+    {
+        var items = ReadArray(element, path,
+            "$.foreignInterfaceDefinitions");
+        var result = ImmutableArray.CreateBuilder<
+            PrivateForeignInterfaceDefinitionAssignment>(items.Length);
+        for (var index = 0; index < items.Length; index++)
+        {
+            var itemPath = $"$.foreignInterfaceDefinitions[{index}]";
+            var item = RequireObject(items[index], path, itemPath,
+                "interfaceOrdinal", "localDeclarationKey", "isExported",
+                "members");
+            var memberElements = ReadArray(Property(item, "members", path,
+                itemPath), path, itemPath + ".members");
+            if (memberElements.IsEmpty)
+            {
+                throw Invalid(path, itemPath + ".members",
+                    "a foreign-interface owner requires at least one member");
+            }
+            var members = ImmutableArray.CreateBuilder<
+                PrivateForeignInterfaceMemberDefinitionAssignment>(
+                    memberElements.Length);
+            for (var memberIndex = 0;
+                memberIndex < memberElements.Length; memberIndex++)
+            {
+                var memberPath
+                    = $"{itemPath}.members[{memberIndex}]";
+                var member = RequireObject(memberElements[memberIndex],
+                    path, memberPath, "memberOrdinal",
+                    "localDeclarationKey");
+                members.Add(
+                    new PrivateForeignInterfaceMemberDefinitionAssignment(
+                        ReadInt32(Property(member, "memberOrdinal", path,
+                            memberPath), path,
+                            memberPath + ".memberOrdinal"),
+                        ReadString(Property(member, "localDeclarationKey",
+                            path, memberPath), path,
+                            memberPath + ".localDeclarationKey")));
+            }
+
+            result.Add(new PrivateForeignInterfaceDefinitionAssignment(
+                ReadInt32(Property(item, "interfaceOrdinal", path,
+                    itemPath), path, itemPath + ".interfaceOrdinal"),
+                ReadString(Property(item, "localDeclarationKey", path,
+                    itemPath), path, itemPath + ".localDeclarationKey"),
+                ReadBoolean(Property(item, "isExported", path, itemPath),
+                    path, itemPath + ".isExported"),
+                members.MoveToImmutable()));
+        }
+        return result.MoveToImmutable();
+    }
+
+    private static ImmutableArray<PrivateForeignInterfaceImportAssignment>
+        ReadForeignInterfaceImports(JsonElement element, string path)
+    {
+        var items = ReadArray(element, path,
+            "$.foreignInterfaceImports");
+        var result = ImmutableArray.CreateBuilder<
+            PrivateForeignInterfaceImportAssignment>(items.Length);
+        for (var index = 0; index < items.Length; index++)
+        {
+            var itemPath = $"$.foreignInterfaceImports[{index}]";
+            var item = RequireObject(items[index], path, itemPath,
+                "interfaceOrdinal", "localDeclarationKey",
+                "selectedModuleIdentity", "selectedExportKey", "members");
+            var selectedModuleIdentity = ReadString(Property(item,
+                "selectedModuleIdentity", path, itemPath), path,
+                itemPath + ".selectedModuleIdentity");
+            if (!IsValidModuleIdentity(selectedModuleIdentity))
+            {
+                throw Invalid(path, itemPath + ".selectedModuleIdentity",
+                    "provider identity is outside the private nominal domain");
+            }
+
+            var memberElements = ReadArray(Property(item, "members", path,
+                itemPath), path, itemPath + ".members");
+            if (memberElements.IsEmpty)
+            {
+                throw Invalid(path, itemPath + ".members",
+                    "a foreign-interface import requires at least one member");
+            }
+            var members = ImmutableArray.CreateBuilder<
+                PrivateForeignInterfaceMemberImportAssignment>(
+                    memberElements.Length);
+            for (var memberIndex = 0;
+                memberIndex < memberElements.Length; memberIndex++)
+            {
+                var memberPath
+                    = $"{itemPath}.members[{memberIndex}]";
+                var member = RequireObject(memberElements[memberIndex],
+                    path, memberPath, "memberOrdinal",
+                    "localDeclarationKey", "selectedExportKey");
+                members.Add(new PrivateForeignInterfaceMemberImportAssignment(
+                    ReadInt32(Property(member, "memberOrdinal", path,
+                        memberPath), path,
+                        memberPath + ".memberOrdinal"),
+                    ReadString(Property(member, "localDeclarationKey",
+                        path, memberPath), path,
+                        memberPath + ".localDeclarationKey"),
+                    ReadString(Property(member, "selectedExportKey", path,
+                        memberPath), path,
+                        memberPath + ".selectedExportKey")));
+            }
+
+            result.Add(new PrivateForeignInterfaceImportAssignment(
+                ReadInt32(Property(item, "interfaceOrdinal", path,
+                    itemPath), path, itemPath + ".interfaceOrdinal"),
+                ReadString(Property(item, "localDeclarationKey", path,
+                    itemPath), path, itemPath + ".localDeclarationKey"),
+                selectedModuleIdentity,
+                ReadString(Property(item, "selectedExportKey", path,
+                    itemPath), path, itemPath + ".selectedExportKey"),
+                members.MoveToImmutable()));
         }
         return result.MoveToImmutable();
     }

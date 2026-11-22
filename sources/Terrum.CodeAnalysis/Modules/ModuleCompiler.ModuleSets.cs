@@ -984,13 +984,17 @@ public static partial class ModuleCompiler
     private static CompilationReference SetReference(Module module)
     {
         var declarations = ImportDeclarations(module);
+        var foreignInterfaces
+            = CreatePrivateForeignInterfaceReferenceDefinitions(module);
         var additionalTypes = PublicStructureNominalRoots(
                 module.NominalTypeOrigins, module.Structures)
             .Concat(PublicEnumNominalRoots(module.NominalTypeOrigins,
                 module.EnumDefinitions))
             .Concat(Private105NativeAddressContractRoots(
                 module.Functions.Where(static item => item.Import),
-                module.NativeFunctionPointerSignatures));
+                module.NativeFunctionPointerSignatures))
+            .Concat(PrivateForeignInterfaceTypeRoots(foreignInterfaces,
+                module.NativePointerTypes));
         var classes = ProjectPrivateClassDefinitions(module.Classes,
             module.NominalTypeOrigins, out var classMapping);
         var projection = ProjectNativeContracts(declarations, module.Structures,
@@ -1048,6 +1052,10 @@ public static partial class ModuleCompiler
             module.NominalTypeOrigins, module.Structures, structures,
             classMapping, module.EnumDefinitions,
             projection.EnumDefinitions, projection.EnumMapping);
+        foreignInterfaces = [.. foreignInterfaces.Select(@interface =>
+            RemapPrivateForeignInterfaceDefinition(@interface,
+                module.Structures, structures, projection,
+                classMapping.ToArray()))];
         var privateClassReferences = CreatePrivateClassReferences(
             module.Structures, module.Classes, module.CheckedReferenceTypes,
             module.NativeFunctionPointerSignatures,
@@ -1067,7 +1075,8 @@ public static partial class ModuleCompiler
             projection.PointerTypes, projection.FixedArrayTypes,
             projection.CheckedReferenceTypes,
             nominalTypeOrigins, classes, privateClassReferences,
-            enumDefinitions: projection.EnumDefinitions);
+            enumDefinitions: projection.EnumDefinitions,
+            interfaces: foreignInterfaces);
     }
 
     private static Module[] ReadSet(IReadOnlyList<byte[]> producers)

@@ -1907,7 +1907,12 @@ public static partial class ModuleCompiler
         }
         var requiresSourceGrant = ValidateProducerBuffers(program);
         var privateNominalRoots = PrivateNominalInputRoots(program,
-            identityInputs);
+                identityInputs)
+            .Concat(PrivateForeignInterfaceTypeRoots(program.Interfaces
+                .Where(static definition =>
+                    definition.ForeignNativeInterface is not null)
+                .ToImmutableArray(), program.NativePointerTypes))
+            .ToImmutableArray();
         var names = new HashSet<string>(exports, StringComparer.Ordinal);
         var hasForeignInterfaceDeclarations
             = program.Interfaces.Any(static definition =>
@@ -2115,7 +2120,16 @@ public static partial class ModuleCompiler
                 identityInputs, selectedFormatVersion, isConsumer: false,
                 firstModuleFunctionIndex: moduleFunctions.Count,
                 remapType: type => RemapEnumType(
-                    RemapType(type, program.Structures, structures),
+                    RemapCheckedReferenceType(
+                        RemapNativePointerType(
+                            RemapNativeFunctionPointerType(
+                                RemapNativeFixedArrayType(
+                                    RemapType(type, program.Structures,
+                                        structures),
+                                    projection.FixedArrayMapping),
+                                projection.FunctionPointerMapping),
+                            projection.PointerMapping),
+                        projection.CheckedReferenceMapping.ToArray()),
                     enumMapping));
         moduleFunctions.AddRange(foreignInterfaceRecords.Functions);
         var module = new Module(false, -1, structures, moduleFunctions.MoveToImmutable()) {
@@ -2238,7 +2252,12 @@ public static partial class ModuleCompiler
         }
         ValidateAddressOnlyNestedBacking(program);
         var privateNominalRoots = PrivateNominalInputRoots(program,
-            identityInputs);
+                identityInputs)
+            .Concat(PrivateForeignInterfaceTypeRoots(program.Interfaces
+                .Where(static definition =>
+                    definition.ForeignNativeInterface is not null)
+                .ToImmutableArray(), program.NativePointerTypes))
+            .ToImmutableArray();
         if (!BoundEnumTypes.IsValidTable(program.EnumDefinitions))
         {
             throw new ModuleContractException(

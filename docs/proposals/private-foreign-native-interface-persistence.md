@@ -57,13 +57,20 @@ These are source observations, not validation results:
 
 | Path | Current private boundary |
 |---|---|
-| [`ModuleCompiler.cs`](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.cs), `Write`, `ReadModuleHeader` | Writers select 104 or 106; the header admits exactly those revisions. The 106 directory writes `foreignInterfaceCount=0`. `Module`/`ModuleFunction` have no FNI owner/member collection. |
-| [`ModuleCompiler.CheckedReferences.cs`](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.CheckedReferences.cs), function metadata | Writes a **u8 zero** foreign-member discriminator. Reading rejects nonzero; a bodyless owned declaration is currently rejected before that discriminator. The actual expected-direct descriptor precedes expected-vtable metadata. |
-| `ModuleCompiler.cs`, `PutExpression`, `GetExpression`, `ValidateNativeOutputContracts` | Tag 5 has a symbolic function name and rejects the negative foreign-call function marker; it has no typed foreign target or separate receiver. Output admission accepts DirectImport only. |
+| [`ModuleCompiler.cs`](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.cs), `Write`, `ReadModuleHeader` | Revision 111 now dispatches the exact PF111 candidate, composes the checked-reference baseline, and carries foreign owner/member directory rows, member surfaces and Copy evidence. Revisions 104/106 retain their existing framing. |
+| [`ModuleCompiler.CheckedReferences.cs`](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.CheckedReferences.cs), function metadata | PF111 now persists bodyless owned/expected member declarations, receiver/signature/default facts, NativeOutput, and receiver-relative dependencies. |
+| `ModuleCompiler.cs`, `PutExpression`, `GetExpression` | PF111 tag 5 now carries an exact zero-based ModuleFunction target, explicit-formal mapping and a separate receiver before source-ordered arguments. Source-free resolution restores the receiver-aware bound call; tag 41 retains output reservations. |
 | [`BoundProgram.cs`](../../sources/Terrum.CodeAnalysis/Semantics/BoundProgram.cs), [`ForeignNativeInterfaceContract.cs`](../../sources/Terrum.CodeAnalysis/Semantics/ForeignNativeInterfaceContract.cs) | Checked interfaces/members, separate receiver, convention and output facts exist in memory. `BoundStruct.DeclaredCopyEvidence` is nullable; private struct records do not explicitly persist it. |
-| [`PrivateModuleIdentityInputs.cs`](../../sources/Terrum.CodeAnalysis/Modules/PrivateModuleIdentityInputs.cs), [`private origins`](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.PrivateNominalOrigins.cs) | Nominal using/provider identities and complete original type views exist. Inputs assign structs/classes/enums, not foreign owners and complete member keys. |
+| [`PrivateModuleIdentityInputs.cs`](../../sources/Terrum.CodeAnalysis/Modules/PrivateModuleIdentityInputs.cs), [`private origins`](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.PrivateNominalOrigins.cs) | Snapshot-bound FNI owner/member assignments, provider resolution, nominal-origin closure, positive Copy checks and type/layout replacement checks are implemented alongside nominal identity inputs. |
 | [`Foreign emitter`](../../sources/Terrum.CodeAnalysis/Native/NativeEmitter.ForeignNativeInterface.cs), [module inventory](../implementation/modules.md) | Source dispatch has a receiver-aware lowering route. That does not restore erased private declarations or establish private source-free execution. |
-| [`Program.NativeModules.cs`](../../sources/terrumc/Program.NativeModules.cs), [`Program.Modules.cs`](../../sources/terrumc/Program.Modules.cs), [`NativeModuleCompiler.cs`](../../sources/Terrum.CodeAnalysis/Modules/NativeModuleCompiler.cs) | `compile-native producer|consumer` calls the default native creation APIs, which serialize an inner ModuleCompiler Contract. The shared parser currently scopes `--private-schema` to `compile-module`. Native `WithSchema` APIs forward selection to that same inner codec; outer version 3 is not an exemption from selecting it. |
+| [`Program.NativeModules.cs`](../../sources/terrumc/Program.NativeModules.cs), [`Program.Modules.cs`](../../sources/terrumc/Program.Modules.cs), [`NativeModuleCompiler.cs`](../../sources/Terrum.CodeAnalysis/Modules/NativeModuleCompiler.cs) | Both private CLI routes now carry exact PF111 selection; identity manifest v2 and the existing NativeCore/NativeOutput readers configure source binding without changing the outer native package revision. |
+
+These are implementation observations, not qualification results. Owner/member
+and typed-call persistence, nominal closure/provider checks, v2 identity
+transport, and private NativeCore/NativeOutput manifest routing are being
+implemented under this provisional direction. The active validation hold
+prevents builds, tests and runtime qualification; the proposal remains
+unapproved.
 
 ## Exact selection and backward behavior
 

@@ -39,11 +39,16 @@ These are inspected source boundaries, not validation results:
 
 | Owner | Current boundary |
 |---|---|
-| [`PrivateModuleIdentityManifestReader.cs`](../../sources/terrumc/PrivateModuleIdentityManifestReader.cs) | Requires exactly version 1 and its eight root properties; kind tags are only struct/class/enum. There is no foreign owner/member input. |
-| [`PrivateModuleIdentityInputs.cs`](../../sources/Terrum.CodeAnalysis/Modules/PrivateModuleIdentityInputs.cs), [`selectors`](../../sources/Terrum.CodeAnalysis/Modules/PrivateModuleIdentitySelectors.cs) | Four collections and checked-program association exist. Nominal selectors resolve `PrimitiveType` structs/classes/enums, not interface declarations or their complete member maps. |
+| [`PrivateModuleIdentityManifestReader.cs`](../../sources/terrumc/PrivateModuleIdentityManifestReader.cs) | Reads the exact v1 eight-property grammar and v2 ten-property grammar; v2 carries complete foreign owner/member assignments while v1 rejects those properties. |
+| [`PrivateModuleIdentityInputs.cs`](../../sources/Terrum.CodeAnalysis/Modules/PrivateModuleIdentityInputs.cs), [`selectors`](../../sources/Terrum.CodeAnalysis/Modules/PrivateModuleIdentitySelectors.cs) | Snapshot-bound owner/member assignments and exact syntax/member association now complement the nominal collections. Rebinding retains declaration identity and rebases selected interface ordinals. |
 | [`BoundProgram.cs`](../../sources/Terrum.CodeAnalysis/Semantics/BoundProgram.cs), [`Binder.Interfaces.cs`](../../sources/Terrum.CodeAnalysis/Semantics/Binder.Interfaces.cs) | Internal interface/member tables carry source provenance, ordered members, foreign layout and native facts. Source member `DeclarationKey` comes from `InterfaceMemberKey`; it is not an explicit private export-key assignment. Owner `ModuleImport` does not supply a complete private using-context/member Binding map. |
-| [`Program.Modules.cs`](../../sources/terrumc/Program.Modules.cs) | Reads/hashes the v1 manifest and exact source/provider bytes, then calls the public selector factory. The shared parser admits identity/layout manifests only for `compile-module`. |
-| [`Program.NativeModules.cs`](../../sources/terrumc/Program.NativeModules.cs), [`NativeModuleCompiler.cs`](../../sources/Terrum.CodeAnalysis/Modules/NativeModuleCompiler.cs) | Exact-schema selection now reaches native reference and creation APIs. The CLI supplies no identity inputs, although native `WithSchema` creation overloads already accept them. Native consumer outer identity denotes its selected producer, not its own semantic using Module. |
+| [`Program.Modules.cs`](../../sources/terrumc/Program.Modules.cs) | Reads and hashes the selected v1/v2 source and producer snapshots, enforces v2/PF111 pairing, composes selected Core manifests, and captures the public selector-factory inputs before publication. |
+| [`Program.NativeModules.cs`](../../sources/terrumc/Program.NativeModules.cs), [`NativeModuleCompiler.cs`](../../sources/Terrum.CodeAnalysis/Modules/NativeModuleCompiler.cs) | Native producer/consumer routes now admit v2 only with exact PF111, guard the complete `.trmn` package, pass snapshot-bound identity inputs, and preserve the producer outer identity distinction. |
+
+Implementation of the recommended assignments, v2 CLI transport and Core
+registration routes is in progress. The current worktree has not been built or
+tested under the active validation hold; this does not change this proposal's
+unapproved status.
 
 PF111's schema selector supplies **no Module identity, owner key or member key**.
 Adding `"interface"` to the existing nominal kind enum or encoding an interface
@@ -234,8 +239,8 @@ are accepted as additional foreign fields.
 
 Select the exact property set by `schemaVersion`, never field presence.
 An upgraded reader supports the independently defined v1 and v2 schemas;
-the present v1-only reader rejects 2. V1 rejects the two foreign properties,
-even when empty; v2 requires them both. Reject missing/unknown versions,
+the v1 grammar rejects version 2. V1 rejects the two foreign properties, even
+when empty; v2 requires them both. Reject missing/unknown versions,
 mixed shapes and malformed selected input without retry, sparse overlay,
 implicit upgrade/downgrade or a compatibility alias.
 
@@ -325,16 +330,18 @@ or digest checks.
 Formal adoption of this joint v2/API/native-option recommendation remains
 unapproved. The authorized workflow makes it provisionally actionable; no
 in-scope key-generation, ordinal, version or option-scope choice is delegated
-to implementation. Broader provider transport and source Core-manifest scope
-remain separate decisions. This input amendment neither completes PF111 nor
+to implementation. Core authority remains independently supplied by the
+separate NativeCore/NativeOutput manifest options; the identity manifest does
+not supply registration. This input amendment neither completes PF111 nor
 approves its other dependencies.
 
-Remaining implementation: add the two collections/factories and positive
-source/reference captures; persist/project complete private owner/member
-origins and explicitly rebase them; add exact v2 parsing and gated native
-plumbing with digest/identity/alias checks; integrate PF111 closure, binding,
-verification, remapping and semantic-only native edges. Existing source
-registration and native image gates must remain visible rather than bypassed.
+The public assignments and rebinding, exact v1/v2 parser, PF111 pairing,
+source and package digests, path-identity checks, and private module/native
+Core-manifest routes are implemented. An end-to-end CLI regression covering
+local/imported FNI identities, NativeOutput, source-free provider binding,
+receiver-aware call persistence and both package types is added but remains
+unverified under the active hold. Malformed binding cases, remaining set/graph
+and runtime integration, and final acceptance remain.
 
 Future focused acceptance, **not checks run here**, must cover:
 

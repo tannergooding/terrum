@@ -14,8 +14,8 @@ namespace Terrum.Tools;
 
 internal static partial class Program
 {
-    private const string NativeModuleUsage = "Usage: terrumc compile-native producer <source> <identity> --export <name> [--export <name>] [--source <source>] -o <producer.trmn> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] [--private-schema <exact-schema-identity>] [--corelib] [--json]; "
-        + "terrumc compile-native consumer <source> <producer.trmn> [--source <source>] -o <consumer.trmn> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] [--private-schema <exact-schema-identity>] [--json]; "
+    private const string NativeModuleUsage = "Usage: terrumc compile-native producer <source> <identity> --export <name> [--export <name>] [--source <source>] -o <producer.trmn> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] [--native-core-manifest <path>] [--native-output-core-manifest <path>] [--private-identity-manifest <path>] [--private-schema <exact-schema-identity>] [--corelib] [--json]; "
+        + "terrumc compile-native consumer <source> <producer.trmn> [--source <source>] -o <consumer.trmn> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] [--native-core-manifest <path>] [--native-output-core-manifest <path>] [--private-identity-manifest <path>] [--private-schema <exact-schema-identity>] [--json]; "
         + "terrumc validate-native <consumer.trmn> <producer.trmn> [--json]; "
         + "terrumc run-native <consumer.trmn> <producer.trmn> --runtime <fail-fast|checked-exceptions> [--json]";
 
@@ -34,7 +34,11 @@ internal static partial class Program
             {
                 if (!TryReadModuleOptions(args, count, out var paths, out var exports, out var output,
                     out var runtimePolicy, out var sourceArithmeticProfile, out var coreLibrary,
-                    out _, out _, out var privateSchemaIdentity))
+                    out _, out var nativeCoreManifestPath,
+                    out var nativeOutputCoreManifestPath,
+                    out var privateIdentityManifestPath,
+                    out var privateSchemaIdentity,
+                    out var coreManifestOrder))
                 {
                     WriteInputError(json, "TRM2000", NativeModuleUsage);
                     return 2;
@@ -55,14 +59,134 @@ internal static partial class Program
                 }
                 var producer = args[1] == "producer";
                 var outputPath = Path.GetFullPath(output);
+                var producerPath = producer ? null : args[3];
+                var pathAliasError = GetModuleManifestPathAliasError(paths,
+                    producerPath, outputPath, nativeCoreManifestPath,
+                    nativeOutputCoreManifestPath,
+                    privateIdentityManifestPath);
+                if (pathAliasError is not null)
+                {
+                    WriteInputError(json, "TRM2002", pathAliasError);
+                    return 2;
+                }
                 if (!Path.GetExtension(outputPath).Equals(".trmn", StringComparison.OrdinalIgnoreCase)
-                    || paths.Any(path => Path.GetFullPath(path).Equals(outputPath, StringComparison.OrdinalIgnoreCase))
-                    || (!producer && Path.GetFullPath(args[3]).Equals(outputPath, StringComparison.OrdinalIgnoreCase)))
+                    || paths.Any(path => path != "-"
+                        && PathsAlias(outputPath, path))
+                    || (!producer && PathsAlias(args[3], outputPath)))
                 {
                     throw new ModuleFormatException("Native module output must be a distinct .trmn path, not any source or producer input.");
                 }
-                var snapshots = ReadModuleSources(paths);
+                PrivateModuleIdentityManifest? privateIdentityManifest = null;
+                if (privateIdentityManifestPath is not null)
+                {
+                    try
+                    {
+                        privateIdentityManifest
+                            = PrivateModuleIdentityManifestReader.Read(
+                                privateIdentityManifestPath, producer,
+                                paths.Count);
+                    }
+                    catch (Exception exception) when (exception is IOException
+                        or UnauthorizedAccessException
+                        or DecoderFallbackException or ArgumentException
+                        or NotSupportedException or FormatException
+                        or JsonException)
+                    {
+                        WriteInputError(json, "TRM2001", exception.Message);
+                        return 2;
+                    }
+                    if (privateIdentityManifest.SchemaVersion != 2)
+                    {
+                        WriteInputError(json, "TRM2000",
+                            "compile-native requires private identity manifest version 2.");
+                        return 2;
+                    }
+                    if (privateSchemaIdentity
+                        != ModuleCompiler.ForeignInterfacePrivateSchemaIdentity)
+                    {
+                        WriteInputError(json, "TRM2001",
+                            "Private identity manifest version 2 requires the exact PF111 private-schema selection.");
+                        return 2;
+                    }
+                    if (producer
+                        && privateIdentityManifest.UsingModuleIdentity
+                            != args[3])
+                    {
+                        WriteInputError(json, "TRM2000",
+                            "The native producer identity must equal the v2 private identity manifest using Module identity.");
+                        return 2;
+                    }
+                }
+
+                CoreManifestDefinitions coreDefinitions;
+                CoreManifestRegistrationComposition coreRegistrationComposition;
+                try
+                {
+                    coreDefinitions = ReadPrivateCompilationCoreDefinitions(
+                        layoutPath: null,
+                        nativePath: nativeCoreManifestPath,
+                        nativeOutputPath: nativeOutputCoreManifestPath,
+                        order: coreManifestOrder,
+                        identityManifest: privateIdentityManifest);
+                    coreRegistrationComposition
+                        = CoreManifestRegistrationComposer.Create(
+                            coreDefinitions.Layout, coreDefinitions.Native,
+                            coreDefinitions.NativeOutput,
+                            layoutPath: null,
+                            nativePath: nativeCoreManifestPath,
+                            nativeOutputPath:
+                                nativeOutputCoreManifestPath);
+                }
+                catch (Exception exception) when (exception is IOException
+                    or UnauthorizedAccessException or DecoderFallbackException
+                    or ArgumentException or NotSupportedException
+                    or FormatException)
+                {
+                    WriteInputError(json, "TRM2001", exception.Message);
+                    return 2;
+                }
+                var selectedUsingModuleIdentity
+                    = coreDefinitions.Layout?.UsingModuleIdentity
+                        ?? coreDefinitions.Native?.UsingModuleIdentity
+                        ?? coreDefinitions.NativeOutput?.UsingModuleIdentity;
+                if (producer
+                    && selectedUsingModuleIdentity is string configuredUsing
+                    && configuredUsing != args[3])
+                {
+                    WriteInputError(json, "TRM2000",
+                        "A native producer identity must equal every selected Core manifest using Module identity.");
+                    return 2;
+                }
+                if (!producer && privateIdentityManifest is not null
+                    && SelectsConfiguredCoreEnum(privateIdentityManifest,
+                        coreDefinitions))
+                {
+                    WriteInputError(json, "TRM2001",
+                        "A private consumer cannot select a Core enum identity directly from a selected Core registration; imports must resolve through its positional producer.");
+                    return 2;
+                }
+
+                var snapshots = ReadModuleSources(paths,
+                    out var sourceSha256);
+                if (privateIdentityManifest is not null
+                    && !sourceSha256.SequenceEqual(
+                        privateIdentityManifest.SourceSha256,
+                        StringComparer.Ordinal))
+                {
+                    WriteInputError(json, "TRM2001",
+                        "A source file does not match the captured private identity manifest snapshot.");
+                    return 2;
+                }
                 var reference = producer ? null : ReadModuleFile(args[3], 16 * 1024 * 1024);
+                if (privateIdentityManifest is not null
+                    && reference is not null
+                    && Convert.ToHexString(SHA256.HashData(reference))
+                        != privateIdentityManifest.ReferenceProducerSha256)
+                {
+                    WriteInputError(json, "TRM2001",
+                        "The native producer package does not match the captured private identity manifest snapshot.");
+                    return 2;
+                }
                 var declarations = reference is null ? null
                     : privateSchemaIdentity is null
                         ? NativeModuleCompiler.CreateReference(reference)
@@ -71,6 +195,10 @@ internal static partial class Program
                 var options = new CompilationOptions {
                     SourceArithmeticProfile = sourceArithmeticProfile,
                     RuntimePolicy = (BoundRuntimePolicy)runtimePolicy,
+                    NativeCoreRegistration =
+                        coreRegistrationComposition.Native,
+                    NativeOutputCoreRegistration =
+                        coreRegistrationComposition.NativeOutput,
                 };
                 var compilation = coreLibrary
                     ? Compilation.CreateCoreLibrary(snapshots, options)
@@ -87,19 +215,44 @@ internal static partial class Program
                 {
                     throw new InvalidOperationException("A successful compilation must contain a bound program.");
                 }
+                PrivateModuleIdentityInputs? identityInputs = null;
+                if (privateIdentityManifest is not null)
+                {
+                    try
+                    {
+                        identityInputs
+                            = PrivateModuleIdentityInputs.CreateFromSelectors(
+                                program,
+                                privateIdentityManifest.UsingModuleIdentity,
+                                privateIdentityManifest.Definitions,
+                                privateIdentityManifest.Imports,
+                                privateIdentityManifest.EnumMembers,
+                                privateIdentityManifest.SourceEnumDefinitions,
+                                privateIdentityManifest
+                                    .ForeignInterfaceDefinitions,
+                                privateIdentityManifest
+                                    .ForeignInterfaceImports);
+                    }
+                    catch (Exception exception) when (exception is
+                        ArgumentException or ModuleContractException)
+                    {
+                        WriteInputError(json, "TRM2001", exception.Message);
+                        return 2;
+                    }
+                }
                 var bytes = reference is null
                     ? privateSchemaIdentity is null
                         ? NativeModuleCompiler.CreateProducer(program, exports,
                             args[3], runtimePolicy)
                         : NativeModuleCompiler.CreateProducerWithSchema(
                             program, exports, args[3], privateSchemaIdentity,
-                            runtimePolicy)
+                            runtimePolicy, identityInputs)
                     : privateSchemaIdentity is null
                         ? NativeModuleCompiler.CreateConsumer(program,
                             reference, runtimePolicy)
                         : NativeModuleCompiler.CreateConsumerWithSchema(
                             program, reference, privateSchemaIdentity,
-                            runtimePolicy);
+                            runtimePolicy, identityInputs);
                 var info = NativeModuleCompiler.Inspect(bytes);
                 WriteArtifact(outputPath, bytes);
                 if (json)

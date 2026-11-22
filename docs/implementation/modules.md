@@ -429,6 +429,18 @@ p=1/p=2 paths through source-free consumer re-emission. This does not admit
 ordinary nested value operations, vacant
 backing, escapes or pointer-to-array carriers. Nested and pointer-array
 recipes not rooted by this exact backing role remain metadata-only.
+The separate unapproved
+[PF111 foreign-interface candidate](../proposals/private-foreign-native-interface-persistence.md)
+adds the exact revision-111 owner/member directory, receiver-aware tag-5 calls,
+tag-41 NativeOutput reservations, positive Copy/type-origin closure, and
+provider replacement checks. Private `compile-module` and `compile-native`
+source routes now carry exact PF111 selection; private identity manifest v2
+supplies explicit complete owner/member assignments, and the private source
+routes reuse the existing NativeCore/NativeOutput manifest readers. Reference,
+set, graph and Link projections carry the selected interface views. Focused
+module/native CLI coverage is added but remains unverified under the active
+hold; broader provider/graph/cleanup cases and standalone/runtime qualification
+remain open. These implementation steps do not formally approve PF111.
 The unapproved
 [private nominal-class-reference candidate](../proposals/private-nominal-class-reference.md)
 is provisionally implemented for reference-only snapshots, including nested

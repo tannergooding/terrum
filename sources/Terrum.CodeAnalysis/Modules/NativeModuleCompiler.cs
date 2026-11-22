@@ -543,6 +543,10 @@ public static partial class NativeModuleCompiler
         var names = new HashSet<string>(StringComparer.Ordinal);
         foreach (var function in providerSnapshot.ParsedModule.Functions)
         {
+            if (function.ForeignInterfaceMember is not null)
+            {
+                continue;
+            }
             if (function.Import && !names.Add(function.Name))
             {
                 throw new ModuleFormatException("Native producer contains duplicate image export names.");

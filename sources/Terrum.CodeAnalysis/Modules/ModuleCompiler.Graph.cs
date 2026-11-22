@@ -1052,12 +1052,14 @@ public static partial class ModuleCompiler
             NativePointerTypes = nativePointerTypes,
             NativeFixedArrayTypes = nativeFixedArrayTypes,
             CheckedReferenceTypes = checkedReferenceTypes,
+            EnumDefinitions = program.EnumDefinitions,
             RuntimePolicy = program.RuntimePolicy,
         };
         module = module with {
             NominalTypeOrigins = BuildPrivateNominalTypeOrigins(
                 sourceProgram, module, identityInputs),
         };
+        module = ProjectPrivateEnumDefinitions(module, identityInputs);
         ValidatePrivateNominalImportsAgainstReference(module,
             dependencies);
         var contract = Write(module, program, selectedFormatVersion,

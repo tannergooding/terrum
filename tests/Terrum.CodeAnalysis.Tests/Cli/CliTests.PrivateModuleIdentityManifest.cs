@@ -159,6 +159,285 @@ internal sealed partial class CliTests
         }
     }
 
+    [Test]
+    public async Task PrivateIdentityManifestV2CarriesFniThroughModuleAndNativeCliAsync()
+    {
+        const string privateSchema
+            = "terrum/private-semantic-111-foreign-native-interfaces-1";
+        const string providerIdentity = "FniProvider";
+        const string consumerIdentity = "FniConsumer";
+        const string ownerKey = "contract.iprobe";
+        var memberKeys = new[] {
+            "contract.iprobe.get",
+            "contract.iprobe.try-read",
+        };
+        var source = Encoding.UTF8.GetBytes("""
+            using Terrum.Interop;
+            public int32 Add(int32 value) { return value + 1; }
+            [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+            [ForeignNativeInterface(VTableByteOffset: uint32(0))]
+            public interface IProbe {
+                public unsafe int32 Get(int32 value);
+                [param(value): NativeOutput(
+                    When: NativeOutputCondition.NonZero)]
+                public unsafe int32 TryRead(ptr<int32> source,
+                    [Terrum.CodeAnalysis.DependsOn(this, nameof(source))]
+                    [Terrum.CodeAnalysis.ForwardsBacking(
+                        this, nameof(source))]
+                    write ptr<int32> value);
+            }
+            """);
+        var consumerSource = Encoding.UTF8.GetBytes("""
+            public int32 Main() { return Add(41); }
+            public unsafe int32 Invoke(
+                ptr<void> receiver, int32 value) {
+                unsafe { return IProbe.Get(receiver, value); }
+            }
+            """);
+        var directory = TestArtifactPaths.CreateDirectory(
+            "terrum-private-identity-v2-fni-");
+        var providerSourcePath = Path.Combine(directory, "provider.terrum");
+        var consumerSourcePath = Path.Combine(directory, "consumer.terrum");
+        var nativeManifestPath = Path.Combine(directory, "native.json");
+        var nativeOutputManifestPath = Path.Combine(directory,
+            "native-output.json");
+        var moduleProviderManifest = Path.Combine(directory,
+            "module-provider.json");
+        var moduleConsumerManifest = Path.Combine(directory,
+            "module-consumer.json");
+        var nativeProviderManifest = Path.Combine(directory,
+            "native-provider.json");
+        var nativeConsumerManifest = Path.Combine(directory,
+            "native-consumer.json");
+        var moduleProvider = Path.Combine(directory, "provider.trm");
+        var moduleConsumer = Path.Combine(directory, "consumer.trm");
+        var nativeProvider = Path.Combine(directory, "provider.trmn");
+        var nativeConsumer = Path.Combine(directory, "consumer.trmn");
+        var preservedOutput = Path.Combine(directory, "preserved.trm");
+        var preservedNativeOutput = Path.Combine(directory, "preserved.trmn");
+
+        try
+        {
+            await File.WriteAllBytesAsync(providerSourcePath, source)
+                .ConfigureAwait(false);
+            await File.WriteAllBytesAsync(consumerSourcePath, consumerSource)
+                .ConfigureAwait(false);
+            await File.WriteAllTextAsync(nativeManifestPath,
+                CreateNativeCoreManifest(usingModuleIdentity: providerIdentity,
+                    includeForeignNativeInterface: true))
+                .ConfigureAwait(false);
+            await File.WriteAllTextAsync(nativeOutputManifestPath,
+                CreateNativeOutputCoreManifest(
+                    usingModuleIdentity: providerIdentity))
+                .ConfigureAwait(false);
+
+            var foreignDefinition = new {
+                interfaceOrdinal = 0,
+                localDeclarationKey = ownerKey,
+                isExported = true,
+                members = new[] {
+                    new {
+                        memberOrdinal = 0,
+                        localDeclarationKey = memberKeys[0],
+                    },
+                    new {
+                        memberOrdinal = 1,
+                        localDeclarationKey = memberKeys[1],
+                    },
+                },
+            };
+            await File.WriteAllTextAsync(moduleProviderManifest,
+                CreateManifestV2(providerIdentity, [Digest(source)], null,
+                    [foreignDefinition], [])).ConfigureAwait(false);
+            var sentinel = new byte[] { 0xA5, 0x5A };
+            await File.WriteAllBytesAsync(preservedOutput, sentinel)
+                .ConfigureAwait(false);
+            var (missingSchemaExit, missingSchemaOutput,
+                missingSchemaError) = await RunAsync([], [
+                    "compile-module", "producer", providerSourcePath, "Add",
+                    "-o", preservedOutput, "--runtime", "fail-fast",
+                    "--private-identity-manifest", moduleProviderManifest,
+                    "--json",
+                ]).ConfigureAwait(false);
+            Assert.That(missingSchemaExit, Is.EqualTo(2),
+                missingSchemaOutput + missingSchemaError);
+            Assert.That(missingSchemaError, Is.Empty);
+            using (var document = JsonDocument.Parse(missingSchemaOutput))
+            {
+                Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM2001"));
+            }
+            Assert.That(await File.ReadAllBytesAsync(preservedOutput)
+                .ConfigureAwait(false), Is.EqualTo(sentinel));
+            await File.WriteAllBytesAsync(preservedNativeOutput, sentinel)
+                .ConfigureAwait(false);
+            var (aliasExit, aliasOutput, aliasError) = await RunAsync([], [
+                "compile-module", "producer", providerSourcePath, "Add", "-o",
+                preservedOutput, "--runtime", "fail-fast",
+                "--native-core-manifest", moduleProviderManifest,
+                "--private-identity-manifest", moduleProviderManifest,
+                "--private-schema", privateSchema, "--json",
+            ]).ConfigureAwait(false);
+            Assert.That(aliasExit, Is.EqualTo(2), aliasOutput + aliasError);
+            Assert.That(aliasError, Is.Empty);
+            using (var document = JsonDocument.Parse(aliasOutput))
+            {
+                Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM2002"));
+            }
+            Assert.That(await File.ReadAllBytesAsync(preservedOutput)
+                .ConfigureAwait(false), Is.EqualTo(sentinel));
+
+            var (moduleProviderExit, moduleProviderOutput,
+                moduleProviderError) = await RunAsync([], [
+                    "compile-module", "producer", providerSourcePath, "Add",
+                    "-o", moduleProvider, "--runtime", "fail-fast",
+                    "--native-core-manifest", nativeManifestPath,
+                    "--native-output-core-manifest",
+                    nativeOutputManifestPath,
+                    "--private-identity-manifest", moduleProviderManifest,
+                    "--private-schema", privateSchema, "--json",
+                ]).ConfigureAwait(false);
+            Assert.That(moduleProviderExit, Is.Zero,
+                moduleProviderOutput + moduleProviderError);
+            Assert.That(moduleProviderError, Is.Empty);
+
+            var moduleProviderBytes = await File.ReadAllBytesAsync(
+                moduleProvider).ConfigureAwait(false);
+            var foreignImport = new {
+                interfaceOrdinal = 0,
+                localDeclarationKey = "consumer.iprobe",
+                selectedModuleIdentity = providerIdentity,
+                selectedExportKey = ownerKey,
+                members = new[] {
+                    new {
+                        memberOrdinal = 0,
+                        localDeclarationKey = "consumer.iprobe.get",
+                        selectedExportKey = memberKeys[0],
+                    },
+                    new {
+                        memberOrdinal = 1,
+                        localDeclarationKey = "consumer.iprobe.try-read",
+                        selectedExportKey = memberKeys[1],
+                    },
+                },
+            };
+            await File.WriteAllTextAsync(moduleConsumerManifest,
+                CreateManifestV2(consumerIdentity, [Digest(consumerSource)],
+                    Digest(moduleProviderBytes), [], [foreignImport]))
+                .ConfigureAwait(false);
+            var (moduleConsumerExit, moduleConsumerOutput,
+                moduleConsumerError) = await RunAsync([], [
+                    "compile-module", "consumer", consumerSourcePath,
+                    moduleProvider, "-o", moduleConsumer, "--runtime",
+                    "fail-fast", "--private-identity-manifest",
+                    moduleConsumerManifest, "--private-schema", privateSchema,
+                    "--json",
+                ]).ConfigureAwait(false);
+            Assert.That(moduleConsumerExit, Is.Zero,
+                moduleConsumerOutput + moduleConsumerError);
+            Assert.That(moduleConsumerError, Is.Empty);
+            var (moduleRunExit, _, moduleRunError) = await RunAsync([], [
+                "run-module", moduleConsumer, moduleProvider, "--runtime",
+                "fail-fast",
+            ]).ConfigureAwait(false);
+            Assert.That(moduleRunExit, Is.EqualTo(42), moduleRunError);
+
+            await File.WriteAllTextAsync(nativeProviderManifest,
+                CreateManifestV2(providerIdentity, [Digest(source)], null,
+                    [foreignDefinition], [])).ConfigureAwait(false);
+            var (wrongIdentityExit, wrongIdentityOutput, wrongIdentityError)
+                = await RunAsync([], [
+                    "compile-native", "producer", providerSourcePath,
+                    "DifferentIdentity", "--export", "Add", "-o",
+                    preservedNativeOutput, "--runtime", "fail-fast",
+                    "--native-core-manifest", nativeManifestPath,
+                    "--native-output-core-manifest",
+                    nativeOutputManifestPath,
+                    "--private-identity-manifest", nativeProviderManifest,
+                    "--private-schema", privateSchema, "--json",
+                ]).ConfigureAwait(false);
+            Assert.That(wrongIdentityExit, Is.EqualTo(2),
+                wrongIdentityOutput + wrongIdentityError);
+            Assert.That(wrongIdentityError, Is.Empty);
+            using (var document = JsonDocument.Parse(wrongIdentityOutput))
+            {
+                Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM2000"));
+            }
+            Assert.That(await File.ReadAllBytesAsync(preservedNativeOutput)
+                .ConfigureAwait(false), Is.EqualTo(sentinel));
+            var (nativeProviderExit, nativeProviderOutput,
+                nativeProviderError) = await RunAsync([], [
+                    "compile-native", "producer", providerSourcePath,
+                    providerIdentity, "--export", "Add", "-o",
+                    nativeProvider, "--runtime", "fail-fast",
+                    "--native-core-manifest", nativeManifestPath,
+                    "--native-output-core-manifest",
+                    nativeOutputManifestPath,
+                    "--private-identity-manifest", nativeProviderManifest,
+                    "--private-schema", privateSchema, "--json",
+                ]).ConfigureAwait(false);
+            Assert.That(nativeProviderExit, Is.Zero,
+                nativeProviderOutput + nativeProviderError);
+            Assert.That(nativeProviderError, Is.Empty);
+
+            var nativeProviderBytes = await File.ReadAllBytesAsync(
+                nativeProvider).ConfigureAwait(false);
+            var incorrectProducerDigest = Digest(nativeProviderBytes);
+            incorrectProducerDigest = (incorrectProducerDigest[0] == 'A'
+                ? "B" : "A") + incorrectProducerDigest[1..];
+            await File.WriteAllTextAsync(nativeConsumerManifest,
+                CreateManifestV2(consumerIdentity,
+                    [Digest(consumerSource)],
+                    incorrectProducerDigest, [], [foreignImport]))
+                .ConfigureAwait(false);
+            var (digestExit, digestOutput, digestError) = await RunAsync(
+                [], [
+                    "compile-native", "consumer", consumerSourcePath,
+                    nativeProvider, "-o", preservedNativeOutput,
+                    "--runtime", "fail-fast",
+                    "--private-identity-manifest", nativeConsumerManifest,
+                    "--private-schema", privateSchema, "--json",
+                ]).ConfigureAwait(false);
+            Assert.That(digestExit, Is.EqualTo(2), digestOutput + digestError);
+            Assert.That(digestError, Is.Empty);
+            using (var document = JsonDocument.Parse(digestOutput))
+            {
+                Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM2001"));
+            }
+            Assert.That(await File.ReadAllBytesAsync(preservedNativeOutput)
+                .ConfigureAwait(false), Is.EqualTo(sentinel));
+            await File.WriteAllTextAsync(nativeConsumerManifest,
+                CreateManifestV2(consumerIdentity,
+                    [Digest(consumerSource)],
+                    Digest(nativeProviderBytes), [], [foreignImport]))
+                .ConfigureAwait(false);
+            var (nativeConsumerExit, nativeConsumerOutput,
+                nativeConsumerError) = await RunAsync([], [
+                    "compile-native", "consumer", consumerSourcePath,
+                    nativeProvider, "-o", nativeConsumer, "--runtime",
+                    "fail-fast", "--private-identity-manifest",
+                    nativeConsumerManifest, "--private-schema", privateSchema,
+                    "--json",
+                ]).ConfigureAwait(false);
+            Assert.That(nativeConsumerExit, Is.Zero,
+                nativeConsumerOutput + nativeConsumerError);
+            Assert.That(nativeConsumerError, Is.Empty);
+            var (nativeRunExit, _, nativeRunError) = await RunAsync([], [
+                "run-native", nativeConsumer, nativeProvider, "--runtime",
+                "fail-fast",
+            ]).ConfigureAwait(false);
+            Assert.That(nativeRunExit, Is.EqualTo(42), nativeRunError);
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
+                .ConfigureAwait(false);
+        }
+    }
+
     [TestCase("fail-fast")]
     [TestCase("checked-exceptions")]
     public async Task CompileModulePrivateSchemaSelectionPreservesRevisionBoundariesAsync(
@@ -800,6 +1079,23 @@ internal sealed partial class CliTests
             imports,
             enumMembers = enumMembers ?? Array.Empty<object>(),
             sourceEnumDefinitions,
+        });
+
+    private static string CreateManifestV2(string usingModuleIdentity,
+        string[] sourceSha256, string? referenceProducerSha256,
+        object[] foreignInterfaceDefinitions,
+        object[] foreignInterfaceImports)
+        => JsonSerializer.Serialize(new {
+            schemaVersion = 2,
+            usingModuleIdentity,
+            sourceSha256,
+            referenceProducerSha256,
+            definitions = Array.Empty<object>(),
+            imports = Array.Empty<object>(),
+            enumMembers = Array.Empty<object>(),
+            sourceEnumDefinitions = Array.Empty<object>(),
+            foreignInterfaceDefinitions,
+            foreignInterfaceImports,
         });
 
     private static string Digest(byte[] bytes)

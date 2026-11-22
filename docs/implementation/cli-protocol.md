@@ -279,7 +279,7 @@ default, configure native Core schemas, decode provider artifacts or choose
 a TRRM output schema. Manifest admission precedes source and
 consumer-artifact reading, and manifest aliases with sources, producer input
 or output reject before publication. Syntax-only, source-free,
-`compile-native`, native set/graph and other artifact commands reject the
+native set/graph and other artifact commands reject the
 option. The `frontend-build`, `frontend-build-library` and
 `frontend-run` fallback wrappers also reject it. The separate test-only
 `frontend-component` probe accepts it only for its fixed component-source
@@ -304,16 +304,31 @@ The private `compile-module producer`/`consumer` commands also accept one
 [private identity CLI proposal](../proposals/private-module-cli-identity-inputs.md).
 This bounded, strict file input supplies explicit nominal selectors and keys,
 Core enum-member identities, source-enum maps, and hashes of the exact source
-and positional producer bytes; it does not add fields to `.trm`. If both
-manifests are supplied, their using-Module identities must match and satisfy
-both domains. Producer imports may select only checked Core enums from an
-explicit Core registration; consumer imports must resolve to owned exports in
-the positional producer artifact. Consumer manifests cannot assign Core
-enum-member identities or select a Core enum directly from the Layout
-registration; they must use the positional producer's import. Invalid manifest
-combinations fail before output replacement. The option is rejected by other
-commands and does not extend
+and positional producer bytes; it does not add fields to `.trm`. The strict
+version-1 shape remains module-only. The separately specified unapproved
+version-2 shape adds complete foreign-interface owner/member assignments and
+is accepted only with the exact PF111 schema on both `compile-module` and
+`compile-native` producer/consumer routes. Native version 2 guards the whole
+positional `.trmn` package. If identity and Core manifests are both supplied,
+their using-Module identities must match; a native producer's positional
+identity must also match. Producer imports may select only checked Core enums
+from an explicit Core registration; consumer imports must resolve to owned
+exports in the positional producer artifact. Consumer manifests cannot assign
+Core enum-member identities or select a Core enum directly from a selected
+Core registration; they must use the positional producer's import. Invalid
+manifest combinations fail before output replacement. The option remains
+rejected by other commands and does not extend
 `terrum.cli/1`.
+
+The private `compile-module` routes compose an explicitly selected
+`--layout-core-manifest`, `--native-core-manifest`, and/or
+`--native-output-core-manifest` using their existing strict readers and the
+shared Core registration composer. The private `compile-native` routes admit
+the latter two options only; they do not extend `--layout-core-manifest` to
+native package creation. These selections configure authored source roles,
+are independent of PF111 schema selection, and do not supply private
+owner/member keys. All selected Core registrations share one provider-binding
+snapshot.
 
 ## Provisional private semantic schema selection
 

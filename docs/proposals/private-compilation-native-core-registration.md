@@ -20,10 +20,15 @@ The gap is delivery to source binding, not PF111 encoding or identity inputs:
 |---|---|
 | [`Binder.Interfaces.cs`](../../sources/Terrum.CodeAnalysis/Semantics/Binder.Interfaces.cs), `BindForeignNativeInterfaceLayout`; [`Binder.cs`](../../sources/Terrum.CodeAnalysis/Semantics/Binder.cs), `TryBindNativeOutputAttribute` | Authored FNI requires the selected NativeCore FNI schema and effective NativeCallable contracts; authored NativeOutput independently requires its selected Core schema. Missing selection diagnoses `TRM3030`. |
 | [`NativeOutputContractValidator.cs`](../../sources/Terrum.CodeAnalysis/Semantics/NativeOutputContractValidator.cs), `IsValidInterfaceTable` | Local source output contracts require FNI/output registrations. Admitted normalized foreign origins have a distinct consumption path; they are not permission to bypass authored-source registration. |
-| [`Program.Modules.cs`](../../sources/terrumc/Program.Modules.cs), `TryReadModuleOptions`, `RunModuleCommand` | The shared parser has no native/output manifest branches. Module source options supply Layout only; Layout is admitted independently rather than through the multi-family composer. |
-| [`Program.NativeModules.cs`](../../sources/terrumc/Program.NativeModules.cs), `RunNativeModuleCommand` | Both native compile modes bind source with runtime/arithmetic options, but no Core registration. Their inner private-schema reference/creation selection already has separate plumbing. |
+| [`Program.Modules.cs`](../../sources/terrumc/Program.Modules.cs), `TryReadModuleOptions`, `RunModuleCommand` | The private parser now admits NativeCore and NativeOutput alongside Layout, reads the existing strict definitions in option order, and composes registrations through one shared provider-binding snapshot before source binding. |
+| [`Program.NativeModules.cs`](../../sources/terrumc/Program.NativeModules.cs), `RunNativeModuleCommand` | Native producer/consumer source compilation now admits NativeCore and NativeOutput, pairs them with identity/PF111 selection, and passes the composed registrations to the existing compilation options. Layout remains excluded from `compile-native`. |
 | [`NativeCoreManifestReader.cs`](../../sources/terrumc/NativeCoreManifestReader.cs); [`NativeOutputCoreManifestReader.cs`](../../sources/terrumc/NativeOutputCoreManifestReader.cs) | NativeCore explicitly reads `/1` and FNI-capable `/2`; NativeOutput reads its independent `/1`. Both return complete unbound definitions, not private declaration-key assignments. |
-| [`Program.Compilation.cs`](../../sources/terrumc/Program.Compilation.cs), `ReadCoreManifestDefinitions`; [`CoreManifestRegistrationComposer.cs`](../../sources/terrumc/CoreManifestRegistrationComposer.cs) | Existing source hosts already read selected definitions in Core-option order and compose complete registrations against one provider-binding snapshot. |
+| [`Program.Compilation.cs`](../../sources/terrumc/Program.Compilation.cs), `ReadCoreManifestDefinitions`; [`CoreManifestRegistrationComposer.cs`](../../sources/terrumc/CoreManifestRegistrationComposer.cs) | The private commands now reuse the existing Core-option-order reader and composer, preserving one provider-binding snapshot and independent role selection. |
+
+The recommended CLI route is implemented but remains unverified under the
+active build/test hold. This does not change the proposal's unapproved status,
+extend Layout registration to native package commands, or make Core manifests
+a substitute for private identity assignments.
 
 No existing proposal resolves these four routes.
 [NativeCore CLI registration](native-core-cli-registration.md#exact-option-and-command-contract)

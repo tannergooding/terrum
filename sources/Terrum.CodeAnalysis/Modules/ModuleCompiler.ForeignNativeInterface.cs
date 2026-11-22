@@ -581,6 +581,41 @@ public static partial class ModuleCompiler
             });
         }
 
+        for (var index = 0; index < remappedFunctions.Count; index++)
+        {
+            var function = remappedFunctions[index];
+            if (function.Function is not BoundFunction body)
+            {
+                continue;
+            }
+
+            var rewritten = BoundTreeTraversal.RewriteExpressions(body,
+                expression =>
+                {
+                    if (expression is not
+                        PendingPrivateForeignInterfaceCall pending)
+                    {
+                        return expression;
+                    }
+                    if ((uint)pending.ModuleFunctionIndex
+                            >= (uint)functionMappings.Length
+                        || functionMappings[
+                            pending.ModuleFunctionIndex] < 0)
+                    {
+                        throw new ModuleContractException(
+                            "PF111 foreign call target has no canonical ModuleFunction mapping.");
+                    }
+
+                    return pending with {
+                        ModuleFunctionIndex = functionMappings[
+                            pending.ModuleFunctionIndex],
+                    };
+                });
+            remappedFunctions[index] = function with {
+                Function = rewritten,
+            };
+        }
+
         var entryPoint = module.EntryPoint;
         if (entryPoint >= 0)
         {
@@ -1378,9 +1413,10 @@ public static partial class ModuleCompiler
                         == BoundPrivateForeignInterfaceBindingKind
                             .OwnedDefinition))
                 || (isConsumer && origin.Owner.IsExported)
-                || (!isConsumer && origin.Owner.Kind
-                    != BoundPrivateForeignInterfaceBindingKind
-                        .OwnedDefinition))
+                || (origin.Owner.Kind
+                        == BoundPrivateForeignInterfaceBindingKind
+                            .ImportedExpectation
+                    && origin.Owner.IsExported))
             {
                 throw new ModuleContractException(
                     "PF111 foreign-interface ownership or complete member identity is invalid for this module role.");
@@ -1758,6 +1794,12 @@ public static partial class ModuleCompiler
                     != expectedOwner.SelectedModuleIdentity
                 || actualImport.ExportKey
                     != expectedOwner.SelectedExportKey
+                || expected.ModuleImport
+                    is not BoundModuleImport expectedImport
+                || actualImport.TargetRequirement
+                    != expectedImport.TargetRequirement
+                || actualImport.RuntimePolicy
+                    != expectedImport.RuntimePolicy
                 || actual.Members.Length != expected.Members.Length
                 || actualOrigin.Members.Length != expectedOrigin.Members.Length)
             {

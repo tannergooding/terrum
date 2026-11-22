@@ -17,8 +17,8 @@ namespace Terrum.Tools;
 
 internal static partial class Program
 {
-    private const string ModuleUsage = "Usage: terrumc compile-module producer <source> <export> [--source <source>] [--export <export>] -o <artifact.trm> [--runtime <fail-fast|checked-exceptions>] [--arithmetic-profile <development|release>] [--layout-core-manifest <path>] [--private-identity-manifest <path>] [--private-schema <exact-schema-identity>] [--corelib] [--json]; "
-        + "terrumc compile-module consumer <source> <producer.trm> [--source <source>] -o <artifact.trm> [--runtime <fail-fast|checked-exceptions>] [--arithmetic-profile <development|release>] [--layout-core-manifest <path>] [--private-identity-manifest <path>] [--private-schema <exact-schema-identity>] [--json]; "
+    private const string ModuleUsage = "Usage: terrumc compile-module producer <source> <export> [--source <source>] [--export <export>] -o <artifact.trm> [--runtime <fail-fast|checked-exceptions>] [--arithmetic-profile <development|release>] [--layout-core-manifest <path>] [--native-core-manifest <path>] [--native-output-core-manifest <path>] [--private-identity-manifest <path>] [--private-schema <exact-schema-identity>] [--corelib] [--json]; "
+        + "terrumc compile-module consumer <source> <producer.trm> [--source <source>] -o <artifact.trm> [--runtime <fail-fast|checked-exceptions>] [--arithmetic-profile <development|release>] [--layout-core-manifest <path>] [--native-core-manifest <path>] [--native-output-core-manifest <path>] [--private-identity-manifest <path>] [--private-schema <exact-schema-identity>] [--json]; "
         + "terrumc link-module <consumer.trm> <producer.trm> -o <output.exe> --runtime <fail-fast|checked-exceptions> [--json]; "
         + "terrumc run-module <consumer.trm> <producer.trm> --runtime <fail-fast|checked-exceptions> [--json]";
 
@@ -42,7 +42,9 @@ internal static partial class Program
             var selectedPolicy = NativeRuntimePolicy.FailFast;
             var sourceArithmeticProfile = SourceArithmeticProfile.Development;
             LayoutCoreRegistrationSet? layoutCoreRegistration = null;
-            LoadedLayoutCoreManifest? layoutCoreManifest = null;
+            NativeCoreRegistrationSet? nativeCoreRegistration = null;
+            NativeOutputCoreRegistrationSet? nativeOutputCoreRegistration
+                = null;
             string? privateSchemaIdentity = null;
             if (count >= 6 && args[0] == "compile-module"
                 && (args[1] is "producer" or "consumer"))
@@ -50,64 +52,24 @@ internal static partial class Program
                 if (!TryReadModuleOptions(args, count, out var paths, out var exports, out output,
                     out selectedPolicy, out sourceArithmeticProfile, out var coreLibrary,
                     out var layoutCoreManifestPath,
+                    out var nativeCoreManifestPath,
+                    out var nativeOutputCoreManifestPath,
                     out var privateIdentityManifestPath,
-                    out privateSchemaIdentity))
+                    out privateSchemaIdentity,
+                    out var coreManifestOrder))
                 {
                     WriteInputError(json, "TRM2000", ModuleUsage);
                     return 2;
                 }
-                if (layoutCoreManifestPath is not null)
+                var pathAliasError = GetModuleManifestPathAliasError(paths,
+                    args[1] == "consumer" ? args[3] : null, output,
+                    layoutCoreManifestPath, nativeCoreManifestPath,
+                    nativeOutputCoreManifestPath,
+                    privateIdentityManifestPath);
+                if (pathAliasError is not null)
                 {
-                    try
-                    {
-                        if (PathsAlias(layoutCoreManifestPath, output)
-                            || paths.Any(path => path != "-"
-                                && PathsAlias(layoutCoreManifestPath, path))
-                            || (args[1] == "consumer"
-                                && PathsAlias(layoutCoreManifestPath, args[3])))
-                        {
-                            WriteInputError(json, "TRM2002",
-                                "The layout Core manifest must be distinct from every source, producer artifact and output.");
-                            return 2;
-                        }
-                    }
-                    catch (Exception exception) when (exception is IOException
-                        or UnauthorizedAccessException or ArgumentException
-                        or NotSupportedException)
-                    {
-                        WriteInputError(json, "TRM2002",
-                            $"Could not validate layout Core manifest path identity: {exception.Message}");
-                        return 2;
-                    }
-                }
-                if (privateIdentityManifestPath is not null)
-                {
-                    try
-                    {
-                        if (PathsAlias(privateIdentityManifestPath, output)
-                            || paths.Any(path => path != "-"
-                                && PathsAlias(privateIdentityManifestPath,
-                                    path))
-                            || (args[1] == "consumer"
-                                && PathsAlias(privateIdentityManifestPath,
-                                    args[3]))
-                            || (layoutCoreManifestPath is not null
-                                && PathsAlias(privateIdentityManifestPath,
-                                    layoutCoreManifestPath)))
-                        {
-                            WriteInputError(json, "TRM2002",
-                                "The private identity manifest must be distinct from every source, producer artifact, layout manifest and output.");
-                            return 2;
-                        }
-                    }
-                    catch (Exception exception) when (exception is IOException
-                        or UnauthorizedAccessException or ArgumentException
-                        or NotSupportedException)
-                    {
-                        WriteInputError(json, "TRM2002",
-                            $"Could not validate private identity manifest path identity: {exception.Message}");
-                        return 2;
-                    }
+                    WriteInputError(json, "TRM2002", pathAliasError);
+                    return 2;
                 }
                 if (privateSchemaIdentity is not null)
                 {
@@ -153,47 +115,51 @@ internal static partial class Program
                     }
                 }
 
-                if (layoutCoreManifestPath is not null)
-                {
-                    try
-                    {
-                        layoutCoreManifest = LayoutCoreManifestReader.Read(
-                            layoutCoreManifestPath);
-                        layoutCoreRegistration = layoutCoreManifest.Registration;
-                        if (privateIdentityManifest is not null
-                            && layoutCoreManifest.UsingModuleIdentity
-                                != privateIdentityManifest.UsingModuleIdentity)
-                        {
-                            WriteInputError(json, "TRM2001",
-                                "The private identity and layout Core manifests must select the same using Module identity.");
-                            return 2;
-                        }
-                    }
-                    catch (Exception exception) when (exception is IOException
-                        or UnauthorizedAccessException
-                        or System.Text.DecoderFallbackException
-                        or ArgumentException or NotSupportedException
-                        or FormatException)
-                    {
-                        WriteInputError(json, "TRM2001", exception.Message);
-                        return 2;
-                    }
-                }
-                if (args[1] == "consumer"
-                    && privateIdentityManifest is not null
-                    && layoutCoreManifest is not null
-                    && privateIdentityManifest.Imports.Any(selection =>
-                        selection.Declaration.Kind
-                            == PrivateNominalDeclarationKind.Enum
-                        && selection.SelectedModuleIdentity
-                            == layoutCoreManifest.Registration
-                                .LayoutKinds.Identity.ProviderIdentity
-                        && selection.SelectedExportKey
-                            == layoutCoreManifest.Registration
-                                .LayoutKinds.Identity.ExportKey))
+                if (privateIdentityManifest is
+                        { SchemaVersion: 2 }
+                    && privateSchemaIdentity
+                        != ModuleCompiler.ForeignInterfacePrivateSchemaIdentity)
                 {
                     WriteInputError(json, "TRM2001",
-                        "A consumer cannot select a Core enum identity directly from a layout registration; imports must resolve through its positional producer.");
+                        "Private identity manifest version 2 requires the exact PF111 private-schema selection.");
+                    return 2;
+                }
+
+                CoreManifestDefinitions coreDefinitions;
+                CoreManifestRegistrationComposition coreRegistrationComposition;
+                try
+                {
+                    coreDefinitions = ReadPrivateCompilationCoreDefinitions(
+                        layoutCoreManifestPath, nativeCoreManifestPath,
+                        nativeOutputCoreManifestPath, coreManifestOrder,
+                        privateIdentityManifest);
+                    coreRegistrationComposition
+                        = CoreManifestRegistrationComposer.Create(
+                            coreDefinitions.Layout, coreDefinitions.Native,
+                            coreDefinitions.NativeOutput,
+                            layoutCoreManifestPath, nativeCoreManifestPath,
+                            nativeOutputCoreManifestPath);
+                }
+                catch (Exception exception) when (exception is IOException
+                    or UnauthorizedAccessException
+                    or System.Text.DecoderFallbackException
+                    or ArgumentException or NotSupportedException
+                    or FormatException)
+                {
+                    WriteInputError(json, "TRM2001", exception.Message);
+                    return 2;
+                }
+                layoutCoreRegistration = coreRegistrationComposition.Layout;
+                nativeCoreRegistration = coreRegistrationComposition.Native;
+                nativeOutputCoreRegistration
+                    = coreRegistrationComposition.NativeOutput;
+                if (args[1] == "consumer"
+                    && privateIdentityManifest is not null
+                    && SelectsConfiguredCoreEnum(privateIdentityManifest,
+                        coreDefinitions))
+                {
+                    WriteInputError(json, "TRM2001",
+                        "A private consumer cannot select a Core enum identity directly from a selected Core registration; imports must resolve through its positional producer.");
                     return 2;
                 }
                 var snapshots = ReadModuleSources(paths,
@@ -226,6 +192,9 @@ internal static partial class Program
                     SourceArithmeticProfile = sourceArithmeticProfile,
                     RuntimePolicy = (BoundRuntimePolicy)selectedPolicy,
                     LayoutCoreRegistration = layoutCoreRegistration,
+                    NativeCoreRegistration = nativeCoreRegistration,
+                    NativeOutputCoreRegistration =
+                        nativeOutputCoreRegistration,
                 };
                 var compilation = coreLibrary ? Compilation.CreateCoreLibrary(snapshots, options)
                     : snapshots.Length == 1
@@ -254,9 +223,14 @@ internal static partial class Program
                                 privateIdentityManifest.Definitions,
                                 privateIdentityManifest.Imports,
                                 privateIdentityManifest.EnumMembers,
-                                privateIdentityManifest.SourceEnumDefinitions);
+                                privateIdentityManifest.SourceEnumDefinitions,
+                                privateIdentityManifest
+                                    .ForeignInterfaceDefinitions,
+                                privateIdentityManifest
+                                    .ForeignInterfaceImports);
                     }
-                    catch (ArgumentException exception)
+                    catch (Exception exception) when (exception is
+                        ArgumentException or ModuleContractException)
                     {
                         WriteInputError(json, "TRM2001", exception.Message);
                         return 2;
@@ -350,8 +324,11 @@ internal static partial class Program
         out List<string> exports, out string output, out NativeRuntimePolicy runtimePolicy,
         out SourceArithmeticProfile sourceArithmeticProfile, out bool coreLibrary,
         out string? layoutCoreManifestPath,
+        out string? nativeCoreManifestPath,
+        out string? nativeOutputCoreManifestPath,
         out string? privateIdentityManifestPath,
-        out string? privateSchemaIdentity)
+        out string? privateSchemaIdentity,
+        out List<CoreManifestKind> coreManifestOrder)
     {
         sources = [args[2]];
         var native = args[0] == "compile-native";
@@ -361,8 +338,11 @@ internal static partial class Program
         sourceArithmeticProfile = SourceArithmeticProfile.Development;
         coreLibrary = false;
         layoutCoreManifestPath = null;
+        nativeCoreManifestPath = null;
+        nativeOutputCoreManifestPath = null;
         privateIdentityManifestPath = null;
         privateSchemaIdentity = null;
+        coreManifestOrder = [];
         var hasOutput = false;
         var hasRuntime = false;
         var hasArithmeticProfile = false;
@@ -414,9 +394,33 @@ internal static partial class Program
                     {
                         return false;
                     }
+                    coreManifestOrder.Add(CoreManifestKind.Layout);
+                    break;
+                case "--native-core-manifest" when
+                    (args[0] is "compile-module" or "compile-native")
+                    && nativeCoreManifestPath is null
+                    && value.Length != 0 && value != "-"
+                    && !value.StartsWith('-', StringComparison.Ordinal):
+                    if (!TryGetFullPath(value, out nativeCoreManifestPath))
+                    {
+                        return false;
+                    }
+                    coreManifestOrder.Add(CoreManifestKind.Native);
+                    break;
+                case "--native-output-core-manifest" when
+                    (args[0] is "compile-module" or "compile-native")
+                    && nativeOutputCoreManifestPath is null
+                    && value.Length != 0 && value != "-"
+                    && !value.StartsWith('-', StringComparison.Ordinal):
+                    if (!TryGetFullPath(value,
+                        out nativeOutputCoreManifestPath))
+                    {
+                        return false;
+                    }
+                    coreManifestOrder.Add(CoreManifestKind.NativeOutput);
                     break;
                 case "--private-identity-manifest" when args[0]
-                        == "compile-module"
+                        is ("compile-module" or "compile-native")
                     && privateIdentityManifestPath is null
                     && value.Length != 0 && value != "-"
                     && !value.StartsWith('-', StringComparison.Ordinal):
@@ -439,6 +443,86 @@ internal static partial class Program
             index += 2;
         }
         return hasOutput && (!native || (hasRuntime && (args[1] != "producer" || exports.Count != 0)));
+    }
+
+    private static string? GetModuleManifestPathAliasError(
+        List<string> sourcePaths, string? producerPath, string outputPath,
+        params string?[] manifestPaths)
+    {
+        var selectedManifests = manifestPaths
+            .Where(static path => path is not null)
+            .Select(static path => path!)
+            .ToArray();
+        try
+        {
+            for (var index = 0; index < selectedManifests.Length; index++)
+            {
+                var path = selectedManifests[index];
+                if (PathsAlias(path, outputPath)
+                    || sourcePaths.Any(source => source != "-"
+                        && PathsAlias(path, source))
+                    || (producerPath is not null
+                        && PathsAlias(path, producerPath))
+                    || selectedManifests.Take(index).Any(previous =>
+                        PathsAlias(path, previous)))
+                {
+                    return "Selected manifests must be distinct from every source, producer artifact, output and other manifest.";
+                }
+            }
+        }
+        catch (Exception exception) when (exception is IOException
+            or UnauthorizedAccessException or ArgumentException
+            or NotSupportedException)
+        {
+            return $"Could not validate manifest path identity: {exception.Message}";
+        }
+
+        return null;
+    }
+
+    private static CoreManifestDefinitions ReadPrivateCompilationCoreDefinitions(
+        string? layoutPath, string? nativePath,
+        string? nativeOutputPath, List<CoreManifestKind> order,
+        PrivateModuleIdentityManifest? identityManifest)
+    {
+        var definitions = ReadCoreManifestDefinitions(layoutPath, nativePath,
+            nativeOutputPath, evaluationPath: null, order: order);
+        var usingModuleIdentity = definitions.Layout?.UsingModuleIdentity
+            ?? definitions.Native?.UsingModuleIdentity
+            ?? definitions.NativeOutput?.UsingModuleIdentity;
+        if (identityManifest is not null
+            && usingModuleIdentity is string configuredIdentity
+            && configuredIdentity != identityManifest.UsingModuleIdentity)
+        {
+            throw new FormatException(
+                "The private identity and selected Core manifests must use the same Module identity.");
+        }
+        return definitions;
+    }
+
+    private static bool SelectsConfiguredCoreEnum(
+        PrivateModuleIdentityManifest manifest,
+        CoreManifestDefinitions definitions)
+    {
+        var identities = (definitions.Layout is null
+                ? Enumerable.Empty<CoreDeclarationIdentity>()
+                : new[] { definitions.Layout.LayoutKinds.Identity })
+            .Concat(definitions.Native?.EnumDefinitions.Select(
+                static definition => definition.Identity)
+                ?? Enumerable.Empty<CoreDeclarationIdentity>())
+            .Concat(definitions.NativeOutput is null
+                ? Enumerable.Empty<CoreDeclarationIdentity>()
+                : new[] {
+                    definitions.NativeOutput.OutputConditions.Identity,
+                });
+        var selected = identities.ToHashSet();
+        return manifest.Imports.Any(selection =>
+            selection.Declaration.Kind
+                == PrivateNominalDeclarationKind.Enum
+            && selected.Contains(new CoreDeclarationIdentity(
+                selection.SelectedModuleIdentity,
+                selection.SelectedExportKey,
+                CoreDeclarationKind.EnumType)));
     }
 
     private static void WriteModuleSourceDiagnostics(Compilation compilation, bool json, NativeRuntimePolicy policy)
