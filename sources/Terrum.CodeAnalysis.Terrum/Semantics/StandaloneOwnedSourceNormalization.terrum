@@ -859,13 +859,14 @@ int32 NormalizeStandaloneCallExpression(int32 bodyId,
         int32 expectedSourceUse
             = Host.StandaloneSourceCallArguments[
                 argumentOffset + 2];
-        if (parameterOrdinal != ordinal)
+        if (parameterOrdinal < 0
+            || parameterOrdinal >= parameterCount)
         {
             return 3;
         }
         init int32 parameterTypeId;
         int32 parameterTypeStatus = GetStandaloneCallParameterTypeId(
-            targetKind, targetIndex, ordinal,
+            targetKind, targetIndex, parameterOrdinal,
             ref init parameterTypeId);
         if (parameterTypeStatus != 0)
         {
@@ -909,7 +910,9 @@ int32 NormalizeStandaloneCallExpression(int32 bodyId,
         {
             return 3;
         }
-        int32 scratchOffset = argumentIndex * 3;
+        int32 scratchArgumentIndex
+            = bodyArgumentFirst + argumentFirst + parameterOrdinal;
+        int32 scratchOffset = scratchArgumentIndex * 3;
         Host.StandaloneNormalizedInputScratch[scratchOffset]
             = argumentSelectorKind;
         Host.StandaloneNormalizedInputScratch[scratchOffset + 1]
@@ -937,9 +940,9 @@ int32 NormalizeStandaloneCallExpression(int32 bodyId,
         ordinal < argumentCount;
         ordinal = ordinal + 1)
     {
-        int32 argumentIndex
+        int32 formalArgumentIndex
             = bodyArgumentFirst + argumentFirst + ordinal;
-        int32 scratchOffset = argumentIndex * 3;
+        int32 scratchOffset = formalArgumentIndex * 3;
         int32 inputOffset = (inputGlobalFirst + ordinal) * 3;
         Host.StandaloneInvokeInputs[inputOffset]
             = Host.StandaloneNormalizedInputScratch[scratchOffset];
@@ -1265,15 +1268,25 @@ int32 VerifyStandaloneNormalizedProgram()
                     = bodyArgumentFirst + argumentFirst + ordinal;
                 int32 argumentOffset = argumentIndex * 3;
                 int32 inputOffset
-                    = (inputFirst + invokeInputFirst + ordinal) * 3;
+                    = (inputFirst + invokeInputFirst
+                        + parameterOrdinal) * 3;
                 int32 normalizedInputIndex
-                    = inputFirst + invokeInputFirst + ordinal;
+                    = inputFirst + invokeInputFirst
+                        + parameterOrdinal;
                 int32 argumentExpressionId
                     = Host.StandaloneSourceCallArguments[
                         argumentOffset];
+                int32 parameterOrdinal
+                    = Host.StandaloneSourceCallArguments[
+                        argumentOffset + 1];
                 int32 expectedSourceUse
                     = Host.StandaloneSourceCallArguments[
                         argumentOffset + 2];
+                if (parameterOrdinal < 0
+                    || parameterOrdinal >= argumentCount)
+                {
+                    return 3;
+                }
                 int32 expressionTypeId
                     = Host.StandaloneSourceExpressions[
                         (Host.StandaloneSourceBodies[

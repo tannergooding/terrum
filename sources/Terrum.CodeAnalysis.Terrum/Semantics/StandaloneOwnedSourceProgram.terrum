@@ -139,6 +139,8 @@ bool ValidateStandaloneSourceCallBuffers()
             == tokenCapacity * 3
         && Host.StandaloneSourceCallArgumentOwners.Length
             == tokenCapacity
+        && Host.StandaloneSourceCallFormalSeen.Length
+            == tokenCapacity
         && Host.StandaloneSourceUsingCount.Length == 1
         && Host.StandaloneSourceUsings.Length
             == tokenCapacity * 2;
@@ -227,6 +229,12 @@ void ClearStandaloneSourceCallProgram()
         index = index + 1)
     {
         Host.StandaloneSourceCallArgumentOwners[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneSourceCallFormalSeen.Length;
+        index = index + 1)
+    {
+        Host.StandaloneSourceCallFormalSeen[index] = 0;
     }
     for (mut int32 index = 0;
         index < Host.StandaloneSourceUsings.Length;
@@ -1970,13 +1978,55 @@ int32 ParseStandaloneSourceExpression(int32 localCallableId,
     }
 
     mut int32 argumentToken = openingParen + 1;
-    for (mut int32 ordinal = 0;
-        ordinal < argumentCount;
-        ordinal = ordinal + 1)
+    mut int32 nextPositionalParameter = 0;
+    mut bool hasOutOfPositionNamedArgument = false;
+    for (mut int32 sourceOrdinal = 0;
+        sourceOrdinal < argumentCount;
+        sourceOrdinal = sourceOrdinal + 1)
     {
+        int32 expressionToken = argumentToken;
+        int32 parameterOrdinal = nextPositionalParameter;
+        if (argumentToken + 1 < closeParen
+            && Host.Tokens[argumentToken * 3] == 2
+            && Host.Tokens[(argumentToken + 1) * 3] == 55)
+        {
+            if (targetKind != 1)
+            {
+                return 2;
+            }
+            init int32 namedParameterOrdinal;
+            init int32 namedParameterTypeId;
+            if (!TryFindStandaloneSourceParameter(targetIndex,
+                    argumentToken, ref init namedParameterOrdinal,
+                    ref init namedParameterTypeId))
+            {
+                return 2;
+            }
+            parameterOrdinal = namedParameterOrdinal;
+            if (parameterOrdinal == nextPositionalParameter)
+            {
+                nextPositionalParameter
+                    = nextPositionalParameter + 1;
+            }
+            else
+            {
+                hasOutOfPositionNamedArgument = true;
+            }
+            expressionToken = argumentToken + 2;
+        }
+        else
+        {
+            if (hasOutOfPositionNamedArgument)
+            {
+                return 2;
+            }
+            parameterOrdinal = nextPositionalParameter;
+            nextPositionalParameter = nextPositionalParameter + 1;
+        }
+
         init int32 parameterTypeId;
         int32 parameterTypeStatus = GetStandaloneCallParameterTypeId(
-            targetKind, targetIndex, ordinal,
+            targetKind, targetIndex, parameterOrdinal,
             ref init parameterTypeId);
         if (parameterTypeStatus != 0)
         {
@@ -1986,7 +2036,7 @@ int32 ParseStandaloneSourceExpression(int32 localCallableId,
         init int32 nextArgumentToken;
         int32 argumentStatus = ParseStandaloneSourceExpression(
             localCallableId, bodyId, expressionFirst,
-            parameterTypeId, argumentToken, closeParen,
+            parameterTypeId, expressionToken, closeParen,
             depth + 1, ref init argumentExpressionId,
             ref init nextArgumentToken);
         if (argumentStatus != 0)
@@ -1999,8 +2049,8 @@ int32 ParseStandaloneSourceExpression(int32 localCallableId,
             return 3;
         }
         int32 argumentOffset
-            = (globalArgumentFirst + ordinal) * 3;
-        int32 argumentIndex = globalArgumentFirst + ordinal;
+            = (globalArgumentFirst + sourceOrdinal) * 3;
+        int32 argumentIndex = globalArgumentFirst + sourceOrdinal;
         int32 expressionIndex = expressionFirst
             + argumentExpressionId;
         int32 globalCallIndex
@@ -2022,12 +2072,12 @@ int32 ParseStandaloneSourceExpression(int32 localCallableId,
         Host.StandaloneSourceCallArguments[argumentOffset]
             = argumentExpressionId;
         Host.StandaloneSourceCallArguments[argumentOffset + 1]
-            = ordinal;
+            = parameterOrdinal;
         Host.StandaloneSourceCallArguments[argumentOffset + 2]
             = sourceUse;
 
         argumentToken = nextArgumentToken;
-        if (ordinal + 1 < argumentCount)
+        if (sourceOrdinal + 1 < argumentCount)
         {
             if (argumentToken >= closeParen
                 || Host.Tokens[argumentToken * 3] != 53)
@@ -2286,11 +2336,19 @@ int32 VerifyStandaloneDirectCalls()
             }
             if (resolvedCallableId != expectedCallableId
                 || targetResultTypeId != resultTypeId
-                || parameterCount != callArgumentCount)
+                || parameterCount != callArgumentCount
+                || parameterCount
+                    > Host.StandaloneSourceCallFormalSeen.Length)
             {
                 return 3;
             }
 
+            for (mut int32 ordinal = 0;
+                ordinal < parameterCount;
+                ordinal = ordinal + 1)
+            {
+                Host.StandaloneSourceCallFormalSeen[ordinal] = 0;
+            }
             for (mut int32 ordinal = 0;
                 ordinal < callArgumentCount;
                 ordinal = ordinal + 1)
@@ -2307,7 +2365,12 @@ int32 VerifyStandaloneDirectCalls()
                 int32 sourceUse
                     = Host.StandaloneSourceCallArguments[
                         argumentOffset + 2];
-                if (parameterOrdinal != ordinal
+                if (parameterOrdinal < 0
+                    || parameterOrdinal >= parameterCount
+                    || (targetKind == 2
+                        && parameterOrdinal != ordinal)
+                    || Host.StandaloneSourceCallFormalSeen[
+                        parameterOrdinal] != 0
                     || expressionId < 0
                     || expressionId >= bodyExpressionCount
                     || Host.StandaloneSourceCallArgumentOwners[
@@ -2315,11 +2378,13 @@ int32 VerifyStandaloneDirectCalls()
                 {
                     return 3;
                 }
+                Host.StandaloneSourceCallFormalSeen[
+                    parameterOrdinal] = 1;
 
                 init int32 parameterTypeId;
                 int32 parameterStatus
                     = GetStandaloneCallParameterTypeId(
-                        targetKind, targetIndex, ordinal,
+                        targetKind, targetIndex, parameterOrdinal,
                         ref init parameterTypeId);
                 if (parameterStatus != 0)
                 {
@@ -2334,6 +2399,15 @@ int32 VerifyStandaloneDirectCalls()
                     = GetStandaloneSourceUse(parameterTypeId);
                 if (expressionTypeId != parameterTypeId
                     || sourceUse != expectedSourceUse)
+                {
+                    return 3;
+                }
+            }
+            for (mut int32 ordinal = 0;
+                ordinal < parameterCount;
+                ordinal = ordinal + 1)
+            {
+                if (Host.StandaloneSourceCallFormalSeen[ordinal] != 1)
                 {
                     return 3;
                 }

@@ -628,8 +628,9 @@ internal sealed class StandaloneMethodImportInputTests
             Is.EqualTo(0));
 
         var remapSource = SourceText.From(
-            "using api; int32 Local(int32 value) { return value; } "
-            + "int32 Main(int32 value) { return Imported(Local(value)); }");
+            "using api; int32 Local(int32 first, int32 second) { "
+            + "return first; } int32 Main(int32 value) { return "
+            + "Imported(Local(second: Imported(value), first: value)); }");
         var remapInput = new StandaloneMethodImportInput(Agreement,
             "consumer/module", [
                 new TrRmStandardArtifactInput(SchemaIdentity,
@@ -656,8 +657,10 @@ internal sealed class StandaloneMethodImportInputTests
                     || Host.StandaloneLocalCallableCount[0] != 2
                     || Host.StandaloneSourceImportedCallableCount[0] != 2
                     || Host.StandaloneSourceBodyCount[0] != 2
-                    || Host.StandaloneSourceDirectCallCount[0] != 2
-                    || Host.StandaloneInvokeCount[0] != 2
+                    || Host.StandaloneSourceExpressionCount[0] != 6
+                    || Host.StandaloneSourceDirectCallCount[0] != 3
+                    || Host.StandaloneSourceCallArgumentCount[0] != 4
+                    || Host.StandaloneInvokeCount[0] != 3
                     || Host.StandaloneTypeFactCount[0] != 1) {
                     return 51;
                 }
@@ -735,15 +738,42 @@ internal sealed class StandaloneMethodImportInputTests
                     || Host.StandaloneRewrittenSourceDirectCalls[8] != 0
                     || Host.StandaloneRewrittenSourceDirectCalls[9]
                         != callableBase
+                    || Host.StandaloneRewrittenSourceDirectCalls[11] != 1
+                    || Host.StandaloneRewrittenSourceDirectCalls[12] != 2
+                    || Host.StandaloneRewrittenSourceDirectCalls[14] != 2
+                    || Host.StandaloneRewrittenSourceDirectCalls[15] != 1
+                    || Host.StandaloneRewrittenSourceDirectCalls[16] != 1
+                    || Host.StandaloneRewrittenSourceDirectCalls[18] != 3
+                    || Host.StandaloneRewrittenSourceDirectCalls[19] != 1
+                    || Host.StandaloneRewrittenSourceCallArguments[4] != 1
+                    || Host.StandaloneRewrittenSourceCallArguments[7] != 0
                     || Host.StandaloneRewrittenInvokes[0] != 1
-                    || Host.StandaloneRewrittenInvokes[1] != 0
-                    || Host.StandaloneRewrittenInvokes[2]
+                    || Host.StandaloneRewrittenInvokes[1] != 1
+                    || Host.StandaloneRewrittenInvokes[2] != 1
+                    || Host.StandaloneRewrittenInvokes[3] != 0
+                    || Host.StandaloneRewrittenInvokes[4] != 1
+                    || Host.StandaloneRewrittenInvokes[10] != 1
+                    || Host.StandaloneRewrittenInvokes[11] != 0
+                    || Host.StandaloneRewrittenInvokes[12]
                         != callableBase
-                    || Host.StandaloneRewrittenInvokes[10] != 2
-                    || Host.StandaloneRewrittenInvokes[11] != 1
-                    || Host.StandaloneRewrittenInvokes[12] != 1
-                    || Host.StandaloneRewrittenDirectCallInvokeMap[0] != 1
-                    || Host.StandaloneRewrittenDirectCallInvokeMap[1] != 0) {
+                    || Host.StandaloneRewrittenInvokes[13] != 1
+                    || Host.StandaloneRewrittenInvokes[14] != 2
+                    || Host.StandaloneRewrittenInvokes[20] != 2
+                    || Host.StandaloneRewrittenInvokes[21] != 1
+                    || Host.StandaloneRewrittenInvokes[22] != 1
+                    || Host.StandaloneRewrittenInvokes[23] != 3
+                    || Host.StandaloneRewrittenInvokes[24] != 1
+                    || Host.StandaloneRewrittenDirectCallInvokeMap[0] != 2
+                    || Host.StandaloneRewrittenDirectCallInvokeMap[1] != 1
+                    || Host.StandaloneRewrittenDirectCallInvokeMap[2] != 0
+                    || Host.StandaloneRewrittenInvokeInputs[0] != 2
+                    || Host.StandaloneRewrittenInvokeInputs[2] != 0
+                    || Host.StandaloneRewrittenInvokeInputs[3] != 2
+                    || Host.StandaloneRewrittenInvokeInputs[5] != 0
+                    || Host.StandaloneRewrittenInvokeInputs[6] != 2
+                    || Host.StandaloneRewrittenInvokeInputs[8] != 1
+                    || Host.StandaloneRewrittenInvokeInputs[9] != 2
+                    || Host.StandaloneRewrittenInvokeInputs[11] != 2) {
                     return 52;
                 }
                 return 0;

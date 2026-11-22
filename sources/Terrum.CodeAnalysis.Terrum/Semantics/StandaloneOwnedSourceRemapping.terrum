@@ -1329,10 +1329,15 @@ int32 VerifyStandaloneRewrittenCallNodes()
             int32 expressionId
                 = Host.StandaloneRewrittenSourceCallArguments[
                     argumentOffset];
+            int32 parameterOrdinal
+                = Host.StandaloneRewrittenSourceCallArguments[
+                    argumentOffset + 1];
             int32 sourceUse
                 = Host.StandaloneRewrittenSourceCallArguments[
                     argumentOffset + 2];
-            if (expressionId < 0
+            if (parameterOrdinal < 0
+                || parameterOrdinal >= argumentCount
+                || expressionId < 0
                 || expressionId >= bodyExpressionCount)
             {
                 return 3;
@@ -1343,10 +1348,11 @@ int32 VerifyStandaloneRewrittenCallNodes()
             init int32 parameterTypeId;
             int32 parameterStatus
                 = GetStandaloneRewrittenCallableParameterTypeId(
-                    targetKind, targetIndex, ordinal,
+                    targetKind, targetIndex, parameterOrdinal,
                     ref init parameterTypeId);
             int32 inputOffset
-                = (bodyInputFirst + invokeInputFirst + ordinal) * 3;
+                = (bodyInputFirst + invokeInputFirst
+                    + parameterOrdinal) * 3;
             int32 selectorKind
                 = Host.StandaloneRewrittenInvokeInputs[inputOffset];
             int32 inputUse
