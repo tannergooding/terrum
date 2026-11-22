@@ -7331,6 +7331,8 @@ internal sealed class NativeCoreRegistrationTests
             [Blittable] [Layout(LayoutKind.Sequential)]
             public struct Point {
                 public Coordinates Position;
+                public ptr<int32> Link;
+                public ptr<Coordinates> Related;
             }
             [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
             [ForeignNativeInterface(VTableByteOffset: uint32(0))]
@@ -7374,6 +7376,8 @@ internal sealed class NativeCoreRegistrationTests
                                 "provider/Point.Position"),
                             new TrRmSourceFieldExport("Link",
                                 "provider/Point.Link"),
+                            new TrRmSourceFieldExport("Related",
+                                "provider/Point.Related"),
                         ],
                     },
                     new TrRmSourceTypeExport("", "IProbe",
@@ -7396,6 +7400,7 @@ internal sealed class NativeCoreRegistrationTests
             public struct Point {
                 public Coordinates Position;
                 public ptr<int32> Link;
+                public ptr<Coordinates> Related;
             }
             [Blittable] [Layout(LayoutKind.Sequential)]
             public struct Coordinates {
@@ -7482,6 +7487,13 @@ internal sealed class NativeCoreRegistrationTests
                 && consumerTables.Imports.GetBindingForImportRow(importRow)
                     .ExportKey == "provider/Point.Link"),
             Is.True);
+        Assert.That(Enumerable.Range(1, consumerTables.Imports.Count)
+            .Any(importRow =>
+                (consumerTables.Imports.GetExpectedDefinitionForImportRow(
+                    importRow) >> 24) == 0x14
+                && consumerTables.Imports.GetBindingForImportRow(importRow)
+                    .ExportKey == "provider/Point.Related"),
+            Is.True);
 
         var reboundReference = TrRmExecutableCompiler
             .CreateStandardReference(
@@ -7497,6 +7509,19 @@ internal sealed class NativeCoreRegistrationTests
             Is.EqualTo("provider.module"));
         Assert.That(NativePointerTypes.IsType(reboundPoint.Fields.Single(
             static field => field.Name == "Link").Type), Is.True);
+        Assert.That(NativePointerTypes.IsType(reboundPoint.Fields.Single(
+            static field => field.Name == "Related").Type), Is.True);
+        var reboundRelatedPointerType
+            = reboundPoint.Fields.Single(
+                static field => field.Name == "Related").Type;
+        var reboundRelatedPointee = reboundReference.NativePointerTypes[
+            NativePointerTypes.Index(reboundRelatedPointerType)].PointeeType;
+        Assert.That((int)reboundRelatedPointee, Is.GreaterThanOrEqualTo(100));
+        var reboundCoordinates = reboundReference.Structures[
+            (int)reboundRelatedPointee - 100];
+        Assert.That(reboundCoordinates.Name, Is.EqualTo("Coordinates"));
+        Assert.That(reboundCoordinates.StandardTypeOrigin?.Provider
+            .ModuleIdentity, Is.EqualTo("provider.module"));
         Assert.That(reboundReference.Structures.Count(
             static structure => structure.StandardLayoutOnly),
             Is.EqualTo(2));
@@ -7553,6 +7578,13 @@ internal sealed class NativeCoreRegistrationTests
                     .ExportKey == "provider/Point.Link"),
             Is.True);
         Assert.That(Enumerable.Range(1, reemittedTables.Imports.Count)
+            .Any(importRow =>
+                (reemittedTables.Imports.GetExpectedDefinitionForImportRow(
+                    importRow) >> 24) == 0x14
+                && reemittedTables.Imports.GetBindingForImportRow(importRow)
+                    .ExportKey == "provider/Point.Related"),
+            Is.True);
+        Assert.That(Enumerable.Range(1, reemittedTables.Imports.Count)
             .Where(importRow => (reemittedTables.Imports
                 .GetExpectedDefinitionForImportRow(importRow) >> 24)
                     == 0x13
@@ -7576,6 +7608,19 @@ internal sealed class NativeCoreRegistrationTests
                 && structure.StandardTypeOrigin?.IsLookupRoot == true);
         Assert.That(NativePointerTypes.IsType(reloadedPoint.Fields.Single(
             static field => field.Name == "Link").Type), Is.True);
+        Assert.That(NativePointerTypes.IsType(reloadedPoint.Fields.Single(
+            static field => field.Name == "Related").Type), Is.True);
+        var reloadedRelatedPointerType
+            = reloadedPoint.Fields.Single(
+                static field => field.Name == "Related").Type;
+        var reloadedRelatedPointee = reloadedReference.NativePointerTypes[
+            NativePointerTypes.Index(reloadedRelatedPointerType)].PointeeType;
+        Assert.That((int)reloadedRelatedPointee, Is.GreaterThanOrEqualTo(100));
+        var reloadedCoordinates = reloadedReference.Structures[
+            (int)reloadedRelatedPointee - 100];
+        Assert.That(reloadedCoordinates.Name, Is.EqualTo("Coordinates"));
+        Assert.That(reloadedCoordinates.StandardTypeOrigin?.Provider
+            .ModuleIdentity, Is.EqualTo("provider.module"));
         var reloadedConsumer = Compilation.CreateLibrary(
             SyntaxTree.Parse("""
                 int32 Invoke(ptr<void> receiver, ptr<Point> point) {
