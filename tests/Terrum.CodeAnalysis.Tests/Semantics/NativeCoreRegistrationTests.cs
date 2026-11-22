@@ -647,6 +647,12 @@ internal sealed class NativeCoreRegistrationTests
     [TestCase("int32", "value ^ 2", (byte)0x32,
         TokenKind.Caret, false, SourceArithmeticProfile.Development,
         BoundIntegerOverflowBehavior.Checked, (ushort)2, false)]
+    [TestCase("int32", "+value", (byte)0x11, TokenKind.Plus, true,
+        SourceArithmeticProfile.Development,
+        BoundIntegerOverflowBehavior.Checked, (ushort)1, false)]
+    [TestCase("float64", "+value", (byte)0x11, TokenKind.Plus, true,
+        SourceArithmeticProfile.Development,
+        BoundIntegerOverflowBehavior.Checked, (ushort)1, false)]
     [TestCase("bool", "!value", (byte)0x33, TokenKind.Bang, true,
         SourceArithmeticProfile.Development,
         BoundIntegerOverflowBehavior.Checked, (ushort)1, false)]
@@ -839,6 +845,15 @@ internal sealed class NativeCoreRegistrationTests
             var argument = foreignCall!.Arguments.Single();
             if (unary)
             {
+                if (operatorKind == TokenKind.Plus)
+                {
+                    Assert.That(argument, Is.TypeOf<BoundRead>());
+                    Assert.That(((BoundRead)argument).Variable,
+                        Is.EqualTo(1));
+                    Assert.That(argument.Type, Is.EqualTo(expectedType));
+                    return;
+                }
+
                 Assert.That(argument, Is.TypeOf<BoundUnary>());
                 var unaryExpression = (BoundUnary)argument;
                 Assert.That(unaryExpression.Operator,

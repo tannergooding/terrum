@@ -2162,6 +2162,12 @@ public static partial class TrRmExecutableCompiler
             return true;
         }
 
+        if (unary.Operator == TokenKind.Plus)
+        {
+            return PrimitiveTypeFacts.IsIntegerOrWide(unary.Type)
+                || PrimitiveTypeFacts.IsFloating(unary.Type);
+        }
+
         if (unary.Operator != TokenKind.Minus)
         {
             return false;
@@ -2765,6 +2771,11 @@ public static partial class TrRmExecutableCompiler
                     out var unaryOpcode, out var unaryControl))
             {
                 var operand = Emit(unary.Operand, type);
+                if (unary.Operator == TokenKind.Plus)
+                {
+                    return operand;
+                }
+
                 if (!operand.OwnsRegister)
                 {
                     throw Invalid(

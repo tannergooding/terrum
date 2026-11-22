@@ -1386,15 +1386,18 @@ typed ConstantMap/TypedFrozenValues loads, including literal arguments within ne
 calls and mixed outer inputs. The fallback conditional-output form separately
 supports up to 13 total nested-call results and distinct scalar-literal
 register inputs, including literal arguments within nested calls.
-FNI scalar expression inputs support wrapping integer arithmetic, checked
-integer negation/add/subtract/multiply/divide/remainder, and floating unary and
-binary operations over Home-rooted trees with typed scalar ConstantMap leaves.
+FNI scalar expression inputs support wrapping integer arithmetic,
+integer/floating unary plus identities, checked integer
+negation/add/subtract/multiply/divide/remainder, and floating unary and binary
+operations over Home-rooted trees with typed scalar ConstantMap leaves.
 They also support integer/Boolean bitwise AND, OR and XOR, type-directed
 integer bitwise and Boolean logical NOT, plus Boolean equality and inequality
 through C2. Boolean `&&` and `||` are admitted when their right operand is a
 supported pure, non-throwing scalar tree; they use the corresponding Boolean
 bitwise opcode because eager evaluation is then observationally equivalent.
 Source-free decoding canonicalizes those expressions to Boolean `&` and `|`.
+Unary plus emits no unary Body opcode and likewise disappears during
+source-free decoding.
 Integer and float32/float64 comparisons use C2 relation results followed by
 C3 predicate selection; inequality uses the relation mask that includes
 unordered floating results, and source-free loading rejects unsupported
