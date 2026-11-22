@@ -2094,6 +2094,8 @@ public static partial class TrRmExecutableCompiler
         BoundProgram? semanticVerificationProgram = null)
     {
         ArgumentNullException.ThrowIfNull(program);
+        var standardTerrumFunctionPointerProfile
+            = schema.UsesTerrumFunctionPointer(standardSchemaIdentity);
         if (BoundEnumTypes.HasStandardDeclarations(
                 program.EnumDefinitions)
             && !schema.UsesC1EnumClosure())
@@ -3070,9 +3072,39 @@ public static partial class TrRmExecutableCompiler
             signature < program.NativeFunctionPointerSignatures.Length; signature++)
         {
             var row = typeRowsList.Count + 1;
-            typeRowsList.Add(TrRmTypeSpecTableWriter
-                .DevelopmentFunctionPointerSignatureReference(
-                    checked((uint)(signature + 1))));
+            var signatureContract
+                = program.NativeFunctionPointerSignatures[signature];
+            var anchorMethodDefRow = checked(
+                (uint)(program.Functions.Length + signature + 1));
+            if (schema.IsDevelopmentProfile())
+            {
+                typeRowsList.Add(TrRmTypeSpecTableWriter
+                    .DevelopmentFunctionPointerSignatureReference(
+                        checked((uint)(signature + 1))));
+            }
+            else if (standardTerrumFunctionPointerProfile
+                && signatureContract.CallingConvention
+                    == NativeCallingConvention.Native)
+            {
+                typeRowsList.Add(
+                    TrRmTypeSpecTableWriter.NativeFunctionPointer(
+                        0, anchorMethodDefRow,
+                        standardSchemaIdentity!));
+            }
+            else if (schema.UsesForeignInvocationContracts()
+                && signatureContract.CallingConvention
+                    != NativeCallingConvention.Native)
+            {
+                typeRowsList.Add(
+                    TrRmTypeSpecTableWriter.NativeFunctionPointer(
+                        (byte)signatureContract.CallingConvention,
+                        anchorMethodDefRow));
+            }
+            else
+            {
+                throw Unsupported(
+                    "The selected TRRM schema has no function-pointer TypeSpec anchor for this convention.");
+            }
             nativeFunctionPointerTypeRows.Add(NativeFunctionPointerTypes.Type(signature), row);
         }
         var nativePointerTypeRows = new Dictionary<PrimitiveType, int>(program.NativePointerTypes.Length);
@@ -6494,6 +6526,12 @@ public static partial class TrRmExecutableCompiler
         {
             var signature = program.NativeFunctionPointerSignatures[index];
             var methodRow = methods.Count + 1;
+            if (standardTerrumFunctionPointerProfile
+                && methodRow != program.Functions.Length + index + 1)
+            {
+                throw Unsupported(
+                    "Terrum function-pointer anchors do not follow the selected MethodDef layout.");
+            }
             var first = signature.ParameterTypes.IsEmpty ? 0 : parameters.Count + 1;
             foreach (var parameterType in signature.ParameterTypes)
             {
@@ -6518,9 +6556,15 @@ public static partial class TrRmExecutableCompiler
                 contracts.Add(new TrRmContractRow(0x1600_0000u | (uint)methodRow, 1,
                     s_effectPayloads[anchorEffectsMask]));
             }
-            contracts.Add(new TrRmContractRow(0x1600_0000u | (uint)methodRow, 0x10,
-                NativeAbiPayload(3, NativeAbiConvention(schema,
-                    signature.CallingConvention, 3))));
+            if (!standardTerrumFunctionPointerProfile
+                || signature.CallingConvention
+                    != NativeCallingConvention.Native)
+            {
+                contracts.Add(new TrRmContractRow(
+                    0x1600_0000u | (uint)methodRow, 0x10,
+                    NativeAbiPayload(3, NativeAbiConvention(schema,
+                        signature.CallingConvention, 3))));
+            }
             var nameRow = names.Count + 1;
             names.Add(($"__trrm_fnptr_signature_{index}", 1));
             methods.Add(new TrRmMethodDefRow(0, nameRow, signatures.Count, 0,
@@ -6528,6 +6572,9 @@ public static partial class TrRmExecutableCompiler
             nativeFunctionPointerSignatureRows.Add(
                 new TrRmNativeFunctionPointerSignatureRow(methodRow));
         }
+        var nativeFunctionPointerSignatureTableCount
+            = schema.IsDevelopmentProfile()
+                ? nativeFunctionPointerSignatureRows.Count : 0;
 
         AddStandardLayoutQuerySourceExports(program, sourceTypeExports,
             schema.UsesInitializationReferenceLocalFieldLayout()
@@ -6612,7 +6659,8 @@ public static partial class TrRmExecutableCompiler
             || !program.NativePointerTypes.IsEmpty
             || !blittableStructureIndexes.IsEmpty)
         {
-            if (standardInitializationBodyFeatureProfile)
+            if (standardInitializationBodyFeatureProfile
+                || standardTerrumFunctionPointerProfile)
             {
                 requiresStandardNativeBoundaryContracts = true;
             }
@@ -6645,7 +6693,8 @@ public static partial class TrRmExecutableCompiler
                     && HasRootlessNativeValues(program.Functions[index]));
         if (hasRootlessNativeValues)
         {
-            if (standardInitializationBodyFeatureProfile)
+            if (standardInitializationBodyFeatureProfile
+                || standardTerrumFunctionPointerProfile)
             {
                 requiresStandardRootlessNativeValues = true;
             }
@@ -6931,12 +6980,14 @@ public static partial class TrRmExecutableCompiler
         var typeRows = typeRowsList.ToArray();
         var typeBytes = TrRmTypeSpecTableWriter.Encode(typeRows, typeDefCount,
             pendingStandardImports.Count, 0,
-            nativeFunctionPointerSignatureRows.Count, schema,
+            nativeFunctionPointerSignatureTableCount, schema,
+            methodDefCount: methods.Count,
             standardSchemaIdentity: standardSchemaIdentity);
         var types = new TrRmTypeSpecTableReader(typeBytes, typeRows.Length,
             typeDefCount, pendingStandardImports.Count, 0,
-            nativeFunctionPointerSignatureRows.Count,
-            schema, standardSchemaIdentity: standardSchemaIdentity);
+            nativeFunctionPointerSignatureTableCount, schema,
+            methodDefCount: methods.Count,
+            standardSchemaIdentity: standardSchemaIdentity);
         var sigBytes = signatures.Count == 0 ? []
             : TrRmMethodSigTableWriter.Encode(signatures, types,
                 parameters.Count, 0);
@@ -7226,14 +7277,17 @@ public static partial class TrRmExecutableCompiler
                 nativeImportRows, strings, defs, sigs, paramReader, types,
                 contractReader, layouts);
         }
-        var nativeFunctionPointerSignatureBytes = nativeFunctionPointerSignatureRows.Count == 0 ? []
+        var nativeFunctionPointerSignatureBytes
+            = nativeFunctionPointerSignatureTableCount == 0 ? []
             : TrRmNativeFunctionPointerSignatureTableWriter.Encode(
                 nativeFunctionPointerSignatureRows, defs, sigs, paramReader, types,
                 contractReader);
-        var nativeFunctionPointerSignatureReader =
-            new TrRmNativeFunctionPointerSignatureTableReader(
-                nativeFunctionPointerSignatureBytes, nativeFunctionPointerSignatureRows.Count,
-                defs, sigs, paramReader, types, contractReader);
+        var nativeFunctionPointerSignatureReader
+            = nativeFunctionPointerSignatureTableCount == 0 ? default
+                : new TrRmNativeFunctionPointerSignatureTableReader(
+                    nativeFunctionPointerSignatureBytes,
+                    nativeFunctionPointerSignatureTableCount,
+                    defs, sigs, paramReader, types, contractReader);
         var nativeCallableRows = new List<TrRmNativeCallableRow>(nativeCallableCount);
         for (var index = 0; index < program.Functions.Length; index++)
         {
@@ -7347,7 +7401,7 @@ public static partial class TrRmExecutableCompiler
             + (moduleImportRows.Count != 0 ? 1 : 0)
             + (bodies.Count != 0 ? 1 : 0) + (nativeImportCount != 0 ? 1 : 0)
             + (nativeCallableRows.Count != 0 ? 1 : 0) + (nativeVTableRows.Count != 0 ? 1 : 0);
-        sectionCount += nativeFunctionPointerSignatureRows.Count != 0 ? 1 : 0;
+        sectionCount += nativeFunctionPointerSignatureTableCount != 0 ? 1 : 0;
         sectionCount += layoutFieldRows.Count != 0 ? 1 : 0;
         sectionCount += targetProfiles.Count != 0 ? 1 : 0;
         sectionCount += nativeExportTableRows.Count != 0 ? 1 : 0;
@@ -7460,9 +7514,9 @@ public static partial class TrRmExecutableCompiler
         {
             sections.Add(new(0x32, 0, (uint)nativeVTableRows.Count, nativeVTableBytes));
         }
-        if (nativeFunctionPointerSignatureRows.Count != 0)
+        if (nativeFunctionPointerSignatureTableCount != 0)
         {
-            sections.Add(new(0x33, 0, (uint)nativeFunctionPointerSignatureRows.Count,
+            sections.Add(new(0x33, 0, (uint)nativeFunctionPointerSignatureTableCount,
                 nativeFunctionPointerSignatureBytes));
         }
         if (predicateGraphs.Count != 0)

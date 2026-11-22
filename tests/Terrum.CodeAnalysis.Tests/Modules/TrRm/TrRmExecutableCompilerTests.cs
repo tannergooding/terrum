@@ -208,6 +208,51 @@ internal sealed class TrRmExecutableCompilerTests
     }
 
     [Test]
+    public void TerrumFunctionPointerTypeUsesExactSuccessorAndBodylessAnchor()
+    {
+        var program = Compile(
+            "internal int32 Accept(fnptr<int32, int32> callback) { return 0; }",
+            library: true);
+        var schemaIdentity = TrRmArtifactSchemaFacts
+            .StandardTerrumFunctionPointerSchemaIdentity;
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "terrum-fnptr", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var index = TrRmExecutableCompiler.CreateForeignInvocationIndex(
+            artifact, schemaIdentity);
+        var tables
+            = TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
+                index);
+        var acceptMethod = Enumerable.Range(1, tables.Methods.Count)
+            .Single(row => tables.Methods.GetName(row) == "Accept");
+        var signature = tables.Methods.GetSignature(acceptMethod);
+        var (parameterFirst, parameterCount)
+            = tables.Signatures.GetParamRange(signature);
+        Assert.That(parameterCount, Is.EqualTo(1));
+        var typeSpecRef
+            = tables.Parameters.GetTypeSpec(parameterFirst);
+        Assert.That(tables.TypeSpecs.TryGetNativeFunctionPointerAnchor(
+            checked((int)typeSpecRef), out var convention,
+            out var anchorMethod), Is.True);
+        Assert.That(convention, Is.EqualTo(0));
+        Assert.That(tables.Methods.GetBodyRow(anchorMethod), Is.Zero);
+        Assert.That(tables.Contracts.HasNativeAbi(anchorMethod), Is.False);
+        Assert.That(TrRmFeatureManifestValidator.Requires(tables.Features,
+            tables.Modules, 1,
+            TrRmFeatureTableReader.NativeBoundaryContractsFeatureId,
+            TrRmArtifactSchema.Standard), Is.True);
+        Assert.That(TrRmFeatureManifestValidator.Requires(tables.Features,
+            tables.Modules, 1,
+            TrRmFeatureTableReader.RootlessNativeValuesFeatureId,
+            TrRmArtifactSchema.Standard), Is.True);
+
+        _ = Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.EmitStandard(program, "terrum-fnptr-old",
+                "trrm/1-draft-layout-queries-1",
+                TrRmModuleTableReader.WindowsX64NativeTargetRequirement));
+    }
+
+    [Test]
     public void StandardRegisteredLayoutQueryRoundTripsThroughFeature13Body()
     {
         const string schemaIdentity = "trrm/1-draft-layout-queries-1";
