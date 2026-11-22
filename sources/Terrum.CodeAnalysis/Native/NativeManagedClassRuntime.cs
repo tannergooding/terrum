@@ -39,9 +39,20 @@ internal sealed partial class PeCompiler
         (NormalBackingControlSize + payloadSize + 7) & ~7;
 
     internal static bool AllowsCheckedNormalBackingCleanup(
-        BoundProgram program) =>
-        program.RuntimePolicy == BoundRuntimePolicy.CheckedExceptions
-        && program.Functions.All(static function => function.NoFailureProof);
+        BoundProgram program)
+    {
+        if (program.RuntimePolicy != BoundRuntimePolicy.CheckedExceptions)
+        {
+            return false;
+        }
+
+        var cleanupBearingClasses
+            = GetNormalBackingCleanupBearingClasses(program);
+        return program.Functions.All(function =>
+            function.NoFailureProof
+            || !NormalBackingFunctionMayRetainCleanup(
+                function, cleanupBearingClasses, program));
+    }
 
     internal static void ValidateNormalBackingProgram(BoundProgram program)
     {
@@ -143,7 +154,7 @@ internal sealed partial class PeCompiler
             && !AllowsCheckedNormalBackingCleanup(program))
         {
             throw new NotSupportedException(
-                "The selected normal-backing runtime admits checked-exception Cleanup retirement only when every function has a verified no-failure proof.");
+                "The selected normal-backing runtime admits checked-exception Cleanup retirement only when every function that may retain Cleanup-bearing backing has a verified no-failure proof.");
         }
 
         for (var functionIndex = 0; functionIndex < program.Functions.Length; functionIndex++)
@@ -332,6 +343,141 @@ internal sealed partial class PeCompiler
                         "The selected normal-backing runtime does not support this class field type.");
                 }
             }
+        }
+    }
+
+    private static HashSet<int> GetNormalBackingCleanupBearingClasses(
+        BoundProgram program)
+    {
+        var cleanupBearingClasses = new HashSet<int>();
+        for (var classIndex = 0; classIndex < program.Classes.Length;
+            classIndex++)
+        {
+            if (program.Classes[classIndex].CleanupMethod is not null)
+            {
+                _ = cleanupBearingClasses.Add(classIndex);
+            }
+        }
+
+        var changed = true;
+        while (changed)
+        {
+            changed = false;
+            for (var classIndex = 0; classIndex < program.Classes.Length;
+                classIndex++)
+            {
+                if (cleanupBearingClasses.Contains(classIndex))
+                {
+                    continue;
+                }
+
+                var @class = program.Classes[classIndex];
+                if (@class.Fields.Any(field =>
+                    NormalBackingTypeMayRetainCleanup(
+                        field.Type, cleanupBearingClasses, program, [])))
+                {
+                    _ = cleanupBearingClasses.Add(classIndex);
+                    changed = true;
+                }
+            }
+        }
+
+        return cleanupBearingClasses;
+    }
+
+    private static bool NormalBackingFunctionMayRetainCleanup(
+        BoundFunction function, HashSet<int> cleanupBearingClasses,
+        BoundProgram program)
+    {
+        if (NormalBackingTypeMayRetainCleanup(function.ReturnType,
+                cleanupBearingClasses, program, [])
+            || function.Variables.Any(variable =>
+                NormalBackingTypeMayRetainCleanup(variable.Type,
+                    cleanupBearingClasses, program, [])))
+        {
+            return true;
+        }
+
+        var mayRetainCleanup = false;
+        if (!BoundTreeTraversal.VisitExpressions(function.Body,
+                expression =>
+                {
+                    mayRetainCleanup |=
+                        NormalBackingTypeMayRetainCleanup(
+                            expression.Type, cleanupBearingClasses,
+                            program, []);
+                })
+            || !BoundTreeTraversal.VisitContractExpressions(function,
+                expression =>
+                {
+                    mayRetainCleanup |=
+                        NormalBackingTypeMayRetainCleanup(
+                            expression.Type, cleanupBearingClasses,
+                            program, []);
+                }))
+        {
+            throw new NotSupportedException(
+                "The selected normal-backing runtime requires complete traversal when checking Cleanup-bearing residences.");
+        }
+
+        return mayRetainCleanup;
+    }
+
+    private static bool NormalBackingTypeMayRetainCleanup(
+        PrimitiveType type, HashSet<int> cleanupBearingClasses,
+        BoundProgram program, HashSet<int> activeStructures)
+    {
+        if (cleanupBearingClasses.Count == 0)
+        {
+            return false;
+        }
+        if (CheckedReferenceTypes.IsType(type))
+        {
+            return true;
+        }
+        if (IsNormalBackingHandle(type))
+        {
+            var classIndex = ManagedClassTypes.ClassIndex(type);
+            return (uint)classIndex >= (uint)program.Classes.Length
+                || cleanupBearingClasses.Contains(classIndex);
+        }
+        if (ManagedClassTypes.IsManaged(type))
+        {
+            return true;
+        }
+        if (BoundEnumTypes.IsType(type)
+            || NativePointerTypes.IsType(type)
+            || NativeFunctionPointerTypes.IsType(type)
+            || NativeFixedArrayTypes.IsType(type)
+            || (int)type is < 100 or >= ManagedClassTypes.First)
+        {
+            return false;
+        }
+
+        var structureIndex = (int)type - 100;
+        if ((uint)structureIndex >= (uint)program.Structures.Length
+            || !activeStructures.Add(structureIndex))
+        {
+            return true;
+        }
+
+        try
+        {
+            foreach (var field in program.Structures[structureIndex].Fields)
+            {
+                if (NormalBackingTypeMayRetainCleanup(
+                    field.Type, cleanupBearingClasses, program,
+                    activeStructures))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+        finally
+        {
+            _ = activeStructures.Remove(structureIndex);
         }
     }
 

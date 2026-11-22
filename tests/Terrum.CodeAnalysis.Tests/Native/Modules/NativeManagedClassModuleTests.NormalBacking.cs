@@ -115,6 +115,50 @@ internal sealed partial class NativeManagedClassModuleTests
             .ConfigureAwait(true), Is.EqualTo(43));
     }
 
+    [Test]
+    public async Task NormalBackingClassCleanupIgnoresUnrelatedFallibleScalarFunctionAsync()
+    {
+        const string agreement
+            = CompilationOptions.WindowsX64NormalBackingAgreement;
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            mut class Owner {
+                public mut write ref<int32> Item;
+                [NoThrow] public Owner(write ref<int32> item) {
+                    Item = item;
+                }
+                [NoThrow] [Cleanup] private void Close() {
+                    *Item = int32(43);
+                }
+            }
+            int32 FallibleScalar() {
+                require false;
+                return 0;
+            }
+            [NoThrow] public int32 Main() {
+                mut int32 value = int32(42);
+                if (Owner.TryCreate(ref value, out var owner)) {
+                    var duplicate = owner;
+                }
+                return value;
+            }
+            """), new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.CheckedExceptions,
+            NativeLoweringAgreement = agreement,
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        Assert.That(program.Functions.Single(function =>
+            StringComparer.Ordinal.Equals(function.Name,
+                "FallibleScalar")).NoFailureProof, Is.False);
+        Assert.That(NativeJit.ExecuteWithData(program,
+            NativeRuntimePolicy.CheckedExceptions,
+            nativeLoweringAgreement: agreement).ExitCode, Is.EqualTo(43));
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(program,
+                NativeRuntimePolicy.CheckedExceptions, agreement))
+            .ConfigureAwait(true), Is.EqualTo(43));
+    }
+
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task NormalBackingClassHandlesRetainAndRetireWithinSelectedRuntimeAsync(
