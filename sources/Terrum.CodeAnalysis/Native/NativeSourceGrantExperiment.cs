@@ -18,6 +18,7 @@ internal static class NativeSourceGrantExperiment
                 Name: "Source", ElementType: PrimitiveType.Char16, IsWritable: false,
                 IsInvocationScoped: true, InvocationProfileId: null,
             } || program.Buffers[0].Values.Length > 16_384
+            || !program.Interfaces.IsEmpty
             || !program.Structures.IsEmpty || !program.Classes.IsEmpty)
         {
             return false;

@@ -3601,6 +3601,11 @@ public static partial class ModuleCompiler
                     visitExpression: scopedExpression => {
                         switch (scopedExpression)
                         {
+                            case BoundCall {
+                                ForeignInterfaceCall: not null,
+                                IsUnsafeAuthorized: true,
+                            }:
+                                break;
                             case BoundCall { IsUnsafeAuthorized: true } call
                                 when (uint)call.Function < (uint)program.Functions.Length:
                                 if (!IsSupportedModuleUnsafeExpressionCall(program.Functions[call.Function],

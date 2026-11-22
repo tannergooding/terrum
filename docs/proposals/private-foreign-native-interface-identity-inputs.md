@@ -7,7 +7,7 @@ establish implementation or execution support. No build or test accompanies it.
 
 ## Missing decision, recommendation and owners
 
-The current identity inputs cannot supply
+The original v1 identity inputs cannot supply
 [PF111's owner/member Bindings](private-foreign-native-interface-persistence.md#exact-private-records).
 Recommend two complete foreign-interface assignment collections on the existing
 snapshot-bound `PrivateModuleIdentityInputs`, transported by the exact new
@@ -15,6 +15,8 @@ snapshot-bound `PrivateModuleIdentityInputs`, transported by the exact new
 `compile-native producer|consumer` only when paired with PF111's exact
 `--private-schema` selection. Version 1 remains its independently selected
 module-only grammar; do not add optional foreign fields to it.
+The existing host API and CLI reader now implement this v2 contract
+provisionally; that implementation does not formally adopt this proposal.
 
 This supplements PF111's checked-interface-ordinal input requirement without
 changing its bytes or exact agreement

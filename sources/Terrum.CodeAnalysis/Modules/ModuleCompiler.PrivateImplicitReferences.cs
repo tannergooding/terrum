@@ -217,6 +217,20 @@ public static partial class ModuleCompiler
             return expression;
         }
 
+        if (call.ForeignInterfaceCall is not null)
+        {
+            if (call.Arguments.IsDefault
+                || !call.ArgumentImplicitReferenceTemporaries.IsDefault
+                || !call.ArgumentParameterIndices.IsDefault
+                    && call.ArgumentParameterIndices.Length
+                        != call.Arguments.Length)
+            {
+                throw new ModuleContractException(
+                    "Foreign-interface call has invalid implicit-reference mappings.");
+            }
+            return call;
+        }
+
         if ((uint)call.Function >= (uint)program.Functions.Length
             || call.Arguments.IsDefault
             || (!call.ArgumentParameterIndices.IsDefault
