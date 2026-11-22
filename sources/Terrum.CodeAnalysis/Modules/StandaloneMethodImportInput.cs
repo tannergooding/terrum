@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using Terrum.CodeAnalysis.Lexing;
+using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Text;
 
@@ -339,6 +340,37 @@ internal readonly record struct CapturedStandaloneMethodImportInput(
             Math.Max(moduleCapacity,
                 Math.Max(rewriteCallableCapacity,
                     checked(typeCapacity + 1))));
+        var artifactByteLength = 0;
+        foreach (var artifact in Artifacts)
+        {
+            artifactByteLength = checked(artifactByteLength
+                + artifact.Artifact.Length);
+        }
+
+        var standaloneTextLength = 0;
+        foreach (var buffer in hostBuffers)
+        {
+            if (buffer.Name == "StandaloneText")
+            {
+                standaloneTextLength = buffer.Values.Length;
+                break;
+            }
+        }
+
+        var writerOutputByteCapacity = checked(
+            ((long)artifactByteLength * (MethodRoots.Length + 1L))
+            + ((long)standaloneTextLength * 8)
+            + ((long)source.Length * 128)
+            + 65_536);
+        var writerWordCapacity = checked((int)(
+            (writerOutputByteCapacity + 3) / 4));
+        var writerSectionCapacity = checked((int)Math.Min(32_790L,
+            (artifactByteLength / 16L) + 32));
+        var writerStringCapacity = checked(tokenCapacity
+            + (MethodRoots.Length * 3) + 1);
+        var writerStringHashCapacity = checked(
+            (writerStringCapacity * 2) + 1);
+        var writerConstantHashCapacity = checked((tokenCapacity * 2) + 1);
         return hostBuffers.AddRange([
             new HostBuffer("StandaloneSourceProgramStatus",
                 PrimitiveType.Int32, [0], true),
@@ -598,6 +630,270 @@ internal readonly record struct CapturedStandaloneMethodImportInput(
                 PrimitiveType.Int32, [0], true),
             new HostBuffer("StandaloneRewrittenNormalizedOperationCount",
                 PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneWriterStatus",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneWriterSectionCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneWriterSections",
+                PrimitiveType.Int32,
+                [.. new int[checked(writerSectionCapacity * 5)]], true),
+            new HostBuffer("StandaloneWriterOutputByteCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneWriterOutputWords",
+                PrimitiveType.Int32, [.. new int[writerWordCapacity]], true),
+            new HostBuffer("StandaloneWriterStringCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneWriterStrings",
+                PrimitiveType.Int32,
+                [.. new int[checked(writerStringCapacity * 3)]], true),
+            new HostBuffer("StandaloneWriterStringHashSlots",
+                PrimitiveType.Int32,
+                [.. new int[writerStringHashCapacity]], true),
+            new HostBuffer("StandaloneWriterStringHashes",
+                PrimitiveType.UInt32,
+                [.. new int[writerStringCapacity]], true),
+            new HostBuffer("StandaloneWriterLocalNameStringIds",
+                PrimitiveType.Int32,
+                [.. new int[tokenCapacity]], true),
+            new HostBuffer("StandaloneWriterRootNameStringIds",
+                PrimitiveType.Int32,
+                [.. new int[MethodRoots.Length]], true),
+            new HostBuffer("StandaloneWriterRootKeyStringIds",
+                PrimitiveType.Int32,
+                [.. new int[MethodRoots.Length]], true),
+            new HostBuffer("StandaloneWriterRootModuleStringIds",
+                PrimitiveType.Int32,
+                [.. new int[MethodRoots.Length]], true),
+            new HostBuffer("StandaloneWriterRootOrdinals",
+                PrimitiveType.Int32,
+                [.. new int[MethodRoots.Length]], true),
+            new HostBuffer("StandaloneWriterModuleRefCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneWriterModuleRefByModuleId",
+                PrimitiveType.Int32,
+                [.. new int[moduleCapacity]], true),
+            new HostBuffer("StandaloneWriterModuleRefStringIds",
+                PrimitiveType.Int32,
+                [.. new int[moduleCapacity]], true),
+            new HostBuffer("StandaloneWriterModuleRefModuleIds",
+                PrimitiveType.Int32,
+                [.. new int[moduleCapacity]], true),
+            new HostBuffer("StandaloneWriterModuleIdentityStringId",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneWriterTypeSpecCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneWriterTypeSpecOrder",
+                PrimitiveType.Int32, [.. new int[typeCapacity]], true),
+            new HostBuffer("StandaloneWriterTypeSpecRowByTypeId",
+                PrimitiveType.Int32,
+                [.. new int[checked(typeCapacity + 1)]], true),
+            new HostBuffer("StandaloneWriterBodyPlans",
+                PrimitiveType.Int32,
+                [.. new int[checked(tokenCapacity * 20)]], true),
+            new HostBuffer("StandaloneWriterBodyPlanCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneWriterTypeMapCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneWriterTypeMapTokens",
+                PrimitiveType.UInt32,
+                [.. new int[checked(tokenCapacity * 2)]], true),
+            new HostBuffer("StandaloneWriterHomeTypeMapIndices",
+                PrimitiveType.Int32,
+                [.. new int[checked(tokenCapacity * 2)]], true),
+            new HostBuffer("StandaloneWriterTypeMapIndexByTypeId",
+                PrimitiveType.Int32,
+                [.. new int[checked(typeCapacity + 1)]], true),
+            new HostBuffer("StandaloneWriterMethodMapCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneWriterMethodMapTokens",
+                PrimitiveType.UInt32,
+                [.. new int[tokenCapacity]], true),
+            new HostBuffer("StandaloneWriterLocalMethodMapIndices",
+                PrimitiveType.Int32,
+                [.. new int[tokenCapacity]], true),
+            new HostBuffer("StandaloneWriterImportedMethodMapIndices",
+                PrimitiveType.Int32,
+                [.. new int[MethodRoots.Length]], true),
+            new HostBuffer("StandaloneWriterInvokeMethodMapIndices",
+                PrimitiveType.Int32,
+                [.. new int[tokenCapacity]], true),
+            new HostBuffer("StandaloneWriterCallSiteRecordIndices",
+                PrimitiveType.Int32,
+                [.. new int[tokenCapacity]], true),
+            new HostBuffer("StandaloneWriterConstantMapCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneWriterConstantMapEntries",
+                PrimitiveType.UInt32,
+                [.. new int[checked(tokenCapacity * 2)]], true),
+            new HostBuffer("StandaloneWriterConstantMapIndices",
+                PrimitiveType.Int32,
+                [.. new int[tokenCapacity]], true),
+            new HostBuffer("StandaloneWriterConstantMapIndexBySourceRow",
+                PrimitiveType.Int32,
+                [.. new int[checked(tokenCapacity + 1)]], true),
+            new HostBuffer("StandaloneWriterConstantSourceRowByConstant",
+                PrimitiveType.Int32,
+                [.. new int[tokenCapacity]], true),
+            new HostBuffer("StandaloneWriterUniqueConstantCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneWriterUniqueConstants",
+                PrimitiveType.Int32,
+                [.. new int[checked(tokenCapacity * 5)]], true),
+            new HostBuffer("StandaloneWriterUniqueConstantTypeSpecRefs",
+                PrimitiveType.UInt32,
+                [.. new int[tokenCapacity]], true),
+            new HostBuffer("StandaloneWriterConstantHashSlots",
+                PrimitiveType.Int32,
+                [.. new int[writerConstantHashCapacity]], true),
+            new HostBuffer("StandaloneWriterBlobCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneWriterBlobs",
+                PrimitiveType.UInt32,
+                [.. new int[checked(tokenCapacity * 4)]], true),
+            new HostBuffer("StandaloneWriterBlobHashSlots",
+                PrimitiveType.Int32,
+                [.. new int[writerConstantHashCapacity]], true),
         ]);
+    }
+}
+
+internal static class StandaloneMethodImportOutputFramer
+{
+    internal static byte[] Frame(
+        NativeExecutionResult execution,
+        ImmutableArray<HostBuffer> buffers)
+    {
+        ArgumentNullException.ThrowIfNull(execution);
+        if (execution.ExitCode != 0
+            || execution.BufferOffsets.Length != buffers.Length)
+        {
+            throw new InvalidOperationException(
+                "Standalone output framing requires a successful execution snapshot.");
+        }
+
+        var sectionCountBuffer = FindBuffer(buffers,
+            "StandaloneWriterSectionCount");
+        var writerStatusBuffer = FindBuffer(buffers,
+            "StandaloneWriterStatus");
+        var sectionRowsBuffer = FindBuffer(buffers,
+            "StandaloneWriterSections");
+        var byteCountBuffer = FindBuffer(buffers,
+            "StandaloneWriterOutputByteCount");
+        var outputWordsBuffer = FindBuffer(buffers,
+            "StandaloneWriterOutputWords");
+        if (buffers[sectionRowsBuffer].Values.Length % 5 != 0)
+        {
+            throw new InvalidOperationException(
+                "The standalone output section inventory has an invalid shape.");
+        }
+
+        if (ReadBufferInt32(execution, writerStatusBuffer, 0) != 0)
+        {
+            throw new InvalidOperationException(
+                "The standalone TRRM writer did not complete successfully.");
+        }
+
+        var sectionCount = ReadBufferInt32(execution, sectionCountBuffer, 0);
+        var sectionCapacity = buffers[sectionRowsBuffer].Values.Length / 5;
+        var outputByteCount = ReadBufferInt32(execution, byteCountBuffer, 0);
+        var outputWordCapacity = buffers[outputWordsBuffer].Values.Length;
+        if (sectionCount <= 0 || sectionCount > sectionCapacity
+            || outputByteCount < 0
+            || outputByteCount > (long)outputWordCapacity * sizeof(int))
+        {
+            throw new InvalidOperationException(
+                "The standalone output section inventory exceeds its captured buffers.");
+        }
+
+        var sections = new TrRmSection[sectionCount];
+        var previousKind = 0;
+        var previousByteEnd = 0;
+        for (var index = 0; index < sectionCount; index++)
+        {
+            var row = index * 5;
+            var kind = ReadBufferInt32(execution, sectionRowsBuffer, row);
+            var flags = ReadBufferInt32(execution, sectionRowsBuffer, row + 1);
+            var recordCount = ReadBufferInt32(execution, sectionRowsBuffer,
+                row + 2);
+            var byteOffset = ReadBufferInt32(execution, sectionRowsBuffer,
+                row + 3);
+            var byteLength = ReadBufferInt32(execution, sectionRowsBuffer,
+                row + 4);
+            if (kind <= previousKind || kind > ushort.MaxValue
+                || flags is < 0 or > ushort.MaxValue
+                || recordCount <= 0 || recordCount > 0xFF_FFFF
+                || byteOffset < 0 || byteLength <= 0
+                || byteOffset != previousByteEnd
+                || byteOffset > outputByteCount
+                || byteLength > outputByteCount - byteOffset)
+            {
+                throw new InvalidOperationException(
+                    "The standalone output contains an invalid section extent.");
+            }
+
+            var payload = new byte[byteLength];
+            for (var byteIndex = 0; byteIndex < payload.Length; byteIndex++)
+            {
+                var outputByteIndex = byteOffset + byteIndex;
+                var packedWord = ReadBufferInt32(execution,
+                    outputWordsBuffer, outputByteIndex / sizeof(int));
+                var shift = (outputByteIndex % sizeof(int)) * 8;
+                payload[byteIndex] = unchecked((byte)(
+                    (uint)packedWord >> shift));
+            }
+
+            sections[index] = new TrRmSection((ushort)kind,
+                (ushort)flags, (uint)recordCount, payload);
+            previousKind = kind;
+            previousByteEnd = byteOffset + byteLength;
+        }
+        if (previousByteEnd != outputByteCount)
+        {
+            throw new InvalidOperationException(
+                "The standalone output contains unclaimed section bytes.");
+        }
+
+        return TrRmArtifactWriter.Encode(sections);
+    }
+
+    private static int FindBuffer(ImmutableArray<HostBuffer> buffers,
+        string name)
+    {
+        var found = -1;
+        for (var index = 0; index < buffers.Length; index++)
+        {
+            if (!StringComparer.Ordinal.Equals(buffers[index].Name, name))
+            {
+                continue;
+            }
+            if (found >= 0)
+            {
+                throw new InvalidOperationException(
+                    $"The standalone output buffer '{name}' is duplicated.");
+            }
+
+            found = index;
+        }
+
+        return found >= 0 ? found
+            : throw new InvalidOperationException(
+                $"The standalone output buffer '{name}' is missing.");
+    }
+
+    private static int ReadBufferInt32(NativeExecutionResult execution,
+        int bufferIndex, int elementIndex)
+    {
+        var offset = execution.BufferOffsets[bufferIndex];
+        var byteOffset = checked(offset + (elementIndex * sizeof(int)));
+        if (offset < 0 || byteOffset < offset
+            || byteOffset > execution.Data.Length - sizeof(int))
+        {
+            throw new InvalidOperationException(
+                "The standalone output buffer exceeds the execution snapshot.");
+        }
+
+        return System.Buffers.Binary.BinaryPrimitives
+            .ReadInt32LittleEndian(execution.Data.AsSpan(byteOffset,
+                sizeof(int)));
     }
 }

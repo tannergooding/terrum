@@ -465,6 +465,7 @@ internal sealed class StandaloneMethodImportInputTests
             "sources/Terrum.CodeAnalysis.Terrum/Semantics/StandaloneOwnedSourceProgram.terrum",
             "sources/Terrum.CodeAnalysis.Terrum/Semantics/StandaloneOwnedSourceNormalization.terrum",
             "sources/Terrum.CodeAnalysis.Terrum/Semantics/StandaloneOwnedSourceRemapping.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Semantics/StandaloneOwnedSourceWriter.terrum",
         };
         const string verificationSource = """
             namespace Terrum.CodeAnalysis;
@@ -597,6 +598,18 @@ internal sealed class StandaloneMethodImportInputTests
                     || Host.StandaloneNormalizedOperations[21] != 4) {
                     return 41;
                 }
+                status = RewriteStandaloneOwnedCallNodes();
+                if (status != 0) { return status; }
+                status = WriteStandaloneScalarModule();
+                if (status != 0) { return status; }
+                if (Host.StandaloneWriterStatus[0] != 0
+                    || Host.StandaloneWriterSectionCount[0] < 5
+                    || Host.StandaloneWriterSections[0] != 1
+                    || Host.StandaloneWriterSections[5] != 2
+                    || Host.StandaloneWriterSections[10] != 3
+                    || Host.StandaloneWriterSections[15] != 4) {
+                    return 42;
+                }
                 return 0;
             }
             """;
@@ -623,9 +636,12 @@ internal sealed class StandaloneMethodImportInputTests
         var program = compilation.Program
             ?? throw new AssertionException(
                 "Expected a bound standalone source-call validator.");
-        Assert.That(NativeJit.Execute(program,
-                (NativeRuntimePolicy)policy),
-            Is.EqualTo(0));
+        var execution = NativeJit.ExecuteWithData(program,
+            (NativeRuntimePolicy)policy);
+        Assert.That(execution.ExitCode, Is.EqualTo(0));
+        var artifact = StandaloneMethodImportOutputFramer.Frame(
+            execution, buffers);
+        AssertStandaloneWrittenArtifact(artifact);
 
         var remapSource = SourceText.From(
             "using api; int32 Local(int32 first, int32 second) { "
@@ -1773,6 +1789,53 @@ internal sealed class StandaloneMethodImportInputTests
     private static string RepositoryRoot() =>
         Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..",
             "..", "..", "..", ".."));
+
+    private static void AssertStandaloneWrittenArtifact(byte[] artifact)
+    {
+        var index = new TrRmArtifactIndex(artifact);
+        Assert.That(index.TryGetSection(0x0003, out var blobs,
+                out var blobCount), Is.True);
+        Assert.That(blobCount, Is.EqualTo(1));
+        Assert.That(index.TryGetSection(0x0004, out var features,
+                out var featureCount), Is.True);
+        Assert.That(featureCount, Is.EqualTo(2));
+        Assert.That(index.TryGetSection(0x001C, out _, out var importCount),
+            Is.True);
+        Assert.That(importCount, Is.EqualTo(1));
+        Assert.That(index.TryGetSection(0x0020, out var bodySection,
+                out var bodyCount), Is.True);
+        Assert.That(bodyCount, Is.EqualTo(1));
+        Assert.That(index.TryGetSection(0x0030, out _,
+                out var constantSourceCount), Is.True);
+        Assert.That(constantSourceCount, Is.EqualTo(1));
+        Assert.That(index.TryGetSection(0x003F, out _,
+                out var frozenValueNodeCount), Is.True);
+        Assert.That(frozenValueNodeCount, Is.EqualTo(1));
+
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                features.Slice(0, sizeof(uint))), Is.EqualTo(9));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                features.Slice(sizeof(uint), sizeof(uint))), Is.EqualTo(1));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                features.Slice(2 * sizeof(uint), sizeof(uint))),
+            Is.EqualTo(11));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                features.Slice(3 * sizeof(uint), sizeof(uint))),
+            Is.EqualTo(1));
+
+        var bodies = new TrRmBodyTableReader(bodySection, bodyCount);
+        var bodyReader = new TrRmRegisterBodyReader(bodies.GetRow(1));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                bodyReader.MethodMap), Is.EqualTo(0x1C00_0001));
+        Assert.That(bodyReader.RecordCount, Is.EqualTo(4));
+        var firstCall = bodyReader.GetRecord(1);
+        Assert.That(firstCall[0], Is.EqualTo(0x02));
+        Assert.That(firstCall[4], Is.EqualTo(1));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+                firstCall.Slice(4 + 4, sizeof(ushort))),
+            Is.EqualTo(0));
+        Assert.That(blobs.Length, Is.GreaterThan(0));
+    }
 
     private static byte[] CreateAliasedProviderArtifact(
         string moduleIdentity, string firstExportKey,

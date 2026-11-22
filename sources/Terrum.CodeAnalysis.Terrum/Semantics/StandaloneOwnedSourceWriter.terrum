@@ -1,0 +1,3759 @@
+namespace Terrum.CodeAnalysis;
+
+bool ValidateStandaloneWriterBuffers()
+{
+    return Host.StandaloneWriterStatus.Length == 1
+        && Host.StandaloneWriterSectionCount.Length == 1
+        && Host.StandaloneWriterSections.Length % 5 == 0
+        && Host.StandaloneWriterOutputByteCount.Length == 1
+        && Host.StandaloneWriterOutputWords.Length > 0
+        && Host.StandaloneWriterStringCount.Length == 1
+        && Host.StandaloneWriterStrings.Length % 3 == 0
+        && Host.StandaloneWriterStringHashSlots.Length
+            == Host.StandaloneWriterStringHashes.Length * 2 + 1
+        && Host.StandaloneWriterLocalNameStringIds.Length
+            == Host.StandaloneSourceCallableInfo.Length / 12
+        && Host.StandaloneWriterRootNameStringIds.Length
+            == Host.StandaloneMethodRoots.Length / 5
+        && Host.StandaloneWriterRootKeyStringIds.Length
+            == Host.StandaloneMethodRoots.Length / 5
+        && Host.StandaloneWriterRootModuleStringIds.Length
+            == Host.StandaloneMethodRoots.Length / 5
+        && Host.StandaloneWriterRootOrdinals.Length
+            == Host.StandaloneMethodRoots.Length / 5
+        && Host.StandaloneWriterModuleRefCount.Length == 1
+        && Host.StandaloneWriterModuleRefByModuleId.Length
+            == Host.StandaloneModuleDirectory.Length / 8
+        && Host.StandaloneWriterModuleIdentityStringId.Length == 1
+        && Host.StandaloneWriterModuleRefStringIds.Length
+            == Host.StandaloneModuleDirectory.Length / 8
+        && Host.StandaloneWriterModuleRefModuleIds.Length
+            == Host.StandaloneModuleDirectory.Length / 8
+        && Host.StandaloneWriterTypeSpecCount.Length == 1
+        && Host.StandaloneWriterTypeSpecOrder.Length
+            == Host.StandaloneTypeFacts.Length / 3
+        && Host.StandaloneWriterTypeSpecRowByTypeId.Length
+            == Host.StandaloneTypeFacts.Length / 3 + 1
+        && Host.StandaloneWriterBodyPlanCount.Length == 1
+        && Host.StandaloneWriterBodyPlans.Length % 20 == 0
+        && Host.StandaloneWriterTypeMapCount.Length == 1
+        && Host.StandaloneWriterTypeMapTokens.Length
+            == Host.StandaloneRewrittenNormalizedHomes.Length / 5
+        && Host.StandaloneWriterHomeTypeMapIndices.Length
+            == Host.StandaloneRewrittenNormalizedHomes.Length / 5
+        && Host.StandaloneWriterTypeMapIndexByTypeId.Length
+            == Host.StandaloneRewrittenTypeFacts.Length / 3 + 1
+        && Host.StandaloneWriterMethodMapCount.Length == 1
+        && Host.StandaloneWriterMethodMapTokens.Length
+            == Host.StandaloneRewrittenInvokes.Length / 10
+        && Host.StandaloneWriterLocalMethodMapIndices.Length
+            == Host.StandaloneRewrittenLocalCallables.Length / 3
+        && Host.StandaloneWriterImportedMethodMapIndices.Length
+            == Host.StandaloneMethodRoots.Length / 5
+        && Host.StandaloneWriterInvokeMethodMapIndices.Length
+            == Host.StandaloneRewrittenInvokes.Length / 10
+        && Host.StandaloneWriterCallSiteRecordIndices.Length
+            == Host.StandaloneRewrittenInvokes.Length / 10
+        && Host.StandaloneWriterConstantMapCount.Length == 1
+        && Host.StandaloneWriterConstantMapEntries.Length
+            == Host.StandaloneRewrittenNormalizedConstants.Length / 2
+        && Host.StandaloneWriterConstantMapIndices.Length
+            == Host.StandaloneRewrittenNormalizedConstants.Length / 4
+        && Host.StandaloneWriterConstantMapIndexBySourceRow.Length
+            == Host.StandaloneRewrittenNormalizedConstants.Length / 4 + 1
+        && Host.StandaloneWriterConstantSourceRowByConstant.Length
+            == Host.StandaloneRewrittenNormalizedConstants.Length / 4
+        && Host.StandaloneWriterUniqueConstantCount.Length == 1
+        && Host.StandaloneWriterUniqueConstants.Length % 5 == 0
+        && Host.StandaloneWriterUniqueConstantTypeSpecRefs.Length
+            == Host.StandaloneWriterUniqueConstants.Length / 5
+        && Host.StandaloneWriterConstantHashSlots.Length
+            == Host.StandaloneWriterUniqueConstants.Length / 5 * 2 + 1
+        && Host.StandaloneWriterBlobCount.Length == 1
+        && Host.StandaloneWriterBlobs.Length % 4 == 0
+        && Host.StandaloneWriterBlobHashSlots.Length
+            == Host.StandaloneWriterBlobs.Length / 4 * 2 + 1;
+}
+
+void ClearStandaloneWriterOutputs()
+{
+    Host.StandaloneWriterStatus[0] = 0;
+    Host.StandaloneWriterSectionCount[0] = 0;
+    Host.StandaloneWriterOutputByteCount[0] = 0;
+    Host.StandaloneWriterStringCount[0] = 0;
+    Host.StandaloneWriterModuleRefCount[0] = 0;
+    Host.StandaloneWriterModuleIdentityStringId[0] = 0;
+    Host.StandaloneWriterTypeSpecCount[0] = 0;
+    Host.StandaloneWriterBodyPlanCount[0] = 0;
+    Host.StandaloneWriterTypeMapCount[0] = 0;
+    Host.StandaloneWriterMethodMapCount[0] = 0;
+    Host.StandaloneWriterConstantMapCount[0] = 0;
+    Host.StandaloneWriterUniqueConstantCount[0] = 0;
+    Host.StandaloneWriterBlobCount[0] = 0;
+    for (mut int32 index = 0;
+        index < Host.StandaloneWriterSections.Length;
+        index = index + 1)
+    {
+        Host.StandaloneWriterSections[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneWriterStrings.Length;
+        index = index + 1)
+    {
+        Host.StandaloneWriterStrings[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneWriterStringHashSlots.Length;
+        index = index + 1)
+    {
+        Host.StandaloneWriterStringHashSlots[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneWriterStringHashes.Length;
+        index = index + 1)
+    {
+        Host.StandaloneWriterStringHashes[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneWriterLocalNameStringIds.Length;
+        index = index + 1)
+    {
+        Host.StandaloneWriterLocalNameStringIds[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneWriterRootNameStringIds.Length;
+        index = index + 1)
+    {
+        Host.StandaloneWriterRootNameStringIds[index] = 0;
+        Host.StandaloneWriterRootKeyStringIds[index] = 0;
+        Host.StandaloneWriterRootModuleStringIds[index] = 0;
+        Host.StandaloneWriterRootOrdinals[index] = -1;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneWriterModuleRefByModuleId.Length;
+        index = index + 1)
+    {
+        Host.StandaloneWriterModuleRefByModuleId[index] = 0;
+        Host.StandaloneWriterModuleRefStringIds[index] = 0;
+        Host.StandaloneWriterModuleRefModuleIds[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneWriterTypeSpecOrder.Length;
+        index = index + 1)
+    {
+        Host.StandaloneWriterTypeSpecOrder[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneWriterTypeSpecRowByTypeId.Length;
+        index = index + 1)
+    {
+        Host.StandaloneWriterTypeSpecRowByTypeId[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneWriterBodyPlans.Length;
+        index = index + 1)
+    {
+        Host.StandaloneWriterBodyPlans[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneWriterTypeMapTokens.Length;
+        index = index + 1)
+    {
+        Host.StandaloneWriterTypeMapTokens[index] = 0;
+        Host.StandaloneWriterHomeTypeMapIndices[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneWriterTypeMapIndexByTypeId.Length;
+        index = index + 1)
+    {
+        Host.StandaloneWriterTypeMapIndexByTypeId[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneWriterMethodMapTokens.Length;
+        index = index + 1)
+    {
+        Host.StandaloneWriterMethodMapTokens[index] = 0;
+        Host.StandaloneWriterInvokeMethodMapIndices[index] = 0;
+        Host.StandaloneWriterCallSiteRecordIndices[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneWriterLocalMethodMapIndices.Length;
+        index = index + 1)
+    {
+        Host.StandaloneWriterLocalMethodMapIndices[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneWriterImportedMethodMapIndices.Length;
+        index = index + 1)
+    {
+        Host.StandaloneWriterImportedMethodMapIndices[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneWriterConstantMapEntries.Length;
+        index = index + 1)
+    {
+        Host.StandaloneWriterConstantMapEntries[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneWriterConstantMapIndices.Length;
+        index = index + 1)
+    {
+        Host.StandaloneWriterConstantMapIndices[index] = 0;
+        Host.StandaloneWriterConstantSourceRowByConstant[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneWriterConstantMapIndexBySourceRow.Length;
+        index = index + 1)
+    {
+        Host.StandaloneWriterConstantMapIndexBySourceRow[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneWriterUniqueConstants.Length;
+        index = index + 1)
+    {
+        Host.StandaloneWriterUniqueConstants[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneWriterUniqueConstantTypeSpecRefs.Length;
+        index = index + 1)
+    {
+        Host.StandaloneWriterUniqueConstantTypeSpecRefs[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneWriterConstantHashSlots.Length;
+        index = index + 1)
+    {
+        Host.StandaloneWriterConstantHashSlots[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneWriterBlobs.Length;
+        index = index + 1)
+    {
+        Host.StandaloneWriterBlobs[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneWriterBlobHashSlots.Length;
+        index = index + 1)
+    {
+        Host.StandaloneWriterBlobHashSlots[index] = 0;
+    }
+}
+
+int32 FailStandaloneWriter(int32 status)
+{
+    Host.StandaloneWriterSectionCount[0] = 0;
+    Host.StandaloneWriterOutputByteCount[0] = 0;
+    for (mut int32 index = 0;
+        index < Host.StandaloneWriterSections.Length;
+        index = index + 1)
+    {
+        Host.StandaloneWriterSections[index] = 0;
+    }
+    Host.StandaloneWriterStatus[0] = status;
+    return status;
+}
+
+int32 AppendStandaloneWriterByte(int32 value)
+{
+    int32 byteIndex = Host.StandaloneWriterOutputByteCount[0];
+    if (value < 0 || value > 255 || byteIndex < 0)
+    {
+        return 3;
+    }
+
+    int32 wordIndex = byteIndex / 4;
+    if (wordIndex >= Host.StandaloneWriterOutputWords.Length)
+    {
+        return 3;
+    }
+    int32 shift = (byteIndex % 4) * 8;
+    int32 mask = 255 << shift;
+    int32 previous
+        = Host.StandaloneWriterOutputWords[wordIndex];
+    Host.StandaloneWriterOutputWords[wordIndex]
+        = (previous & ~mask) | (value << shift);
+    Host.StandaloneWriterOutputByteCount[0] = byteIndex + 1;
+    return 0;
+}
+
+int32 AppendStandaloneWriterHalfWord(uint32 value)
+{
+    int32 status = AppendStandaloneWriterByte(
+        int32(value & uint32(0xFF)));
+    if (status != 0)
+    {
+        return status;
+    }
+    return AppendStandaloneWriterByte(
+        int32((value >> 8) & uint32(0xFF)));
+}
+
+int32 AppendStandaloneWriterWord(uint32 value)
+{
+    for (mut int32 byteIndex = 0;
+        byteIndex < 4;
+        byteIndex = byteIndex + 1)
+    {
+        int32 status = AppendStandaloneWriterByte(int32(
+            (value >> (byteIndex * 8)) & uint32(0xFF)));
+        if (status != 0)
+        {
+            return status;
+        }
+    }
+    return 0;
+}
+
+int32 FinishStandaloneWriterSection(int32 kind, int32 recordCount,
+    int32 byteStart)
+{
+    int32 sectionCount = Host.StandaloneWriterSectionCount[0];
+    int32 currentByteCount = Host.StandaloneWriterOutputByteCount[0];
+    if (kind <= 0 || kind > 0xFFFF
+        || recordCount <= 0 || recordCount > 0xFF_FFFF
+        || byteStart < 0 || currentByteCount <= byteStart
+        || sectionCount < 0
+        || sectionCount >= Host.StandaloneWriterSections.Length / 5)
+    {
+        return 3;
+    }
+    if (sectionCount > 0
+        && Host.StandaloneWriterSections[(sectionCount - 1) * 5]
+            >= kind)
+    {
+        return 3;
+    }
+
+    int32 offset = sectionCount * 5;
+    Host.StandaloneWriterSections[offset] = kind;
+    Host.StandaloneWriterSections[offset + 1] = 0;
+    Host.StandaloneWriterSections[offset + 2] = recordCount;
+    Host.StandaloneWriterSections[offset + 3] = byteStart;
+    Host.StandaloneWriterSections[offset + 4]
+        = currentByteCount - byteStart;
+    Host.StandaloneWriterSectionCount[0] = sectionCount + 1;
+    return 0;
+}
+
+int32 GetStandaloneWriterTextUnit(int32 inputKind, int32 index)
+{
+    if (inputKind == 1)
+    {
+        return index >= 0 && index < Host.Source.Length
+            ? int32(Host.Source[index]) : -1;
+    }
+    if (inputKind == 2)
+    {
+        return index >= 0 && index < Host.StandaloneText.Length
+            ? int32(Host.StandaloneText[index]) : -1;
+    }
+    return -1;
+}
+
+bool IsStandaloneWriterTextRangeValid(int32 inputKind,
+    int32 start, int32 length)
+{
+    if (start < 0 || length <= 0)
+    {
+        return false;
+    }
+    if (inputKind == 1)
+    {
+        return start <= Host.Source.Length
+            && length <= Host.Source.Length - start;
+    }
+    if (inputKind == 2)
+    {
+        return start <= Host.StandaloneText.Length
+            && length <= Host.StandaloneText.Length - start;
+    }
+    return false;
+}
+
+bool IsStandaloneWriterTextWellFormed(int32 inputKind,
+    int32 start, int32 length)
+{
+    if (!IsStandaloneWriterTextRangeValid(inputKind, start, length))
+    {
+        return false;
+    }
+
+    int32 end = start + length;
+    mut int32 at = start;
+    while (at < end)
+    {
+        int32 first = GetStandaloneWriterTextUnit(inputKind, at);
+        if (first <= 0 || first > 0xFFFF)
+        {
+            return false;
+        }
+        if (first >= 0xD800 && first <= 0xDBFF)
+        {
+            if (at + 1 >= end)
+            {
+                return false;
+            }
+            int32 second
+                = GetStandaloneWriterTextUnit(inputKind, at + 1);
+            if (second < 0xDC00 || second > 0xDFFF)
+            {
+                return false;
+            }
+            at = at + 2;
+        }
+        else
+        {
+            if (first >= 0xDC00 && first <= 0xDFFF)
+            {
+                return false;
+            }
+            at = at + 1;
+        }
+    }
+    return true;
+}
+
+uint32 GetStandaloneWriterTextHash(int32 inputKind,
+    int32 start, int32 length)
+{
+    mut uint32 hash = uint32(0x9E37_79B9);
+    for (mut int32 offset = 0;
+        offset < length;
+        offset = offset + 1)
+    {
+        hash = (hash << 5) | (hash >> 27);
+        hash = hash ^ uint32(GetStandaloneWriterTextUnit(
+            inputKind, start + offset));
+    }
+    return hash;
+}
+
+bool StandaloneWriterTextRangesEqual(int32 firstKind,
+    int32 firstStart, int32 firstLength, int32 secondKind,
+    int32 secondStart, int32 secondLength)
+{
+    if (firstLength != secondLength
+        || !IsStandaloneWriterTextRangeValid(firstKind,
+            firstStart, firstLength)
+        || !IsStandaloneWriterTextRangeValid(secondKind,
+            secondStart, secondLength))
+    {
+        return false;
+    }
+    for (mut int32 offset = 0;
+        offset < firstLength;
+        offset = offset + 1)
+    {
+        if (GetStandaloneWriterTextUnit(firstKind,
+                firstStart + offset)
+            != GetStandaloneWriterTextUnit(secondKind,
+                secondStart + offset))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+int32 TryAddStandaloneWriterString(int32 inputKind,
+    int32 start, int32 length, ref<init int32> stringIdResult)
+    ensure return == 0 ? *stringIdResult is init : true
+{
+    int32 rowCapacity = Host.StandaloneWriterStrings.Length / 3;
+    int32 slotCapacity
+        = Host.StandaloneWriterStringHashSlots.Length;
+    if (!IsStandaloneWriterTextWellFormed(inputKind, start, length)
+        || length > 0xFF_FFFF
+        || rowCapacity <= 0
+        || slotCapacity != Host.StandaloneWriterStringHashes.Length * 2 + 1)
+    {
+        return 3;
+    }
+
+    uint32 hash = GetStandaloneWriterTextHash(
+        inputKind, start, length);
+    mut int32 slotIndex
+        = int32(hash % uint32(slotCapacity));
+    for (mut int32 probe = 0;
+        probe < slotCapacity;
+        probe = probe + 1)
+    {
+        int32 storedId
+            = Host.StandaloneWriterStringHashSlots[slotIndex];
+        if (storedId == 0)
+        {
+            int32 row = Host.StandaloneWriterStringCount[0];
+            if (row < 0 || row >= rowCapacity
+                || row >= Host.StandaloneWriterStringHashes.Length)
+            {
+                return 3;
+            }
+            int32 offset = row * 3;
+            Host.StandaloneWriterStrings[offset] = inputKind;
+            Host.StandaloneWriterStrings[offset + 1] = start;
+            Host.StandaloneWriterStrings[offset + 2] = length;
+            Host.StandaloneWriterStringHashes[row] = hash;
+            Host.StandaloneWriterStringHashSlots[slotIndex] = row + 1;
+            Host.StandaloneWriterStringCount[0] = row + 1;
+            *stringIdResult = row + 1;
+            return 0;
+        }
+
+        int32 existingRow = storedId - 1;
+        if (existingRow < 0
+            || existingRow >= Host.StandaloneWriterStringCount[0])
+        {
+            return 3;
+        }
+        if (Host.StandaloneWriterStringHashes[existingRow] == hash)
+        {
+            int32 existingOffset = existingRow * 3;
+            if (StandaloneWriterTextRangesEqual(
+                    Host.StandaloneWriterStrings[existingOffset],
+                    Host.StandaloneWriterStrings[existingOffset + 1],
+                    Host.StandaloneWriterStrings[existingOffset + 2],
+                    inputKind, start, length))
+            {
+                *stringIdResult = existingRow + 1;
+                return 0;
+            }
+        }
+        slotIndex = slotIndex + 1;
+        if (slotIndex == slotCapacity)
+        {
+            slotIndex = 0;
+        }
+    }
+    return 3;
+}
+
+int32 BuildStandaloneWriterRootMap()
+{
+    int32 rootCount = Host.StandaloneMethodRoots.Length / 5;
+    int32 importedCount
+        = Host.StandaloneSourceImportedCallableCount[0];
+    if (rootCount < 0 || importedCount != rootCount
+        || Host.StandaloneRewriteImportedCallableIds.Length < rootCount
+        || Host.StandaloneRewrittenImportedCallableCount[0]
+            != importedCount)
+    {
+        return 3;
+    }
+
+    for (mut int32 root = 0; root < rootCount; root = root + 1)
+    {
+        int32 importedId
+            = Host.StandaloneRewriteImportedCallableIds[root];
+        if (importedId < 0 || importedId >= importedCount
+            || Host.StandaloneWriterRootOrdinals[importedId] != -1)
+        {
+            return 3;
+        }
+        int32 rootOffset = root * 20;
+        int32 sourceOffset = root * 8;
+        int32 targetOffset = importedId * 8;
+        int32 providerModuleId
+            = Host.StandaloneRewriteModuleIds[
+                int32(Host.StandaloneResolvedRoots[rootOffset])];
+        int32 usingModuleId
+            = Host.StandaloneRewriteModuleIds[
+                int32(Host.StandaloneResolvedRoots[rootOffset + 1])];
+        if (Host.StandaloneSourceImportedCallables[
+                sourceOffset + 4] != root
+            || Host.StandaloneRewrittenImportedCallables[
+                targetOffset + 1] != providerModuleId
+            || Host.StandaloneRewrittenImportedCallables[
+                targetOffset] != usingModuleId
+            || Host.StandaloneRewrittenImportedCallables[
+                targetOffset + 5]
+                != int32(Host.StandaloneResolvedRoots[
+                    rootOffset + 2])
+            || Host.StandaloneRewrittenImportedCallables[
+                targetOffset + 6]
+                != int32(Host.StandaloneResolvedRoots[
+                    rootOffset + 3])
+            || Host.StandaloneRewrittenImportedCallables[
+                targetOffset + 7]
+                != int32(Host.StandaloneResolvedRoots[
+                    rootOffset + 5]))
+        {
+            return 3;
+        }
+
+        int32 inputOffset = root * 5;
+        if (Host.StandaloneRewrittenImportedCallables[
+                targetOffset + 2]
+                != Host.StandaloneMethodRoots[inputOffset + 3]
+            || Host.StandaloneRewrittenImportedCallables[
+                targetOffset + 3]
+                != Host.StandaloneMethodRoots[inputOffset + 4])
+        {
+            return 3;
+        }
+        Host.StandaloneWriterRootOrdinals[importedId] = root;
+    }
+    return 0;
+}
+
+int32 BuildStandaloneWriterStringInventory()
+{
+    int32 rootStatus = BuildStandaloneWriterRootMap();
+    if (rootStatus != 0)
+    {
+        return rootStatus;
+    }
+
+    int32 moduleIdentityStart = Host.StandaloneRequest[2];
+    int32 moduleIdentityLength = Host.StandaloneRequest[3];
+    init int32 moduleIdentityStringId;
+    int32 stringStatus = TryAddStandaloneWriterString(2,
+        moduleIdentityStart, moduleIdentityLength,
+        ref init moduleIdentityStringId);
+    if (stringStatus != 0)
+    {
+        return stringStatus;
+    }
+    Host.StandaloneWriterModuleIdentityStringId[0]
+        = moduleIdentityStringId;
+
+    int32 importedCount
+        = Host.StandaloneRewrittenImportedCallableCount[0];
+    for (mut int32 importedId = 0;
+        importedId < importedCount;
+        importedId = importedId + 1)
+    {
+        int32 rootOrdinal
+            = Host.StandaloneWriterRootOrdinals[importedId];
+        int32 importedOffset = importedId * 8;
+        int32 providerModuleId
+            = Host.StandaloneRewrittenImportedCallables[
+                importedOffset + 1];
+        if (rootOrdinal < 0
+            || rootOrdinal >= Host.StandaloneMethodRoots.Length / 5
+            || providerModuleId < 0
+            || providerModuleId
+                >= Host.StandaloneWriterModuleRefByModuleId.Length)
+        {
+            return 3;
+        }
+
+        int32 moduleRefRow
+            = Host.StandaloneWriterModuleRefByModuleId[
+                providerModuleId];
+        int32 moduleStringId;
+        if (moduleRefRow == 0)
+        {
+            int32 inputOffset = rootOrdinal * 5;
+            init int32 addedModuleStringId;
+            stringStatus = TryAddStandaloneWriterString(2,
+                Host.StandaloneMethodRoots[inputOffset + 1],
+                Host.StandaloneMethodRoots[inputOffset + 2],
+                ref init addedModuleStringId);
+            if (stringStatus != 0)
+            {
+                return stringStatus;
+            }
+            moduleStringId = addedModuleStringId;
+            Host.StandaloneWriterModuleRefCount[0]
+                = Host.StandaloneWriterModuleRefCount[0] + 1;
+            moduleRefRow
+                = Host.StandaloneWriterModuleRefCount[0];
+            Host.StandaloneWriterModuleRefByModuleId[
+                providerModuleId] = moduleRefRow;
+            Host.StandaloneWriterModuleRefStringIds[
+                providerModuleId] = moduleStringId;
+            Host.StandaloneWriterModuleRefModuleIds[
+                moduleRefRow - 1] = providerModuleId;
+        }
+        else
+        {
+            moduleStringId
+                = Host.StandaloneWriterModuleRefStringIds[
+                    providerModuleId];
+            int32 inputOffset = rootOrdinal * 5;
+            int32 existingStringOffset = (moduleStringId - 1) * 3;
+            if (moduleStringId <= 0
+                || moduleStringId
+                    > Host.StandaloneWriterStringCount[0]
+                || !StandaloneWriterTextRangesEqual(
+                    Host.StandaloneWriterStrings[
+                        existingStringOffset],
+                    Host.StandaloneWriterStrings[
+                        existingStringOffset + 1],
+                    Host.StandaloneWriterStrings[
+                        existingStringOffset + 2],
+                    2, Host.StandaloneMethodRoots[
+                        inputOffset + 1],
+                    Host.StandaloneMethodRoots[
+                        inputOffset + 2]))
+            {
+                return 3;
+            }
+        }
+        Host.StandaloneWriterRootModuleStringIds[importedId]
+            = moduleStringId;
+    }
+
+    int32 localCount
+        = Host.StandaloneRewrittenLocalCallableCount[0];
+    for (mut int32 localId = 0;
+        localId < localCount;
+        localId = localId + 1)
+    {
+        int32 infoOffset = localId * 12;
+        int32 start
+            = Host.StandaloneRewrittenSourceCallableInfo[
+                infoOffset];
+        int32 length
+            = Host.StandaloneRewrittenSourceCallableInfo[
+                infoOffset + 1];
+        if (start >= 0 && start < Host.Source.Length
+            && int32(Host.Source[start]) == 64)
+        {
+            start = start + 1;
+            length = length - 1;
+        }
+        init int32 stringId;
+        stringStatus = TryAddStandaloneWriterString(1,
+            start, length, ref init stringId);
+        if (stringStatus != 0)
+        {
+            return stringStatus;
+        }
+        Host.StandaloneWriterLocalNameStringIds[localId] = stringId;
+    }
+
+    for (mut int32 importedId = 0;
+        importedId < importedCount;
+        importedId = importedId + 1)
+    {
+        int32 importedOffset = importedId * 8;
+        int32 keyStart
+            = Host.StandaloneRewrittenImportedCallables[
+                importedOffset + 2];
+        int32 keyLength
+            = Host.StandaloneRewrittenImportedCallables[
+                importedOffset + 3];
+        int32 nameStart = keyStart;
+        int32 nameLength = keyLength;
+        for (mut int32 offset = 0;
+            offset < keyLength;
+            offset = offset + 1)
+        {
+            if (GetStandaloneWriterTextUnit(2,
+                    keyStart + offset) == 46)
+            {
+                nameStart = keyStart + offset + 1;
+                nameLength = keyLength - offset - 1;
+            }
+        }
+        init int32 nameStringId;
+        stringStatus = TryAddStandaloneWriterString(2,
+            nameStart, nameLength, ref init nameStringId);
+        if (stringStatus != 0)
+        {
+            return stringStatus;
+        }
+        Host.StandaloneWriterRootNameStringIds[importedId]
+            = nameStringId;
+    }
+
+    for (mut int32 importedId = 0;
+        importedId < importedCount;
+        importedId = importedId + 1)
+    {
+        int32 importedOffset = importedId * 8;
+        init int32 keyStringId;
+        stringStatus = TryAddStandaloneWriterString(2,
+            Host.StandaloneRewrittenImportedCallables[
+                importedOffset + 2],
+            Host.StandaloneRewrittenImportedCallables[
+                importedOffset + 3],
+            ref init keyStringId);
+        if (stringStatus != 0)
+        {
+            return stringStatus;
+        }
+        Host.StandaloneWriterRootKeyStringIds[importedId]
+            = keyStringId;
+    }
+    return 0;
+}
+
+int32 GetStandaloneWriterStringRowLength(int32 row)
+{
+    int32 count = Host.StandaloneWriterStringCount[0];
+    if (row < 0 || row >= count)
+    {
+        return -1;
+    }
+    int32 length
+        = Host.StandaloneWriterStrings[row * 3 + 2];
+    if (length <= 0 || length > 0xFF_FFFF
+        || length > (int32.MaxValue - 9) / 2)
+    {
+        return -1;
+    }
+    int32 unpaddedLength = 6 + (length * 2);
+    return (unpaddedLength + 3) & ~3;
+}
+
+int32 WriteStandaloneWriterStringSection()
+{
+    int32 stringCount = Host.StandaloneWriterStringCount[0];
+    if (stringCount <= 0 || stringCount > 0xFF_FFFF)
+    {
+        return 3;
+    }
+
+    int32 sectionStart = Host.StandaloneWriterOutputByteCount[0];
+    mut int32 dataLength = 0;
+    for (mut int32 row = 0;
+        row < stringCount;
+        row = row + 1)
+    {
+        int32 rowLength = GetStandaloneWriterStringRowLength(row);
+        if (rowLength <= 0
+            || dataLength > int32.MaxValue - rowLength)
+        {
+            return 3;
+        }
+        int32 status
+            = AppendStandaloneWriterWord(uint32(dataLength));
+        if (status != 0)
+        {
+            return status;
+        }
+        dataLength = dataLength + rowLength;
+    }
+    int32 finalOffsetStatus
+        = AppendStandaloneWriterWord(uint32(dataLength));
+    if (finalOffsetStatus != 0)
+    {
+        return finalOffsetStatus;
+    }
+
+    for (mut int32 row = 0;
+        row < stringCount;
+        row = row + 1)
+    {
+        int32 rowOffset = row * 3;
+        int32 inputKind
+            = Host.StandaloneWriterStrings[rowOffset];
+        int32 inputStart
+            = Host.StandaloneWriterStrings[rowOffset + 1];
+        int32 length
+            = Host.StandaloneWriterStrings[rowOffset + 2];
+        int32 rowLength = GetStandaloneWriterStringRowLength(row);
+        int32 status = AppendStandaloneWriterByte(2);
+        if (status != 0)
+        {
+            return status;
+        }
+        status = AppendStandaloneWriterByte(length & 0xFF);
+        if (status != 0)
+        {
+            return status;
+        }
+        status = AppendStandaloneWriterByte((length >> 8) & 0xFF);
+        if (status != 0)
+        {
+            return status;
+        }
+        status = AppendStandaloneWriterByte((length >> 16) & 0xFF);
+        if (status != 0)
+        {
+            return status;
+        }
+        for (mut int32 unit = 0;
+            unit < length;
+            unit = unit + 1)
+        {
+            int32 codeUnit = GetStandaloneWriterTextUnit(
+                inputKind, inputStart + unit);
+            status = AppendStandaloneWriterByte(codeUnit & 0xFF);
+            if (status != 0)
+            {
+                return status;
+            }
+            status = AppendStandaloneWriterByte(
+                (codeUnit >> 8) & 0xFF);
+            if (status != 0)
+            {
+                return status;
+            }
+        }
+        status = AppendStandaloneWriterByte(0);
+        if (status != 0)
+        {
+            return status;
+        }
+        status = AppendStandaloneWriterByte(0);
+        if (status != 0)
+        {
+            return status;
+        }
+        int32 unpaddedLength = 6 + (length * 2);
+        for (mut int32 padding = unpaddedLength;
+            padding < rowLength;
+            padding = padding + 1)
+        {
+            status = AppendStandaloneWriterByte(0);
+            if (status != 0)
+            {
+                return status;
+            }
+        }
+    }
+
+    return FinishStandaloneWriterSection(
+        0x0002, stringCount, sectionStart);
+}
+
+int32 WriteStandaloneWriterModuleSection()
+{
+    int32 moduleIdentityStringId
+        = Host.StandaloneWriterModuleIdentityStringId[0];
+    int32 featureCount
+        = Host.StandaloneWriterUniqueConstantCount[0] == 0 ? 0 : 2;
+    if (moduleIdentityStringId <= 0
+        || moduleIdentityStringId
+            > Host.StandaloneWriterStringCount[0]
+        || (featureCount != 0
+            && Host.StandaloneWriterUniqueConstantCount[0] < 0))
+    {
+        return 3;
+    }
+
+    int32 sectionStart = Host.StandaloneWriterOutputByteCount[0];
+    int32 status = AppendStandaloneWriterWord(
+        uint32(moduleIdentityStringId));
+    if (status != 0) { return status; }
+    status = AppendStandaloneWriterWord(1);
+    if (status != 0) { return status; }
+    status = AppendStandaloneWriterWord(1);
+    if (status != 0) { return status; }
+    status = AppendStandaloneWriterWord(0);
+    if (status != 0) { return status; }
+    status = AppendStandaloneWriterWord(0);
+    if (status != 0) { return status; }
+    status = AppendStandaloneWriterWord(0);
+    if (status != 0) { return status; }
+    status = AppendStandaloneWriterWord(
+        featureCount == 0 ? uint32(0) : uint32(1));
+    if (status != 0) { return status; }
+    status = AppendStandaloneWriterWord(uint32(featureCount));
+    if (status != 0) { return status; }
+    status = AppendStandaloneWriterWord(1);
+    if (status != 0) { return status; }
+    status = AppendStandaloneWriterWord(1);
+    if (status != 0) { return status; }
+    status = AppendStandaloneWriterWord(1);
+    if (status != 0) { return status; }
+    status = AppendStandaloneWriterWord(1);
+    if (status != 0) { return status; }
+    return FinishStandaloneWriterSection(0x0001, 1, sectionStart);
+}
+
+int32 WriteStandaloneWriterFeatureSection()
+{
+    if (Host.StandaloneWriterUniqueConstantCount[0] == 0)
+    {
+        return 0;
+    }
+
+    int32 sectionStart = Host.StandaloneWriterOutputByteCount[0];
+    int32 status = AppendStandaloneWriterWord(9);
+    if (status != 0) { return status; }
+    status = AppendStandaloneWriterWord(1);
+    if (status != 0) { return status; }
+    status = AppendStandaloneWriterWord(11);
+    if (status != 0) { return status; }
+    status = AppendStandaloneWriterWord(1);
+    if (status != 0) { return status; }
+    return FinishStandaloneWriterSection(0x0004, 2, sectionStart);
+}
+
+int32 WriteStandaloneWriterModuleRefSection()
+{
+    int32 moduleRefCount = Host.StandaloneWriterModuleRefCount[0];
+    if (moduleRefCount == 0)
+    {
+        return 0;
+    }
+    if (moduleRefCount < 0
+        || moduleRefCount
+            > Host.StandaloneWriterModuleRefModuleIds.Length)
+    {
+        return 3;
+    }
+
+    int32 sectionStart = Host.StandaloneWriterOutputByteCount[0];
+    for (mut int32 row = 0;
+        row < moduleRefCount;
+        row = row + 1)
+    {
+        int32 providerModuleId
+            = Host.StandaloneWriterModuleRefModuleIds[row];
+        if (providerModuleId < 0
+            || providerModuleId
+                >= Host.StandaloneWriterModuleRefByModuleId.Length
+            || Host.StandaloneWriterModuleRefByModuleId[
+                providerModuleId] != row + 1)
+        {
+            return 3;
+        }
+
+        int32 identityStringId
+            = Host.StandaloneWriterModuleRefStringIds[
+                providerModuleId];
+        int32 directoryOffset = (providerModuleId + 1) * 8;
+        int32 targetRequirement
+            = Host.StandaloneRewrittenModuleDirectory[
+                directoryOffset + 6];
+        int32 runtimePolicy
+            = Host.StandaloneRewrittenModuleDirectory[
+                directoryOffset + 7];
+        if (identityStringId <= 0
+            || identityStringId
+                > Host.StandaloneWriterStringCount[0]
+            || targetRequirement != 1 || runtimePolicy != 0)
+        {
+            return 3;
+        }
+
+        int32 status = AppendStandaloneWriterWord(
+            uint32(identityStringId));
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterWord(
+            uint32(targetRequirement));
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterWord(uint32(runtimePolicy));
+        if (status != 0) { return status; }
+    }
+    return FinishStandaloneWriterSection(
+        0x0010, moduleRefCount, sectionStart);
+}
+
+int32 GetStandaloneWriterMethodParameterCount(int32 methodId)
+{
+    int32 localCount
+        = Host.StandaloneRewrittenLocalCallableCount[0];
+    int32 importedCount
+        = Host.StandaloneRewrittenImportedCallableCount[0];
+    if (methodId < 0 || methodId >= localCount + importedCount)
+    {
+        return -1;
+    }
+    if (methodId < localCount)
+    {
+        return Host.StandaloneRewrittenSourceCallableInfo[
+            methodId * 12 + 6];
+    }
+
+    int32 importedId = methodId - localCount;
+    int32 rootOrdinal
+        = Host.StandaloneWriterRootOrdinals[importedId];
+    if (rootOrdinal < 0
+        || rootOrdinal >= Host.StandaloneResolvedRootCount[0])
+    {
+        return -1;
+    }
+    return int32(Host.StandaloneResolvedRoots[
+        rootOrdinal * 20 + 11]);
+}
+
+int32 GetStandaloneWriterMethodResultTypeId(int32 methodId)
+{
+    int32 localCount
+        = Host.StandaloneRewrittenLocalCallableCount[0];
+    int32 importedCount
+        = Host.StandaloneRewrittenImportedCallableCount[0];
+    if (methodId < 0 || methodId >= localCount + importedCount)
+    {
+        return -1;
+    }
+    if (methodId < localCount)
+    {
+        return Host.StandaloneRewrittenSourceCallableInfo[
+            methodId * 12 + 4];
+    }
+
+    int32 importedId = methodId - localCount;
+    int32 expectedCallableId
+        = Host.StandaloneRewrittenImportedCallables[
+            importedId * 8 + 4];
+    if (expectedCallableId < 0
+        || expectedCallableId
+            >= Host.StandaloneRewrittenCallableCount[0])
+    {
+        return -1;
+    }
+    return Host.StandaloneRewrittenCallableTypeIds[
+        expectedCallableId];
+}
+
+int32 GetStandaloneWriterMethodParameterTypeId(int32 methodId,
+    int32 ordinal)
+{
+    int32 localCount
+        = Host.StandaloneRewrittenLocalCallableCount[0];
+    int32 parameterCount
+        = GetStandaloneWriterMethodParameterCount(methodId);
+    if (parameterCount < 0 || ordinal < 0
+        || ordinal >= parameterCount)
+    {
+        return -1;
+    }
+    if (methodId < localCount)
+    {
+        int32 parameterFirst
+            = Host.StandaloneRewrittenSourceCallableInfo[
+                methodId * 12 + 5];
+        int32 row = parameterFirst + ordinal;
+        if (row < 0
+            || row
+                >= Host.StandaloneRewrittenSourceParameterCount[0])
+        {
+            return -1;
+        }
+        return Host.StandaloneRewrittenSourceParameters[
+            row * 4 + 1];
+    }
+
+    int32 importedId = methodId - localCount;
+    int32 rootOrdinal
+        = Host.StandaloneWriterRootOrdinals[importedId];
+    if (rootOrdinal < 0
+        || rootOrdinal >= Host.StandaloneResolvedRootCount[0])
+    {
+        return -1;
+    }
+    int32 rootOffset = rootOrdinal * 20;
+    int32 artifactOrdinal
+        = int32(Host.StandaloneResolvedRoots[rootOffset + 2]);
+    int32 parameterFirst
+        = int32(Host.StandaloneResolvedRoots[rootOffset + 10]);
+    if (artifactOrdinal < 0
+        || artifactOrdinal >= Host.StandaloneRequest[4])
+    {
+        return -1;
+    }
+    int32 globalParameterRow
+        = Host.StandaloneArtifactParameterStarts[artifactOrdinal]
+            + parameterFirst + ordinal;
+    if (globalParameterRow <= 0
+        || globalParameterRow
+            >= Host.StandaloneRewrittenParameterTypeIds.Length)
+    {
+        return -1;
+    }
+    return Host.StandaloneRewrittenParameterTypeIds[
+        globalParameterRow];
+}
+
+int32 GetStandaloneWriterMethodFlags(int32 methodId)
+{
+    int32 localCount
+        = Host.StandaloneRewrittenLocalCallableCount[0];
+    if (methodId < 0
+        || methodId >= localCount
+            + Host.StandaloneRewrittenImportedCallableCount[0])
+    {
+        return -1;
+    }
+    if (methodId < localCount)
+    {
+        int32 sourceFlags
+            = Host.StandaloneRewrittenSourceCallableInfo[
+                methodId * 12 + 10];
+        if ((sourceFlags & ~3) != 0)
+        {
+            return -1;
+        }
+        return (sourceFlags & 1) != 0 ? 2 : 0;
+    }
+
+    int32 rootOrdinal
+        = Host.StandaloneWriterRootOrdinals[methodId - localCount];
+    if (rootOrdinal < 0
+        || rootOrdinal >= Host.StandaloneResolvedRootCount[0])
+    {
+        return -1;
+    }
+    return int32(Host.StandaloneResolvedRoots[
+        rootOrdinal * 20 + 17]);
+}
+
+int32 GetStandaloneWriterMethodEffectMask(int32 methodId)
+{
+    int32 localCount
+        = Host.StandaloneRewrittenLocalCallableCount[0];
+    if (methodId < 0
+        || methodId >= localCount
+            + Host.StandaloneRewrittenImportedCallableCount[0])
+    {
+        return -1;
+    }
+    if (methodId < localCount)
+    {
+        int32 sourceFlags
+            = Host.StandaloneRewrittenSourceCallableInfo[
+                methodId * 12 + 10];
+        if ((sourceFlags & ~3) != 0)
+        {
+            return -1;
+        }
+        return (sourceFlags & 2) != 0 ? 4 : 0;
+    }
+
+    int32 importedId = methodId - localCount;
+    int32 expectedCallableId
+        = Host.StandaloneRewrittenImportedCallables[
+            importedId * 8 + 4];
+    if (expectedCallableId < 0
+        || expectedCallableId
+            >= Host.StandaloneRewrittenCallableCount[0])
+    {
+        return -1;
+    }
+    int32 mask
+        = Host.StandaloneRewrittenCallableEffects[
+            expectedCallableId];
+    return (mask & ~6) == 0 ? mask : -1;
+}
+
+int32 GetStandaloneWriterMethodBodyRow(int32 methodId)
+{
+    int32 localCount
+        = Host.StandaloneRewrittenLocalCallableCount[0];
+    int32 importedCount
+        = Host.StandaloneRewrittenImportedCallableCount[0];
+    if (methodId < 0 || methodId >= localCount + importedCount)
+    {
+        return -1;
+    }
+    if (methodId >= localCount)
+    {
+        return 0;
+    }
+
+    int32 bodyId
+        = Host.StandaloneRewrittenLocalCallables[methodId * 3 + 2];
+    if (bodyId < 0
+        || bodyId >= Host.StandaloneRewrittenNormalizedBodyCount[0])
+    {
+        return -1;
+    }
+    return bodyId + 1;
+}
+
+int32 EnsureStandaloneWriterTypeSpec(int32 typeId,
+    ref<init uint32> typeSpecRefResult)
+    ensure return == 0 ? *typeSpecRefResult is init : true
+{
+    int32 typeCount = Host.StandaloneRewrittenTypeFactCount[0];
+    if (typeId <= 0 || typeId > typeCount)
+    {
+        return 3;
+    }
+
+    int32 typeOffset = typeId * 3;
+    int32 kind
+        = Host.StandaloneRewrittenTypeFacts[typeOffset];
+    int32 code
+        = Host.StandaloneRewrittenTypeFacts[typeOffset + 1];
+    int32 writable
+        = Host.StandaloneRewrittenTypeFacts[typeOffset + 2];
+    if (kind == 0)
+    {
+        if (code < 0 || code > 255 || writable != 0)
+        {
+            return 3;
+        }
+        *typeSpecRefResult
+            = uint32(0xF200_0000) | uint32(code);
+        return 0;
+    }
+    if (kind != 1 || code <= 0 || code > 255
+        || writable < 0 || writable > 1)
+    {
+        return 2;
+    }
+
+    int32 row
+        = Host.StandaloneWriterTypeSpecRowByTypeId[typeId];
+    if (row == 0)
+    {
+        int32 count = Host.StandaloneWriterTypeSpecCount[0];
+        if (count < 0
+            || count >= Host.StandaloneWriterTypeSpecOrder.Length)
+        {
+            return 3;
+        }
+        row = count + 1;
+        Host.StandaloneWriterTypeSpecCount[0] = row;
+        Host.StandaloneWriterTypeSpecOrder[count] = typeId;
+        Host.StandaloneWriterTypeSpecRowByTypeId[typeId] = row;
+    }
+    *typeSpecRefResult
+        = uint32(0x1100_0000) | uint32(row);
+    return 0;
+}
+
+int32 BuildStandaloneWriterTypeSpecInventory()
+{
+    int32 methodCount
+        = Host.StandaloneRewrittenLocalCallableCount[0]
+            + Host.StandaloneRewrittenImportedCallableCount[0];
+    if (methodCount <= 0
+        || methodCount
+            > Host.StandaloneRewrittenCallableCount[0])
+    {
+        return 3;
+    }
+
+    Host.StandaloneWriterTypeSpecCount[0] = 0;
+    for (mut int32 typeId = 0;
+        typeId < Host.StandaloneWriterTypeSpecRowByTypeId.Length;
+        typeId = typeId + 1)
+    {
+        Host.StandaloneWriterTypeSpecRowByTypeId[typeId] = 0;
+    }
+    for (mut int32 methodId = 0;
+        methodId < methodCount;
+        methodId = methodId + 1)
+    {
+        init uint32 ignoredResultType;
+        int32 resultStatus = EnsureStandaloneWriterTypeSpec(
+            GetStandaloneWriterMethodResultTypeId(methodId),
+            ref init ignoredResultType);
+        if (resultStatus != 0)
+        {
+            return resultStatus;
+        }
+        int32 parameterCount
+            = GetStandaloneWriterMethodParameterCount(methodId);
+        if (parameterCount < 0 || parameterCount > 65_536)
+        {
+            return 3;
+        }
+        for (mut int32 ordinal = 0;
+            ordinal < parameterCount;
+            ordinal = ordinal + 1)
+        {
+            init uint32 ignoredParameterType;
+            int32 parameterStatus = EnsureStandaloneWriterTypeSpec(
+                GetStandaloneWriterMethodParameterTypeId(
+                    methodId, ordinal),
+                ref init ignoredParameterType);
+            if (parameterStatus != 0)
+            {
+                return parameterStatus;
+            }
+        }
+    }
+
+    int32 bodyCount
+        = Host.StandaloneRewrittenNormalizedBodyCount[0];
+    if (bodyCount != Host.StandaloneRewrittenLocalCallableCount[0])
+    {
+        return 3;
+    }
+    for (mut int32 bodyId = 0;
+        bodyId < bodyCount;
+        bodyId = bodyId + 1)
+    {
+        int32 bodyOffset = bodyId * 12;
+        int32 homeFirst
+            = Host.StandaloneRewrittenNormalizedBodies[
+                bodyOffset + 1];
+        int32 homeCount
+            = Host.StandaloneRewrittenNormalizedBodies[
+                bodyOffset + 2];
+        if (homeFirst < 0 || homeCount < 0
+            || homeFirst > Host.StandaloneRewrittenNormalizedHomeCount[0]
+                - homeCount)
+        {
+            return 3;
+        }
+        for (mut int32 localHome = 0;
+            localHome < homeCount;
+            localHome = localHome + 1)
+        {
+            int32 homeTypeId
+                = Host.StandaloneRewrittenNormalizedHomes[
+                    (homeFirst + localHome) * 5 + 3];
+            init uint32 ignoredHomeType;
+            int32 homeStatus = EnsureStandaloneWriterTypeSpec(
+                homeTypeId, ref init ignoredHomeType);
+            if (homeStatus != 0)
+            {
+                return homeStatus;
+            }
+        }
+    }
+
+    int32 constantCount
+        = Host.StandaloneRewrittenNormalizedConstantCount[0];
+    if (constantCount < 0
+        || constantCount
+            > Host.StandaloneRewrittenNormalizedConstants.Length / 4)
+    {
+        return 3;
+    }
+    for (mut int32 constantId = 0;
+        constantId < constantCount;
+        constantId = constantId + 1)
+    {
+        init uint32 ignoredConstantType;
+        int32 constantStatus = EnsureStandaloneWriterTypeSpec(
+            Host.StandaloneRewrittenNormalizedConstants[
+                constantId * 4 + 1],
+            ref init ignoredConstantType);
+        if (constantStatus != 0)
+        {
+            return constantStatus;
+        }
+    }
+    return 0;
+}
+
+int32 WriteStandaloneWriterTypeSpecSection()
+{
+    int32 rowCount = Host.StandaloneWriterTypeSpecCount[0];
+    if (rowCount == 0)
+    {
+        return 0;
+    }
+    if (rowCount < 0
+        || rowCount > Host.StandaloneWriterTypeSpecOrder.Length)
+    {
+        return 3;
+    }
+
+    int32 sectionStart = Host.StandaloneWriterOutputByteCount[0];
+    for (mut int32 offset = 0;
+        offset <= rowCount;
+        offset = offset + 1)
+    {
+        int32 status = AppendStandaloneWriterWord(
+            uint32(offset * 6));
+        if (status != 0)
+        {
+            return status;
+        }
+    }
+    for (mut int32 row = 0;
+        row < rowCount;
+        row = row + 1)
+    {
+        int32 typeId
+            = Host.StandaloneWriterTypeSpecOrder[row];
+        if (typeId <= 0
+            || typeId > Host.StandaloneRewrittenTypeFactCount[0])
+        {
+            return 3;
+        }
+        int32 factOffset = typeId * 3;
+        int32 typeKind
+            = Host.StandaloneRewrittenTypeFacts[factOffset];
+        int32 scalarCode
+            = Host.StandaloneRewrittenTypeFacts[factOffset + 1];
+        int32 writable
+            = Host.StandaloneRewrittenTypeFacts[factOffset + 2];
+        if (typeKind != 1 || scalarCode <= 0
+            || scalarCode > 255 || writable < 0 || writable > 1)
+        {
+            return 3;
+        }
+        int32 status = AppendStandaloneWriterByte(0x0E);
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterByte(writable);
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterWord(
+            uint32(0xF200_0000) | uint32(scalarCode));
+        if (status != 0) { return status; }
+    }
+    return FinishStandaloneWriterSection(
+        0x0011, rowCount, sectionStart);
+}
+
+int32 GetStandaloneWriterScalarWidth(int32 typeId,
+    int32 valueLow, int32 valueHigh)
+{
+    if (typeId <= 0
+        || typeId > Host.StandaloneRewrittenTypeFactCount[0])
+    {
+        return -1;
+    }
+    int32 typeOffset = typeId * 3;
+    if (Host.StandaloneRewrittenTypeFacts[typeOffset] != 0)
+    {
+        return -1;
+    }
+    int32 code
+        = Host.StandaloneRewrittenTypeFacts[typeOffset + 1];
+    if (Host.StandaloneRewrittenTypeFacts[typeOffset + 2] != 0)
+    {
+        return -1;
+    }
+    if (code == 1)
+    {
+        return (valueLow == 0 || valueLow == 1) && valueHigh == 0
+            ? 1 : -1;
+    }
+    if (code == 3)
+    {
+        return valueLow >= 0 && valueLow <= 0xFFFF
+            && valueHigh == 0 ? 2 : -1;
+    }
+    if (code == 0x06)
+    {
+        return valueLow >= -128 && valueLow <= 127
+            && valueHigh == 0 ? 1 : -1;
+    }
+    if (code == 0x07)
+    {
+        return valueLow >= 0 && valueLow <= 0xFF
+            && valueHigh == 0 ? 1 : -1;
+    }
+    if (code == 0x08 || code == 0x0D)
+    {
+        return valueHigh == 0 ? 4 : -1;
+    }
+    if (code == 0x09 || code == 0x0E)
+    {
+        return 8;
+    }
+    return -1;
+}
+
+int32 GetStandaloneWriterHashSlot(int32 hash,
+    int32 capacity)
+{
+    if (capacity <= 0)
+    {
+        return -1;
+    }
+    return (hash & 0x7FFF_FFFF) % capacity;
+}
+
+int32 GetStandaloneWriterConstantHash(int32 typeId,
+    int32 valueLow, int32 valueHigh)
+{
+    mut int32 hash = 0x5D58_8B65;
+    hash = ((hash << 5) | (hash >>> 27)) ^ typeId;
+    hash = ((hash << 5) | (hash >>> 27)) ^ valueLow;
+    hash = ((hash << 5) | (hash >>> 27)) ^ valueHigh;
+    return hash;
+}
+
+int32 GetStandaloneWriterBlobHash(int32 width,
+    int32 valueLow, int32 valueHigh)
+{
+    mut int32 hash = 0x5D58_8B65;
+    hash = ((hash << 5) | (hash >>> 27)) ^ width;
+    hash = ((hash << 5) | (hash >>> 27)) ^ valueLow;
+    hash = ((hash << 5) | (hash >>> 27)) ^ valueHigh;
+    return hash;
+}
+
+int32 TryGetOrAddStandaloneWriterBlob(int32 width,
+    int32 valueLow, int32 valueHigh,
+    ref<init int32> blobRowResult)
+    ensure return == 0 ? *blobRowResult is init : true
+{
+    if (width != 1 && width != 2 && width != 4 && width != 8)
+    {
+        return 2;
+    }
+    int32 low = valueLow;
+    int32 high = width == 8 ? valueHigh : 0;
+    if (width == 1) { low = low & 0xFF; }
+    else if (width == 2) { low = low & 0xFFFF; }
+
+    int32 slotCapacity
+        = Host.StandaloneWriterBlobHashSlots.Length;
+    int32 hash = GetStandaloneWriterBlobHash(width, low, high);
+    int32 slotIndex
+        = GetStandaloneWriterHashSlot(hash, slotCapacity);
+    if (slotIndex < 0)
+    {
+        return 3;
+    }
+    for (mut int32 probe = 0;
+        probe < slotCapacity;
+        probe = probe + 1)
+    {
+        int32 storedRow
+            = Host.StandaloneWriterBlobHashSlots[slotIndex];
+        if (storedRow == 0)
+        {
+            int32 count = Host.StandaloneWriterBlobCount[0];
+            if (count < 0
+                || count >= Host.StandaloneWriterBlobs.Length / 4)
+            {
+                return 3;
+            }
+            int32 row = count + 1;
+            int32 offset = count * 4;
+            Host.StandaloneWriterBlobs[offset] = width;
+            Host.StandaloneWriterBlobs[offset + 1] = low;
+            Host.StandaloneWriterBlobs[offset + 2] = high;
+            Host.StandaloneWriterBlobs[offset + 3] = row;
+            Host.StandaloneWriterBlobHashSlots[slotIndex] = row;
+            Host.StandaloneWriterBlobCount[0] = row;
+            *blobRowResult = row;
+            return 0;
+        }
+
+        int32 existingOffset = (storedRow - 1) * 4;
+        if (storedRow < 1
+            || storedRow > Host.StandaloneWriterBlobCount[0]
+            || Host.StandaloneWriterBlobs[existingOffset] != width
+            || Host.StandaloneWriterBlobs[existingOffset + 1] != low
+            || Host.StandaloneWriterBlobs[existingOffset + 2] != high)
+        {
+            if (storedRow < 1
+                || storedRow > Host.StandaloneWriterBlobCount[0])
+            {
+                return 3;
+            }
+        }
+        else
+        {
+            *blobRowResult = storedRow;
+            return 0;
+        }
+
+        slotIndex = slotIndex + 1;
+        if (slotIndex == slotCapacity)
+        {
+            slotIndex = 0;
+        }
+    }
+    return 3;
+}
+
+int32 TryGetOrAddStandaloneWriterConstant(int32 typeId,
+    int32 valueLow, int32 valueHigh, uint32 typeSpecRef,
+    int32 blobRow, ref<init int32> sourceRowResult)
+    ensure return == 0 ? *sourceRowResult is init : true
+{
+    int32 slotCapacity
+        = Host.StandaloneWriterConstantHashSlots.Length;
+    int32 hash = GetStandaloneWriterConstantHash(
+        typeId, valueLow, valueHigh);
+    int32 slotIndex
+        = GetStandaloneWriterHashSlot(hash, slotCapacity);
+    if (slotIndex < 0 || blobRow <= 0
+        || blobRow > Host.StandaloneWriterBlobCount[0])
+    {
+        return 3;
+    }
+    for (mut int32 probe = 0;
+        probe < slotCapacity;
+        probe = probe + 1)
+    {
+        int32 storedRow
+            = Host.StandaloneWriterConstantHashSlots[slotIndex];
+        if (storedRow == 0)
+        {
+            int32 count
+                = Host.StandaloneWriterUniqueConstantCount[0];
+            if (count < 0
+                || count
+                    >= Host.StandaloneWriterUniqueConstants.Length / 5
+                || count
+                    >= Host.StandaloneWriterUniqueConstantTypeSpecRefs.Length)
+            {
+                return 3;
+            }
+            int32 row = count + 1;
+            int32 offset = count * 5;
+            Host.StandaloneWriterUniqueConstants[offset] = typeId;
+            Host.StandaloneWriterUniqueConstants[offset + 1] = valueLow;
+            Host.StandaloneWriterUniqueConstants[offset + 2] = valueHigh;
+            Host.StandaloneWriterUniqueConstants[offset + 3] = blobRow;
+            Host.StandaloneWriterUniqueConstants[offset + 4] = row;
+            Host.StandaloneWriterUniqueConstantTypeSpecRefs[count]
+                = typeSpecRef;
+            Host.StandaloneWriterConstantHashSlots[slotIndex] = row;
+            Host.StandaloneWriterUniqueConstantCount[0] = row;
+            *sourceRowResult = row;
+            return 0;
+        }
+
+        if (storedRow < 1
+            || storedRow
+                > Host.StandaloneWriterUniqueConstantCount[0])
+        {
+            return 3;
+        }
+        int32 existingOffset = (storedRow - 1) * 5;
+        if (Host.StandaloneWriterUniqueConstants[
+                existingOffset] == typeId
+            && Host.StandaloneWriterUniqueConstants[
+                existingOffset + 1] == valueLow
+            && Host.StandaloneWriterUniqueConstants[
+                existingOffset + 2] == valueHigh)
+        {
+            if (Host.StandaloneWriterUniqueConstantTypeSpecRefs[
+                    storedRow - 1] != typeSpecRef)
+            {
+                return 3;
+            }
+            *sourceRowResult = storedRow;
+            return 0;
+        }
+
+        slotIndex = slotIndex + 1;
+        if (slotIndex == slotCapacity)
+        {
+            slotIndex = 0;
+        }
+    }
+    return 3;
+}
+
+int32 BuildStandaloneWriterConstantInventory()
+{
+    int32 constantCount
+        = Host.StandaloneRewrittenNormalizedConstantCount[0];
+    int32 bodyCount
+        = Host.StandaloneRewrittenNormalizedBodyCount[0];
+    if (constantCount < 0
+        || constantCount
+            > Host.StandaloneRewrittenNormalizedConstants.Length / 4
+        || bodyCount < 0
+        || bodyCount != Host.StandaloneRewrittenLocalCallableCount[0])
+    {
+        return 3;
+    }
+    Host.StandaloneWriterUniqueConstantCount[0] = 0;
+    Host.StandaloneWriterBlobCount[0] = 0;
+    for (mut int32 index = 0;
+        index < Host.StandaloneWriterConstantHashSlots.Length;
+        index = index + 1)
+    {
+        Host.StandaloneWriterConstantHashSlots[index] = 0;
+        Host.StandaloneWriterBlobHashSlots[index] = 0;
+    }
+    for (mut int32 bodyId = 0;
+        bodyId < bodyCount;
+        bodyId = bodyId + 1)
+    {
+        int32 bodyOffset = bodyId * 12;
+        int32 constantFirst
+            = Host.StandaloneRewrittenNormalizedBodies[
+                bodyOffset + 3];
+        int32 bodyConstantCount
+            = Host.StandaloneRewrittenNormalizedBodies[
+                bodyOffset + 4];
+        int32 operationFirst
+            = Host.StandaloneRewrittenNormalizedBodies[
+                bodyOffset + 9];
+        int32 operationCount
+            = Host.StandaloneRewrittenNormalizedBodies[
+                bodyOffset + 10];
+        if (constantFirst < 0 || bodyConstantCount < 0
+            || constantFirst > constantCount - bodyConstantCount
+            || operationFirst < 0 || operationCount < 0
+            || operationFirst
+                > Host.StandaloneRewrittenNormalizedOperationCount[0]
+                    - operationCount)
+        {
+            return 3;
+        }
+        for (mut int32 localOperation = 0;
+            localOperation < operationCount;
+            localOperation = localOperation + 1)
+        {
+            int32 operationOffset
+                = (operationFirst + localOperation) * 4;
+            if (Host.StandaloneRewrittenNormalizedOperations[
+                    operationOffset] != 1)
+            {
+                continue;
+            }
+            int32 constantLocal
+                = Host.StandaloneRewrittenNormalizedOperations[
+                    operationOffset + 1];
+            int32 constantId = constantFirst + constantLocal;
+            if (constantLocal < 0
+                || constantLocal >= bodyConstantCount
+                || constantId < 0 || constantId >= constantCount
+                || Host.StandaloneRewrittenNormalizedOperations[
+                    operationOffset + 2] != 0
+                || Host.StandaloneRewrittenNormalizedConstants[
+                    constantId * 4] != bodyId)
+            {
+                return 3;
+            }
+            if (Host.StandaloneWriterConstantSourceRowByConstant[
+                    constantId] != 0)
+            {
+                continue;
+            }
+            int32 constantOffset = constantId * 4;
+            int32 typeId
+                = Host.StandaloneRewrittenNormalizedConstants[
+                    constantOffset + 1];
+            int32 valueLow
+                = Host.StandaloneRewrittenNormalizedConstants[
+                    constantOffset + 2];
+            int32 valueHigh
+                = Host.StandaloneRewrittenNormalizedConstants[
+                    constantOffset + 3];
+            int32 width = GetStandaloneWriterScalarWidth(
+                typeId, valueLow, valueHigh);
+            if (width <= 0)
+            {
+                return 2;
+            }
+            init uint32 typeSpecRef;
+            int32 typeStatus = EnsureStandaloneWriterTypeSpec(
+                typeId, ref init typeSpecRef);
+            if (typeStatus != 0)
+            {
+                return typeStatus;
+            }
+            init int32 blobRow;
+            int32 blobStatus = TryGetOrAddStandaloneWriterBlob(
+                width, valueLow, valueHigh, ref init blobRow);
+            if (blobStatus != 0)
+            {
+                return blobStatus;
+            }
+            init int32 sourceRow;
+            int32 sourceStatus = TryGetOrAddStandaloneWriterConstant(
+                typeId, valueLow, valueHigh, typeSpecRef, blobRow,
+                ref init sourceRow);
+            if (sourceStatus != 0)
+            {
+                return sourceStatus;
+            }
+            Host.StandaloneWriterConstantSourceRowByConstant[
+                constantId] = sourceRow;
+        }
+    }
+    return 0;
+}
+
+int32 WriteStandaloneWriterBlobSection()
+{
+    int32 blobCount = Host.StandaloneWriterBlobCount[0];
+    if (blobCount == 0)
+    {
+        return 0;
+    }
+    if (blobCount < 0
+        || blobCount > Host.StandaloneWriterBlobs.Length / 4)
+    {
+        return 3;
+    }
+
+    int32 sectionStart = Host.StandaloneWriterOutputByteCount[0];
+    mut int32 dataLength = 0;
+    for (mut int32 row = 0;
+        row < blobCount;
+        row = row + 1)
+    {
+        int32 width
+            = Host.StandaloneWriterBlobs[row * 4];
+        if (width <= 0 || width > 8
+            || dataLength > int32.MaxValue - width)
+        {
+            return 3;
+        }
+        int32 status = AppendStandaloneWriterWord(uint32(dataLength));
+        if (status != 0)
+        {
+            return status;
+        }
+        dataLength = dataLength + width;
+    }
+    int32 status
+        = AppendStandaloneWriterWord(uint32(dataLength));
+    if (status != 0)
+    {
+        return status;
+    }
+
+    for (mut int32 row = 0;
+        row < blobCount;
+        row = row + 1)
+    {
+        int32 offset = row * 4;
+        int32 width
+            = Host.StandaloneWriterBlobs[offset];
+        int32 low
+            = Host.StandaloneWriterBlobs[offset + 1];
+        int32 high
+            = Host.StandaloneWriterBlobs[offset + 2];
+        for (mut int32 byteIndex = 0;
+            byteIndex < width;
+            byteIndex = byteIndex + 1)
+        {
+            int32 value = byteIndex < 4
+                ? (low >> (byteIndex * 8)) & 0xFF
+                : (high >> ((byteIndex - 4) * 8)) & 0xFF;
+            status = AppendStandaloneWriterByte(value);
+            if (status != 0)
+            {
+                return status;
+            }
+        }
+    }
+    return FinishStandaloneWriterSection(
+        0x0003, blobCount, sectionStart);
+}
+
+int32 WriteStandaloneWriterConstantSourceSection()
+{
+    int32 uniqueCount
+        = Host.StandaloneWriterUniqueConstantCount[0];
+    if (uniqueCount <= 0)
+    {
+        return uniqueCount == 0 ? 0 : 3;
+    }
+
+    int32 sectionStart = Host.StandaloneWriterOutputByteCount[0];
+    for (mut int32 row = 0;
+        row < uniqueCount;
+        row = row + 1)
+    {
+        int32 payloadRow = row + 1;
+        int32 status = AppendStandaloneWriterWord(1);
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterWord(uint32(payloadRow));
+        if (status != 0) { return status; }
+    }
+    return FinishStandaloneWriterSection(
+        0x0030, uniqueCount, sectionStart);
+}
+
+int32 WriteStandaloneWriterFrozenValueNodeSection()
+{
+    int32 uniqueCount
+        = Host.StandaloneWriterUniqueConstantCount[0];
+    if (uniqueCount <= 0)
+    {
+        return uniqueCount == 0 ? 0 : 3;
+    }
+
+    int32 sectionStart = Host.StandaloneWriterOutputByteCount[0];
+    for (mut int32 row = 0;
+        row < uniqueCount;
+        row = row + 1)
+    {
+        int32 uniqueOffset = row * 5;
+        uint32 typeSpecRef
+            = Host.StandaloneWriterUniqueConstantTypeSpecRefs[row];
+        int32 blobRow
+            = Host.StandaloneWriterUniqueConstants[
+                uniqueOffset + 3];
+        if (blobRow <= 0
+            || blobRow > Host.StandaloneWriterBlobCount[0])
+        {
+            return 3;
+        }
+        int32 status
+            = AppendStandaloneWriterWord(typeSpecRef);
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterByte(1);
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterByte(0);
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterHalfWord(0);
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterWord(uint32(blobRow));
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterWord(0);
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterWord(0);
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterWord(0);
+        if (status != 0) { return status; }
+    }
+    return FinishStandaloneWriterSection(
+        0x003F, uniqueCount, sectionStart);
+}
+
+int32 AddStandaloneWriterBodyTypeMapEntry(int32 typeFirst,
+    int32 typeId, ref<init int32> localIndexResult)
+    ensure return == 0 ? *localIndexResult is init : true
+{
+    if (typeId <= 0
+        || typeId >= Host.StandaloneWriterTypeMapIndexByTypeId.Length)
+    {
+        return 3;
+    }
+    int32 existing
+        = Host.StandaloneWriterTypeMapIndexByTypeId[typeId];
+    if (existing >= 0)
+    {
+        *localIndexResult = existing;
+        return 0;
+    }
+
+    int32 globalIndex = Host.StandaloneWriterTypeMapCount[0];
+    int32 localIndex = globalIndex - typeFirst;
+    if (localIndex < 0 || localIndex > 0xFFFF
+        || globalIndex >= Host.StandaloneWriterTypeMapTokens.Length)
+    {
+        return 3;
+    }
+    init uint32 token;
+    int32 status = EnsureStandaloneWriterTypeSpec(
+        typeId, ref init token);
+    if (status != 0)
+    {
+        return status;
+    }
+    Host.StandaloneWriterTypeMapTokens[globalIndex] = token;
+    Host.StandaloneWriterTypeMapCount[0] = globalIndex + 1;
+    Host.StandaloneWriterTypeMapIndexByTypeId[typeId] = localIndex;
+    *localIndexResult = localIndex;
+    return 0;
+}
+
+int32 AddStandaloneWriterBodyMethodMapEntry(int32 methodFirst,
+    int32 targetKind, int32 targetIndex,
+    ref<init int32> localIndexResult)
+    ensure return == 0 ? *localIndexResult is init : true
+{
+    int32 localCount
+        = Host.StandaloneRewrittenLocalCallableCount[0];
+    int32 importedCount
+        = Host.StandaloneRewrittenImportedCallableCount[0];
+    int32 token;
+    int32 existing;
+    if (targetKind == 1)
+    {
+        if (targetIndex < 0 || targetIndex >= localCount
+            || targetIndex
+                >= Host.StandaloneWriterLocalMethodMapIndices.Length)
+        {
+            return 3;
+        }
+        existing
+            = Host.StandaloneWriterLocalMethodMapIndices[targetIndex];
+        token = int32(0x1600_0000)
+            | (targetIndex + 1);
+    }
+    else if (targetKind == 2)
+    {
+        if (targetIndex < 0 || targetIndex >= importedCount
+            || targetIndex
+                >= Host.StandaloneWriterImportedMethodMapIndices.Length)
+        {
+            return 3;
+        }
+        existing
+            = Host.StandaloneWriterImportedMethodMapIndices[
+                targetIndex];
+        token = int32(0x1C00_0000)
+            | (targetIndex + 1);
+    }
+    else
+    {
+        return 3;
+    }
+
+    if (existing >= 0)
+    {
+        *localIndexResult = existing;
+        return 0;
+    }
+    int32 globalIndex = Host.StandaloneWriterMethodMapCount[0];
+    int32 localIndex = globalIndex - methodFirst;
+    if (localIndex < 0 || localIndex > 0xFFFF
+        || globalIndex >= Host.StandaloneWriterMethodMapTokens.Length)
+    {
+        return 3;
+    }
+    Host.StandaloneWriterMethodMapTokens[globalIndex]
+        = uint32(token);
+    Host.StandaloneWriterMethodMapCount[0] = globalIndex + 1;
+    if (targetKind == 1)
+    {
+        Host.StandaloneWriterLocalMethodMapIndices[targetIndex]
+            = localIndex;
+    }
+    else
+    {
+        Host.StandaloneWriterImportedMethodMapIndices[targetIndex]
+            = localIndex;
+    }
+    *localIndexResult = localIndex;
+    return 0;
+}
+
+int32 AddStandaloneWriterBodyConstantMapEntry(int32 constantFirst,
+    int32 constantId, ref<init int32> localIndexResult)
+    ensure return == 0 ? *localIndexResult is init : true
+{
+    if (constantId < 0
+        || constantId
+            >= Host.StandaloneWriterConstantSourceRowByConstant.Length
+        || constantId
+            >= Host.StandaloneWriterConstantMapIndices.Length)
+    {
+        return 3;
+    }
+    int32 sourceRow
+        = Host.StandaloneWriterConstantSourceRowByConstant[
+            constantId];
+    if (sourceRow <= 0
+        || sourceRow
+            > Host.StandaloneWriterUniqueConstantCount[0]
+        || sourceRow
+            >= Host.StandaloneWriterConstantMapIndexBySourceRow.Length)
+    {
+        return 3;
+    }
+    int32 existing
+        = Host.StandaloneWriterConstantMapIndexBySourceRow[sourceRow];
+    if (existing >= 0)
+    {
+        Host.StandaloneWriterConstantMapIndices[constantId]
+            = existing;
+        *localIndexResult = existing;
+        return 0;
+    }
+
+    int32 globalIndex = Host.StandaloneWriterConstantMapCount[0];
+    int32 localIndex = globalIndex - constantFirst;
+    if (localIndex < 0 || localIndex > 0xFFFF
+        || globalIndex
+            >= Host.StandaloneWriterConstantMapEntries.Length / 2)
+    {
+        return 3;
+    }
+    uint32 typeSpecRef
+        = Host.StandaloneWriterUniqueConstantTypeSpecRefs[
+            sourceRow - 1];
+    int32 offset = globalIndex * 2;
+    Host.StandaloneWriterConstantMapEntries[offset] = typeSpecRef;
+    Host.StandaloneWriterConstantMapEntries[offset + 1]
+        = uint32(sourceRow);
+    Host.StandaloneWriterConstantMapCount[0] = globalIndex + 1;
+    Host.StandaloneWriterConstantMapIndexBySourceRow[sourceRow]
+        = localIndex;
+    Host.StandaloneWriterConstantMapIndices[constantId] = localIndex;
+    *localIndexResult = localIndex;
+    return 0;
+}
+
+int32 GetStandaloneWriterOperationCodeLength(int32 bodyId,
+    int32 operationIndex, int32 callRecordIndex)
+{
+    int32 operationOffset = operationIndex * 4;
+    int32 kind
+        = Host.StandaloneRewrittenNormalizedOperations[
+            operationOffset];
+    int32 operand0
+        = Host.StandaloneRewrittenNormalizedOperations[
+            operationOffset + 1];
+    int32 operand1
+        = Host.StandaloneRewrittenNormalizedOperations[
+            operationOffset + 2];
+    if (Host.StandaloneRewrittenNormalizedOperations[
+            operationOffset + 3] != bodyId)
+    {
+        return -1;
+    }
+
+    if (kind == 1)
+    {
+        int32 bodyOffset = bodyId * 12;
+        int32 constantFirst
+            = Host.StandaloneRewrittenNormalizedBodies[
+                bodyOffset + 3];
+        int32 constantCount
+            = Host.StandaloneRewrittenNormalizedBodies[
+                bodyOffset + 4];
+        if (operand0 < 0 || operand0 >= constantCount
+            || operand1 != 0)
+        {
+            return -1;
+        }
+        int32 mapIndex
+            = Host.StandaloneWriterConstantMapIndices[
+                constantFirst + operand0];
+        return mapIndex == 0 ? 1
+            : mapIndex <= 15 ? 2
+            : mapIndex <= 0xFFFF ? 4 : -1;
+    }
+    if (kind == 2)
+    {
+        int32 bodyOffset = bodyId * 12;
+        int32 homeFirst
+            = Host.StandaloneRewrittenNormalizedBodies[
+                bodyOffset + 1];
+        int32 homeCount
+            = Host.StandaloneRewrittenNormalizedBodies[
+                bodyOffset + 2];
+        if (operand0 < 0 || operand0 >= homeCount
+            || operand1 != 0)
+        {
+            return -1;
+        }
+        int32 homeIndex = operand0;
+        return homeIndex == 0 ? 1
+            : homeIndex <= 15 ? 2
+            : homeIndex <= 0xFFFF ? 4 : -1;
+    }
+    if (kind == 3)
+    {
+        int32 bodyOffset = bodyId * 12;
+        int32 invokeFirst
+            = Host.StandaloneRewrittenNormalizedBodies[
+                bodyOffset + 5];
+        int32 invokeCount
+            = Host.StandaloneRewrittenNormalizedBodies[
+                bodyOffset + 6];
+        if (operand0 < 0 || operand0 >= invokeCount
+            || operand1 != 0 || callRecordIndex < 1
+            || callRecordIndex > 0xFFFF)
+        {
+            return -1;
+        }
+        int32 invokeId = invokeFirst + operand0;
+        Host.StandaloneWriterCallSiteRecordIndices[invokeId]
+            = callRecordIndex;
+        return callRecordIndex <= 255 ? 2 : 4;
+    }
+    if (kind == 4)
+    {
+        int32 bodyOffset = bodyId * 12;
+        int32 homeCount
+            = Host.StandaloneRewrittenNormalizedBodies[
+                bodyOffset + 2];
+        if (operand0 < 0 || operand0 >= homeCount
+            || operand1 != 0)
+        {
+            return -1;
+        }
+        return operand0 <= 255 ? 2 : 6;
+    }
+    if (kind == 5 && operand0 == 0 && operand1 == 0)
+    {
+        return 2;
+    }
+    return -1;
+}
+
+int32 BuildStandaloneWriterBodyPlans()
+{
+    int32 bodyCount
+        = Host.StandaloneRewrittenNormalizedBodyCount[0];
+    int32 localCount
+        = Host.StandaloneRewrittenLocalCallableCount[0];
+    if (bodyCount != localCount || bodyCount <= 0
+        || bodyCount > Host.StandaloneWriterBodyPlans.Length / 20)
+    {
+        return 3;
+    }
+    Host.StandaloneWriterBodyPlanCount[0] = 0;
+    Host.StandaloneWriterTypeMapCount[0] = 0;
+    Host.StandaloneWriterMethodMapCount[0] = 0;
+    Host.StandaloneWriterConstantMapCount[0] = 0;
+
+    for (mut int32 bodyId = 0;
+        bodyId < bodyCount;
+        bodyId = bodyId + 1)
+    {
+        int32 bodyOffset = bodyId * 12;
+        int32 homeFirst
+            = Host.StandaloneRewrittenNormalizedBodies[
+                bodyOffset + 1];
+        int32 homeCount
+            = Host.StandaloneRewrittenNormalizedBodies[
+                bodyOffset + 2];
+        int32 constantFirst
+            = Host.StandaloneRewrittenNormalizedBodies[
+                bodyOffset + 3];
+        int32 constantCount
+            = Host.StandaloneRewrittenNormalizedBodies[
+                bodyOffset + 4];
+        int32 invokeFirst
+            = Host.StandaloneRewrittenNormalizedBodies[
+                bodyOffset + 5];
+        int32 invokeCount
+            = Host.StandaloneRewrittenNormalizedBodies[
+                bodyOffset + 6];
+        int32 inputFirst
+            = Host.StandaloneRewrittenNormalizedBodies[
+                bodyOffset + 7];
+        int32 inputCount
+            = Host.StandaloneRewrittenNormalizedBodies[
+                bodyOffset + 8];
+        int32 operationFirst
+            = Host.StandaloneRewrittenNormalizedBodies[
+                bodyOffset + 9];
+        int32 operationCount
+            = Host.StandaloneRewrittenNormalizedBodies[
+                bodyOffset + 10];
+        int32 terminalKind
+            = Host.StandaloneRewrittenNormalizedBodies[
+                bodyOffset + 11];
+        if (Host.StandaloneRewrittenNormalizedBodies[bodyOffset]
+                != bodyId
+            || homeFirst < 0 || homeCount < 0
+            || homeFirst
+                > Host.StandaloneRewrittenNormalizedHomeCount[0]
+                    - homeCount
+            || constantFirst < 0 || constantCount < 0
+            || constantFirst
+                > Host.StandaloneRewrittenNormalizedConstantCount[0]
+                    - constantCount
+            || invokeFirst < 0 || invokeCount < 0
+            || invokeFirst > Host.StandaloneRewrittenInvokeCount[0]
+                - invokeCount
+            || inputFirst < 0 || inputCount < 0
+            || inputFirst > Host.StandaloneRewrittenInvokeInputCount[0]
+                - inputCount
+            || operationFirst < 0 || operationCount < 0
+            || operationFirst
+                > Host.StandaloneRewrittenNormalizedOperationCount[0]
+                    - operationCount
+            || invokeCount > 65_535)
+        {
+            return 3;
+        }
+
+        int32 typeFirst = Host.StandaloneWriterTypeMapCount[0];
+        for (mut int32 typeId = 0;
+            typeId < Host.StandaloneWriterTypeMapIndexByTypeId.Length;
+            typeId = typeId + 1)
+        {
+            Host.StandaloneWriterTypeMapIndexByTypeId[typeId] = -1;
+        }
+        for (mut int32 localHome = 0;
+            localHome < homeCount;
+            localHome = localHome + 1)
+        {
+            int32 homeIndex = homeFirst + localHome;
+            int32 homeOffset = homeIndex * 5;
+            if (Host.StandaloneRewrittenNormalizedHomes[
+                    homeOffset] != bodyId)
+            {
+                return 3;
+            }
+            init int32 typeMapIndex;
+            int32 typeStatus = AddStandaloneWriterBodyTypeMapEntry(
+                typeFirst,
+                Host.StandaloneRewrittenNormalizedHomes[
+                    homeOffset + 3],
+                ref init typeMapIndex);
+            if (typeStatus != 0)
+            {
+                return typeStatus;
+            }
+            Host.StandaloneWriterHomeTypeMapIndices[homeIndex]
+                = typeMapIndex;
+        }
+        int32 typeMapCount
+            = Host.StandaloneWriterTypeMapCount[0] - typeFirst;
+
+        int32 methodFirst = Host.StandaloneWriterMethodMapCount[0];
+        for (mut int32 target = 0;
+            target < Host.StandaloneWriterLocalMethodMapIndices.Length;
+            target = target + 1)
+        {
+            Host.StandaloneWriterLocalMethodMapIndices[target] = -1;
+        }
+        for (mut int32 target = 0;
+            target
+                < Host.StandaloneWriterImportedMethodMapIndices.Length;
+            target = target + 1)
+        {
+            Host.StandaloneWriterImportedMethodMapIndices[target] = -1;
+        }
+        for (mut int32 localInvoke = 0;
+            localInvoke < invokeCount;
+            localInvoke = localInvoke + 1)
+        {
+            int32 invokeId = invokeFirst + localInvoke;
+            Host.StandaloneWriterInvokeMethodMapIndices[invokeId] = -1;
+            Host.StandaloneWriterCallSiteRecordIndices[invokeId] = -1;
+        }
+
+        int32 constantMapFirst
+            = Host.StandaloneWriterConstantMapCount[0];
+        for (mut int32 sourceRow = 0;
+            sourceRow
+                < Host.StandaloneWriterConstantMapIndexBySourceRow.Length;
+            sourceRow = sourceRow + 1)
+        {
+            Host.StandaloneWriterConstantMapIndexBySourceRow[
+                sourceRow] = -1;
+        }
+
+        int32 operationCallCount = 0;
+        int32 recordDataLength = 8;
+        int32 codeLength = 0;
+        for (mut int32 localOperation = 0;
+            localOperation < operationCount;
+            localOperation = localOperation + 1)
+        {
+            int32 operationIndex = operationFirst + localOperation;
+            int32 operationKind
+                = Host.StandaloneRewrittenNormalizedOperations[
+                    operationIndex * 4];
+            int32 operationOperand
+                = Host.StandaloneRewrittenNormalizedOperations[
+                    operationIndex * 4 + 1];
+            if (operationKind == 1)
+            {
+                if (operationOperand < 0
+                    || operationOperand >= constantCount)
+                {
+                    return 3;
+                }
+                init int32 constantMapIndex;
+                int32 constantStatus
+                    = AddStandaloneWriterBodyConstantMapEntry(
+                        constantMapFirst,
+                        constantFirst + operationOperand,
+                        ref init constantMapIndex);
+                if (constantStatus != 0)
+                {
+                    return constantStatus;
+                }
+            }
+            if (operationKind == 3)
+            {
+                if (operationOperand < 0
+                    || operationOperand >= invokeCount)
+                {
+                    return 3;
+                }
+                int32 invokeId = invokeFirst + operationOperand;
+                if (Host.StandaloneWriterCallSiteRecordIndices[
+                        invokeId] != -1)
+                {
+                    return 3;
+                }
+                int32 invokeOffset = invokeId * 10;
+                int32 targetKind
+                    = Host.StandaloneRewrittenInvokes[invokeOffset];
+                int32 targetIndex
+                    = Host.StandaloneRewrittenInvokes[
+                        invokeOffset + 1];
+                int32 expectedCallableId
+                    = Host.StandaloneRewrittenInvokes[
+                        invokeOffset + 2];
+                if (targetKind == 1
+                    ? (targetIndex < 0
+                        || targetIndex >= localCount
+                        || Host.StandaloneRewrittenLocalCallables[
+                            targetIndex * 3 + 1]
+                            != expectedCallableId)
+                    : targetKind == 2
+                        ? (targetIndex < 0
+                            || targetIndex
+                                >= Host.StandaloneRewrittenImportedCallableCount[0]
+                            || Host.StandaloneRewrittenImportedCallables[
+                                targetIndex * 8 + 4]
+                                != expectedCallableId)
+                        : true)
+                {
+                    return 3;
+                }
+                init int32 methodMapIndex;
+                int32 methodStatus
+                    = AddStandaloneWriterBodyMethodMapEntry(
+                        methodFirst, targetKind, targetIndex,
+                        ref init methodMapIndex);
+                if (methodStatus != 0)
+                {
+                    return methodStatus;
+                }
+                Host.StandaloneWriterInvokeMethodMapIndices[
+                    invokeId] = methodMapIndex;
+                operationCallCount = operationCallCount + 1;
+
+                int32 inputCountForCall
+                    = Host.StandaloneRewrittenInvokes[
+                        invokeOffset + 4];
+                int32 prepCount
+                    = Host.StandaloneRewrittenInvokes[
+                        invokeOffset + 8];
+                if (inputCountForCall < 0
+                    || inputCountForCall > 65_536
+                    || prepCount != 0
+                    || recordDataLength
+                        > int32.MaxValue - 20
+                            - (inputCountForCall * 4))
+                {
+                    return prepCount != 0 ? 2 : 3;
+                }
+                recordDataLength = recordDataLength + 20
+                    + (inputCountForCall * 4);
+            }
+
+            int32 callRecordIndex = operationCallCount;
+            int32 instructionLength
+                = GetStandaloneWriterOperationCodeLength(
+                    bodyId, operationIndex, callRecordIndex);
+            if (instructionLength <= 0
+                || codeLength > int32.MaxValue - instructionLength)
+            {
+                return 3;
+            }
+            codeLength = codeLength + instructionLength;
+        }
+        if (operationCallCount != invokeCount
+            || recordDataLength > int32.MaxValue
+            || codeLength <= 0)
+        {
+            return 3;
+        }
+        for (mut int32 localInvoke = 0;
+            localInvoke < invokeCount;
+            localInvoke = localInvoke + 1)
+        {
+            int32 invokeId = invokeFirst + localInvoke;
+            if (Host.StandaloneWriterCallSiteRecordIndices[
+                    invokeId] <= 0
+                || Host.StandaloneWriterInvokeMethodMapIndices[
+                    invokeId] < 0)
+            {
+                return 3;
+            }
+        }
+
+        int32 methodMapCount
+            = Host.StandaloneWriterMethodMapCount[0] - methodFirst;
+        int32 constantMapCount
+            = Host.StandaloneWriterConstantMapCount[0]
+                - constantMapFirst;
+        if (methodMapCount > 65_536
+            || typeMapCount > 65_536
+            || constantMapCount > 65_536)
+        {
+            return 3;
+        }
+        int32 recordCount = invokeCount + 1;
+        int32 mapMask = (homeCount != 0 ? 1 : 0)
+            | (typeMapCount != 0 ? 2 : 0)
+            | (methodMapCount != 0 ? 4 : 0)
+            | (constantMapCount != 0 ? 16 : 0);
+        int32 mapCount = 0;
+        if ((mapMask & 1) != 0) { mapCount = mapCount + 1; }
+        if ((mapMask & 2) != 0) { mapCount = mapCount + 1; }
+        if ((mapMask & 4) != 0) { mapCount = mapCount + 1; }
+        if ((mapMask & 8) != 0) { mapCount = mapCount + 1; }
+        if ((mapMask & 16) != 0) { mapCount = mapCount + 1; }
+        int32 bodySize = 17 + (mapCount * 4)
+            + (homeCount * 8) + (typeMapCount * 4)
+            + (methodMapCount * 4) + (constantMapCount * 8)
+            + 12 + ((recordCount + 1) * 4)
+            + recordDataLength + codeLength;
+        if (bodySize <= 0 || bodySize > int32.MaxValue)
+        {
+            return 3;
+        }
+
+        int32 planOffset = bodyId * 20;
+        Host.StandaloneWriterBodyPlans[planOffset] = bodyId;
+        Host.StandaloneWriterBodyPlans[planOffset + 1] = mapMask;
+        Host.StandaloneWriterBodyPlans[planOffset + 2] = homeFirst;
+        Host.StandaloneWriterBodyPlans[planOffset + 3] = homeCount;
+        Host.StandaloneWriterBodyPlans[planOffset + 4] = typeFirst;
+        Host.StandaloneWriterBodyPlans[planOffset + 5] = typeMapCount;
+        Host.StandaloneWriterBodyPlans[planOffset + 6] = methodFirst;
+        Host.StandaloneWriterBodyPlans[planOffset + 7] = methodMapCount;
+        Host.StandaloneWriterBodyPlans[planOffset + 8]
+            = constantMapFirst;
+        Host.StandaloneWriterBodyPlans[planOffset + 9]
+            = constantMapCount;
+        Host.StandaloneWriterBodyPlans[planOffset + 10]
+            = invokeFirst;
+        Host.StandaloneWriterBodyPlans[planOffset + 11]
+            = invokeCount;
+        Host.StandaloneWriterBodyPlans[planOffset + 12]
+            = inputFirst;
+        Host.StandaloneWriterBodyPlans[planOffset + 13]
+            = inputCount;
+        Host.StandaloneWriterBodyPlans[planOffset + 14]
+            = operationFirst;
+        Host.StandaloneWriterBodyPlans[planOffset + 15]
+            = operationCount;
+        Host.StandaloneWriterBodyPlans[planOffset + 16]
+            = recordDataLength;
+        Host.StandaloneWriterBodyPlans[planOffset + 17] = codeLength;
+        Host.StandaloneWriterBodyPlans[planOffset + 18] = bodySize;
+        Host.StandaloneWriterBodyPlans[planOffset + 19] = recordCount;
+        Host.StandaloneWriterBodyPlanCount[0] = bodyId + 1;
+    }
+    return 0;
+}
+
+int32 WriteStandaloneWriterCallSiteRecord(int32 bodyId,
+    int32 invokeId)
+{
+    int32 invokeOffset = invokeId * 10;
+    int32 targetKind
+        = Host.StandaloneRewrittenInvokes[invokeOffset];
+    int32 resultKind
+        = Host.StandaloneRewrittenInvokes[invokeOffset + 5];
+    int32 resultIndex
+        = Host.StandaloneRewrittenInvokes[invokeOffset + 6];
+    int32 inputFirst
+        = Host.StandaloneRewrittenInvokes[invokeOffset + 3];
+    int32 inputCount
+        = Host.StandaloneRewrittenInvokes[invokeOffset + 4];
+    int32 prepFirst
+        = Host.StandaloneRewrittenInvokes[invokeOffset + 7];
+    int32 prepCount
+        = Host.StandaloneRewrittenInvokes[invokeOffset + 8];
+    int32 mapIndex
+        = Host.StandaloneWriterInvokeMethodMapIndices[invokeId];
+    int32 bodyOffset = bodyId * 12;
+    int32 homeFirst
+        = Host.StandaloneRewrittenNormalizedBodies[
+            bodyOffset + 1];
+    int32 homeCount
+        = Host.StandaloneRewrittenNormalizedBodies[
+            bodyOffset + 2];
+    if ((targetKind != 1 && targetKind != 2)
+        || mapIndex < 0 || mapIndex > 0xFFFF
+        || resultKind < 0 || resultKind > 2
+        || (resultKind == 0 && resultIndex != 0)
+        || (resultKind == 1
+            && (resultIndex < 0 || resultIndex > 15
+                || resultIndex == 14))
+        || (resultKind == 2
+            && (resultIndex < 0 || resultIndex >= homeCount))
+        || inputFirst < 0 || inputCount < 0
+        || inputFirst
+            > Host.StandaloneRewrittenInvokeInputCount[0]
+                - inputCount
+        || prepFirst < 0 || prepCount != 0
+        || prepFirst
+            > Host.StandaloneRewrittenInvokeInputCount[0])
+    {
+        return prepCount != 0 ? 2 : 3;
+    }
+
+    int32 status = AppendStandaloneWriterByte(0x02);
+    if (status != 0) { return status; }
+    status = AppendStandaloneWriterByte(0);
+    if (status != 0) { return status; }
+    status = AppendStandaloneWriterHalfWord(0);
+    if (status != 0) { return status; }
+    status = AppendStandaloneWriterByte(1);
+    if (status != 0) { return status; }
+    status = AppendStandaloneWriterByte(resultKind);
+    if (status != 0) { return status; }
+    status = AppendStandaloneWriterHalfWord(uint32(mapIndex));
+    if (status != 0) { return status; }
+    status = AppendStandaloneWriterHalfWord(uint32(resultIndex));
+    if (status != 0) { return status; }
+    status = AppendStandaloneWriterWord(uint32(inputCount));
+    if (status != 0) { return status; }
+    status = AppendStandaloneWriterWord(0);
+    if (status != 0) { return status; }
+
+    for (mut int32 inputOrdinal = 0;
+        inputOrdinal < inputCount;
+        inputOrdinal = inputOrdinal + 1)
+    {
+        int32 inputOffset = (inputFirst + inputOrdinal) * 3;
+        int32 selectorKind
+            = Host.StandaloneRewrittenInvokeInputs[inputOffset];
+        int32 sourceUse
+            = Host.StandaloneRewrittenInvokeInputs[inputOffset + 1];
+        int32 selectorIndex
+            = Host.StandaloneRewrittenInvokeInputs[inputOffset + 2];
+        if (selectorKind < 0 || selectorKind > 2
+            || (selectorKind == 0
+                ? sourceUse != 0 || selectorIndex != 0
+                : (sourceUse < 1 || sourceUse > 5)
+                    || (selectorKind == 1
+                        && (selectorIndex < 0
+                            || selectorIndex > 15))
+                    || (selectorKind == 2
+                        && (selectorIndex < 0
+                            || selectorIndex >= homeCount))))
+        {
+            return 3;
+        }
+        status = AppendStandaloneWriterByte(selectorKind);
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterByte(sourceUse);
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterHalfWord(
+            uint32(selectorIndex));
+        if (status != 0) { return status; }
+    }
+    return 0;
+}
+
+int32 WriteStandaloneWriterBodyCode(int32 bodyId,
+    int32 codeLength)
+{
+    int32 bodyOffset = bodyId * 20;
+    int32 operationFirst
+        = Host.StandaloneWriterBodyPlans[bodyOffset + 14];
+    int32 operationCount
+        = Host.StandaloneWriterBodyPlans[bodyOffset + 15];
+    int32 constantFirst
+        = Host.StandaloneRewrittenNormalizedBodies[
+            bodyId * 12 + 3];
+    int32 invokeFirst
+        = Host.StandaloneRewrittenNormalizedBodies[
+            bodyId * 12 + 5];
+    int32 codeStart
+        = Host.StandaloneWriterOutputByteCount[0];
+    mut int32 observedCallCount = 0;
+    for (mut int32 localOperation = 0;
+        localOperation < operationCount;
+        localOperation = localOperation + 1)
+    {
+        int32 operationOffset
+            = (operationFirst + localOperation) * 4;
+        int32 kind
+            = Host.StandaloneRewrittenNormalizedOperations[
+                operationOffset];
+        int32 operand0
+            = Host.StandaloneRewrittenNormalizedOperations[
+                operationOffset + 1];
+        int32 operand1
+            = Host.StandaloneRewrittenNormalizedOperations[
+                operationOffset + 2];
+        int32 status;
+        if (kind == 1)
+        {
+            if (operand0 < 0
+                || operand0
+                    >= Host.StandaloneRewrittenNormalizedBodies[
+                        bodyId * 12 + 4]
+                || operand1 != 0)
+            {
+                return 3;
+            }
+            int32 mapIndex
+                = Host.StandaloneWriterConstantMapIndices[
+                    constantFirst + operand0];
+            if (mapIndex == 0)
+            {
+                status = AppendStandaloneWriterByte(0x09);
+                if (status != 0) { return status; }
+            }
+            else if (mapIndex > 0 && mapIndex <= 15)
+            {
+                status = AppendStandaloneWriterByte(0x16);
+                if (status != 0) { return status; }
+                status = AppendStandaloneWriterByte(mapIndex << 4);
+                if (status != 0) { return status; }
+            }
+            else if (mapIndex > 15 && mapIndex <= 0xFFFF)
+            {
+                status = AppendStandaloneWriterByte(0xD4);
+                if (status != 0) { return status; }
+                status = AppendStandaloneWriterByte(0);
+                if (status != 0) { return status; }
+                status = AppendStandaloneWriterHalfWord(
+                    uint32(mapIndex));
+                if (status != 0) { return status; }
+            }
+            else
+            {
+                return 3;
+            }
+        }
+        else if (kind == 2)
+        {
+            int32 homeCount
+                = Host.StandaloneRewrittenNormalizedBodies[
+                    bodyId * 12 + 2];
+            if (operand0 < 0 || operand0 >= homeCount
+                || operand1 != 0)
+            {
+                return 3;
+            }
+            if (operand0 == 0)
+            {
+                status = AppendStandaloneWriterByte(0x07);
+                if (status != 0) { return status; }
+            }
+            else if (operand0 <= 15)
+            {
+                status = AppendStandaloneWriterByte(0x14);
+                if (status != 0) { return status; }
+                status = AppendStandaloneWriterByte(operand0);
+                if (status != 0) { return status; }
+            }
+            else if (operand0 <= 0xFFFF)
+            {
+                status = AppendStandaloneWriterByte(0xD6);
+                if (status != 0) { return status; }
+                status = AppendStandaloneWriterByte(0x10);
+                if (status != 0) { return status; }
+                status = AppendStandaloneWriterHalfWord(
+                    uint32(operand0));
+                if (status != 0) { return status; }
+            }
+            else
+            {
+                return 3;
+            }
+        }
+        else if (kind == 3)
+        {
+            int32 invokeCount
+                = Host.StandaloneRewrittenNormalizedBodies[
+                    bodyId * 12 + 6];
+            if (operand0 < 0 || operand0 >= invokeCount
+                || operand1 != 0)
+            {
+                return 3;
+            }
+            int32 invokeId = invokeFirst + operand0;
+            int32 recordIndex
+                = Host.StandaloneWriterCallSiteRecordIndices[
+                    invokeId];
+            if (recordIndex < 1 || recordIndex > 0xFFFF)
+            {
+                return 3;
+            }
+            if (recordIndex <= 255)
+            {
+                status = AppendStandaloneWriterByte(0x90);
+                if (status != 0) { return status; }
+                status = AppendStandaloneWriterByte(recordIndex);
+                if (status != 0) { return status; }
+            }
+            else
+            {
+                status = AppendStandaloneWriterByte(0xE0);
+                if (status != 0) { return status; }
+                status = AppendStandaloneWriterByte(0);
+                if (status != 0) { return status; }
+                status = AppendStandaloneWriterHalfWord(
+                    uint32(recordIndex));
+                if (status != 0) { return status; }
+            }
+            observedCallCount = observedCallCount + 1;
+        }
+        else if (kind == 4)
+        {
+            int32 homeCount
+                = Host.StandaloneRewrittenNormalizedBodies[
+                    bodyId * 12 + 2];
+            if (operand0 < 0 || operand0 >= homeCount
+                || operand1 != 0)
+            {
+                return 3;
+            }
+            if (operand0 <= 255)
+            {
+                status = AppendStandaloneWriterByte(0xB8);
+                if (status != 0) { return status; }
+                status = AppendStandaloneWriterByte(operand0);
+                if (status != 0) { return status; }
+            }
+            else
+            {
+                status = AppendStandaloneWriterByte(0xD5);
+                if (status != 0) { return status; }
+                status = AppendStandaloneWriterByte(0);
+                if (status != 0) { return status; }
+                status = AppendStandaloneWriterHalfWord(
+                    uint32(operand0));
+                if (status != 0) { return status; }
+                status = AppendStandaloneWriterByte(0x17);
+                if (status != 0) { return status; }
+                status = AppendStandaloneWriterByte(0);
+                if (status != 0) { return status; }
+            }
+        }
+        else if (kind == 5 && operand0 == 0 && operand1 == 0)
+        {
+            status = AppendStandaloneWriterByte(0x18);
+            if (status != 0) { return status; }
+            status = AppendStandaloneWriterByte(0);
+            if (status != 0) { return status; }
+        }
+        else
+        {
+            return 3;
+        }
+    }
+    int32 invokeCount
+        = Host.StandaloneRewrittenNormalizedBodies[
+            bodyId * 12 + 6];
+    if (observedCallCount != invokeCount
+        || Host.StandaloneWriterOutputByteCount[0] - codeStart
+            != codeLength)
+    {
+        return 3;
+    }
+    return 0;
+}
+
+int32 WriteStandaloneWriterBody(int32 bodyId)
+{
+    int32 planOffset = bodyId * 20;
+    int32 mapMask
+        = Host.StandaloneWriterBodyPlans[planOffset + 1];
+    int32 homeFirst
+        = Host.StandaloneWriterBodyPlans[planOffset + 2];
+    int32 homeCount
+        = Host.StandaloneWriterBodyPlans[planOffset + 3];
+    int32 typeFirst
+        = Host.StandaloneWriterBodyPlans[planOffset + 4];
+    int32 typeCount
+        = Host.StandaloneWriterBodyPlans[planOffset + 5];
+    int32 methodFirst
+        = Host.StandaloneWriterBodyPlans[planOffset + 6];
+    int32 methodCount
+        = Host.StandaloneWriterBodyPlans[planOffset + 7];
+    int32 constantFirst
+        = Host.StandaloneWriterBodyPlans[planOffset + 8];
+    int32 constantCount
+        = Host.StandaloneWriterBodyPlans[planOffset + 9];
+    int32 invokeFirst
+        = Host.StandaloneWriterBodyPlans[planOffset + 10];
+    int32 invokeCount
+        = Host.StandaloneWriterBodyPlans[planOffset + 11];
+    int32 operationFirst
+        = Host.StandaloneWriterBodyPlans[planOffset + 14];
+    int32 operationCount
+        = Host.StandaloneWriterBodyPlans[planOffset + 15];
+    int32 recordDataLength
+        = Host.StandaloneWriterBodyPlans[planOffset + 16];
+    int32 codeLength
+        = Host.StandaloneWriterBodyPlans[planOffset + 17];
+    int32 bodySize
+        = Host.StandaloneWriterBodyPlans[planOffset + 18];
+    int32 recordCount
+        = Host.StandaloneWriterBodyPlans[planOffset + 19];
+    int32 bodyStart
+        = Host.StandaloneWriterOutputByteCount[0];
+
+    int32 status = AppendStandaloneWriterByte(1);
+    if (status != 0) { return status; }
+    status = AppendStandaloneWriterByte(1);
+    if (status != 0) { return status; }
+    status = AppendStandaloneWriterByte(mapMask);
+    if (status != 0) { return status; }
+    status = AppendStandaloneWriterHalfWord(0);
+    if (status != 0) { return status; }
+    if ((mapMask & 1) != 0)
+    {
+        status = AppendStandaloneWriterWord(uint32(homeCount));
+        if (status != 0) { return status; }
+    }
+    if ((mapMask & 2) != 0)
+    {
+        status = AppendStandaloneWriterWord(uint32(typeCount));
+        if (status != 0) { return status; }
+    }
+    if ((mapMask & 4) != 0)
+    {
+        status = AppendStandaloneWriterWord(uint32(methodCount));
+        if (status != 0) { return status; }
+    }
+    if ((mapMask & 8) != 0)
+    {
+        return 3;
+    }
+    if ((mapMask & 16) != 0)
+    {
+        status = AppendStandaloneWriterWord(uint32(constantCount));
+        if (status != 0) { return status; }
+    }
+    status = AppendStandaloneWriterWord(1);
+    if (status != 0) { return status; }
+    status = AppendStandaloneWriterWord(uint32(recordCount));
+    if (status != 0) { return status; }
+    status = AppendStandaloneWriterWord(uint32(codeLength));
+    if (status != 0) { return status; }
+
+    for (mut int32 localHome = 0;
+        localHome < homeCount;
+        localHome = localHome + 1)
+    {
+        int32 homeOffset = (homeFirst + localHome) * 5;
+        int32 role
+            = Host.StandaloneRewrittenNormalizedHomes[
+                homeOffset + 1];
+        int32 flags
+            = Host.StandaloneRewrittenNormalizedHomes[
+                homeOffset + 2];
+        int32 typeMapIndex
+            = Host.StandaloneWriterHomeTypeMapIndices[
+                homeFirst + localHome];
+        int32 formalOrdinal
+            = Host.StandaloneRewrittenNormalizedHomes[
+                homeOffset + 4];
+        if ((role != 2 && role != 3)
+            || flags != 0 || typeMapIndex < 0
+            || typeMapIndex >= typeCount
+            || formalOrdinal < 0 || formalOrdinal > 0xFFFF
+            || (role == 3 && formalOrdinal != 0))
+        {
+            return 3;
+        }
+        status = AppendStandaloneWriterByte(role);
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterByte(flags);
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterHalfWord(
+            uint32(typeMapIndex));
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterHalfWord(
+            uint32(formalOrdinal));
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterHalfWord(0);
+        if (status != 0) { return status; }
+    }
+    for (mut int32 index = 0;
+        index < typeCount;
+        index = index + 1)
+    {
+        status = AppendStandaloneWriterWord(
+            Host.StandaloneWriterTypeMapTokens[
+                typeFirst + index]);
+        if (status != 0) { return status; }
+    }
+    for (mut int32 index = 0;
+        index < methodCount;
+        index = index + 1)
+    {
+        status = AppendStandaloneWriterWord(
+            Host.StandaloneWriterMethodMapTokens[
+                methodFirst + index]);
+        if (status != 0) { return status; }
+    }
+    for (mut int32 index = 0;
+        index < constantCount;
+        index = index + 1)
+    {
+        int32 constantOffset
+            = (constantFirst + index) * 2;
+        status = AppendStandaloneWriterWord(
+            Host.StandaloneWriterConstantMapEntries[
+                constantOffset]);
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterWord(
+            Host.StandaloneWriterConstantMapEntries[
+                constantOffset + 1]);
+        if (status != 0) { return status; }
+    }
+
+    status = AppendStandaloneWriterWord(0);
+    if (status != 0) { return status; }
+    status = AppendStandaloneWriterWord(uint32(codeLength));
+    if (status != 0) { return status; }
+    status = AppendStandaloneWriterHalfWord(0);
+    if (status != 0) { return status; }
+    status = AppendStandaloneWriterHalfWord(0);
+    if (status != 0) { return status; }
+
+    mut int32 recordOffset = 0;
+    status = AppendStandaloneWriterWord(0);
+    if (status != 0) { return status; }
+    recordOffset = 8;
+    status = AppendStandaloneWriterWord(uint32(recordOffset));
+    if (status != 0) { return status; }
+    for (mut int32 localOperation = 0;
+        localOperation < operationCount;
+        localOperation = localOperation + 1)
+    {
+        int32 operationOffset
+            = (operationFirst + localOperation) * 4;
+        if (Host.StandaloneRewrittenNormalizedOperations[
+                operationOffset] != 3)
+        {
+            continue;
+        }
+        int32 invokeLocal
+            = Host.StandaloneRewrittenNormalizedOperations[
+                operationOffset + 1];
+        if (invokeLocal < 0 || invokeLocal >= invokeCount)
+        {
+            return 3;
+        }
+        int32 invokeId = invokeFirst + invokeLocal;
+        int32 inputCountForCall
+            = Host.StandaloneRewrittenInvokes[
+                invokeId * 10 + 4];
+        recordOffset = recordOffset + 20
+            + (inputCountForCall * 4);
+        status = AppendStandaloneWriterWord(uint32(recordOffset));
+        if (status != 0) { return status; }
+    }
+    if (recordOffset != recordDataLength)
+    {
+        return 3;
+    }
+
+    status = AppendStandaloneWriterByte(1);
+    if (status != 0) { return status; }
+    status = AppendStandaloneWriterByte(0);
+    if (status != 0) { return status; }
+    status = AppendStandaloneWriterHalfWord(0);
+    if (status != 0) { return status; }
+    status = AppendStandaloneWriterWord(0);
+    if (status != 0) { return status; }
+    for (mut int32 localOperation = 0;
+        localOperation < operationCount;
+        localOperation = localOperation + 1)
+    {
+        int32 operationOffset
+            = (operationFirst + localOperation) * 4;
+        if (Host.StandaloneRewrittenNormalizedOperations[
+                operationOffset] != 3)
+        {
+            continue;
+        }
+        int32 invokeLocal
+            = Host.StandaloneRewrittenNormalizedOperations[
+                operationOffset + 1];
+        int32 invokeId = invokeFirst + invokeLocal;
+        status = WriteStandaloneWriterCallSiteRecord(
+            bodyId, invokeId);
+        if (status != 0) { return status; }
+    }
+    status = WriteStandaloneWriterBodyCode(bodyId, codeLength);
+    if (status != 0) { return status; }
+    if (Host.StandaloneWriterOutputByteCount[0] - bodyStart
+        != bodySize)
+    {
+        return 3;
+    }
+    return 0;
+}
+
+int32 WriteStandaloneWriterBodySection()
+{
+    int32 bodyCount = Host.StandaloneWriterBodyPlanCount[0];
+    if (bodyCount <= 0
+        || bodyCount > Host.StandaloneWriterBodyPlans.Length / 20)
+    {
+        return 3;
+    }
+
+    int32 totalDataLength = 0;
+    for (mut int32 bodyId = 0;
+        bodyId < bodyCount;
+        bodyId = bodyId + 1)
+    {
+        int32 bodySize
+            = Host.StandaloneWriterBodyPlans[
+                bodyId * 20 + 18];
+        if (bodySize <= 0
+            || totalDataLength > int32.MaxValue - bodySize)
+        {
+            return 3;
+        }
+        totalDataLength = totalDataLength + bodySize;
+    }
+
+    int32 sectionStart = Host.StandaloneWriterOutputByteCount[0];
+    mut int32 dataOffset = 0;
+    for (mut int32 bodyId = 0;
+        bodyId < bodyCount;
+        bodyId = bodyId + 1)
+    {
+        int32 status = AppendStandaloneWriterWord(
+            uint32(dataOffset));
+        if (status != 0) { return status; }
+        dataOffset = dataOffset
+            + Host.StandaloneWriterBodyPlans[
+                bodyId * 20 + 18];
+    }
+    int32 finalOffsetStatus
+        = AppendStandaloneWriterWord(uint32(dataOffset));
+    if (finalOffsetStatus != 0) { return finalOffsetStatus; }
+    if (dataOffset != totalDataLength)
+    {
+        return 3;
+    }
+
+    for (mut int32 bodyId = 0;
+        bodyId < bodyCount;
+        bodyId = bodyId + 1)
+    {
+        int32 status = WriteStandaloneWriterBody(bodyId);
+        if (status != 0)
+        {
+            return status;
+        }
+    }
+    return FinishStandaloneWriterSection(
+        0x0020, bodyCount, sectionStart);
+}
+
+public static int32 WriteStandaloneScalarModule()
+{
+    if (!ValidateStandaloneWriterBuffers()
+        || !ValidateStandaloneSourceCallBuffers()
+        || !ValidateStandaloneNormalizationBuffers()
+        || !ValidateStandaloneRewriteBuffers())
+    {
+        return 3;
+    }
+
+    ClearStandaloneWriterOutputs();
+    if (ValidateStandaloneMethodImportInput() != 0
+        || Host.StandaloneSourceProgramStatus[0] != 0
+        || Host.StandaloneNormalizedProgramStatus[0] != 0
+        || Host.StandaloneRewriteStatus[0] != 0
+        || Host.StandaloneRewrittenSourceBodyCount[0]
+            != Host.StandaloneRewrittenNormalizedBodyCount[0]
+        || Host.StandaloneRewrittenNormalizedBodyCount[0]
+            != Host.StandaloneRewrittenLocalCallableCount[0]
+        || !ValidateStandaloneRewriteMaps())
+    {
+        return FailStandaloneWriter(3);
+    }
+
+    int32 contractStatus
+        = ValidateStandaloneWriterContractClosure();
+    if (contractStatus != 0)
+    {
+        return FailStandaloneWriter(contractStatus);
+    }
+    int32 stringStatus = BuildStandaloneWriterStringInventory();
+    if (stringStatus != 0)
+    {
+        return FailStandaloneWriter(stringStatus);
+    }
+    int32 typeStatus = BuildStandaloneWriterTypeSpecInventory();
+    if (typeStatus != 0)
+    {
+        return FailStandaloneWriter(typeStatus);
+    }
+    int32 constantStatus = BuildStandaloneWriterConstantInventory();
+    if (constantStatus != 0)
+    {
+        return FailStandaloneWriter(constantStatus);
+    }
+    int32 bodyStatus = BuildStandaloneWriterBodyPlans();
+    if (bodyStatus != 0)
+    {
+        return FailStandaloneWriter(bodyStatus);
+    }
+
+    int32 writeStatus = WriteStandaloneWriterModuleSection();
+    if (writeStatus != 0)
+    {
+        return FailStandaloneWriter(writeStatus);
+    }
+    writeStatus = WriteStandaloneWriterStringSection();
+    if (writeStatus != 0)
+    {
+        return FailStandaloneWriter(writeStatus);
+    }
+    writeStatus = WriteStandaloneWriterBlobSection();
+    if (writeStatus != 0)
+    {
+        return FailStandaloneWriter(writeStatus);
+    }
+    writeStatus = WriteStandaloneWriterFeatureSection();
+    if (writeStatus != 0)
+    {
+        return FailStandaloneWriter(writeStatus);
+    }
+    writeStatus = WriteStandaloneWriterModuleRefSection();
+    if (writeStatus != 0)
+    {
+        return FailStandaloneWriter(writeStatus);
+    }
+    writeStatus = WriteStandaloneWriterTypeSpecSection();
+    if (writeStatus != 0)
+    {
+        return FailStandaloneWriter(writeStatus);
+    }
+    writeStatus = WriteStandaloneWriterMethodDefSection();
+    if (writeStatus != 0)
+    {
+        return FailStandaloneWriter(writeStatus);
+    }
+    writeStatus = WriteStandaloneWriterMethodSigSection();
+    if (writeStatus != 0)
+    {
+        return FailStandaloneWriter(writeStatus);
+    }
+    writeStatus = WriteStandaloneWriterParamSection();
+    if (writeStatus != 0)
+    {
+        return FailStandaloneWriter(writeStatus);
+    }
+    writeStatus = WriteStandaloneWriterContractSection();
+    if (writeStatus != 0)
+    {
+        return FailStandaloneWriter(writeStatus);
+    }
+    writeStatus = WriteStandaloneWriterImportSection();
+    if (writeStatus != 0)
+    {
+        return FailStandaloneWriter(writeStatus);
+    }
+    writeStatus = WriteStandaloneWriterBodySection();
+    if (writeStatus != 0)
+    {
+        return FailStandaloneWriter(writeStatus);
+    }
+    writeStatus = WriteStandaloneWriterConstantSourceSection();
+    if (writeStatus != 0)
+    {
+        return FailStandaloneWriter(writeStatus);
+    }
+    writeStatus = WriteStandaloneWriterFrozenValueNodeSection();
+    if (writeStatus != 0)
+    {
+        return FailStandaloneWriter(writeStatus);
+    }
+
+    Host.StandaloneWriterStatus[0] = 0;
+    return 0;
+}
+
+int32 ValidateStandaloneWriterContractClosure()
+{
+    if (Host.StandaloneResolvedImportCount[0] != 0)
+    {
+        return 2;
+    }
+
+    int32 rootCount = Host.StandaloneResolvedRootCount[0];
+    for (mut int32 root = 0; root < rootCount; root = root + 1)
+    {
+        int32 rootOffset = root * 20;
+        int32 artifactOrdinal
+            = int32(Host.StandaloneResolvedRoots[rootOffset + 2]);
+        int32 contractFirst
+            = int32(Host.StandaloneResolvedRoots[rootOffset + 14]);
+        int32 contractCount
+            = int32(Host.StandaloneResolvedRoots[rootOffset + 15]);
+        if (contractCount == 0)
+        {
+            continue;
+        }
+
+        if (artifactOrdinal < 0
+            || artifactOrdinal >= Host.StandaloneRequest[4]
+            || !TryValidateStandaloneArtifactDirectory(
+                artifactOrdinal))
+        {
+            return 3;
+        }
+        init int32 artifactStart;
+        init int32 artifactLength;
+        if (!TryGetStandaloneArtifactExtent(artifactOrdinal,
+                ref init artifactStart, ref init artifactLength))
+        {
+            return 3;
+        }
+        int32 contractEntry
+            = FindStandaloneArtifactSection(0x001B);
+        int32 contractTableCount
+            = GetStandaloneArtifactSectionCount(0x001B);
+        if (contractEntry == 0
+            || !IsStandaloneMetadataRange(uint32(contractFirst),
+                uint32(contractCount), contractTableCount))
+        {
+            return 3;
+        }
+        int32 contractStart
+            = Host.StandaloneSectionStarts[contractEntry];
+        int32 contractLength
+            = Host.StandaloneSectionLengths[contractEntry];
+        if (!TryValidateStandaloneVariableTableIndex(
+                artifactStart, artifactLength, contractStart,
+                contractLength, contractTableCount, 8, 1))
+        {
+            return 3;
+        }
+        for (mut int32 offset = 0;
+            offset < contractCount;
+            offset = offset + 1)
+        {
+            init int32 rowStart;
+            init int32 rowLength;
+            if (!TryGetStandaloneVariableTableRowExtent(
+                    artifactStart, artifactLength, contractStart,
+                    contractLength, contractTableCount, 8, 1,
+                    contractFirst + offset,
+                    ref init rowStart, ref init rowLength))
+            {
+                return 3;
+            }
+            init uint32 clauseKind;
+            if (rowLength != 12
+                || !TryReadStandaloneArtifactAbsoluteHalfWord(
+                    artifactStart, artifactLength, rowStart + 4,
+                    ref init clauseKind))
+            {
+                return 3;
+            }
+            if (clauseKind != 1)
+            {
+                return 2;
+            }
+        }
+    }
+    return 0;
+}
+
+int32 GetStandaloneWriterTotalParameterCount()
+{
+    int32 methodCount
+        = Host.StandaloneRewrittenLocalCallableCount[0]
+            + Host.StandaloneRewrittenImportedCallableCount[0];
+    mut int32 total = 0;
+    for (mut int32 methodId = 0;
+        methodId < methodCount;
+        methodId = methodId + 1)
+    {
+        int32 count
+            = GetStandaloneWriterMethodParameterCount(methodId);
+        if (count < 0 || count > 65_536
+            || total > 0xFF_FFFF - count)
+        {
+            return -1;
+        }
+        total = total + count;
+    }
+    return total;
+}
+
+int32 GetStandaloneWriterTotalContractCount()
+{
+    int32 methodCount
+        = Host.StandaloneRewrittenLocalCallableCount[0]
+            + Host.StandaloneRewrittenImportedCallableCount[0];
+    mut int32 total = 0;
+    for (mut int32 methodId = 0;
+        methodId < methodCount;
+        methodId = methodId + 1)
+    {
+        int32 mask
+            = GetStandaloneWriterMethodEffectMask(methodId);
+        if (mask < 0 || (mask & ~6) != 0)
+        {
+            return -1;
+        }
+        if (mask != 0)
+        {
+            total = total + 1;
+        }
+    }
+    return total;
+}
+
+int32 WriteStandaloneWriterMethodDefSection()
+{
+    int32 localCount
+        = Host.StandaloneRewrittenLocalCallableCount[0];
+    int32 importedCount
+        = Host.StandaloneRewrittenImportedCallableCount[0];
+    int32 methodCount = localCount + importedCount;
+    if (methodCount <= 0 || methodCount > 0xFF_FFFF
+        || importedCount != Host.StandaloneWriterRootOrdinals.Length)
+    {
+        return 3;
+    }
+
+    int32 sectionStart = Host.StandaloneWriterOutputByteCount[0];
+    mut int32 nextContractRow = 1;
+    for (mut int32 methodId = 0;
+        methodId < methodCount;
+        methodId = methodId + 1)
+    {
+        int32 nameStringId = methodId < localCount
+            ? Host.StandaloneWriterLocalNameStringIds[methodId]
+            : Host.StandaloneWriterRootNameStringIds[
+                methodId - localCount];
+        int32 flags = GetStandaloneWriterMethodFlags(methodId);
+        int32 bodyRow
+            = GetStandaloneWriterMethodBodyRow(methodId);
+        int32 effectMask
+            = GetStandaloneWriterMethodEffectMask(methodId);
+        if (nameStringId <= 0
+            || nameStringId > Host.StandaloneWriterStringCount[0]
+            || (flags != 0 && flags != 2)
+            || bodyRow < 0 || effectMask < 0
+            || (effectMask & ~6) != 0)
+        {
+            return 3;
+        }
+
+        int32 contractFirst = effectMask == 0
+            ? 0 : nextContractRow;
+        int32 contractCount = effectMask == 0 ? 0 : 1;
+        if (contractCount != 0)
+        {
+            nextContractRow = nextContractRow + 1;
+        }
+        int32 status = AppendStandaloneWriterWord(0);
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterWord(uint32(nameStringId));
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterWord(uint32(methodId + 1));
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterWord(uint32(flags));
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterWord(uint32(contractFirst));
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterWord(uint32(contractCount));
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterWord(uint32(bodyRow));
+        if (status != 0) { return status; }
+    }
+    return FinishStandaloneWriterSection(
+        0x0016, methodCount, sectionStart);
+}
+
+int32 WriteStandaloneWriterMethodSigSection()
+{
+    int32 methodCount
+        = Host.StandaloneRewrittenLocalCallableCount[0]
+            + Host.StandaloneRewrittenImportedCallableCount[0];
+    if (methodCount <= 0 || methodCount > 0xFF_FFFF)
+    {
+        return 3;
+    }
+    int32 totalParameterCount
+        = GetStandaloneWriterTotalParameterCount();
+    if (totalParameterCount < 0)
+    {
+        return 3;
+    }
+
+    int32 sectionStart = Host.StandaloneWriterOutputByteCount[0];
+    mut int32 nextParameterRow = 1;
+    for (mut int32 methodId = 0;
+        methodId < methodCount;
+        methodId = methodId + 1)
+    {
+        int32 resultTypeId
+            = GetStandaloneWriterMethodResultTypeId(methodId);
+        int32 parameterCount
+            = GetStandaloneWriterMethodParameterCount(methodId);
+        if (resultTypeId <= 0 || parameterCount < 0
+            || parameterCount > 65_536
+            || nextParameterRow
+                > 0xFF_FFFF - parameterCount)
+        {
+            return 3;
+        }
+        init uint32 resultTypeSpec;
+        int32 typeStatus = EnsureStandaloneWriterTypeSpec(
+            resultTypeId, ref init resultTypeSpec);
+        if (typeStatus != 0)
+        {
+            return typeStatus;
+        }
+
+        int32 paramFirst = parameterCount == 0
+            ? 0 : nextParameterRow;
+        int32 status
+            = AppendStandaloneWriterWord(resultTypeSpec);
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterWord(0);
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterWord(uint32(paramFirst));
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterWord(uint32(parameterCount));
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterWord(0);
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterWord(0);
+        if (status != 0) { return status; }
+        nextParameterRow = nextParameterRow + parameterCount;
+    }
+    if (nextParameterRow - 1 != totalParameterCount)
+    {
+        return 3;
+    }
+    return FinishStandaloneWriterSection(
+        0x0017, methodCount, sectionStart);
+}
+
+int32 WriteStandaloneWriterParamSection()
+{
+    int32 totalParameterCount
+        = GetStandaloneWriterTotalParameterCount();
+    if (totalParameterCount < 0)
+    {
+        return 3;
+    }
+    if (totalParameterCount == 0)
+    {
+        return 0;
+    }
+
+    int32 methodCount
+        = Host.StandaloneRewrittenLocalCallableCount[0]
+            + Host.StandaloneRewrittenImportedCallableCount[0];
+    int32 sectionStart = Host.StandaloneWriterOutputByteCount[0];
+    for (mut int32 methodId = 0;
+        methodId < methodCount;
+        methodId = methodId + 1)
+    {
+        int32 parameterCount
+            = GetStandaloneWriterMethodParameterCount(methodId);
+        if (parameterCount < 0)
+        {
+            return 3;
+        }
+        for (mut int32 ordinal = 0;
+            ordinal < parameterCount;
+            ordinal = ordinal + 1)
+        {
+            int32 typeId
+                = GetStandaloneWriterMethodParameterTypeId(
+                    methodId, ordinal);
+            init uint32 typeSpecRef;
+            int32 typeStatus = EnsureStandaloneWriterTypeSpec(
+                typeId, ref init typeSpecRef);
+            if (typeStatus != 0)
+            {
+                return typeStatus;
+            }
+            int32 status
+                = AppendStandaloneWriterWord(uint32(methodId + 1));
+            if (status != 0) { return status; }
+            status = AppendStandaloneWriterWord(uint32(ordinal));
+            if (status != 0) { return status; }
+            status = AppendStandaloneWriterWord(typeSpecRef);
+            if (status != 0) { return status; }
+            status = AppendStandaloneWriterByte(0);
+            if (status != 0) { return status; }
+            status = AppendStandaloneWriterByte(0);
+            if (status != 0) { return status; }
+            status = AppendStandaloneWriterHalfWord(0);
+            if (status != 0) { return status; }
+        }
+    }
+    return FinishStandaloneWriterSection(
+        0x0018, totalParameterCount, sectionStart);
+}
+
+int32 WriteStandaloneWriterContractSection()
+{
+    int32 contractCount
+        = GetStandaloneWriterTotalContractCount();
+    if (contractCount < 0)
+    {
+        return 3;
+    }
+    if (contractCount == 0)
+    {
+        return 0;
+    }
+
+    int32 methodCount
+        = Host.StandaloneRewrittenLocalCallableCount[0]
+            + Host.StandaloneRewrittenImportedCallableCount[0];
+    int32 sectionStart = Host.StandaloneWriterOutputByteCount[0];
+    for (mut int32 offset = 0;
+        offset <= contractCount;
+        offset = offset + 1)
+    {
+        int32 status = AppendStandaloneWriterWord(
+            uint32(offset * 12));
+        if (status != 0)
+        {
+            return status;
+        }
+    }
+
+    mut int32 outputContractRow = 0;
+    for (mut int32 methodId = 0;
+        methodId < methodCount;
+        methodId = methodId + 1)
+    {
+        int32 effectMask
+            = GetStandaloneWriterMethodEffectMask(methodId);
+        if (effectMask < 0 || (effectMask & ~6) != 0)
+        {
+            return 3;
+        }
+        if (effectMask == 0)
+        {
+            continue;
+        }
+
+        outputContractRow = outputContractRow + 1;
+        int32 status = AppendStandaloneWriterWord(
+            uint32(0x1600_0000) | uint32(methodId + 1));
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterHalfWord(1);
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterHalfWord(0);
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterWord(uint32(effectMask));
+        if (status != 0) { return status; }
+    }
+    if (outputContractRow != contractCount)
+    {
+        return 3;
+    }
+    return FinishStandaloneWriterSection(
+        0x001B, contractCount, sectionStart);
+}
+
+int32 WriteStandaloneWriterImportSection()
+{
+    int32 localCount
+        = Host.StandaloneRewrittenLocalCallableCount[0];
+    int32 importedCount
+        = Host.StandaloneRewrittenImportedCallableCount[0];
+    if (importedCount == 0)
+    {
+        return 0;
+    }
+
+    int32 sectionStart = Host.StandaloneWriterOutputByteCount[0];
+    for (mut int32 importedId = 0;
+        importedId < importedCount;
+        importedId = importedId + 1)
+    {
+        int32 providerModuleId
+            = Host.StandaloneRewrittenImportedCallables[
+                importedId * 8 + 1];
+        int32 keyStringId
+            = Host.StandaloneWriterRootKeyStringIds[importedId];
+        if (providerModuleId < 0
+            || providerModuleId
+                >= Host.StandaloneWriterModuleRefByModuleId.Length
+            || keyStringId <= 0
+            || keyStringId > Host.StandaloneWriterStringCount[0])
+        {
+            return 3;
+        }
+        int32 moduleRefRow
+            = Host.StandaloneWriterModuleRefByModuleId[
+                providerModuleId];
+        int32 expectedMethodRow = localCount + importedId + 1;
+        if (moduleRefRow <= 0
+            || moduleRefRow
+                > Host.StandaloneWriterModuleRefCount[0]
+            || expectedMethodRow > 0x00FF_FFFF)
+        {
+            return 3;
+        }
+        int32 status = AppendStandaloneWriterWord(
+            uint32(moduleRefRow));
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterWord(uint32(keyStringId));
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterWord(
+            uint32(0x1600_0000) | uint32(expectedMethodRow));
+        if (status != 0) { return status; }
+    }
+    return FinishStandaloneWriterSection(
+        0x001C, importedCount, sectionStart);
+}
