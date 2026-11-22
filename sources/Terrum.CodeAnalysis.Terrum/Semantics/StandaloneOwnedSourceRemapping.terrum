@@ -147,7 +147,13 @@ public static int32 RewriteStandaloneOwnedCallNodes()
             = Host.StandaloneRewriteCallableIds[oldCallableId];
         int32 oldTypeId
             = Host.StandaloneCallableTypeIds[oldCallableId];
-        if (oldTypeId <= 0
+        if (oldTypeId == 0)
+        {
+            Host.StandaloneRewrittenCallableTypeIds[newCallableId] = 0;
+            Host.StandaloneRewrittenCallableEffects[newCallableId] = 0;
+            continue;
+        }
+        if (oldTypeId < 0
             || oldTypeId > Host.StandaloneTypeFactCount[0])
         {
             return FailStandaloneRewrite(3);
@@ -1744,10 +1750,24 @@ int32 TryGetRewrittenCallableSignature(int32 targetKind,
             return 3;
         }
         int32 infoOffset = targetIndex * 12;
-        *expectedCallableIdResult = callableId;
-        *resultTypeIdResult
+        int32 resultTypeId
             = Host.StandaloneRewrittenSourceCallableInfo[
                 infoOffset + 4];
+        int32 callableEffects
+            = (Host.StandaloneRewrittenSourceCallableInfo[
+                infoOffset + 10] & 2) != 0 ? 4 : 0;
+        if (resultTypeId <= 0
+            || resultTypeId
+                > Host.StandaloneRewrittenTypeFactCount[0]
+            || Host.StandaloneRewrittenCallableTypeIds[
+                callableId] != resultTypeId
+            || Host.StandaloneRewrittenCallableEffects[
+                callableId] != callableEffects)
+        {
+            return 3;
+        }
+        *expectedCallableIdResult = callableId;
+        *resultTypeIdResult = resultTypeId;
         *parameterCountResult
             = Host.StandaloneRewrittenSourceCallableInfo[
                 infoOffset + 6];

@@ -281,8 +281,10 @@ internal readonly record struct CapturedStandaloneMethodImportInput(
         var callableCapacity = 0;
         var typeCapacity = 0;
         var parameterTypeCapacity = 0;
-        foreach (var buffer in hostBuffers)
+        var callableEffectsCapacity = 0;
+        for (var index = 0; index < hostBuffers.Length; index++)
         {
+            var buffer = hostBuffers[index];
             if (buffer.Name == "StandaloneModuleDirectory")
             {
                 moduleCapacity = buffer.Values.Length / 8;
@@ -290,6 +292,10 @@ internal readonly record struct CapturedStandaloneMethodImportInput(
             else if (buffer.Name == "StandaloneCallableTypeIds")
             {
                 callableCapacity = buffer.Values.Length;
+            }
+            else if (buffer.Name == "StandaloneCallableEffects")
+            {
+                callableEffectsCapacity = buffer.Values.Length;
             }
             else if (buffer.Name == "StandaloneTypeFacts")
             {
@@ -301,9 +307,38 @@ internal readonly record struct CapturedStandaloneMethodImportInput(
             }
         }
 
+        if (callableEffectsCapacity != callableCapacity)
+        {
+            throw new InvalidOperationException(
+                "Standalone callable buffers are missing.");
+        }
+
+        var sourceCallableCapacity = checked(callableCapacity
+            + tokenCapacity);
+        var expandedBuffers = hostBuffers.ToBuilder();
+        for (var index = 0; index < hostBuffers.Length; index++)
+        {
+            if (hostBuffers[index].Name == "StandaloneCallableTypeIds")
+            {
+                expandedBuffers[index] = new HostBuffer(
+                    "StandaloneCallableTypeIds", PrimitiveType.Int32,
+                    [.. new int[sourceCallableCapacity]], true);
+            }
+            else if (hostBuffers[index].Name == "StandaloneCallableEffects")
+            {
+                expandedBuffers[index] = new HostBuffer(
+                    "StandaloneCallableEffects", PrimitiveType.Int32,
+                    [.. new int[sourceCallableCapacity]], true);
+            }
+        }
+        hostBuffers = expandedBuffers.ToImmutable();
+
+        var rewriteCallableCapacity
+            = checked(callableCapacity + tokenCapacity);
         var rewriteMapCapacity = Math.Max(checked(tokenCapacity * 2),
             Math.Max(moduleCapacity,
-                Math.Max(callableCapacity, checked(typeCapacity + 1))));
+                Math.Max(rewriteCallableCapacity,
+                    checked(typeCapacity + 1))));
         return hostBuffers.AddRange([
             new HostBuffer("StandaloneSourceProgramStatus",
                 PrimitiveType.Int32, [0], true),
@@ -437,7 +472,7 @@ internal readonly record struct CapturedStandaloneMethodImportInput(
                 [.. new int[MethodRoots.Length]], true),
             new HostBuffer("StandaloneRewriteCallableIds",
                 PrimitiveType.Int32,
-                [.. new int[callableCapacity]], true),
+                [.. new int[rewriteCallableCapacity]], true),
             new HostBuffer("StandaloneRewriteTypeIds",
                 PrimitiveType.Int32,
                 [.. new int[checked(typeCapacity + 1)]], true),
@@ -461,13 +496,13 @@ internal readonly record struct CapturedStandaloneMethodImportInput(
                 [.. new int[checked(MethodRoots.Length * 8)]], true),
             new HostBuffer("StandaloneRewrittenCallableTypeIds",
                 PrimitiveType.Int32,
-                [.. new int[callableCapacity]], true),
+                [.. new int[rewriteCallableCapacity]], true),
             new HostBuffer("StandaloneRewrittenCallableEffects",
                 PrimitiveType.Int32,
-                [.. new int[callableCapacity]], true),
+                [.. new int[rewriteCallableCapacity]], true),
             new HostBuffer("StandaloneRewrittenCallableParameterCounts",
                 PrimitiveType.Int32,
-                [.. new int[callableCapacity]], true),
+                [.. new int[rewriteCallableCapacity]], true),
             new HostBuffer("StandaloneRewrittenTypeFacts",
                 PrimitiveType.Int32,
                 [.. new int[checked(typeCapacity * 3)]], true),

@@ -661,7 +661,13 @@ internal sealed class StandaloneMethodImportInputTests
                     || Host.StandaloneTypeFactCount[0] != 1) {
                     return 51;
                 }
-                Host.StandaloneRewriteCallableCount[0] = 4;
+                int32 callableBase
+                    = Host.StandaloneResolvedRootCount[0]
+                        + Host.StandaloneResolvedImports.Length / 32
+                        + Host.StandaloneResolvedProviderGroupCount[0];
+                int32 callableCount
+                    = callableBase + Host.StandaloneLocalCallableCount[0];
+                Host.StandaloneRewriteCallableCount[0] = callableCount;
                 for (mut int32 id = 0;
                     id < Host.StandaloneModuleCount[0];
                     id = id + 1) {
@@ -676,8 +682,11 @@ internal sealed class StandaloneMethodImportInputTests
                 Host.StandaloneRewriteImportedCallableIds[1] = 0;
                 Host.StandaloneRewriteCallableIds[0] = 1;
                 Host.StandaloneRewriteCallableIds[1] = 0;
-                Host.StandaloneRewriteCallableIds[2] = 2;
-                Host.StandaloneRewriteCallableIds[3] = 3;
+                for (mut int32 id = 2;
+                    id < callableCount;
+                    id = id + 1) {
+                    Host.StandaloneRewriteCallableIds[id] = id;
+                }
                 Host.StandaloneRewriteTypeIds[0] = 0;
                 for (mut int32 id = 1;
                     id <= Host.StandaloneTypeFactCount[0];
@@ -697,12 +706,15 @@ internal sealed class StandaloneMethodImportInputTests
                     || Host.StandaloneRewrittenModuleCount[0] != 3
                     || Host.StandaloneRewrittenLocalCallableCount[0] != 2
                     || Host.StandaloneRewrittenImportedCallableCount[0] != 2
-                    || Host.StandaloneRewrittenCallableCount[0] != 4
+                    || Host.StandaloneRewrittenCallableCount[0]
+                        != callableCount
                     || Host.StandaloneRewrittenSourceBodyCount[0] != 2
                     || Host.StandaloneRewrittenNormalizedBodyCount[0] != 2
-                    || Host.StandaloneRewrittenLocalCallables[1] != 2
+                    || Host.StandaloneRewrittenLocalCallables[1]
+                        != callableBase
                     || Host.StandaloneRewrittenLocalCallables[2] != 1
-                    || Host.StandaloneRewrittenLocalCallables[4] != 3
+                    || Host.StandaloneRewrittenLocalCallables[4]
+                        != callableBase + 1
                     || Host.StandaloneRewrittenLocalCallables[5] != 0
                     || Host.StandaloneRewrittenImportedCallables[4] != 0
                     || Host.StandaloneRewrittenImportedCallables[12] != 1
@@ -721,10 +733,12 @@ internal sealed class StandaloneMethodImportInputTests
                     || Host.StandaloneRewrittenSourceDirectCalls[2] != 1
                     || Host.StandaloneRewrittenSourceDirectCalls[7] != 1
                     || Host.StandaloneRewrittenSourceDirectCalls[8] != 0
-                    || Host.StandaloneRewrittenSourceDirectCalls[9] != 2
+                    || Host.StandaloneRewrittenSourceDirectCalls[9]
+                        != callableBase
                     || Host.StandaloneRewrittenInvokes[0] != 1
                     || Host.StandaloneRewrittenInvokes[1] != 0
-                    || Host.StandaloneRewrittenInvokes[2] != 2
+                    || Host.StandaloneRewrittenInvokes[2]
+                        != callableBase
                     || Host.StandaloneRewrittenInvokes[10] != 2
                     || Host.StandaloneRewrittenInvokes[11] != 1
                     || Host.StandaloneRewrittenInvokes[12] != 1

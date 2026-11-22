@@ -881,8 +881,20 @@ int32 InventoryStandaloneSourceCallable(int32 tokenStart,
     Host.StandaloneSourceCallableInfo[infoOffset + 10] = flags;
     Host.StandaloneSourceCallableInfo[infoOffset + 11]
         = Host.StandaloneResolvedRootCount[0]
-            + Host.StandaloneResolvedImportCount[0]
+            + Host.StandaloneResolvedImports.Length / 32
+            + Host.StandaloneResolvedProviderGroupCount[0]
             + localCallableId;
+
+    int32 callableId
+        = Host.StandaloneSourceCallableInfo[infoOffset + 11];
+    if (callableId < 0
+        || callableId >= Host.StandaloneCallableTypeIds.Length)
+    {
+        return 3;
+    }
+    Host.StandaloneCallableTypeIds[callableId] = returnTypeId;
+    Host.StandaloneCallableEffects[callableId]
+        = (flags & 2) != 0 ? 4 : 0;
 
     int32 callableOffset = localCallableId * 3;
     Host.StandaloneLocalCallables[callableOffset] = usingModuleId;
