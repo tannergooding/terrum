@@ -3,7 +3,8 @@
 **Status: unapproved; provisionally actionable only under the user's authorized
 missing-contract workflow.** This recommendation does not formally approve an
 API, manifest version or private schema, amend normative specifications, or
-establish implementation or execution support. No build or test accompanies it.
+establish implementation or execution support. Its implementation and
+regressions remain unverified under the active validation hold.
 
 ## Missing decision, recommendation and owners
 

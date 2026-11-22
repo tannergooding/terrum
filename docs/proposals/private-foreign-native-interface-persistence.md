@@ -4,8 +4,8 @@
 missing-contract workflow.** That workflow permits implementation using the
 recommendation as provisional direction. It does not formally approve a private
 revision, amend accepted specifications, stabilize bytes or establish compiler
-or runtime support. No build, test or native qualification accompanies this
-proposal.
+or runtime support. No build, test or native qualification has run for this
+implementation under the active hold.
 
 ## Decision, scope and owners
 

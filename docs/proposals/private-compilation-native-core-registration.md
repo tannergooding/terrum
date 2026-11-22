@@ -3,7 +3,8 @@
 **Status: unapproved; provisionally actionable only under the user's authorized
 missing-contract workflow.** This recommends source-configuration delivery,
 not normative adoption, a stabilized CLI/private schema or compiler conformance.
-No build, test or native qualification accompanies this proposal.
+Its CLI integration regression is added but remains unverified under the
+active build/test hold.
 
 ## Missing decision and recommendation
 
