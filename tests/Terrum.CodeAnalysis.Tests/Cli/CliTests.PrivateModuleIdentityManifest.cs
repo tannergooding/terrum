@@ -615,6 +615,29 @@ internal sealed partial class CliTests
             Assert.That(reference.Structures.Single(static structure =>
                 structure.Name == "Payload").DeclaredCopyEvidence,
                 Is.True);
+            var payloadName = Encoding.UTF8.GetBytes("Payload");
+            var payloadOffset = -1;
+            for (var index = 0;
+                index <= artifactBytes.Length - payloadName.Length;
+                index++)
+            {
+                if (!artifactBytes.AsSpan(index, payloadName.Length)
+                    .SequenceEqual(payloadName))
+                {
+                    continue;
+                }
+                Assert.That(payloadOffset, Is.EqualTo(-1),
+                    "The private Structure name should have one wire occurrence.");
+                payloadOffset = index;
+            }
+            Assert.That(payloadOffset, Is.GreaterThanOrEqualTo(0));
+            var copyEvidenceOffset = payloadOffset + payloadName.Length + 12;
+            Assert.That(artifactBytes[copyEvidenceOffset], Is.EqualTo(1));
+            var malformedCopyEvidence = (byte[])artifactBytes.Clone();
+            malformedCopyEvidence[copyEvidenceOffset] = 0;
+            _ = Assert.Throws<ModuleFormatException>(() =>
+                ModuleCompiler.CreateReferenceWithSchema(
+                    malformedCopyEvidence, privateSchema));
             var malformed = (byte[])artifactBytes.Clone();
             var lookupName = Encoding.UTF8.GetBytes("IProbe");
             var lookupOffset = -1;
