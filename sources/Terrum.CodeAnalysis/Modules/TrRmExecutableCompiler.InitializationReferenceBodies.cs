@@ -1358,6 +1358,7 @@ public static partial class TrRmExecutableCompiler
                 foreignInterfaceCallSequenceHasValueResult,
                 foreignInterfaceCallSequenceIsTerminal, typeSpecRowFor,
                 foreignInterfaceCallSequenceNestedInputs,
+                methodMapTokenForFunction,
                 foreignInterfaceMethodMapTokenForCall
                     ?? throw Unsupported(
                         "A Standard F+I caller Body has no InterfaceMethod MethodMap selection."),
@@ -2078,15 +2079,22 @@ public static partial class TrRmExecutableCompiler
     private static BoundCall? GetNestedForeignInterfaceCall(
         BoundExpression expression)
     {
+        var call = GetUnwrappedBoundCall(expression);
+        return call is {
+            Function: BoundCall.ForeignInterfaceFunction,
+            ForeignInterfaceCall: not null,
+        } ? call : null;
+    }
+
+    private static BoundCall? GetUnwrappedBoundCall(
+        BoundExpression expression)
+    {
         while (expression is BoundUnsafeExpression unsafeCall)
         {
             expression = unsafeCall.Expression;
         }
 
-        return expression is BoundCall {
-            Function: BoundCall.ForeignInterfaceFunction,
-            ForeignInterfaceCall: not null,
-        } nestedCall ? nestedCall : null;
+        return expression as BoundCall;
     }
 
     private static bool TryGetForeignInterfaceDirectReturnCall(
@@ -2633,9 +2641,18 @@ public static partial class TrRmExecutableCompiler
             PrimitiveType expectedReturnType, bool allowNestedInputs,
             bool isTerminalCall)
         {
+            if (boundCall.ForeignInterfaceCall is not
+                    BoundForeignInterfaceCall foreignCall)
+            {
+                return expectedReturnType == PrimitiveType.Void
+                    && !allowNestedInputs
+                    && !isTerminalCall
+                    && (function.ReturnType != PrimitiveType.Void
+                        || function.DoesNotReturn)
+                    && TryValidateLocalVoidCall(boundCall);
+            }
+
             if (boundCall.Function != BoundCall.ForeignInterfaceFunction
-                || boundCall.ForeignInterfaceCall is not
-                    BoundForeignInterfaceCall foreignCall
                 || !boundCall.IsUnsafeAuthorized
                 || foreignCall.DoesNotReturn != isTerminalCall
                 || boundCall.Type != expectedReturnType
@@ -2708,6 +2725,79 @@ public static partial class TrRmExecutableCompiler
                     }
                 }
                 else
+                {
+                    return false;
+                }
+
+                seenParameters[formal] = true;
+            }
+
+            return seenParameters.All(static seen => seen);
+        }
+
+        bool TryValidateLocalVoidCall(BoundCall boundCall)
+        {
+            if (boundCall.ForeignInterfaceCall is not null
+                || (uint)boundCall.Function >= (uint)program.Functions.Length
+                || boundCall.InterfaceCallIdentity is not null
+                || boundCall.GenericMethodCall is not null
+                || boundCall.ImportedGenericMethodCall is not null
+                || !boundCall.ImportedGenericMethodTypeArguments
+                    .IsDefaultOrEmpty
+                || boundCall.Type != PrimitiveType.Void
+                || boundCall.Arguments.IsDefault)
+            {
+                return false;
+            }
+
+            var target = program.Functions[boundCall.Function];
+            if (target.IsExternal
+                || target.ModuleImport is not null
+                || target.DeclaringStruct is not null
+                || target.DirectNativeImport is not null
+                || target.NativeVTableMethod is not null
+                || target.NativeFunctionPointerType is not null
+                || target.GenericMethodInstantiation is not null
+                || target.ImportedGenericMethod is not null
+                || target.InterfaceRequirement is not null
+                || target.IsConstEval
+                || target.RequiresUnsafeCaller
+                || target.DoesNotReturn
+                || target.IsConstructor
+                || target.IsCleanup
+                || target.ReturnType != PrimitiveType.Void
+                || !target.NativeOutputContracts.IsEmpty
+                || target.ParameterCount != boundCall.Arguments.Length
+                || target.Variables.Length != target.ParameterCount
+                || target.Variables.Any(static variable =>
+                    variable.IsOut || variable.IsInit
+                    || variable.IsImplicitRef
+                    || variable.IsImplicitReferenceTemporary
+                    || variable.IsInitializationLocal
+                    || !(DirectNativeImportContract.IsScalar(
+                            variable.Type)
+                        || variable.Type
+                            == PrimitiveType.NativeRawPointer)))
+            {
+                return false;
+            }
+
+            var seenParameters = new bool[target.ParameterCount];
+            for (var argumentIndex = 0;
+                argumentIndex < boundCall.Arguments.Length;
+                argumentIndex++)
+            {
+                var formal = boundCall.ParameterIndex(argumentIndex);
+                var argument = boundCall.Arguments[argumentIndex];
+                if ((uint)formal >= (uint)target.ParameterCount
+                    || seenParameters[formal]
+                    || argument is not BoundRead read
+                    || (uint)read.Variable >= (uint)function.ParameterCount
+                    || read.Type != target.Variables[formal].Type
+                    || function.Variables[read.Variable].Type
+                        != read.Type
+                    || function.Variables[read.Variable].IsOut
+                    || function.Variables[read.Variable].IsInit)
                 {
                     return false;
                 }
@@ -2805,6 +2895,7 @@ public static partial class TrRmExecutableCompiler
         bool isTerminal,
         Func<PrimitiveType, int> typeSpecRowFor,
         ImmutableArray<BoundCall> nestedCalls,
+        Func<int, uint> methodMapTokenForFunction,
         Func<BoundInterfaceMemberIdentity, uint>
             methodMapTokenForForeignInterface,
         TrRmFrozenScalarValueBuilder scalarValues,
@@ -2845,39 +2936,53 @@ public static partial class TrRmExecutableCompiler
         for (var callIndex = 0; callIndex < prefixCallCount; callIndex++)
         {
             var call = calls[callIndex];
-            var foreignCall = call.ForeignInterfaceCall
-                ?? throw Invalid(
-                    "A Standard F+I call sequence call has no selected InterfaceMethod identity.");
-            if (!ForeignNativeInterfaceContract.TryCreateCallTarget(
-                    foreignCall, program, out var target)
-                || !call.IsUnsafeAuthorized
-                || foreignCall.DoesNotReturn
-                || call.Type != PrimitiveType.Void
-                || target.ReturnType != PrimitiveType.Void
-                || !target.NativeOutputContracts.IsEmpty
-                || target.ParameterCount != call.Arguments.Length
-                || foreignCall.Receiver is not BoundRead {
-                    Type: PrimitiveType.NativeRawPointer,
-                } receiver
-                || (uint)receiver.Variable >= (uint)function.ParameterCount
-                || function.Variables[receiver.Variable].IsOut
-                || function.Variables[receiver.Variable].IsInit)
+            var methodMapToken = 0u;
+            if (call.ForeignInterfaceCall is
+                BoundForeignInterfaceCall foreignCall)
             {
-                throw Unsupported(
-                    $"Function '{function.Name}' has an F+I call sequence target outside the direct-call subset.");
-            }
-
-            var methodMapToken
-                = methodMapTokenForForeignInterface(foreignCall.Member);
-            prefixMethodMapTokens.Add(methodMapToken);
-            methodMapTokens.Add(methodMapToken);
-            foreach (var argument in call.Arguments)
-            {
-                if (argument is BoundConstant constant)
+                if (!ForeignNativeInterfaceContract.TryCreateCallTarget(
+                        foreignCall, program, out var target)
+                    || !call.IsUnsafeAuthorized
+                    || foreignCall.DoesNotReturn
+                    || call.Type != PrimitiveType.Void
+                    || target.ReturnType != PrimitiveType.Void
+                    || !target.NativeOutputContracts.IsEmpty
+                    || target.ParameterCount != call.Arguments.Length
+                    || foreignCall.Receiver is not BoundRead {
+                        Type: PrimitiveType.NativeRawPointer,
+                    } receiver
+                    || (uint)receiver.Variable
+                        >= (uint)function.ParameterCount
+                    || function.Variables[receiver.Variable].IsOut
+                    || function.Variables[receiver.Variable].IsInit)
                 {
-                    _ = GetConstantRegister(constant);
+                    throw Unsupported(
+                        $"Function '{function.Name}' has an F+I call sequence target outside the direct-call subset.");
+                }
+
+                methodMapToken = methodMapTokenForForeignInterface(
+                    foreignCall.Member);
+                foreach (var argument in call.Arguments)
+                {
+                    if (argument is BoundConstant constant)
+                    {
+                        _ = GetConstantRegister(constant);
+                    }
                 }
             }
+            else if (GetLocalVoidCallTarget(call) is not null)
+            {
+                methodMapToken
+                    = methodMapTokenForFunction(call.Function);
+            }
+            else
+            {
+                throw Unsupported(
+                    $"Function '{function.Name}' has a sequence prefix call outside the local or F+I void-call subset.");
+            }
+
+            prefixMethodMapTokens.Add(methodMapToken);
+            methodMapTokens.Add(methodMapToken);
         }
 
         if (outerForeignCall is not null)
@@ -3145,6 +3250,53 @@ public static partial class TrRmExecutableCompiler
         byte[] EncodeCallSite(BoundCall call, uint methodMapToken,
             byte resultKind, ushort resultIndex)
         {
+            if (call.ForeignInterfaceCall is null)
+            {
+                if (resultKind != 0 || resultIndex != 0
+                    || GetLocalVoidCallTarget(call)
+                        is not BoundFunction localTarget)
+                {
+                    throw Invalid(
+                        "A Standard F+I call sequence local CallSite has an invalid target or result form.");
+                }
+
+                var localInputs
+                    = new TrRmRegisterBodyCallInput[
+                        localTarget.ParameterCount];
+                var localArgumentsByFormal
+                    = new BoundExpression?[localTarget.ParameterCount];
+                for (var argumentIndex = 0;
+                    argumentIndex < call.Arguments.Length;
+                    argumentIndex++)
+                {
+                    var formal = call.ParameterIndex(argumentIndex);
+                    if ((uint)formal >= (uint)localTarget.ParameterCount
+                        || localArgumentsByFormal[formal] is not null)
+                    {
+                        throw Invalid(
+                            "A Standard F+I call sequence local CallSite does not map each formal exactly once.");
+                    }
+
+                    localArgumentsByFormal[formal]
+                        = call.Arguments[argumentIndex];
+                }
+
+                for (var formal = 0;
+                    formal < localTarget.ParameterCount; formal++)
+                {
+                    localInputs[formal] = CreateInput(
+                        localArgumentsByFormal[formal]
+                        ?? throw Invalid(
+                            "A Standard F+I call sequence local CallSite omits a formal input."),
+                        localTarget.Variables[formal].Type);
+                }
+
+                return TrRmRegisterBodyRecordWriter.EncodeCallSite(1,
+                    resultKind,
+                    maps.GetMethodMapIndex(methodMapToken), resultIndex,
+                    localInputs, [], schema: schema);
+            }
+
             var foreignCall = call.ForeignInterfaceCall
                 ?? throw Invalid(
                     "A Standard F+I call sequence CallSite has no InterfaceMethod identity.");
@@ -3188,6 +3340,77 @@ public static partial class TrRmExecutableCompiler
             return TrRmRegisterBodyRecordWriter.EncodeCallSite(1, resultKind,
                 maps.GetMethodMapIndex(methodMapToken), resultIndex, inputs,
                 [], schema: schema);
+        }
+
+        BoundFunction? GetLocalVoidCallTarget(BoundCall call)
+        {
+            if (call.ForeignInterfaceCall is not null
+                || call.InterfaceCallIdentity is not null
+                || call.GenericMethodCall is not null
+                || call.ImportedGenericMethodCall is not null
+                || !call.ImportedGenericMethodTypeArguments.IsDefaultOrEmpty
+                || (uint)call.Function >= (uint)program.Functions.Length
+                || call.Type != PrimitiveType.Void
+                || call.Arguments.IsDefault)
+            {
+                return null;
+            }
+
+            var target = program.Functions[call.Function];
+            if (target.IsExternal
+                || target.ModuleImport is not null
+                || target.DeclaringStruct is not null
+                || target.DirectNativeImport is not null
+                || target.NativeVTableMethod is not null
+                || target.NativeFunctionPointerType is not null
+                || target.GenericMethodInstantiation is not null
+                || target.ImportedGenericMethod is not null
+                || target.InterfaceRequirement is not null
+                || target.IsConstEval
+                || target.RequiresUnsafeCaller
+                || target.DoesNotReturn
+                || target.IsConstructor
+                || target.IsCleanup
+                || target.ReturnType != PrimitiveType.Void
+                || !target.NativeOutputContracts.IsEmpty
+                || target.ParameterCount != call.Arguments.Length
+                || target.Variables.Length != target.ParameterCount
+                || target.Variables.Any(static variable =>
+                    variable.IsOut || variable.IsInit
+                    || variable.IsImplicitRef
+                    || variable.IsImplicitReferenceTemporary
+                    || variable.IsInitializationLocal
+                    || !(DirectNativeImportContract.IsScalar(
+                            variable.Type)
+                        || variable.Type
+                            == PrimitiveType.NativeRawPointer)))
+            {
+                return null;
+            }
+
+            var seenParameters = new bool[target.ParameterCount];
+            for (var argumentIndex = 0;
+                argumentIndex < call.Arguments.Length;
+                argumentIndex++)
+            {
+                var formal = call.ParameterIndex(argumentIndex);
+                var argument = call.Arguments[argumentIndex];
+                if ((uint)formal >= (uint)target.ParameterCount
+                    || seenParameters[formal]
+                    || argument is not BoundRead read
+                    || (uint)read.Variable >= (uint)function.ParameterCount
+                    || read.Type != target.Variables[formal].Type
+                    || function.Variables[read.Variable].Type != read.Type
+                    || function.Variables[read.Variable].IsOut
+                    || function.Variables[read.Variable].IsInit)
+                {
+                    return null;
+                }
+
+                seenParameters[formal] = true;
+            }
+
+            return seenParameters.All(static seen => seen) ? target : null;
         }
 
         ushort GetConstantMapIndex(BoundConstant constant)
@@ -8115,56 +8338,6 @@ public static partial class TrRmExecutableCompiler
                                 constant.Type)))
                 && variables.Count == function.ParameterCount
                     + initializedValueLocals.Count;
-        var foreignInterfaceValueCallSequence
-            = function.ReturnType != PrimitiveType.Void
-                && !function.DoesNotReturn
-                && stores == 0 && calls > 1
-                && foreignInterfaceCalls == calls
-                && foreignInterfaceNonReturningCalls == 0
-                && pointerLoads == 0
-                && initializedLocals.Count == 0
-                && foreignInterfaceOutputReservations == 0
-                && body.RecordCount == calls + 1
-                && body.MethodCount > 0
-                && body.MethodCount <= calls
-                && statements.Count == calls
-                && statements[^1] is BoundReturn {
-                    Value: BoundExpression returnExpression,
-                }
-                && GetNestedForeignInterfaceCall(returnExpression)
-                    is BoundCall returnCall
-                && returnCall.Type == function.ReturnType
-                && returnCall.IsUnsafeAuthorized
-                && returnCall.ForeignInterfaceCall is
-                    BoundForeignInterfaceCall returnForeignCall
-                && !returnForeignCall.DoesNotReturn
-                && returnForeignCall.NativeOutputContracts.IsEmpty
-                && returnCall.Arguments.All(static argument =>
-                    argument is BoundRead
-                    || argument is BoundConstant constant
-                        && DirectNativeImportContract.IsScalar(
-                            constant.Type)
-                        && constant.RepresentationType == constant.Type
-                        && constant.Bits.IsCanonicalFor(constant.Type))
-                && statements.Take(calls - 1).All(statement =>
-                    statement is BoundExpressionStatement expressionStatement
-                    && GetNestedForeignInterfaceCall(
-                        expressionStatement.Expression) is BoundCall call
-                    && call.Type == PrimitiveType.Void
-                    && call.IsUnsafeAuthorized
-                    && call.ForeignInterfaceCall is
-                        BoundForeignInterfaceCall foreignCall
-                    && !foreignCall.DoesNotReturn
-                    && foreignCall.NativeOutputContracts.IsEmpty
-                    && call.Arguments.All(static argument =>
-                        argument is BoundRead
-                        || argument is BoundConstant constant
-                            && DirectNativeImportContract.IsScalar(
-                                constant.Type)
-                            && constant.RepresentationType == constant.Type
-                            && constant.Bits.IsCanonicalFor(
-                                constant.Type)))
-                && variables.Count == function.ParameterCount;
         var valueCall = function.ReturnType != PrimitiveType.Void
             && stores == 0 && calls == 1 && pointerLoads == 0
             && initializedLocals.Count == 1;
@@ -8224,6 +8397,121 @@ public static partial class TrRmExecutableCompiler
                 .OfType<BoundCall>()
                 .ToArray()
             : Array.Empty<BoundCall>();
+        bool IsValidLocalVoidPrefixCall(BoundCall prefixCall)
+        {
+            if (prefixCall.ForeignInterfaceCall is not null
+                || prefixCall.InterfaceCallIdentity is not null
+                || prefixCall.GenericMethodCall is not null
+                || prefixCall.ImportedGenericMethodCall is not null
+                || !prefixCall.ImportedGenericMethodTypeArguments
+                    .IsDefaultOrEmpty
+                || (uint)prefixCall.Function >= (uint)functions.Count
+                || prefixCall.Type != PrimitiveType.Void
+                || prefixCall.Arguments.IsDefault)
+            {
+                return false;
+            }
+
+            var target = functions[prefixCall.Function];
+            if (target.IsExternal
+                || target.ModuleImport is not null
+                || target.DeclaringStruct is not null
+                || target.DirectNativeImport is not null
+                || target.NativeVTableMethod is not null
+                || target.NativeFunctionPointerType is not null
+                || target.GenericMethodInstantiation is not null
+                || target.ImportedGenericMethod is not null
+                || target.InterfaceRequirement is not null
+                || target.IsConstEval
+                || target.RequiresUnsafeCaller
+                || target.DoesNotReturn
+                || target.IsConstructor
+                || target.IsCleanup
+                || target.ReturnType != PrimitiveType.Void
+                || !target.NativeOutputContracts.IsEmpty
+                || target.ParameterCount != prefixCall.Arguments.Length
+                || target.Variables.Length != target.ParameterCount
+                || target.Variables.Any(static variable =>
+                    variable.IsOut || variable.IsInit
+                    || variable.IsImplicitRef
+                    || variable.IsImplicitReferenceTemporary
+                    || variable.IsInitializationLocal
+                    || !(DirectNativeImportContract.IsScalar(
+                            variable.Type)
+                        || variable.Type
+                            == PrimitiveType.NativeRawPointer)))
+            {
+                return false;
+            }
+
+            var seenParameters = new bool[target.ParameterCount];
+            for (var argumentIndex = 0;
+                argumentIndex < prefixCall.Arguments.Length;
+                argumentIndex++)
+            {
+                var formal = prefixCall.ParameterIndex(argumentIndex);
+                var argument = prefixCall.Arguments[argumentIndex];
+                if ((uint)formal >= (uint)target.ParameterCount
+                    || seenParameters[formal]
+                    || !(DirectNativeImportContract.IsScalar(
+                            target.Variables[formal].Type)
+                        || target.Variables[formal].Type
+                            == PrimitiveType.NativeRawPointer)
+                    || argument is not BoundRead read
+                    || (uint)read.Variable >= (uint)function.ParameterCount
+                    || read.Type != target.Variables[formal].Type
+                    || variables[read.Variable].Type != read.Type
+                    || variables[read.Variable].IsOut
+                    || variables[read.Variable].IsInit)
+                {
+                    return false;
+                }
+
+                seenParameters[formal] = true;
+            }
+
+            return seenParameters.All(static seen => seen);
+        }
+
+        bool IsValidVoidPrefixCall(BoundCall prefixCall)
+        {
+            if (prefixCall.Type != PrimitiveType.Void)
+            {
+                return false;
+            }
+
+            if (prefixCall.ForeignInterfaceCall is
+                BoundForeignInterfaceCall prefixForeignCall)
+            {
+                return prefixCall.Function
+                        == BoundCall.ForeignInterfaceFunction
+                    && prefixCall.IsUnsafeAuthorized
+                    && !prefixForeignCall.DoesNotReturn
+                    && prefixForeignCall.NativeOutputContracts.IsEmpty
+                    && prefixForeignCall.Receiver is BoundRead {
+                        Type: PrimitiveType.NativeRawPointer,
+                    } receiver
+                    && (uint)receiver.Variable
+                        < (uint)function.ParameterCount
+                    && prefixCall.Arguments.All(argument =>
+                        argument is BoundRead read
+                            && (uint)read.Variable
+                                < (uint)function.ParameterCount
+                            && read.Type
+                                == variables[read.Variable].Type
+                            && !variables[read.Variable].IsOut
+                            && !variables[read.Variable].IsInit
+                        || argument is BoundConstant constant
+                            && DirectNativeImportContract.IsScalar(
+                                constant.Type)
+                            && constant.RepresentationType == constant.Type
+                            && constant.Bits.IsCanonicalFor(
+                                constant.Type));
+            }
+
+            return IsValidLocalVoidPrefixCall(prefixCall);
+        }
+
         var nestedInputOuterTerminal
             = nestedInputOuterCall?.ForeignInterfaceCall?.DoesNotReturn
                 == true;
@@ -8242,11 +8530,20 @@ public static partial class TrRmExecutableCompiler
                     statement is BoundExpressionStatement {
                         Expression: BoundExpression expression,
                     }
-                    && GetNestedForeignInterfaceCall(expression)
+                    && GetUnwrappedBoundCall(expression)
                         is BoundCall prefixCall
-                    && prefixCall.Type == PrimitiveType.Void
-                    && prefixCall.ForeignInterfaceCall is not null)
+                    && IsValidVoidPrefixCall(prefixCall))
                     ? statements.Count - 1 : 0;
+        var nestedInputLocalPrefixCallCount
+            = nestedInputPrefixCallCount == 0 ? 0
+                : statements.Take(nestedInputPrefixCallCount).Count(
+                    statement =>
+                        statement is BoundExpressionStatement {
+                            Expression: BoundExpression expression,
+                        }
+                        && GetUnwrappedBoundCall(expression) is
+                            BoundCall prefixCall
+                        && prefixCall.ForeignInterfaceCall is null);
         var nestedInputPrefixCallsValid
             = nestedInputPrefixCallCount == 0
                 || (initializedLocals.Count == 0
@@ -8258,28 +8555,45 @@ public static partial class TrRmExecutableCompiler
                         statement is BoundExpressionStatement {
                             Expression: BoundExpression expression,
                         }
-                        && GetNestedForeignInterfaceCall(expression)
-                            is BoundCall prefixCall
-                        && prefixCall.Type == PrimitiveType.Void
-                        && prefixCall.IsUnsafeAuthorized
-                        && prefixCall.ForeignInterfaceCall is
-                            BoundForeignInterfaceCall prefixForeignCall
-                        && !prefixForeignCall.DoesNotReturn
-                        && prefixForeignCall.NativeOutputContracts.IsEmpty
-                        && prefixForeignCall.Receiver is BoundRead {
-                            Type: PrimitiveType.NativeRawPointer,
-                        } receiver
-                        && (uint)receiver.Variable
-                            < (uint)function.ParameterCount
-                        && prefixCall.Arguments.All(static argument =>
-                            argument is BoundRead
-                            || argument is BoundConstant constant
-                                && DirectNativeImportContract.IsScalar(
-                                    constant.Type)
-                                && constant.RepresentationType
-                                    == constant.Type
-                                && constant.Bits.IsCanonicalFor(
-                                    constant.Type)));
+                        && GetUnwrappedBoundCall(expression) is
+                            BoundCall prefixCall
+                        && IsValidVoidPrefixCall(prefixCall));
+        var foreignInterfaceValueCallSequence
+            = function.ReturnType != PrimitiveType.Void
+                && !function.DoesNotReturn
+                && stores == 0 && calls > 1
+                && calls == statements.Count
+                && nestedInputPrefixCallCount == calls - 1
+                && nestedInputCalls.Length == 0
+                && foreignInterfaceCalls
+                    == calls - nestedInputLocalPrefixCallCount
+                && foreignInterfaceNonReturningCalls == 0
+                && pointerLoads == 0
+                && initializedLocals.Count == 0
+                && foreignInterfaceOutputReservations == 0
+                && body.RecordCount == calls + 1
+                && body.MethodCount > 0
+                && body.MethodCount <= calls
+                && statements[^1] is BoundReturn {
+                    Value: BoundExpression returnExpression,
+                }
+                && GetNestedForeignInterfaceCall(returnExpression)
+                    is BoundCall returnCall
+                && returnCall.Type == function.ReturnType
+                && returnCall.IsUnsafeAuthorized
+                && returnCall.ForeignInterfaceCall is
+                    BoundForeignInterfaceCall returnForeignCall
+                && !returnForeignCall.DoesNotReturn
+                && returnForeignCall.NativeOutputContracts.IsEmpty
+                && returnCall.Arguments.All(static argument =>
+                    argument is BoundRead
+                    || argument is BoundConstant constant
+                        && DirectNativeImportContract.IsScalar(
+                            constant.Type)
+                        && constant.RepresentationType == constant.Type
+                        && constant.Bits.IsCanonicalFor(constant.Type))
+                && nestedInputPrefixCallsValid
+                && variables.Count == function.ParameterCount;
         var nestedInputCallsValid
             = nestedInputOuterCall?.ForeignInterfaceCall is
                 BoundForeignInterfaceCall outerForeignCall
@@ -8309,7 +8623,8 @@ public static partial class TrRmExecutableCompiler
             = stores == 0
                 && calls == nestedInputPrefixCallCount
                     + nestedInputCalls.Length + 1
-                && foreignInterfaceCalls == calls
+                && foreignInterfaceCalls
+                    == calls - nestedInputLocalPrefixCallCount
                 && (nestedInputOuterTerminal
                     ? function.DoesNotReturn
                         && foreignInterfaceNonReturningCalls == 1
@@ -8333,7 +8648,8 @@ public static partial class TrRmExecutableCompiler
                 && nestedInputPrefixCallCount > 0
                 && nestedInputCalls.Length == 0
                 && stores == 0
-                && foreignInterfaceCalls == calls
+                && foreignInterfaceCalls
+                    == calls - nestedInputLocalPrefixCallCount
                 && foreignInterfaceNonReturningCalls == 1
                 && pointerLoads == 0
                 && initializedLocals.Count == 0
@@ -8406,6 +8722,7 @@ public static partial class TrRmExecutableCompiler
         var simpleInitializationBody = voidStore || voidForwardingCall
             || voidInitializationCall || foreignInterfaceVoidCall
             || foreignInterfaceVoidCallSequence
+            || foreignInterfaceValueCallSequence
             || foreignInterfaceValueCallSequence || valueCall
             || foreignInterfaceValueCall || foreignInterfaceTerminalCall
             || foreignInterfaceNestedCall
