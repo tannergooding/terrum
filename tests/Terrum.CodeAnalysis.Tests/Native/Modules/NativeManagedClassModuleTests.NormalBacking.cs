@@ -159,6 +159,86 @@ internal sealed partial class NativeManagedClassModuleTests
             .ConfigureAwait(true), Is.EqualTo(43));
     }
 
+    [Test]
+    public async Task NormalBackingCheckedUnwindDrainsRuntimeOnlyClassBesideCleanupClassAsync()
+    {
+        const string agreement
+            = CompilationOptions.WindowsX64NormalBackingAgreement;
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            class CleanupOwner {
+                public int32 Value;
+                [NoThrow] public CleanupOwner() { Value = 1; }
+                [NoThrow] [Cleanup] private void Close() {}
+            }
+            class Plain {
+                public int32 Value;
+                [NoThrow] public Plain() { Value = 40; }
+            }
+            int32 FalliblePlain() {
+                require Plain.TryCreate(out var plain);
+                require false;
+                return plain.Value;
+            }
+            public int32 Main() {
+                unsafe {
+                    try {
+                        return FalliblePlain();
+                    } catch {
+                        return 42;
+                    }
+                }
+            }
+            """), new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.CheckedExceptions,
+            NativeLoweringAgreement = agreement,
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        Assert.That(program.Functions.Single(function =>
+            StringComparer.Ordinal.Equals(function.Name,
+                "FalliblePlain")).NoFailureProof, Is.False);
+        _ = NativeEmitter.EmitCode(program,
+            NativeRuntimePolicy.CheckedExceptions, agreement);
+        Assert.That(NativeJit.ExecuteWithData(program,
+            NativeRuntimePolicy.CheckedExceptions,
+            nativeLoweringAgreement: agreement).ExitCode, Is.EqualTo(42));
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(program,
+                NativeRuntimePolicy.CheckedExceptions, agreement))
+            .ConfigureAwait(true), Is.EqualTo(42));
+    }
+
+    [Test]
+    public void NormalBackingCleanupRejectsFallibleCheckedReferenceResidence()
+    {
+        const string agreement
+            = CompilationOptions.WindowsX64NormalBackingAgreement;
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            class CleanupOwner {
+                public int32 Value;
+                [NoThrow] public CleanupOwner() { Value = 1; }
+                [NoThrow] [Cleanup] private void Close() {}
+            }
+            int32 FallibleReference(ref<int32> value) {
+                require false;
+                return *value;
+            }
+            public int32 Main() { return 42; }
+            """), new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.CheckedExceptions,
+            NativeLoweringAgreement = agreement,
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        Assert.That(program.Functions.Single(function =>
+            StringComparer.Ordinal.Equals(function.Name,
+                "FallibleReference")).NoFailureProof, Is.False);
+        Assert.Throws<NotSupportedException>(() =>
+            NativeEmitter.EmitCode(program,
+                NativeRuntimePolicy.CheckedExceptions, agreement));
+    }
+
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task NormalBackingClassHandlesRetainAndRetireWithinSelectedRuntimeAsync(
