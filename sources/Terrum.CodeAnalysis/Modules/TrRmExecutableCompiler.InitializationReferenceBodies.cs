@@ -1984,8 +1984,6 @@ public static partial class TrRmExecutableCompiler
         }
 
         if (seenParameters.Any(static seen => !seen)
-            || (scalarExpressionRegisterCount != 0
-                && nestedInputCalls.Count != 0)
             || inputHomeVariables.Count != fallbackLocal - 1)
         {
             return false;
@@ -4778,12 +4776,6 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
-        if (scalarExpressionRegisterCount != 0 && nestedCalls.Count != 0)
-        {
-            throw Unsupported(
-                $"Function '{function.Name}' mixes conditional F+I arithmetic expressions with nested CallSite inputs.");
-        }
-
         foreach (var argument in call.Arguments)
         {
             if (argument is BoundConstant constant)
@@ -4920,7 +4912,7 @@ public static partial class TrRmExecutableCompiler
             = GetForeignNativeOutputComparisonOpcode(sourceOperator)
                 ?? throw Unsupported(
                     "The Standard F+I conditional-output result selector is outside the selected subset.");
-        var scalarExpressionCode = new List<byte>();
+        var inputPreparationCode = new List<byte>();
         var nextExpressionRegister
             = nestedCalls.Count + constantLoads.Count + 1;
         for (var sourceArgument = 0;
@@ -4948,6 +4940,8 @@ public static partial class TrRmExecutableCompiler
             {
                 inputs[formal + 1] = new TrRmRegisterBodyCallInput(1, 1,
                     nestedRegister);
+                inputPreparationCode.Add(0x90);
+                inputPreparationCode.Add(nestedRegister);
             }
             else if (call.Arguments[sourceArgument] is BoundRead read
                 && (uint)read.Variable < (uint)function.ParameterCount)
@@ -4971,7 +4965,7 @@ public static partial class TrRmExecutableCompiler
                         call.Arguments[sourceArgument],
                         target.Variables[formal].Type,
                         () => nextExpressionRegister++,
-                        GetConstantRegister, scalarExpressionCode);
+                        GetConstantRegister, inputPreparationCode);
                 inputs[formal + 1] = new TrRmRegisterBodyCallInput(1, 1,
                     checked((ushort)resultRegister));
             }
@@ -5009,11 +5003,8 @@ public static partial class TrRmExecutableCompiler
         var records = new List<ReadOnlyMemory<byte>> {
             new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 },
         };
-        var nestedCallSiteRecordIndexes = new List<ushort>(
-            nestedCallSites.Count);
         foreach (var nestedCallSite in nestedCallSites)
         {
-            nestedCallSiteRecordIndexes.Add(checked((ushort)records.Count));
             records.Add(new(nestedCallSite));
         }
 
@@ -5030,9 +5021,8 @@ public static partial class TrRmExecutableCompiler
             checked((ushort)(successOnTrue ? 1 : 2)),
             checked((ushort)(successOnTrue ? 2 : 1))));
         var entryCode = new List<byte>(26
-            + (nestedCallSiteRecordIndexes.Count * 2)
             + (constantLoads.Count * 2)
-            + scalarExpressionCode.Count);
+            + inputPreparationCode.Count);
         // Finish input preparation before reserving the output Home.
         foreach (var (constantMapIndex, register) in constantLoads)
         {
@@ -5046,12 +5036,7 @@ public static partial class TrRmExecutableCompiler
             entryCode.Add(checked((byte)(
                 (constantMapIndex << 4) | register)));
         }
-        foreach (var nestedRecord in nestedCallSiteRecordIndexes)
-        {
-            entryCode.Add(0x90);
-            entryCode.Add(checked((byte)nestedRecord));
-        }
-        entryCode.AddRange(scalarExpressionCode);
+        entryCode.AddRange(inputPreparationCode);
         entryCode.Add(0xDF);
         entryCode.Add(0);
         entryCode.Add((byte)outputReservationRecordIndex);
@@ -10127,7 +10112,6 @@ public static partial class TrRmExecutableCompiler
             || variables.Count != function.ParameterCount + 2
             || body.RecordCount != (nestedCallCount + 4)
             || nestedCallCount > 13
-            || (hasScalarExpressions && hasNestedCalls)
             || (!hasNestedCalls && body.MethodCount != 1)
             || (hasNestedCalls && (body.MethodCount < 2
                 || body.MethodCount > nestedCallCount + 1))
@@ -10874,7 +10858,7 @@ public static partial class TrRmExecutableCompiler
                 {
                     if (registerInput is BoundUnary or BoundBinary)
                     {
-                        if (!hasScalarExpressions || hasNestedCalls
+                        if (!hasScalarExpressions
                             || !scalarExpressionResultRegisters.Remove(
                                 homeIndex))
                         {

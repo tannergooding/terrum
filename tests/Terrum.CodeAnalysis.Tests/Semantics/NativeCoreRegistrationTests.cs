@@ -819,6 +819,7 @@ internal sealed class NativeCoreRegistrationTests
                     When: Terrum.Interop.NativeOutputCondition.NonNegative)]
                 public unsafe int32 TryReadPair(int32 first, int32 second,
                     write ptr<int32> value);
+                public unsafe int32 GetIndex(int32 index);
             }
             """;
         var providerCompilation = Compilation.CreateLibrary(
@@ -857,6 +858,18 @@ internal sealed class NativeCoreRegistrationTests
                         return fallback;
                     }
                 }
+
+                int32 InvokeMixed(ptr<void> receiver, int32 first,
+                    int32 second, int32 fallback) {
+                    init int32 value;
+                    unsafe {
+                        int32 status = IProbe.TryReadPair(receiver,
+                            IProbe.GetIndex(receiver, first),
+                            second + first, &init value);
+                        if (status >= 0) { return value; }
+                        return fallback;
+                    }
+                }
                 """), reference, options);
         Assert.That(consumerCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine,
@@ -887,17 +900,38 @@ internal sealed class NativeCoreRegistrationTests
         Assert.That((callSite[28], callSite[29],
                 BinaryPrimitives.ReadUInt16LittleEndian(callSite[30..])),
             Is.EqualTo(((byte)1, (byte)1, (ushort)4)));
+        var mixedInvokeRow = Enumerable.Range(1, consumerTables.Methods.Count)
+            .Single(row =>
+                consumerTables.Methods.GetName(row) == "InvokeMixed");
+        var mixedBody = consumerTables.Bodies.GetRegisterBody(
+            consumerTables.Methods.GetBodyRow(mixedInvokeRow),
+            consumerTables.Contracts.Count);
+        Assert.That(mixedBody.GetBlockCode(0).ToArray().Take(8),
+            Is.EqualTo(new byte[] {
+                0x90, 1, 0x11, 0x22, 0x11, 0x13, 0x21, 0x32,
+            }));
+        var mixedCallSite = mixedBody.GetRecord(2);
+        Assert.That((mixedCallSite[24], mixedCallSite[25],
+                BinaryPrimitives.ReadUInt16LittleEndian(
+                    mixedCallSite[26..])),
+            Is.EqualTo(((byte)1, (byte)1, (ushort)1)));
+        Assert.That((mixedCallSite[28], mixedCallSite[29],
+                BinaryPrimitives.ReadUInt16LittleEndian(
+                    mixedCallSite[30..])),
+            Is.EqualTo(((byte)1, (byte)1, (ushort)2)));
 
         var loaded = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(schemaIdentity, consumerArtifact),
             "consumer.module", [providerInput]);
         AssertComputedInputs(loaded);
+        AssertMixedInputs(loaded);
         var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(loaded,
             "consumer.module", schemaIdentity, 1, []);
         var reloaded = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(schemaIdentity,
                 reemittedArtifact), "consumer.module", [providerInput]);
         AssertComputedInputs(reloaded);
+        AssertMixedInputs(reloaded);
 
         static void AssertComputedInputs(BoundProgram program)
         {
@@ -934,6 +968,50 @@ internal sealed class NativeCoreRegistrationTests
             Assert.That(second.Left, Is.TypeOf<BoundRead>());
             Assert.That(((BoundRead)second.Left).Variable, Is.EqualTo(2));
             Assert.That(second.Right, Is.TypeOf<BoundConstant>());
+            Assert.That(selectedCall.Arguments[2],
+                Is.TypeOf<BoundNativeOutputReservation>());
+        }
+
+        static void AssertMixedInputs(BoundProgram program)
+        {
+            var function = program.Functions.Single(
+                static candidate => candidate.Name == "InvokeMixed");
+            BoundCall? foreignCall = null;
+            Assert.That(BoundTreeTraversal.VisitExpressions(function.Body,
+                expression =>
+                {
+                    if (expression is BoundCall call
+                        && call.ForeignInterfaceCall?.Member.Name
+                            == "TryReadPair")
+                    {
+                        foreignCall = call;
+                    }
+                }), Is.True);
+            var selectedCall = foreignCall
+                ?? throw new AssertionException("Expected an FNI call.");
+            Assert.That(selectedCall.Arguments.Length, Is.EqualTo(3));
+            Assert.That(selectedCall.ParameterIndex(0), Is.EqualTo(0));
+            Assert.That(selectedCall.Arguments[0],
+                Is.TypeOf<BoundUnsafeExpression>());
+            var nestedCall = (BoundCall)((BoundUnsafeExpression)
+                selectedCall.Arguments[0]).Expression;
+            Assert.That(nestedCall.ForeignInterfaceCall?.Member.Name,
+                Is.EqualTo("GetIndex"));
+            Assert.That(nestedCall.Arguments.Single(),
+                Is.TypeOf<BoundRead>());
+            Assert.That(((BoundRead)nestedCall.Arguments.Single()).Variable,
+                Is.EqualTo(1));
+            Assert.That(selectedCall.ParameterIndex(1), Is.EqualTo(1));
+            Assert.That(selectedCall.Arguments[1], Is.TypeOf<BoundBinary>());
+            var expression = (BoundBinary)selectedCall.Arguments[1];
+            Assert.That(expression.Operator, Is.EqualTo(TokenKind.Plus));
+            Assert.That(expression.Left, Is.TypeOf<BoundRead>());
+            Assert.That(((BoundRead)expression.Left).Variable,
+                Is.EqualTo(2));
+            Assert.That(expression.Right, Is.TypeOf<BoundRead>());
+            Assert.That(((BoundRead)expression.Right).Variable,
+                Is.EqualTo(1));
+            Assert.That(selectedCall.ParameterIndex(2), Is.EqualTo(2));
             Assert.That(selectedCall.Arguments[2],
                 Is.TypeOf<BoundNativeOutputReservation>());
         }
