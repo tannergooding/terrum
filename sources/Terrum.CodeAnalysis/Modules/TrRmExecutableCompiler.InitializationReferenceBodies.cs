@@ -2198,8 +2198,33 @@ public static partial class TrRmExecutableCompiler
     {
         opcode = 0;
         control = 0;
-        if (binary.Left.Type != binary.Type
-            || !DirectNativeImportContract.IsScalar(binary.Type))
+        if (!DirectNativeImportContract.IsScalar(binary.Type))
+        {
+            return false;
+        }
+
+        if (binary.Type == PrimitiveType.Bool
+            && binary.Left.Type == PrimitiveType.Bool
+            && binary.Right.Type == PrimitiveType.Bool
+            && (binary.Operator is TokenKind.EqualsEquals
+                or TokenKind.BangEquals))
+        {
+            opcode = 0xC2;
+            control = binary.Operator == TokenKind.EqualsEquals ? (byte)0x01
+                : (byte)0x02;
+            return true;
+        }
+
+        if (binary.Type == PrimitiveType.Bool
+            && binary.Left.Type == binary.Right.Type
+            && TryGetForeignInterfaceScalarComparisonPredicateMask(
+                binary.Left.Type, binary.Operator, out _))
+        {
+            opcode = 0xC2;
+            return true;
+        }
+
+        if (binary.Left.Type != binary.Type)
         {
             return false;
         }
@@ -2223,17 +2248,6 @@ public static partial class TrRmExecutableCompiler
                 _ => 0,
             };
             return opcode != 0;
-        }
-
-        if (binary.Type == PrimitiveType.Bool
-            && binary.Right.Type == PrimitiveType.Bool
-            && (binary.Operator is TokenKind.EqualsEquals
-                or TokenKind.BangEquals))
-        {
-            opcode = 0xC2;
-            control = binary.Operator == TokenKind.EqualsEquals ? (byte)0x01
-                : (byte)0x02;
-            return true;
         }
 
         if (binary.Right.Type != binary.Type)
@@ -2303,6 +2317,42 @@ public static partial class TrRmExecutableCompiler
         }
 
         return false;
+    }
+
+    private static bool TryGetForeignInterfaceScalarComparisonPredicateMask(
+        PrimitiveType operandType, TokenKind operation, out byte predicateMask)
+    {
+        predicateMask = operation switch {
+            TokenKind.Less => 0x01,
+            TokenKind.EqualsEquals => 0x02,
+            TokenKind.LessEquals => 0x03,
+            TokenKind.Greater => 0x04,
+            TokenKind.GreaterEquals => 0x06,
+            TokenKind.BangEquals => 0x0D,
+            _ => 0,
+        };
+        return predicateMask != 0
+            && (PrimitiveTypeFacts.IsIntegerOrWide(operandType)
+                || (PrimitiveTypeFacts.IsFloating(operandType)
+                    && DirectNativeImportContract.IsScalar(operandType)));
+    }
+
+    private static bool TryGetForeignInterfaceScalarComparisonOperator(
+        PrimitiveType operandType, byte predicateMask,
+        out TokenKind operation)
+    {
+        operation = predicateMask switch {
+            0x01 => TokenKind.Less,
+            0x02 => TokenKind.EqualsEquals,
+            0x03 => TokenKind.LessEquals,
+            0x04 => TokenKind.Greater,
+            0x05 or 0x0D => TokenKind.BangEquals,
+            0x06 => TokenKind.GreaterEquals,
+            _ => default,
+        };
+        return TryGetForeignInterfaceScalarComparisonPredicateMask(
+            operandType, operation, out var expectedPredicateMask)
+            && expectedPredicateMask == predicateMask;
     }
 
     private static bool TryAnalyzeForeignInterfaceScalarInputExpression(
@@ -2400,11 +2450,16 @@ public static partial class TrRmExecutableCompiler
                     return (false, 0, false);
                 }
 
-                var left = Visit(binary.Left, type);
-                var rightType = binary.Operator is TokenKind.ShiftLeft
-                    or TokenKind.ShiftRight
-                    or TokenKind.ShiftRightUnsigned
+                var relationComparison = binary.Type == PrimitiveType.Bool
+                    && binary.Left.Type != PrimitiveType.Bool;
+                var leftType = relationComparison
+                    ? binary.Left.Type : type;
+                var rightType = relationComparison
+                    || (binary.Operator is TokenKind.ShiftLeft
+                        or TokenKind.ShiftRight
+                        or TokenKind.ShiftRightUnsigned)
                     ? binary.Right.Type : type;
+                var left = Visit(binary.Left, leftType);
                 var right = Visit(binary.Right, rightType);
                 return left.IsValid && left.OwnsRegister && right.IsValid
                     ? (true, checked(left.RegisterCount
@@ -2586,11 +2641,16 @@ public static partial class TrRmExecutableCompiler
                 && TryGetForeignInterfaceScalarBinaryEncoding(binary,
                     out var binaryOpcode, out var binaryControl))
             {
-                var left = Emit(binary.Left, type);
-                var rightType = binary.Operator is TokenKind.ShiftLeft
-                    or TokenKind.ShiftRight
-                    or TokenKind.ShiftRightUnsigned
+                var relationComparison = binaryOpcode == 0xC2
+                    && binaryControl == 0;
+                var leftType = relationComparison
+                    ? binary.Left.Type : type;
+                var rightType = relationComparison
+                    || (binary.Operator is TokenKind.ShiftLeft
+                        or TokenKind.ShiftRight
+                        or TokenKind.ShiftRightUnsigned)
                     ? binary.Right.Type : type;
+                var left = Emit(binary.Left, leftType);
                 var right = Emit(binary.Right, rightType);
                 if (!left.OwnsRegister)
                 {
@@ -2598,7 +2658,34 @@ public static partial class TrRmExecutableCompiler
                         "A Standard F+I binary operation would overwrite a ConstantMap register.");
                 }
 
-                if (binaryOpcode is 0xC0 or 0xC2)
+                if (relationComparison)
+                {
+                    if (!TryGetForeignInterfaceScalarComparisonPredicateMask(
+                            binary.Left.Type, binary.Operator,
+                            out var predicateMask))
+                    {
+                        throw Invalid(
+                            "A Standard F+I relation comparison has no supported predicate mask.");
+                    }
+
+                    var comparisonPayload = checked((ushort)(
+                        left.Register | (0x0F << 4)
+                        | (left.Register << 8)
+                        | (right.Register << 12)));
+                    code.Add(0xC2);
+                    code.Add(0);
+                    code.Add((byte)comparisonPayload);
+                    code.Add((byte)(comparisonPayload >> 8));
+
+                    var conditionPayload = checked((ushort)(
+                        left.Register | (left.Register << 4)
+                        | (0x0F << 8) | (0x0F << 12)));
+                    code.Add(0xC3);
+                    code.Add(predicateMask);
+                    code.Add((byte)conditionPayload);
+                    code.Add((byte)(conditionPayload >> 8));
+                }
+                else if (binaryOpcode is 0xC0 or 0xC2)
                 {
                     var payload = checked((ushort)(
                         left.Register | (0x0F << 4)
@@ -7816,6 +7903,8 @@ public static partial class TrRmExecutableCompiler
         var foreignInterfaceOutputReservations = 0;
         var callSiteValueResultRegisters = new List<ushort>();
         var forwardedInitializationReference = false;
+        var pendingForeignInterfaceComparison
+            = ((BoundExpression Left, BoundExpression Right, int Register)?)null;
         var nativeOutputReservationsByRecord
             = new Dictionary<int, (int CallSiteRecordIndex, int HomeIndex,
                 uint FormalOrdinal)>();
@@ -7857,6 +7946,13 @@ public static partial class TrRmExecutableCompiler
             var instructionLength = TrRmRegisterBodyReader.InstructionLength(
                 opcode, body.Schema, body.UsesNativePointerLoads);
             var instruction = code.Slice(position, instructionLength);
+            if (pendingForeignInterfaceComparison is not null
+                && opcode != 0xC3)
+            {
+                throw Invalid(
+                    "A Standard F+I relation comparison is not immediately followed by SetCondition.");
+            }
+
             switch (opcode)
             {
                 case 0x11:
@@ -8126,6 +8222,23 @@ public static partial class TrRmExecutableCompiler
                             "A Standard F+I Boolean comparison has an invalid or unavailable register.");
                     }
 
+                    if (control == 0)
+                    {
+                        if (destinationRegister != source0Register
+                            || left.Type != right.Type
+                            || !TryGetForeignInterfaceScalarComparisonPredicateMask(
+                                left.Type, TokenKind.EqualsEquals, out _))
+                        {
+                            throw Invalid(
+                                "A Standard F+I relation comparison has incompatible operands or result mapping.");
+                        }
+
+                        pendingForeignInterfaceComparison
+                            = (left, right, destinationRegister);
+                        _ = valueByRegister.Remove(destinationRegister);
+                        break;
+                    }
+
                     var operation = control switch {
                         0x01 => TokenKind.EqualsEquals,
                         0x02 => TokenKind.BangEquals,
@@ -8148,6 +8261,43 @@ public static partial class TrRmExecutableCompiler
                     }
 
                     valueByRegister[destinationRegister] = binary;
+                    break;
+                }
+                case 0xC3:
+                {
+                    if (!foreignInterfaceDirectCallBody
+                        || pendingForeignInterfaceComparison is not
+                            { } pendingComparison)
+                    {
+                        throw Invalid(
+                            "A Standard F+I SetCondition has no pending relation comparison.");
+                    }
+
+                    var predicateMask = instruction[1];
+                    var payload = BinaryPrimitives
+                        .ReadUInt16LittleEndian(instruction[2..]);
+                    var destinationRegister = payload & 0x0F;
+                    var conditionRegister = (payload >> 4) & 0x0F;
+                    var unused0 = (payload >> 8) & 0x0F;
+                    var unused1 = payload >> 12;
+                    if (destinationRegister != pendingComparison.Register
+                        || conditionRegister != pendingComparison.Register
+                        || unused0 != 15 || unused1 != 15
+                        || !TryGetForeignInterfaceScalarComparisonOperator(
+                            pendingComparison.Left.Type, predicateMask,
+                            out var operation))
+                    {
+                        throw Invalid(
+                            "A Standard F+I SetCondition does not match its relation comparison.");
+                    }
+
+                    valueByRegister[destinationRegister] = new BoundBinary(
+                        operation, pendingComparison.Left,
+                        pendingComparison.Right, PrimitiveType.Bool, default) {
+                        OverflowBehavior
+                            = BoundIntegerOverflowBehavior.Checked,
+                    };
+                    pendingForeignInterfaceComparison = null;
                     break;
                 }
                 case 0xD4:
@@ -9795,6 +9945,12 @@ public static partial class TrRmExecutableCompiler
             position += instructionLength;
         }
 
+        if (pendingForeignInterfaceComparison is not null)
+        {
+            throw Invalid(
+                "A Standard F+I relation comparison has no SetCondition.");
+        }
+
         if (activeNativeOutputReservations.Count != 0)
         {
             throw Invalid(
@@ -10479,7 +10635,7 @@ public static partial class TrRmExecutableCompiler
                 hasConstantInputs = true;
                 offset += 4;
             }
-            else if ((code[offset] is 0xC0 or 0xC2)
+            else if ((code[offset] is 0xC0 or 0xC2 or 0xC3)
                 && code.Length - offset >= 4)
             {
                 hasScalarExpressions = true;
@@ -10673,7 +10829,8 @@ public static partial class TrRmExecutableCompiler
             {
                 preparationOffset += 4;
             }
-            else if (rawEntryCode[preparationOffset] == 0xC0)
+            else if (rawEntryCode[preparationOffset] is 0xC0 or 0xC2
+                or 0xC3)
             {
                 preparationOffset += 4;
             }
@@ -10841,7 +10998,7 @@ public static partial class TrRmExecutableCompiler
                 constantOffset += 2;
                 continue;
             }
-            if (opcode is 0xC0 or 0xC2)
+            if (opcode is 0xC0 or 0xC2 or 0xC3)
             {
                 constantOffset += 4;
                 continue;
@@ -11091,10 +11248,19 @@ public static partial class TrRmExecutableCompiler
         var scalarExpressionResultRegisters = new HashSet<ushort>();
         var scalarExpressionHomeLoadCount = 0;
         var expressionNestedCallIndex = 0;
+        var pendingScalarComparison
+            = ((BoundExpression Left, BoundExpression Right,
+                ushort Register, ushort RightRegister)?)null;
         for (var preparationOffset = 0;
             preparationOffset < preparationPrefixLength;)
         {
             var opcode = rawEntryCode[preparationOffset];
+            if (pendingScalarComparison is not null && opcode != 0xC3)
+            {
+                throw Invalid(
+                    "The Standard F+I conditional-output relation comparison is not immediately followed by SetCondition.");
+            }
+
             if (opcode == 0x16)
             {
                 var destination = (ushort)(
@@ -11199,6 +11365,25 @@ public static partial class TrRmExecutableCompiler
                         "The Standard F+I conditional-output Boolean comparison has an invalid register mapping.");
                 }
 
+                var leftInput = registerInputs[source0Register];
+                var rightInput = registerInputs[source1Register];
+                if (control == 0)
+                {
+                    if (leftInput.Type != rightInput.Type
+                        || !TryGetForeignInterfaceScalarComparisonPredicateMask(
+                            leftInput.Type, TokenKind.EqualsEquals, out _))
+                    {
+                        throw Invalid(
+                            "The Standard F+I conditional-output relation comparison has incompatible operands.");
+                    }
+
+                    pendingScalarComparison
+                        = (leftInput, rightInput, comparisonDestination,
+                            source1Register);
+                    preparationOffset += 4;
+                    continue;
+                }
+
                 var operationToken = control switch {
                     0x01 => TokenKind.EqualsEquals,
                     0x02 => TokenKind.BangEquals,
@@ -11206,9 +11391,7 @@ public static partial class TrRmExecutableCompiler
                         "A Standard F+I conditional-output Boolean comparison uses an unsupported control."),
                 };
                 var comparison = new BoundBinary(operationToken,
-                    registerInputs[source0Register],
-                    registerInputs[source1Register], PrimitiveType.Bool,
-                    default) {
+                    leftInput, rightInput, PrimitiveType.Bool, default) {
                     OverflowBehavior
                         = BoundIntegerOverflowBehavior.Checked,
                 };
@@ -11229,6 +11412,48 @@ public static partial class TrRmExecutableCompiler
                 registerInputs[comparisonDestination] = comparison;
                 _ = scalarExpressionResultRegisters.Add(
                     comparisonDestination);
+                preparationOffset += 4;
+                continue;
+            }
+
+            if (opcode == 0xC3)
+            {
+                var predicateMask = rawEntryCode[preparationOffset + 1];
+                var payload = BinaryPrimitives.ReadUInt16LittleEndian(
+                    rawEntryCode[(preparationOffset + 2)..]);
+                var destinationRegister
+                    = checked((ushort)(payload & 0x0F));
+                var conditionRegister
+                    = checked((ushort)((payload >> 4) & 0x0F));
+                var unused0 = (payload >> 8) & 0x0F;
+                var unused1 = payload >> 12;
+                if (pendingScalarComparison is not
+                        { } pendingComparison
+                    || destinationRegister != pendingComparison.Register
+                    || conditionRegister != pendingComparison.Register
+                    || unused0 != 15 || unused1 != 15
+                    || !TryGetForeignInterfaceScalarComparisonOperator(
+                        pendingComparison.Left.Type, predicateMask,
+                        out var operationToken))
+                {
+                    throw Invalid(
+                        "The Standard F+I conditional-output SetCondition does not match a pending relation comparison.");
+                }
+
+                var comparison = new BoundBinary(operationToken,
+                    pendingComparison.Left, pendingComparison.Right,
+                    PrimitiveType.Bool, default) {
+                    OverflowBehavior
+                        = BoundIntegerOverflowBehavior.Checked,
+                };
+                _ = scalarExpressionResultRegisters.Remove(
+                    pendingComparison.RightRegister);
+                _ = scalarExpressionResultRegisters.Remove(
+                    pendingComparison.Register);
+                registerInputs[pendingComparison.Register] = comparison;
+                _ = scalarExpressionResultRegisters.Add(
+                    pendingComparison.Register);
+                pendingScalarComparison = null;
                 preparationOffset += 4;
                 continue;
             }
@@ -11417,6 +11642,12 @@ public static partial class TrRmExecutableCompiler
             registerInputs[destinationRegister] = operation;
             _ = scalarExpressionResultRegisters.Add(destinationRegister);
             preparationOffset += 2;
+        }
+
+        if (pendingScalarComparison is not null)
+        {
+            throw Invalid(
+                "The Standard F+I conditional-output relation comparison has no SetCondition.");
         }
 
         if (expressionNestedCallIndex != nestedCallCount)
