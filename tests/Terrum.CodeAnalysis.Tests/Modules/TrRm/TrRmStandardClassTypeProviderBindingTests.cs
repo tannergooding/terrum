@@ -3205,6 +3205,14 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
             = BinaryPrimitives.ReadUInt32LittleEndian(
                 fieldPathBody.FieldMap);
         Assert.That(fieldPathToken, Is.EqualTo(0x1D00_0002u));
+        var wrongOwnerFieldPathArtifact
+            = RewriteC1M1BodyFieldMapAsFieldPath(artifact,
+                artifactReadBodyRow, pathRootTypeSpecRef, 0x1400_0001u);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    wrongOwnerFieldPathArtifact),
+                "StructFieldConsumer", [providerInput], ["ContainerKey"]));
 
         var fieldPathReference
             = TrRmExecutableCompiler.CreateStandardReference(
@@ -3343,6 +3351,19 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
                 .Single(static definition => definition.Name == "Leaf")
                 .ProviderExpectations,
             Is.Not.Empty);
+
+        var missingFieldProvider = CreateClassArtifact("StructProvider",
+            "Leaf", "LeafKey", 0xF200_0008, schemaIdentity,
+            layoutKind: 0, pack: 0);
+        SetTypeDefFlags(missingFieldProvider, 0x06);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    fieldPathReemitted),
+                "StructFieldPathConsumerReemitted", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        missingFieldProvider),
+                ], ["ContainerKey"]));
 
         var incompatibleProvider = CreateClassArtifact("StructProvider",
             "Leaf", "LeafKey", 0xF200_000A, schemaIdentity,
@@ -6242,7 +6263,8 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
     }
 
     private static byte[] RewriteC1M1BodyFieldMapAsFieldPath(
-        byte[] artifact, int bodyRow, uint rootTypeSpecRef)
+        byte[] artifact, int bodyRow, uint rootTypeSpecRef,
+        uint? fieldReferenceOverride = null)
     {
         var schema
             = TrRmArtifactSchema
@@ -6260,13 +6282,14 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
                 "The FieldPath fixture requires one FieldMap entry.");
         }
 
-        var fieldReference
+        var sourceFieldReference
             = BinaryPrimitives.ReadUInt32LittleEndian(body.FieldMap);
-        if ((fieldReference >> 24) != 0x1C)
+        if ((sourceFieldReference >> 24) != 0x1C)
         {
             throw new InvalidDataException(
                 "The FieldPath fixture requires a selected FieldDef Import.");
         }
+        var fieldReference = fieldReferenceOverride ?? sourceFieldReference;
 
         var fieldPathRow
             = new TrRmFieldPathRow(rootTypeSpecRef, [fieldReference]);
