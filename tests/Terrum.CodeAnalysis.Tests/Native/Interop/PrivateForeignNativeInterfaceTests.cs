@@ -405,6 +405,108 @@ internal sealed class PrivateForeignNativeInterfaceTests
             ModuleCompiler.Link(malformed, producer));
     }
 
+    [Test]
+    public void PrivateFniCallRejectsInvalidOutputReservationLocal()
+    {
+        const string schemaIdentity
+            = "terrum/private-semantic-111-foreign-native-interfaces-1";
+        const string providerIdentity = "PrivateFniReservationProvider";
+        var providerSource = SyntaxTree.Parse("""
+            using Terrum.Interop;
+            public int32 Add(int32 value) { return value + 1; }
+            [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+            [ForeignNativeInterface(VTableByteOffset: uint32(0))]
+            public interface IProbe {
+                [param(value): NativeOutput(
+                    When: NativeOutputCondition.NonZero)]
+                public unsafe int32 TryRead(write ptr<int32> value);
+            }
+            """);
+        var (sourceNativeRegistration, sourceOutputRegistration)
+            = NativeOutputCoreRegistrationTests
+                .CreateCombinedRegistrations(
+                    includeForeignNativeInterface: true);
+        var moduleBindings = CoreProviderModuleBindings.Create(
+            providerIdentity,
+            sourceNativeRegistration.ModuleBindings.Providers,
+            sourceNativeRegistration.ModuleBindings.Declarations);
+        var nativeRegistration = NativeCoreRegistrationSet.Create(
+            moduleBindings, sourceNativeRegistration.CallingConventions,
+            sourceNativeRegistration.ResolutionModes,
+            sourceNativeRegistration.ResolutionPolicies,
+            sourceNativeRegistration.NativeImport,
+            sourceNativeRegistration.NativeCallable,
+            sourceNativeRegistration.NativeCallConv,
+            sourceNativeRegistration.NativeExport,
+            sourceNativeRegistration.ForeignNativeInterface);
+        var outputRegistration = NativeOutputCoreRegistrationSet.Create(
+            moduleBindings, sourceOutputRegistration.OutputConditions,
+            sourceOutputRegistration.NativeOutput);
+        var providerCompilation = Compilation.CreateLibrary(providerSource,
+            new CompilationOptions {
+                NativeCoreRegistration = nativeRegistration,
+                LayoutCoreRegistration =
+                    NativeCoreRegistrationTests.CreateLayoutRegistration(
+                        nativeRegistration),
+                NativeOutputCoreRegistration = outputRegistration,
+            });
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+        var providerProgram = providerCompilation.Program!;
+        var providerInputs = PrivateModuleIdentityInputs.CreateFromSelectors(
+            providerProgram, providerIdentity, [], [], [], [], [
+                new PrivateForeignInterfaceDefinitionAssignment(0,
+                    providerIdentity + ".owner", true, [
+                        new PrivateForeignInterfaceMemberDefinitionAssignment(
+                            0, providerIdentity + ".member"),
+                    ]),
+            ], []);
+        var producer = ModuleCompiler.CreateProducerWithSchema(
+            providerProgram, ["Add"], schemaIdentity, providerInputs);
+        var reference = ModuleCompiler.CreateReferenceWithSchema(producer,
+            schemaIdentity);
+        const string consumerSource = """
+            int32 Invoke(ptr<void> receiver) {
+                init int32 value;
+                unsafe {
+                    int32 status = IProbe.TryRead(receiver, &init value);
+                    if (status != 0) { return value; }
+                }
+                return 0;
+            }
+            """;
+        var consumerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(consumerSource), reference);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumerProgram = consumerCompilation.Program!;
+        var consumerInputs = PrivateModuleIdentityInputs
+            .CreateFromSelectors(consumerProgram,
+                "PrivateFniReservationConsumer", [], [], [], [], [], [
+                    new PrivateForeignInterfaceImportAssignment(0,
+                        "consumer.iprobe", providerIdentity,
+                        providerIdentity + ".owner", [
+                            new PrivateForeignInterfaceMemberImportAssignment(
+                                0, "consumer.iprobe.try-read",
+                                providerIdentity + ".member"),
+                        ]),
+                ]);
+        var consumer = ModuleCompiler.CreateConsumerWithSchema(
+            consumerProgram, producer, schemaIdentity, consumerInputs);
+        var reservationOffset = FindExpressionOffset(consumer, 41,
+            (int)PrimitiveType.Void, -1, -1);
+        Assert.That(reservationOffset, Is.GreaterThanOrEqualTo(0));
+
+        var malformed = (byte[])consumer.Clone();
+        BinaryPrimitives.WriteInt32LittleEndian(
+            malformed.AsSpan(reservationOffset + 13, sizeof(int)),
+            int.MaxValue);
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.Link(malformed, producer));
+    }
+
     private static byte[] CreateFniProvider(string moduleIdentity,
         string interfaceName, string functionName, string payloadTypeName,
         bool useTwoScalarFormals = false)
@@ -475,10 +577,13 @@ internal sealed class PrivateForeignNativeInterfaceTests
             if (module[offset] == kind
                 && BinaryPrimitives.ReadInt32LittleEndian(
                     module.AsSpan(offset + 1, sizeof(int))) == type
-                && BinaryPrimitives.ReadInt32LittleEndian(
-                    module.AsSpan(offset + 5, sizeof(int))) == spanStart
-                && BinaryPrimitives.ReadInt32LittleEndian(
-                    module.AsSpan(offset + 9, sizeof(int))) == spanLength)
+                && (spanStart < 0
+                    || BinaryPrimitives.ReadInt32LittleEndian(
+                        module.AsSpan(offset + 5, sizeof(int))) == spanStart)
+                && (spanLength < 0
+                    || BinaryPrimitives.ReadInt32LittleEndian(
+                        module.AsSpan(offset + 9, sizeof(int)))
+                        == spanLength))
             {
                 return offset;
             }
