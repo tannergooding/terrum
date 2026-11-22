@@ -34,7 +34,7 @@ bool ValidateStandaloneWriterBuffers()
             == Host.StandaloneSourceCallableInfo.Length / 12
                 + Host.StandaloneMethodRoots.Length / 5
         && Host.StandaloneWriterPredicateGraphMapCount.Length == 1
-        && Host.StandaloneWriterPredicateGraphMap.Length % 4 == 0
+        && Host.StandaloneWriterPredicateGraphMap.Length % 10 == 0
         && Host.StandaloneWriterModuleRefCount.Length == 1
         && Host.StandaloneWriterModuleRefByModuleId.Length
             == Host.StandaloneModuleDirectory.Length / 8
@@ -1489,13 +1489,17 @@ int32 WriteStandaloneWriterModuleSection()
         = Host.StandaloneWriterUniqueConstantCount[0];
     int32 predicateGraphCount
         = Host.StandaloneWriterPredicateGraphMapCount[0];
+    int32 generalPredicateGraphCount
+        = GetStandaloneWriterGeneralPredicateGraphCount();
     int32 featureCount
         = (constantCount == 0 ? 0 : 1)
-            + (predicateGraphCount != 0 ? 1 : 0);
+            + (predicateGraphCount != 0 ? 1 : 0)
+            + (generalPredicateGraphCount > 0 ? 1 : 0);
     if (moduleIdentityStringId <= 0
         || moduleIdentityStringId
             > Host.StandaloneWriterStringCount[0]
-        || constantCount < 0 || predicateGraphCount < 0)
+        || constantCount < 0 || predicateGraphCount < 0
+        || generalPredicateGraphCount < 0)
     {
         return 3;
     }
@@ -1536,14 +1540,18 @@ int32 WriteStandaloneWriterFeatureSection()
         = Host.StandaloneWriterUniqueConstantCount[0];
     int32 predicateGraphCount
         = Host.StandaloneWriterPredicateGraphMapCount[0];
-    if (constantCount < 0 || predicateGraphCount < 0)
+    int32 generalPredicateGraphCount
+        = GetStandaloneWriterGeneralPredicateGraphCount();
+    if (constantCount < 0 || predicateGraphCount < 0
+        || generalPredicateGraphCount < 0)
     {
         return 3;
     }
 
     int32 featureCount
         = (constantCount == 0 ? 0 : 1)
-            + (predicateGraphCount == 0 ? 0 : 1);
+            + (predicateGraphCount == 0 ? 0 : 1)
+            + (generalPredicateGraphCount == 0 ? 0 : 1);
     if (featureCount == 0)
     {
         return 0;
@@ -1565,8 +1573,41 @@ int32 WriteStandaloneWriterFeatureSection()
         status = AppendStandaloneWriterWord(1);
         if (status != 0) { return status; }
     }
+    if (generalPredicateGraphCount != 0)
+    {
+        status = AppendStandaloneWriterWord(17);
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterWord(1);
+        if (status != 0) { return status; }
+    }
     return FinishStandaloneWriterSection(
         0x0004, featureCount, sectionStart);
+}
+
+int32 GetStandaloneWriterGeneralPredicateGraphCount()
+{
+    int32 graphCount
+        = Host.StandaloneWriterPredicateGraphMapCount[0];
+    if (graphCount < 0 || graphCount > 0xFF_FFFF
+        || Host.StandaloneWriterPredicateGraphMap.Length % 10 != 0
+        || graphCount
+            > Host.StandaloneWriterPredicateGraphMap.Length / 10)
+    {
+        return -1;
+    }
+
+    mut int32 generalCount = 0;
+    for (mut int32 graphIndex = 0;
+        graphIndex < graphCount;
+        graphIndex = graphIndex + 1)
+    {
+        if (Host.StandaloneWriterPredicateGraphMap[
+                graphIndex * 10 + 6] != 3)
+        {
+            generalCount = generalCount + 1;
+        }
+    }
+    return generalCount;
 }
 
 int32 WriteStandaloneWriterModuleRefSection()
@@ -3908,10 +3949,13 @@ int32 WriteStandaloneWriterPredicateGraphSections()
 {
     int32 graphCount
         = Host.StandaloneWriterPredicateGraphMapCount[0];
+    int32 methodCount = GetStandaloneWriterMethodCount();
     if (graphCount < 0
         || graphCount
-            > Host.StandaloneWriterPredicateGraphMap.Length / 4
-        || graphCount > 0xFF_FFFF)
+            > Host.StandaloneWriterPredicateGraphMap.Length / 10
+        || Host.StandaloneWriterPredicateGraphMap.Length % 10 != 0
+        || graphCount > 0xFF_FFFF
+        || methodCount < 0 || methodCount > 0xFF_FFFF)
     {
         return 3;
     }
@@ -3924,20 +3968,45 @@ int32 WriteStandaloneWriterPredicateGraphSections()
         graphIndex < graphCount;
         graphIndex = graphIndex + 1)
     {
-        int32 mapOffset = graphIndex * 4;
+        int32 mapOffset = graphIndex * 10;
         int32 artifactOrdinal
             = Host.StandaloneWriterPredicateGraphMap[mapOffset];
         int32 inputGraphRow
-            = Host.StandaloneWriterPredicateGraphMap[mapOffset + 1];
-        int32 outputGraphRow
-            = Host.StandaloneWriterPredicateGraphMap[mapOffset + 2];
-        int32 nodeKind
             = Host.StandaloneWriterPredicateGraphMap[mapOffset + 3];
+        int32 outputGraphRow
+            = Host.StandaloneWriterPredicateGraphMap[mapOffset + 4];
+        int32 nodeKind
+            = Host.StandaloneWriterPredicateGraphMap[mapOffset + 5];
+        int32 phaseTag
+            = Host.StandaloneWriterPredicateGraphMap[mapOffset + 6];
+        int32 phaseOrdinal
+            = Host.StandaloneWriterPredicateGraphMap[mapOffset + 7];
+        int32 rootKind
+            = Host.StandaloneWriterPredicateGraphMap[mapOffset + 8];
+        int32 rootIdentity
+            = Host.StandaloneWriterPredicateGraphMap[mapOffset + 9];
+        bool validSelector = phaseTag == 3
+            && nodeKind >= 1 && nodeKind <= 6
+            && rootKind == 5 && rootIdentity == 0;
+        bool validGeneral = (phaseTag == 1 || phaseTag == 2)
+            && nodeKind == 0x11 && rootKind == 2
+            && rootIdentity >= 0;
         if (artifactOrdinal < 0
             || artifactOrdinal >= Host.StandaloneRequest[4]
             || inputGraphRow <= 0
+            || inputGraphRow > 0xFF_FFFF
             || outputGraphRow != graphIndex + 1
-            || nodeKind < 1 || nodeKind > 6)
+            || (!validSelector && !validGeneral)
+            || phaseOrdinal < 0
+            || Host.StandaloneWriterPredicateGraphMap[
+                mapOffset + 1] <= 0
+            || Host.StandaloneWriterPredicateGraphMap[
+                mapOffset + 1] > 0xFF_FFFF
+            || Host.StandaloneWriterPredicateGraphMap[
+                mapOffset + 2] <= 0
+            || Host.StandaloneWriterPredicateGraphMap[
+                mapOffset + 2] > methodCount
+            )
         {
             return 3;
         }
@@ -3982,13 +4051,17 @@ int32 WriteStandaloneWriterPredicateGraphSections()
         graphIndex < graphCount;
         graphIndex = graphIndex + 1)
     {
-        status = AppendStandaloneWriterByte(5);
+        status = AppendStandaloneWriterByte(
+            Host.StandaloneWriterPredicateGraphMap[
+                graphIndex * 10 + 8]);
         if (status != 0) { return status; }
         status = AppendStandaloneWriterByte(0);
         if (status != 0) { return status; }
         status = AppendStandaloneWriterHalfWord(0);
         if (status != 0) { return status; }
-        status = AppendStandaloneWriterWord(0);
+        status = AppendStandaloneWriterWord(uint32(
+            Host.StandaloneWriterPredicateGraphMap[
+                graphIndex * 10 + 9]));
         if (status != 0) { return status; }
     }
     status = FinishStandaloneWriterSection(
@@ -4002,7 +4075,7 @@ int32 WriteStandaloneWriterPredicateGraphSections()
     {
         int32 nodeKind
             = Host.StandaloneWriterPredicateGraphMap[
-                graphIndex * 4 + 3];
+                graphIndex * 10 + 5];
         status = AppendStandaloneWriterWord(uint32(nodeKind));
         if (status != 0) { return status; }
         status = AppendStandaloneWriterWord(uint32(0xF200_0001));
@@ -4181,7 +4254,7 @@ int32 ValidateStandaloneWriterContractClosure()
     if (localCount < 0 || methodCount < localCount
         || methodCount
             > Host.StandaloneWriterMethodContractCounts.Length
-        || Host.StandaloneWriterPredicateGraphMap.Length % 4 != 0)
+        || Host.StandaloneWriterPredicateGraphMap.Length % 10 != 0)
     {
         return 3;
     }
@@ -4289,22 +4362,29 @@ int32 ValidateStandaloneWriterContractClosure()
             int32 factOffset = factRow * 7;
             int32 factKind
                 = Host.StandaloneContractFacts[factOffset];
-            if (factKind == 2 || factKind == 11)
+            if (factKind == 11 || factKind == 12)
             {
-                int32 predicateGraphRow = factKind == 2
-                    ? Host.StandaloneContractFacts[factOffset + 2]
-                    : Host.StandaloneContractFacts[factOffset + 3];
+                int32 predicateGraphRow
+                    = Host.StandaloneContractFacts[factOffset + 3];
+                int32 phaseTag
+                    = Host.StandaloneContractFacts[factOffset + 1];
+                int32 phaseOrdinal
+                    = Host.StandaloneContractFacts[factOffset + 2];
                 init int32 outputGraphRow;
                 int32 graphStatus
                     = EnsureStandaloneWriterPredicateGraph(
-                        artifactOrdinal, moduleRow, rootOrdinal,
-                        predicateGraphRow, ref init outputGraphRow);
+                        artifactOrdinal, methodDefRow, methodId + 1,
+                        phaseTag, phaseOrdinal, predicateGraphRow,
+                        Host.StandaloneContractFacts[factOffset + 4],
+                        Host.StandaloneContractFacts[factOffset + 5],
+                        Host.StandaloneContractFacts[factOffset + 6],
+                        ref init outputGraphRow);
                 if (graphStatus != 0)
                 {
                     return graphStatus;
                 }
             }
-            else if (factKind != 4)
+            else if (factKind != 2 && factKind != 4)
             {
                 return 3;
             }
@@ -4318,19 +4398,33 @@ int32 ValidateStandaloneWriterContractClosure()
 }
 
 int32 EnsureStandaloneWriterPredicateGraph(int32 artifactOrdinal,
-    int32 moduleRow, int32 callableSlot, int32 predicateGraphRow,
+    int32 sourceOwnerMethodDefRow, int32 destinationOwnerMethodDefRow,
+    int32 phaseTag, int32 phaseOrdinal, int32 predicateGraphRow,
+    int32 nodeKind, int32 rootKind, int32 rootIdentity,
     ref<init int32> outputGraphRowResult)
     ensure return == 0 ? *outputGraphRowResult is init : true
 {
     int32 mapCount
         = Host.StandaloneWriterPredicateGraphMapCount[0];
     int32 mapCapacity
-        = Host.StandaloneWriterPredicateGraphMap.Length / 4;
+        = Host.StandaloneWriterPredicateGraphMap.Length / 10;
     if (mapCount < 0 || mapCount > mapCapacity
-        || Host.StandaloneWriterPredicateGraphMap.Length % 4 != 0
+        || Host.StandaloneWriterPredicateGraphMap.Length % 10 != 0
         || artifactOrdinal < 0
         || artifactOrdinal >= Host.StandaloneRequest[4]
-        || predicateGraphRow <= 0)
+        || sourceOwnerMethodDefRow <= 0
+        || destinationOwnerMethodDefRow <= 0
+        || sourceOwnerMethodDefRow > 0xFF_FFFF
+        || destinationOwnerMethodDefRow > 0xFF_FFFF
+        || phaseTag < 1 || phaseTag > 3 || phaseOrdinal < 0
+        || predicateGraphRow <= 0
+        || predicateGraphRow > 0xFF_FFFF
+        || (phaseTag == 3
+            && (nodeKind < 1 || nodeKind > 6
+                || rootKind != 5 || rootIdentity != 0))
+        || (phaseTag != 3
+            && (nodeKind != 0x11 || rootKind != 2
+                || rootIdentity < 0)))
     {
         return 3;
     }
@@ -4339,47 +4433,62 @@ int32 EnsureStandaloneWriterPredicateGraph(int32 artifactOrdinal,
         mapRow < mapCount;
         mapRow = mapRow + 1)
     {
-        int32 mapOffset = mapRow * 4;
+        int32 mapOffset = mapRow * 10;
         if (Host.StandaloneWriterPredicateGraphMap[mapOffset]
                 == artifactOrdinal
             && Host.StandaloneWriterPredicateGraphMap[
-                mapOffset + 1] == predicateGraphRow)
+                mapOffset + 1] == sourceOwnerMethodDefRow
+            && Host.StandaloneWriterPredicateGraphMap[
+                mapOffset + 2] == destinationOwnerMethodDefRow
+            && Host.StandaloneWriterPredicateGraphMap[
+                mapOffset + 3] == predicateGraphRow)
         {
+            if (Host.StandaloneWriterPredicateGraphMap[
+                    mapOffset + 6] != phaseTag
+                || Host.StandaloneWriterPredicateGraphMap[
+                    mapOffset + 7] != phaseOrdinal
+                || Host.StandaloneWriterPredicateGraphMap[
+                    mapOffset + 5] != nodeKind
+                || Host.StandaloneWriterPredicateGraphMap[
+                    mapOffset + 8] != rootKind
+                || Host.StandaloneWriterPredicateGraphMap[
+                    mapOffset + 9] != rootIdentity)
+            {
+                return 3;
+            }
             *outputGraphRowResult
-                = Host.StandaloneWriterPredicateGraphMap[mapOffset + 2];
+                = Host.StandaloneWriterPredicateGraphMap[mapOffset + 4];
             return 0;
         }
     }
 
-    init int32 artifactStart;
-    init int32 artifactLength;
-    if (mapCount >= mapCapacity || mapCount >= 0xFF_FFFF
-        || !TryGetStandaloneArtifactExtent(artifactOrdinal,
-            ref init artifactStart, ref init artifactLength)
-        || !TryValidateStandaloneArtifactDirectory(artifactOrdinal))
+    if (mapCount >= mapCapacity || mapCount >= 0xFF_FFFF)
     {
         return 3;
     }
 
-    init int32 nodeKind;
-    int32 graphStatus = TryValidateStandalonePublishedPredicateGraph(
-        artifactStart, artifactLength, moduleRow, callableSlot,
-        uint32(predicateGraphRow), ref init nodeKind);
-    if (graphStatus != 0)
-    {
-        return graphStatus;
-    }
-
     int32 outputGraphRow = mapCount + 1;
-    int32 mapOffset = mapCount * 4;
+    int32 mapOffset = mapCount * 10;
     Host.StandaloneWriterPredicateGraphMap[mapOffset]
         = artifactOrdinal;
     Host.StandaloneWriterPredicateGraphMap[mapOffset + 1]
-        = predicateGraphRow;
+        = sourceOwnerMethodDefRow;
     Host.StandaloneWriterPredicateGraphMap[mapOffset + 2]
-        = outputGraphRow;
+        = destinationOwnerMethodDefRow;
     Host.StandaloneWriterPredicateGraphMap[mapOffset + 3]
+        = predicateGraphRow;
+    Host.StandaloneWriterPredicateGraphMap[mapOffset + 4]
+        = outputGraphRow;
+    Host.StandaloneWriterPredicateGraphMap[mapOffset + 5]
         = nodeKind;
+    Host.StandaloneWriterPredicateGraphMap[mapOffset + 6]
+        = phaseTag;
+    Host.StandaloneWriterPredicateGraphMap[mapOffset + 7]
+        = phaseOrdinal;
+    Host.StandaloneWriterPredicateGraphMap[mapOffset + 8]
+        = rootKind;
+    Host.StandaloneWriterPredicateGraphMap[mapOffset + 9]
+        = rootIdentity;
     Host.StandaloneWriterPredicateGraphMapCount[0]
         = outputGraphRow;
     *outputGraphRowResult = outputGraphRow;
@@ -4387,12 +4496,13 @@ int32 EnsureStandaloneWriterPredicateGraph(int32 artifactOrdinal,
 }
 
 int32 FindStandaloneWriterPredicateGraph(int32 artifactOrdinal,
-    int32 predicateGraphRow)
+    int32 sourceOwnerMethodDefRow,
+    int32 destinationOwnerMethodDefRow, int32 predicateGraphRow)
 {
     int32 mapCount
         = Host.StandaloneWriterPredicateGraphMapCount[0];
     if (mapCount < 0
-        || mapCount > Host.StandaloneWriterPredicateGraphMap.Length / 4)
+        || mapCount > Host.StandaloneWriterPredicateGraphMap.Length / 10)
     {
         return -1;
     }
@@ -4400,14 +4510,18 @@ int32 FindStandaloneWriterPredicateGraph(int32 artifactOrdinal,
         mapRow < mapCount;
         mapRow = mapRow + 1)
     {
-        int32 mapOffset = mapRow * 4;
+        int32 mapOffset = mapRow * 10;
         if (Host.StandaloneWriterPredicateGraphMap[mapOffset]
                 == artifactOrdinal
             && Host.StandaloneWriterPredicateGraphMap[
-                mapOffset + 1] == predicateGraphRow)
+                mapOffset + 1] == sourceOwnerMethodDefRow
+            && Host.StandaloneWriterPredicateGraphMap[
+                mapOffset + 2] == destinationOwnerMethodDefRow
+            && Host.StandaloneWriterPredicateGraphMap[
+                mapOffset + 3] == predicateGraphRow)
         {
             return Host.StandaloneWriterPredicateGraphMap[
-                mapOffset + 2];
+                mapOffset + 4];
         }
     }
     return 0;
@@ -5024,7 +5138,8 @@ int32 WriteStandaloneWriterContractSection()
                 }
                 int32 outputGraphRow
                     = FindStandaloneWriterPredicateGraph(
-                        artifactOrdinal, int32(inputGraphRow));
+                        artifactOrdinal, methodDefRow, methodId + 1,
+                        int32(inputGraphRow));
                 if (outputGraphRow <= 0 || state < 0 || state > 1
                     || reserved0 != 0 || reserved1 != 0
                     || reserved2 != 0)
@@ -5081,7 +5196,8 @@ int32 WriteStandaloneWriterContractSection()
                 }
                 int32 outputGraphRow
                     = FindStandaloneWriterPredicateGraph(
-                        artifactOrdinal, int32(inputGraphRow));
+                        artifactOrdinal, methodDefRow, methodId + 1,
+                        int32(inputGraphRow));
                 if (outputGraphRow <= 0)
                 {
                     return 3;

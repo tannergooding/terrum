@@ -59,10 +59,18 @@ bool TryGetStandaloneParameterTypeKind(int32 artifactOrdinal,
     return true;
 }
 
-int32 TryValidateStandalonePublishedPredicateGraph(int32 artifactStart,
-    int32 artifactLength, int32 moduleRow, int32 callableSlot,
-    uint32 predicateGraphRow, ref<init int32> nodeKindResult)
-    ensure return == 0 ? *nodeKindResult is init : true
+int32 TryValidateStandalonePredicateGraph(int32 artifactOrdinal,
+    int32 artifactStart, int32 artifactLength, int32 moduleRow,
+    int32 callableSlot, int32 phaseTag, uint32 paramFirst,
+    int32 paramCount, uint32 predicateGraphRow,
+    ref<init int32> nodeKindResult,
+    ref<init int32> rootKindResult,
+    ref<init uint32> rootIdentityResult)
+    ensure return == 0
+        ? (*nodeKindResult is init
+            && *rootKindResult is init
+            && *rootIdentityResult is init)
+        : true
 {
     init bool requiresPublishedPredicates;
     if (!TryRequireStandaloneModuleFeature(artifactStart,
@@ -70,6 +78,21 @@ int32 TryValidateStandalonePublishedPredicateGraph(int32 artifactStart,
             ref init requiresPublishedPredicates))
     {
         return 3;
+    }
+    if (phaseTag < 1 || phaseTag > 3 || paramCount < 0)
+    {
+        return 3;
+    }
+    if (phaseTag != 3)
+    {
+        init bool requiresGeneralPredicateGraphs;
+        if (!TryRequireStandaloneModuleFeature(artifactStart,
+                artifactLength, moduleRow, 17,
+                ref init requiresGeneralPredicateGraphs)
+            || !requiresGeneralPredicateGraphs)
+        {
+            return 3;
+        }
     }
     if (!requiresPublishedPredicates)
     {
@@ -158,8 +181,12 @@ int32 TryValidateStandalonePublishedPredicateGraph(int32 artifactStart,
         || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
             artifactLength, rootOffset + 4,
             ref init readRootIdentity)
-        || readRootKind != 5 || readRootFlags != 0
-        || readRootReserved != 0 || readRootIdentity != 0)
+        || readRootFlags != 0 || readRootReserved != 0
+        || (phaseTag == 3
+            && (readRootKind != 5 || readRootIdentity != 0))
+        || (phaseTag != 3
+            && (readRootKind != 2
+                || readRootIdentity >= uint32(paramCount))))
     {
         return 3;
     }
@@ -183,7 +210,8 @@ int32 TryValidateStandalonePublishedPredicateGraph(int32 artifactStart,
     {
         return 3;
     }
-    if (nodeKind < 1 || nodeKind > 6)
+    if ((phaseTag == 3 && (nodeKind < 1 || nodeKind > 6))
+        || (phaseTag != 3 && nodeKind != 0x11))
     {
         return 2;
     }
@@ -239,38 +267,77 @@ int32 TryValidateStandalonePublishedPredicateGraph(int32 artifactStart,
         return 3;
     }
 
-    if (GetStandaloneArtifactSectionCount(0x003D) != 0)
+    if (GetStandaloneArtifactSectionCount(0x003D) != 0
+        || GetStandaloneArtifactSectionCount(0x003E) != 0)
     {
         return 2;
     }
 
-    int32 callableResultTypeId
-        = Host.StandaloneCallableTypeIds[callableSlot];
-    int32 typeFactCount = Host.StandaloneTypeFactCount[0];
-    if (callableResultTypeId <= 0
-        || callableResultTypeId > typeFactCount)
+    if (phaseTag == 3)
     {
-        return 3;
+        int32 callableResultTypeId
+            = Host.StandaloneCallableTypeIds[callableSlot];
+        int32 typeFactCount = Host.StandaloneTypeFactCount[0];
+        if (callableResultTypeId <= 0
+            || callableResultTypeId > typeFactCount)
+        {
+            return 3;
+        }
+        int32 typeFactOffset = callableResultTypeId * 3;
+        if (Host.StandaloneTypeFacts[typeFactOffset] != 0)
+        {
+            return 3;
+        }
+        int32 resultTypeCode
+            = Host.StandaloneTypeFacts[typeFactOffset + 1];
+        bool selectorMatchesResultType
+            = (nodeKind == 1 || nodeKind == 2)
+                ? resultTypeCode == 1
+                : (nodeKind == 3 || nodeKind == 4)
+                    ? resultTypeCode == 8 || resultTypeCode == 0x0D
+                    : resultTypeCode == 8;
+        if (!selectorMatchesResultType)
+        {
+            return 3;
+        }
     }
-    int32 typeFactOffset = callableResultTypeId * 3;
-    if (Host.StandaloneTypeFacts[typeFactOffset] != 0)
+    else
     {
-        return 3;
-    }
-    int32 resultTypeCode
-        = Host.StandaloneTypeFacts[typeFactOffset + 1];
-    bool selectorMatchesResultType
-        = (nodeKind == 1 || nodeKind == 2)
-            ? resultTypeCode == 1
-            : (nodeKind == 3 || nodeKind == 4)
-                ? resultTypeCode == 8 || resultTypeCode == 0x0D
-                : resultTypeCode == 8;
-    if (!selectorMatchesResultType)
-    {
-        return 3;
+        if (artifactOrdinal < 0
+            || artifactOrdinal >= Host.StandaloneRequest[4]
+            || paramFirst == 0)
+        {
+            return 3;
+        }
+        int32 parameterRow = int32(paramFirst)
+            + int32(readRootIdentity);
+        int32 globalParameterRow
+            = Host.StandaloneArtifactParameterStarts[artifactOrdinal]
+                + parameterRow;
+        if (globalParameterRow <= 0
+            || globalParameterRow >= Host.StandaloneParameterTypeIds.Length)
+        {
+            return 3;
+        }
+        int32 parameterTypeId
+            = Host.StandaloneParameterTypeIds[globalParameterRow];
+        int32 typeFactCount = Host.StandaloneTypeFactCount[0];
+        if (parameterTypeId <= 0 || parameterTypeId > typeFactCount)
+        {
+            return 3;
+        }
+        int32 typeFactOffset = parameterTypeId * 3;
+        if (Host.StandaloneTypeFacts[typeFactOffset] != 0
+            || Host.StandaloneTypeFacts[typeFactOffset + 1] != 1
+            || Host.StandaloneTypeFacts[typeFactOffset + 2] != 0)
+        {
+            return 3;
+        }
     }
 
     *nodeKindResult = int32(nodeKind);
+    *rootKindResult = readRootKind;
+    *rootIdentityResult = readRootIdentity;
     return 0;
 }
 
@@ -315,6 +382,7 @@ bool TryRequireStandaloneModuleFeature(int32 artifactStart,
     }
 
     int32 featureStart = Host.StandaloneSectionStarts[featureEntry];
+    bool featureIsPresent = false;
     for (mut int32 offset = 0;
         offset < int32(moduleFeatureCount);
         offset = offset + 1)
@@ -333,12 +401,16 @@ bool TryRequireStandaloneModuleFeature(int32 artifactStart,
         }
         if (currentFeatureId == featureId && ruleRevision == 1)
         {
-            *isRequiredResult = true;
-            return true;
+            featureIsPresent = true;
+        }
+        if (featureId == 10 && currentFeatureId == 17
+            && ruleRevision == 1)
+        {
+            featureIsPresent = true;
         }
     }
 
-    *isRequiredResult = false;
+    *isRequiredResult = featureIsPresent;
     return true;
 }
 
@@ -434,17 +506,21 @@ int32 ValidateStandaloneOutputStateFacts()
         mut int32 low = 1;
         mut int32 high = attachmentCount;
         mut int32 foundRow = 0;
+        mut int32 foundPosition = 0;
         while (low <= high)
         {
             int32 middle = low + (high - low) / 2;
-            int32 attachmentRow
+            int32 orderedAttachment
                 = Host.StandaloneContractFactOrder[middle];
+            int32 attachmentRow = orderedAttachment < 0
+                ? -orderedAttachment : orderedAttachment;
             int32 attachmentOffset = attachmentRow * 7;
             int32 attachmentGraphRow
                 = Host.StandaloneContractFacts[attachmentOffset + 3];
             if (attachmentGraphRow == outputGraphRow)
             {
                 foundRow = attachmentRow;
+                foundPosition = middle;
                 break;
             }
             if (attachmentGraphRow < outputGraphRow)
@@ -460,21 +536,108 @@ int32 ValidateStandaloneOutputStateFacts()
         {
             return 3;
         }
-        Host.StandaloneContractFacts[foundRow * 7 + 5] = 1;
+        if (Host.StandaloneContractFactOrder[foundPosition] > 0)
+        {
+            Host.StandaloneContractFactOrder[foundPosition]
+                = -Host.StandaloneContractFactOrder[foundPosition];
+        }
     }
 
     for (mut int32 index = 1;
-        index <= Host.StandaloneContractFactCount[0];
+        index <= attachmentCount;
         index = index + 1)
     {
-        int32 factOffset = index * 7;
-        if (Host.StandaloneContractFacts[factOffset] == 11
-            && Host.StandaloneContractFacts[factOffset + 5] != 1)
+        if (Host.StandaloneContractFactOrder[index] >= 0)
         {
             return 3;
         }
     }
 
+    return 0;
+}
+
+int32 ValidateStandalonePhase12PredicateFacts()
+{
+    int32 factCount = Host.StandaloneContractFactCount[0];
+    if (factCount < 0
+        || factCount > Host.StandaloneContractFacts.Length / 7 - 1
+        || Host.StandaloneContractFactOrder.Length <= factCount)
+    {
+        return 3;
+    }
+
+    for (mut int32 phaseTag = 1;
+        phaseTag <= 2;
+        phaseTag = phaseTag + 1)
+    {
+        mut int32 phaseCount = 0;
+        for (mut int32 factRow = 1;
+            factRow <= factCount;
+            factRow = factRow + 1)
+        {
+            int32 factOffset = factRow * 7;
+            if (Host.StandaloneContractFacts[factOffset] == 12
+                && Host.StandaloneContractFacts[factOffset + 1]
+                    == phaseTag)
+            {
+                phaseCount = phaseCount + 1;
+            }
+        }
+
+        for (mut int32 ordinal = 1;
+            ordinal <= phaseCount;
+            ordinal = ordinal + 1)
+        {
+            Host.StandaloneContractFactOrder[ordinal] = 0;
+        }
+        for (mut int32 factRow = 1;
+            factRow <= factCount;
+            factRow = factRow + 1)
+        {
+            int32 factOffset = factRow * 7;
+            if (Host.StandaloneContractFacts[factOffset] != 12
+                || Host.StandaloneContractFacts[factOffset + 1]
+                    != phaseTag)
+            {
+                continue;
+            }
+
+            int32 phaseOrdinal
+                = Host.StandaloneContractFacts[factOffset + 2];
+            if (phaseOrdinal < 0 || phaseOrdinal >= phaseCount)
+            {
+                return 3;
+            }
+            int32 orderIndex = phaseOrdinal + 1;
+            if (Host.StandaloneContractFactOrder[orderIndex] != 0)
+            {
+                return 3;
+            }
+            Host.StandaloneContractFactOrder[orderIndex] = factRow;
+        }
+        for (mut int32 ordinal = 1;
+            ordinal <= phaseCount;
+            ordinal = ordinal + 1)
+        {
+            if (Host.StandaloneContractFactOrder[ordinal] == 0)
+            {
+                return 3;
+            }
+        }
+    }
+
+    for (mut int32 factRow = 1;
+        factRow <= factCount;
+        factRow = factRow + 1)
+    {
+        int32 factOffset = factRow * 7;
+        if (Host.StandaloneContractFacts[factOffset] == 12
+            && (Host.StandaloneContractFacts[factOffset + 1] < 1
+                || Host.StandaloneContractFacts[factOffset + 1] > 2))
+        {
+            return 3;
+        }
+    }
     return 0;
 }
 

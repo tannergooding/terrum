@@ -186,24 +186,29 @@ int32 ValidateStandaloneMethodContracts(int32 artifactOrdinal,
             {
                 return 3;
             }
-            if (phaseTag != 3)
+            if (phaseTag < 1 || phaseTag > 3)
             {
-                return 2;
+                return 3;
             }
             init int32 nodeKind;
-            int32 graphStatus
-                = TryValidateStandalonePublishedPredicateGraph(
-                    artifactStart, artifactLength, moduleRow,
-                    callableSlot, predicateGraphRow,
-                    ref init nodeKind);
+            init int32 rootKind;
+            init uint32 rootIdentity;
+            int32 graphStatus = TryValidateStandalonePredicateGraph(
+                artifactOrdinal, artifactStart, artifactLength,
+                moduleRow, callableSlot, phaseTag, paramFirst,
+                int32(paramCount), predicateGraphRow,
+                ref init nodeKind, ref init rootKind,
+                ref init rootIdentity);
             if (graphStatus != 0)
             {
                 return graphStatus;
             }
 
-            int32 appendStatus = AppendStandaloneContractFact(11,
+            int32 factKind = phaseTag == 3 ? 11 : 12;
+            int32 appendStatus = AppendStandaloneContractFact(factKind,
                 phaseTag, int32(phaseOrdinal),
-                int32(predicateGraphRow), nodeKind, 0, 0);
+                int32(predicateGraphRow), nodeKind, rootKind,
+                int32(rootIdentity));
             if (appendStatus != 0)
             {
                 return appendStatus;
@@ -318,5 +323,10 @@ int32 ValidateStandaloneMethodContracts(int32 artifactOrdinal,
     {
         return outputStateStatus;
     }
-    return ValidateStandaloneDependencyFacts();
+    int32 dependencyStatus = ValidateStandaloneDependencyFacts();
+    if (dependencyStatus != 0)
+    {
+        return dependencyStatus;
+    }
+    return ValidateStandalonePhase12PredicateFacts();
 }

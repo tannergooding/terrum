@@ -25,7 +25,7 @@ internal sealed class StandaloneMethodImportInputTests
     private const string Agreement
         = "terrum.experimental.standalone-method-imports/1";
     private const string SchemaIdentity
-        = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-1";
+        = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-witness-projections-1";
     private const string VerificationSource = """
         namespace Terrum.CodeAnalysis;
         int32 Main() {
@@ -675,17 +675,39 @@ internal sealed class StandaloneMethodImportInputTests
                 status = WriteStandaloneScalarModule();
                 if (status != 0) { return status; }
                 if (Host.StandaloneWriterPredicateGraphMapCount[0] != 2
-                    || Host.StandaloneWriterPredicateGraphMap[1] != 2
-                    || Host.StandaloneWriterPredicateGraphMap[2] != 1
-                    || Host.StandaloneWriterPredicateGraphMap[3] != 1
+                    || Host.StandaloneWriterPredicateGraphMap[0] != 0
+                    || Host.StandaloneWriterPredicateGraphMap[1] != 1
+                    || Host.StandaloneWriterPredicateGraphMap[2] != 2
+                    || Host.StandaloneWriterPredicateGraphMap[3] != 2
                     || Host.StandaloneWriterPredicateGraphMap[4] != 1
                     || Host.StandaloneWriterPredicateGraphMap[5] != 1
-                    || Host.StandaloneWriterPredicateGraphMap[6] != 2
-                    || Host.StandaloneWriterPredicateGraphMap[7] != 1
+                    || Host.StandaloneWriterPredicateGraphMap[6] != 3
+                    || Host.StandaloneWriterPredicateGraphMap[7] != 0
+                    || Host.StandaloneWriterPredicateGraphMap[8] != 5
+                    || Host.StandaloneWriterPredicateGraphMap[9] != 0
+                    || Host.StandaloneWriterPredicateGraphMap[10] != 1
+                    || Host.StandaloneWriterPredicateGraphMap[11] != 1
+                    || Host.StandaloneWriterPredicateGraphMap[12] != 3
+                    || Host.StandaloneWriterPredicateGraphMap[13] != 1
+                    || Host.StandaloneWriterPredicateGraphMap[14] != 2
+                    || Host.StandaloneWriterPredicateGraphMap[15] != 1
+                    || Host.StandaloneWriterPredicateGraphMap[16] != 3
+                    || Host.StandaloneWriterPredicateGraphMap[17] != 0
+                    || Host.StandaloneWriterPredicateGraphMap[18] != 5
+                    || Host.StandaloneWriterPredicateGraphMap[19] != 0
                     || Host.StandaloneWriterMethodContractCounts[0] != 0
                     || Host.StandaloneWriterMethodContractCounts[1] != 3
                     || Host.StandaloneWriterMethodContractCounts[2] != 3) {
                     return 51;
+                }
+                init int32 copiedGraphRow;
+                if (EnsureStandaloneWriterPredicateGraph(0, 1, 3,
+                        3, 0, 2, 1, 5, 0,
+                        ref init copiedGraphRow) != 0
+                    || copiedGraphRow != 3
+                    || FindStandaloneWriterPredicateGraph(0, 1, 2, 2) != 1
+                    || FindStandaloneWriterPredicateGraph(0, 1, 3, 2) != 3) {
+                    return 52;
                 }
                 return 0;
             }
@@ -712,6 +734,86 @@ internal sealed class StandaloneMethodImportInputTests
         var contractArtifact = StandaloneMethodImportOutputFramer.Frame(
             contractExecution, contractBuffers);
         AssertStandaloneOutputStateContractArtifact(contractArtifact);
+
+        var assertionSource = SourceText.From(
+            "using api; bool Main() { return Check(true); }");
+        var assertionInput = new StandaloneMethodImportInput(Agreement,
+            "consumer/assertion", [
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreatePhaseOnePredicateArtifact("provider/assertion")),
+            ], [
+                new StandaloneMethodRoot(0, "provider/assertion",
+                    "api/Check"),
+            ]);
+        const string assertionVerificationSource = """
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                if (Scan() < 1) { return 50; }
+                int32 status = BindStandaloneOwnedSourceProgram();
+                if (status != 0) { return status; }
+                status = NormalizeStandaloneOwnedSourceProgram();
+                if (status != 0) { return status; }
+                status = RewriteStandaloneOwnedCallNodes();
+                if (status != 0) { return status; }
+                status = WriteStandaloneScalarModule();
+                if (status != 0) { return status; }
+                if (Host.StandaloneWriterPredicateGraphMapCount[0] != 1
+                    || Host.StandaloneWriterPredicateGraphMap[0] != 0
+                    || Host.StandaloneWriterPredicateGraphMap[1] != 1
+                    || Host.StandaloneWriterPredicateGraphMap[2] != 2
+                    || Host.StandaloneWriterPredicateGraphMap[3] != 1
+                    || Host.StandaloneWriterPredicateGraphMap[4] != 1
+                    || Host.StandaloneWriterPredicateGraphMap[5] != 0x11
+                    || Host.StandaloneWriterPredicateGraphMap[6] != 1
+                    || Host.StandaloneWriterPredicateGraphMap[7] != 0
+                    || Host.StandaloneWriterPredicateGraphMap[8] != 2
+                    || Host.StandaloneWriterPredicateGraphMap[9] != 0
+                    || Host.StandaloneWriterSections[17] != 2) {
+                    return 51;
+                }
+                return 0;
+            }
+            """;
+        var assertionComponents = new List<SyntaxTree>(
+            components.GetRange(0, sourcePaths.Length));
+        assertionComponents.Add(SyntaxTree.Parse(
+            assertionVerificationSource,
+            "standalone-owned-source-assertion-writer-tests.terrum"));
+        var assertionBuffers = ScannerHost.CreateBuffers(assertionSource)
+            .AddRange(assertionInput.Capture()
+                .CreateSourceCallHostBuffers(assertionSource));
+        var assertionCompilation = Compilation.Create(assertionComponents,
+            assertionBuffers, policy);
+        Assert.That(assertionCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                assertionCompilation.Diagnostics));
+        var assertionProgram = assertionCompilation.Program
+            ?? throw new AssertionException(
+                "Expected a bound standalone assertion-writer validator.");
+        var assertionExecution = NativeJit.ExecuteWithData(assertionProgram,
+            (NativeRuntimePolicy)policy);
+        Assert.That(assertionExecution.ExitCode, Is.EqualTo(0));
+        var assertionArtifact = StandaloneMethodImportOutputFramer.Frame(
+            assertionExecution, assertionBuffers);
+        var assertionIndex
+            = TrRmArtifactIndex.ForGeneralPredicateGraphsDraft(
+                assertionArtifact);
+        Assert.That(assertionIndex.TryGetSection(0x0004,
+                out var assertionFeatures, out var assertionFeatureCount),
+            Is.True);
+        Assert.That(assertionFeatureCount, Is.EqualTo(2));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                assertionFeatures.Slice(0, sizeof(uint))),
+            Is.EqualTo(10));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                assertionFeatures.Slice(sizeof(uint), sizeof(uint))),
+            Is.EqualTo(1));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                assertionFeatures.Slice(2 * sizeof(uint), sizeof(uint))),
+            Is.EqualTo(17));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                assertionFeatures.Slice(3 * sizeof(uint), sizeof(uint))),
+            Is.EqualTo(1));
 
         var decoderInput = new StandaloneMethodImportArtifactInput(
             Agreement, "consumer/contracts",
@@ -822,6 +924,48 @@ internal sealed class StandaloneMethodImportInputTests
         var decoderExecution = NativeJit.ExecuteWithData(decoderProgram,
             (NativeRuntimePolicy)policy);
         Assert.That(decoderExecution.ExitCode, Is.EqualTo(0));
+
+        var assertionDecoderInput
+            = new StandaloneMethodImportArtifactInput(Agreement,
+                "consumer/assertion-reload",
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    assertionArtifact),
+                assertionInput.Artifacts);
+        var assertionDecoderBuffers = assertionDecoderInput.Capture()
+            .CreateSourceFreeReaderHostBuffers();
+        const string assertionDecoderVerificationSource = """
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                int32 status = DecodeStandaloneModuleMetadata();
+                if (status != 0) { return status; }
+                if (Host.StandaloneDecoderStatus[0] != 0
+                    || Host.StandaloneDecoderSelectedModuleId[0] != 0
+                    || Host.StandaloneDecoderMethodCount[0] != 2
+                    || Host.StandaloneDecoderBodyCount[0] != 1
+                    || Host.StandaloneDecoderLocalCallableCount[0] != 1
+                    || Host.StandaloneDecoderImportedCallableCount[0] != 1
+                    || Host.StandaloneDecoderImportMapCount[0] != 1) {
+                    return 71;
+                }
+                return 0;
+            }
+            """;
+        var assertionDecoderComponents = new List<SyntaxTree>(
+            decoderComponents.GetRange(0, decoderSourcePaths.Length));
+        assertionDecoderComponents.Add(SyntaxTree.Parse(
+            assertionDecoderVerificationSource,
+            "standalone-source-free-phase-one-decoder-tests.terrum"));
+        var assertionDecoderCompilation = Compilation.Create(
+            assertionDecoderComponents, assertionDecoderBuffers, policy);
+        Assert.That(assertionDecoderCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                assertionDecoderCompilation.Diagnostics));
+        var assertionDecoderProgram = assertionDecoderCompilation.Program
+            ?? throw new AssertionException(
+                "Expected a bound standalone phase-one decoder validator.");
+        var assertionDecoderExecution = NativeJit.ExecuteWithData(
+            assertionDecoderProgram, (NativeRuntimePolicy)policy);
+        Assert.That(assertionDecoderExecution.ExitCode, Is.EqualTo(0));
 
         var executableProviderArtifact = CreateMethodProviderArtifact(
             "provider/leaf", "api.Imported", scalarParameter: true,
@@ -3154,6 +3298,112 @@ internal sealed class StandaloneMethodImportInputTests
                 contractSection),
             new TrRmSection(0x001D, 0, 1, exportSection),
         ]);
+    }
+
+    private static byte[] CreatePhaseOnePredicateArtifact(
+        string moduleIdentity)
+    {
+        var typeSpecRows = new ReadOnlyMemory<byte>[] {
+            TrRmTypeSpecTableWriter.InitializationReference(
+                0xF200_0008, isWritable: true),
+        };
+        var typeSpecSection = TrRmTypeSpecTableWriter.Encode(
+            typeSpecRows, 0, 0, 0);
+        var typeSpecs = new TrRmTypeSpecTableReader(typeSpecSection,
+            1, 0, 0, 0);
+        var methodSigSection = TrRmMethodSigTableWriter.Encode([
+            new TrRmMethodSigRow(0xF200_0001, 0, 1, 1, 0, 0),
+        ], typeSpecs, 1, 0);
+        var signatures = new TrRmMethodSigTableReader(
+            methodSigSection, 1, typeSpecs, 1, 0);
+        var paramSection = TrRmParamTableWriter.Encode([
+            new TrRmParamRow(1, 0, 0xF200_0001, 0),
+        ], signatures, typeSpecs);
+        var stringSection = TrRmStringTableWriter.EncodeNames([
+            (moduleIdentity, 0),
+            ("Implementation", 0),
+            ("api/Check", 0),
+        ]);
+        var strings = new TrRmStringTableReader(stringSection, 3);
+        var moduleSection = TrRmModuleTableWriter.Encode([
+            new TrRmModuleRow(1, 1, 0, 0, 1, 1, 1, 1, 1, 2),
+        ], strings, 0, 0, 1, 0, 2);
+
+        var methodDefSection = new byte[28];
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            methodDefSection.AsSpan(4), 2);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            methodDefSection.AsSpan(8), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            methodDefSection.AsSpan(12), 2);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            methodDefSection.AsSpan(16), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            methodDefSection.AsSpan(20), 1);
+
+        var predicateAttachment = new byte[20];
+        BinaryPrimitives.WriteUInt32LittleEndian(predicateAttachment, 1);
+        BinaryPrimitives.WriteUInt16LittleEndian(
+            predicateAttachment.AsSpan(4), 0x000B);
+        predicateAttachment[8] = 1;
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            predicateAttachment.AsSpan(16), 1);
+        var contractSection
+            = TrRmVariableTableWriter.EncodeBlobs([predicateAttachment]);
+
+        var predicateGraphSection = new byte[8];
+        BinaryPrimitives.WriteUInt32LittleEndian(predicateGraphSection, 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            predicateGraphSection.AsSpan(4), 1);
+        var readFootprintSection = new byte[16];
+        BinaryPrimitives.WriteUInt32LittleEndian(readFootprintSection, 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            readFootprintSection.AsSpan(4), 1);
+        var readRootSection = new byte[8];
+        readRootSection[0] = 2;
+        var predicateNodeSection = new byte[16];
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            predicateNodeSection, 0x11);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            predicateNodeSection.AsSpan(4), 0xF200_0001);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            predicateNodeSection.AsSpan(8), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            predicateNodeSection.AsSpan(12), 1);
+        var predicateOperandSection = new byte[8];
+        predicateOperandSection[0] = 1;
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            predicateOperandSection.AsSpan(4), 1);
+
+        var featureSection = new byte[16];
+        BinaryPrimitives.WriteUInt32LittleEndian(featureSection, 10);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            featureSection.AsSpan(4), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            featureSection.AsSpan(8), 17);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            featureSection.AsSpan(12), 1);
+        var exportSection = new byte[8];
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            exportSection, 0x1600_0001);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            exportSection.AsSpan(4), 3);
+        return TrRmArtifactWriter.Encode([
+            new TrRmSection(0x0001, 0, 1, moduleSection),
+            new TrRmSection(0x0002, 0, 3, stringSection),
+            new TrRmSection(0x0003, 0, 1, typeSpecSection),
+            new TrRmSection(0x0004, 0, 2, featureSection),
+            new TrRmSection(0x0016, 0, 1, methodDefSection),
+            new TrRmSection(0x0017, 0, 1, methodSigSection),
+            new TrRmSection(0x0018, 0, 1, paramSection),
+            new TrRmSection(0x001B, 0, 1, contractSection),
+            new TrRmSection(0x001D, 0, 1, exportSection),
+            new TrRmSection(0x0037, 0, 1, predicateGraphSection),
+            new TrRmSection(0x0038, 0, 1, readFootprintSection),
+            new TrRmSection(0x0039, 0, 1, readRootSection),
+            new TrRmSection(0x003B, 0, 1, predicateNodeSection),
+            new TrRmSection(0x003C, 0, 1, predicateOperandSection),
+        ], TrRmArtifactSchema.GeneralPredicateGraphsDraft);
     }
 
     private static byte[] CreateOutputStateArtifact(string moduleIdentity,

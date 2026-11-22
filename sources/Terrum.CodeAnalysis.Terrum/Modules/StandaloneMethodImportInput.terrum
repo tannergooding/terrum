@@ -364,7 +364,7 @@ bool MatchesStandaloneImportAgreement(int32 start, int32 length)
 
 bool MatchesStandaloneGeneralPredicateSchema(int32 start, int32 length)
 {
-    return length == 61
+    return length == 81
         && Host.StandaloneText[start] == 't'
         && Host.StandaloneText[start + 1] == 'r'
         && Host.StandaloneText[start + 2] == 'r'
@@ -425,5 +425,25 @@ bool MatchesStandaloneGeneralPredicateSchema(int32 start, int32 length)
         && Host.StandaloneText[start + 57] == 'h'
         && Host.StandaloneText[start + 58] == 's'
         && Host.StandaloneText[start + 59] == '-'
-        && Host.StandaloneText[start + 60] == '1';
+        && Host.StandaloneText[start + 60] == 'w'
+        && Host.StandaloneText[start + 61] == 'i'
+        && Host.StandaloneText[start + 62] == 't'
+        && Host.StandaloneText[start + 63] == 'n'
+        && Host.StandaloneText[start + 64] == 'e'
+        && Host.StandaloneText[start + 65] == 's'
+        && Host.StandaloneText[start + 66] == 's'
+        && Host.StandaloneText[start + 67] == '-'
+        && Host.StandaloneText[start + 68] == 'p'
+        && Host.StandaloneText[start + 69] == 'r'
+        && Host.StandaloneText[start + 70] == 'o'
+        && Host.StandaloneText[start + 71] == 'j'
+        && Host.StandaloneText[start + 72] == 'e'
+        && Host.StandaloneText[start + 73] == 'c'
+        && Host.StandaloneText[start + 74] == 't'
+        && Host.StandaloneText[start + 75] == 'i'
+        && Host.StandaloneText[start + 76] == 'o'
+        && Host.StandaloneText[start + 77] == 'n'
+        && Host.StandaloneText[start + 78] == 's'
+        && Host.StandaloneText[start + 79] == '-'
+        && Host.StandaloneText[start + 80] == '1';
 }

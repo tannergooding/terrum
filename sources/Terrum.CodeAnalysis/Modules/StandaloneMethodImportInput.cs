@@ -859,7 +859,7 @@ internal readonly record struct CapturedStandaloneMethodImportInput(
                 PrimitiveType.Int32, [0], true),
             new HostBuffer("StandaloneWriterPredicateGraphMap",
                 PrimitiveType.Int32,
-                [.. new int[checked(writerContractFactCapacity * 4)]],
+                [.. new int[checked(writerContractFactCapacity * 10)]],
                 true),
             new HostBuffer("StandaloneWriterTextCount",
                 PrimitiveType.Int32, [0], true),
@@ -1053,7 +1053,8 @@ internal static class StandaloneMethodImportOutputFramer
                 "The standalone output contains unclaimed section bytes.");
         }
 
-        return TrRmArtifactWriter.Encode(sections);
+        return TrRmArtifactWriter.Encode(
+            sections, TrRmArtifactSchema.GeneralPredicateGraphsDraft);
     }
 
     private static int FindBuffer(ImmutableArray<HostBuffer> buffers,
