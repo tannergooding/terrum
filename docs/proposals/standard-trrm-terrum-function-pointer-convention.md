@@ -7,7 +7,9 @@ It supplies the bounded decision requested by the standing instruction:
 
 > At a genuine missing contract, prepare the smallest concrete decision needed as a new proposal doc using gpt-6.1-sol at max reasoning, then continue with it being treated as a provisional approval/direction.
 
-This is a proposal-only handoff, not authorization to implement in this task.
+The recommendation is provisionally actionable under the user-authorized
+missing-contract workflow; it remains unapproved and changes no normative text
+until review.
 It supersedes [Standard function-pointer default convention](standard-function-pointer-default-convention.md)
 as the candidate owner of the TypeSpec convention domain and its exact-schema
 selection. The companion [source contracts](standard-function-pointer-source-contracts.md),
@@ -57,7 +59,8 @@ its convention-domain paragraph in
 > The nonzero typed MethodDef reference has a zero high byte and names an
 > existing bodyless, non-exported signature/contract anchor. It is not a
 > MethodSig reference, DefId or address target. The existing anchor,
-> complete-signature and applicable-contract rules remain unchanged.
+> complete-signature and applicable-contract rules remain unchanged except
+> for the zero-anchor ABI-clause restriction below.
 > Complete function-pointer identity includes the original convention;
 > equal target carriers do not equate conventions. NativeImport,
 > NativeCallable and NativeExport declaration-role domains are not widened
@@ -86,6 +89,44 @@ still means **no call convention**, even when its field contains a
 zero-convention function-pointer value. NativeExport still references its
 actual method's unique `000C`; no such clause is manufactured for an anchor.
 Source NativeCallConv still selects the four explicit foreign values.
+
+### Zero-anchor ABI clause
+
+**Unapproved rule:** add this clarification to the TypeSpec anchor paragraph
+and [Contract applicability owner](../specs/representation/contract-clauses.md#1-scope-and-row-admission):
+
+> If TypeSpec `0x0D` has `callingConvention=0`, its referenced MethodDef's
+> Contract range must contain **no clause kind `0x0010` NativeAbi**.
+> This includes a role-3 signature-anchor row, a zero-valued payload or a row
+> claimed to describe only logical Terrum semantics. No replacement logical
+> Terrum ABI clause is selected. The logical invocation contract remains the
+> complete MethodSig and the applicable ordinary invocation clauses admitted
+> by the selected schema; absence of NativeAbi does not erase those facts or
+> select a machine ABI.
+
+Producers omit `0010` from zero anchors and compute their Contract ranges
+accordingly. Consumers enforce this absence before anchor normalization,
+comparison or affected use, rather than permitting the row and ignoring its
+payload in equality. A MethodDef used by any zero TypeSpec must satisfy the
+rule even if a foreign TypeSpec also references it. Remapping/deduplication
+must preserve the restriction, not delete an ABI promise from a shared
+foreign declaration to make a zero view fit.
+
+For conventions `1..4`, preserve existing selected-format NativeAbi
+production, admission and comparison behavior: this amendment neither
+requires, synthesizes nor newly forbids an ABI row for those conventions,
+and adds no foreign ABI comparison to the anchor comparator. In particular,
+the accepted Standard [clause matrix](../specs/representation/contract-clauses.md#2-clause-matrix-and-uniqueness)
+does not assign `0010`; the current Contract reader rejects it in
+non-Development profiles. The anchor validator's permissive `0x10` allow-list
+entry alone is not Standard admission. Existing Development NativeAbi
+carriers remain separate and unchanged, not a logical Terrum alias.
+
+This rule applies to the signature anchor, not to an actual target's
+independently retained ABI obligations. If a crossing needs a physical ABI
+promise that its selected boundary cannot represent or support, decline the
+crossing; do not silently discard it or infer it from zero. NativeCallable,
+NativeAddress eligibility and foreign declaration roles are not broadened.
 
 Candidate [manifest](../specs/representation/semantic-manifests.md) and
 [admission](../specs/representation/requirements-and-admission.md) scope
@@ -230,6 +271,7 @@ These are **unapproved acceptance requirements, not executed results**.
 | Selected codec | Data-driven `0..4` round trips with `(Standard, successor identity)` preserve seven bytes, typed anchor and exact identity. Identity-less/old-baseline Standard rejects zero even with Feature `1/1`; foreign-only cases remain valid. No Development signature section is used. |
 | Domain/bounds | Reject `5`, `255`, nonzero qualifiers, six/eight-byte rows, zero/high-byte-set/wrong-namespace/out-of-table anchors. Accept the largest representable anchor only with valid actual table/owner bounds. |
 | Roles | Zero in callable NativeImport or `000C` rejects; data-import no-convention zero stays valid. A zero TypeSpec does not make its anchor callable or supply NativeCallable/NativeExport. |
+| Anchor ABI | Zero anchors without `0010` retain their complete admitted logical contracts. Any zero anchor containing `0010`, including role 3 or zero payloads, rejects before comparison; sharing it with a foreign TypeSpec does not cure the violation. Existing `1..4` and separately selected Development NativeAbi cases remain unchanged. |
 | Selection/transport | Unknown identity, wrong enum/identity pair, mismatched root/dependency context and unassigned composite fail without publication. Exercise index-to-TypeSpec, writer validation and copied/appended table identity retention. Common-subset bytes do not trigger auto-detection; missing required Feature/carrier support still refuses use. |
 | Binding/remapping | Different anchor rows with equal complete zero contracts compare equal; zero versus Unmanaged rejects even with equal carriers. Reorder/deduplicate nested rows and packed Modules while retaining original expectations, selectors, maps and code origins. |
 | Address/invocation | Existing foreign NativeAddress positive cases stay foreign; foreign target plus zero view rejects. Bare source ordinary-address support is separate from Standard admission. Removing unsafe authorization or losing required output/backing facts rejects. |
@@ -246,9 +288,10 @@ draft.
 | [Grammar §3.2](../specs/grammar-spec.md#32-types-parameters-and-arguments), [callable families](../specs/type-families.md#callable-values-and-tuples), [native roles](../specs/native.md#native-declaration-roles) | Accepted bare result-last pointer syntax, default Terrum identity, explicit foreign identities and foreign role domains. |
 | [Enum/signature model](../../sources/Terrum.CodeAnalysis/Semantics/NativeFunctionPointerContract.cs), [Binder](../../sources/Terrum.CodeAnalysis/Semantics/Binder.cs) `BindType` / `BindNativeFunctionPointerType` | `Native=0`; current bare binding passes it directly. The earlier default-convention proposal's NativeAbi-prefix observation no longer describes this source path. |
 | [NativeCoreRegistrationTests](../../tests/Terrum.CodeAnalysis.Tests/Semantics/NativeCoreRegistrationTests.cs) `BareFunctionPointerUsesTheTerrumDefaultConvention`; [NativeFunctionPointerTests](../../tests/Terrum.CodeAnalysis.Tests/Native/Interop/NativeFunctionPointerTests.cs) `NativeAddressInfersOrdinaryTerrumFunctionContract` | Active source tests assert zero identity and ordinary address behavior; they do not establish Standard persistence or a general ABI. |
-| [TypeSpec reader](../../sources/Terrum.CodeAnalysis/Modules/TrRm/TrRmTypeSpecTableReader.cs), [writer](../../sources/Terrum.CodeAnalysis/Modules/TrRm/TrRmTypeSpecTableWriter.cs), [row tests](../../tests/Terrum.CodeAnalysis.Tests/Modules/TrRm/TrRmTypeSpecTableReaderTests.cs), [register fixtures](../../tests/Terrum.CodeAnalysis.Tests/Modules/TrRm/TrRmRegisterBodyReaderTests.cs) | The tracked baseline accepts and positively tests zero across Standard-schema paths. Uncommitted guard/test edits currently enforce `1..4` but do not yet provide the proposed exact successor selection, so they are not an integrated implementation. |
-| [NativeAddress producer](../../sources/Terrum.CodeAnalysis/Modules/TrRmExecutableCompiler.NativeAddress.cs), [record tests](../../tests/Terrum.CodeAnalysis.Tests/Modules/TrRm/TrRmRegisterBodyNativeAddressTests.cs), [standalone TypeSpec checks](../../sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneTypeSpecValidation.terrum) | Actual formation/profile checks remain distinct from TypeSpec identity. The uncommitted Standard producer guard refuses the Terrum convention, while standalone WP1 preflight is not yet gated by the proposed successor identity. Zero reserved fields in a 12-byte NativeAddress record are not the seven-byte TypeSpec's convention. |
-| [Artifact index](../../sources/Terrum.CodeAnalysis/Modules/TrRmArtifactIndex.cs) constructor / `StandardSchemaIdentity`; [structural validator](../../sources/Terrum.CodeAnalysis/Modules/TrRmStructuralMetadataValidator.cs) TypeSpec construction | The index already retains and checks a separate exact identity; the TypeSpec handoff currently omits it. Narrow identity registration and explicit transport, not a new enum profile, supply the missing internal gate. |
+| [TypeSpec reader](../../sources/Terrum.CodeAnalysis/Modules/TrRmTypeSpecTableReader.cs), [writer](../../sources/Terrum.CodeAnalysis/Modules/TrRmTypeSpecTableWriter.cs), [row tests](../../tests/Terrum.CodeAnalysis.Tests/Modules/TrRm/TrRmTypeSpecTableReaderTests.cs), [register fixtures](../../tests/Terrum.CodeAnalysis.Tests/Modules/TrRm/TrRmRegisterBodyReaderTests.cs) | The tracked baseline accepted and positively tested zero across Standard-schema paths. Commit `40a1ea5c` adds exact-successor reader/writer selection and keeps identity-less Standard and foreign-invocation profiles at `1..4`; new regression cases remain unverified under the active hold. |
+| [NativeAddress producer](../../sources/Terrum.CodeAnalysis/Modules/TrRmExecutableCompiler.NativeAddress.cs), [record tests](../../tests/Terrum.CodeAnalysis.Tests/Modules/TrRm/TrRmRegisterBodyNativeAddressTests.cs), [standalone TypeSpec checks](../../sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneTypeSpecValidation.terrum) | Actual formation/profile checks remain distinct from TypeSpec identity. Commit `40a1ea5c` keeps NativeAddress formation foreign-only; standalone WP1 preflight also rejects zero because that distinct successor does not include this TypeSpec amendment. Zero reserved fields in a 12-byte NativeAddress record are not the seven-byte TypeSpec's convention. |
+| [Artifact index](../../sources/Terrum.CodeAnalysis/Modules/TrRmArtifactIndex.cs) constructor / `StandardSchemaIdentity`; [structural validator](../../sources/Terrum.CodeAnalysis/Modules/TrRmStructuralMetadataValidator.cs) TypeSpec construction | Commit `40a1ea5c` registers the exact `(Standard, successor identity)` pair and transports that identity into structural TypeSpec validation and writer/reader paths. Full source anchor production, provider binding and re-emission remain open. |
+| [Contract owner](../specs/representation/contract-clauses.md), [Contract reader](../../sources/Terrum.CodeAnalysis/Modules/TrRmContractTableReader.cs), [anchor validator](../../sources/Terrum.CodeAnalysis/Modules/TrRmNativeFunctionPointerAnchorTable.cs), [native-anchor producer](../../sources/Terrum.CodeAnalysis/Modules/TrRmExecutableCompiler.cs) | `0010` is not assigned by the Standard owner and the Contract reader rejects it outside Development. Native-anchor production emits a Development NativeAbi role-3 payload containing an AbiId. `HasUnsupportedContract` allows `0x10`, but `AreEquivalentAnchorContracts` / `EquivalentContracts` do not compare it. That local allow-list is not authority to retain a logical Terrum ABI row on a zero Standard anchor. |
 | [Test project](../../tests/Terrum.CodeAnalysis.Tests/Terrum.CodeAnalysis.Tests.csproj), [test props](../../tests/Directory.Build.props), [test targets](../../tests/Directory.Build.targets) | The cited fixtures are normal NUnit compile inputs, not excluded prototypes. Test source is evidence of expectations, not a passing run. |
 
 Remaining **unapproved** decisions are whether to adopt this zero-domain/
