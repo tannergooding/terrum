@@ -745,9 +745,20 @@ internal sealed class StandaloneMethodImportInputTests
                 if (Host.StandaloneDecoderStatus[0] != 0
                     || Host.StandaloneDecoderSelectedModuleId[0] != 0
                     || Host.StandaloneDecoderMethodCount[0] != 3
+                    || Host.StandaloneDecoderBodyCount[0] != 1
                     || Host.StandaloneDecoderLocalCallableCount[0] != 1
                     || Host.StandaloneDecoderImportedCallableCount[0] != 2
                     || Host.StandaloneDecoderImportMapCount[0] != 2
+                    || Host.StandaloneDecoderBodies[0] != 0
+                    || Host.StandaloneDecoderBodies[2] != 1
+                    || Host.StandaloneDecoderBodies[3] != 1
+                    || Host.StandaloneDecoderBodies[4] != 1
+                    || Host.StandaloneDecoderBodyOwners[1] != 1
+                    || Host.StandaloneDecoderBodies[7] != 7
+                    || Host.StandaloneDecoderBodies[8] != 2
+                    || Host.StandaloneDecoderBodies[19] != 1
+                    || Host.StandaloneDecoderBodies[21] != 2
+                    || Host.StandaloneDecoderBodies[26] <= 0
                     || Host.StandaloneDecoderMethods[0] != 0
                     || Host.StandaloneDecoderMethods[3] != 1
                     || Host.StandaloneDecoderMethods[10] != 1
@@ -795,6 +806,54 @@ internal sealed class StandaloneMethodImportInputTests
         var decoderExecution = NativeJit.ExecuteWithData(decoderProgram,
             (NativeRuntimePolicy)policy);
         Assert.That(decoderExecution.ExitCode, Is.EqualTo(0));
+
+        var malformedBodyArtifact = contractArtifact.ToArray();
+        var sectionCount = checked((int)BinaryPrimitives
+            .ReadUInt32LittleEndian(malformedBodyArtifact.AsSpan(12)));
+        var bodySectionStart = -1;
+        var bodySectionCount = 0;
+        for (var section = 0; section < sectionCount; section++)
+        {
+            var entryOffset = checked(32 + (section * 16));
+            if (BinaryPrimitives.ReadUInt16LittleEndian(
+                    malformedBodyArtifact.AsSpan(entryOffset)) == 0x0020)
+            {
+                bodySectionCount = checked((int)BinaryPrimitives
+                    .ReadUInt32LittleEndian(
+                        malformedBodyArtifact.AsSpan(entryOffset + 4)));
+                bodySectionStart = checked((int)BinaryPrimitives
+                    .ReadUInt32LittleEndian(
+                        malformedBodyArtifact.AsSpan(entryOffset + 8)));
+                break;
+            }
+        }
+        Assert.That(bodySectionCount, Is.GreaterThan(0));
+        Assert.That(bodySectionStart, Is.GreaterThanOrEqualTo(32));
+        var bodyIndexLength = checked((bodySectionCount + 1) * 4);
+        var bodyDataOffset = checked((int)BinaryPrimitives
+            .ReadUInt32LittleEndian(
+                malformedBodyArtifact.AsSpan(bodySectionStart)));
+        var bodyStart = checked(bodySectionStart + bodyIndexLength
+            + bodyDataOffset);
+        malformedBodyArtifact[bodyStart + 3] = 1;
+        var malformedDecoderInput = new StandaloneMethodImportArtifactInput(
+            Agreement, "consumer/contracts",
+            new TrRmStandardArtifactInput(SchemaIdentity,
+                malformedBodyArtifact), contractInput.Artifacts);
+        var malformedDecoderBuffers
+            = malformedDecoderInput.Capture()
+                .CreateSourceFreeReaderHostBuffers();
+        var malformedDecoderCompilation = Compilation.Create(
+            decoderComponents, malformedDecoderBuffers, policy);
+        Assert.That(malformedDecoderCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                malformedDecoderCompilation.Diagnostics));
+        var malformedDecoderProgram = malformedDecoderCompilation.Program
+            ?? throw new AssertionException(
+                "Expected a malformed-body decoder validator.");
+        var malformedDecoderExecution = NativeJit.ExecuteWithData(
+            malformedDecoderProgram, (NativeRuntimePolicy)policy);
+        Assert.That(malformedDecoderExecution.ExitCode, Is.EqualTo(3));
 
         var aliasSource = SourceText.From(
             "using api; int32 Main() { AliasA(); return AliasB(); }");

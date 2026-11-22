@@ -322,6 +322,7 @@ internal readonly record struct CapturedStandaloneMethodImportInput(
         }
 
         var methodCapacity = checked((artifactByteLength / 28) + 1);
+        var bodyOwnerCapacity = checked(methodCapacity + 1);
         var importCapacity = checked((artifactByteLength / 12) + 1);
         var moduleCapacity = checked((artifactByteLength / 48) + 2);
         return CreateHostBuffers().AddRange([
@@ -336,6 +337,14 @@ internal readonly record struct CapturedStandaloneMethodImportInput(
             new HostBuffer("StandaloneDecoderMethods",
                 PrimitiveType.Int32,
                 [.. new int[checked(methodCapacity * 16)]], true),
+            new HostBuffer("StandaloneDecoderBodyCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneDecoderBodies",
+                PrimitiveType.Int32,
+                [.. new int[checked(methodCapacity * 28)]], true),
+            new HostBuffer("StandaloneDecoderBodyOwners",
+                PrimitiveType.Int32,
+                [.. new int[bodyOwnerCapacity]], true),
             new HostBuffer("StandaloneDecoderLocalCallableCount",
                 PrimitiveType.Int32, [0], true),
             new HostBuffer("StandaloneDecoderLocalCallables",
