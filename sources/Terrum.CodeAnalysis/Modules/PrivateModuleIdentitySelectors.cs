@@ -53,6 +53,39 @@ public sealed record PrivateEnumMemberSelection(
     CoreDeclarationIdentity MemberIdentity,
     string MemberDeclarationKey);
 
+/// <summary>Assigns a local key to one declared foreign-interface member.</summary>
+/// <param name="MemberOrdinal">The member's ordinal in the checked owner declaration.</param>
+/// <param name="LocalDeclarationKey">The explicit local member key.</param>
+public sealed record PrivateForeignInterfaceMemberDefinitionAssignment(
+    int MemberOrdinal, string LocalDeclarationKey);
+
+/// <summary>Assigns a local proxy and selected export key to a foreign member.</summary>
+/// <param name="MemberOrdinal">The member's ordinal in the checked owner declaration.</param>
+/// <param name="LocalDeclarationKey">The explicit local proxy key.</param>
+/// <param name="SelectedExportKey">The exact selected provider method key.</param>
+public sealed record PrivateForeignInterfaceMemberImportAssignment(
+    int MemberOrdinal, string LocalDeclarationKey, string SelectedExportKey);
+
+/// <summary>Assigns a private owner identity and complete member keys to a checked definition.</summary>
+/// <param name="InterfaceOrdinal">The owner's ordinal in the checked interface table.</param>
+/// <param name="LocalDeclarationKey">The explicit local owner key.</param>
+/// <param name="IsExported">Whether the public owner and every member are exported.</param>
+/// <param name="Members">The complete ordered local member-key map.</param>
+public sealed record PrivateForeignInterfaceDefinitionAssignment(
+    int InterfaceOrdinal, string LocalDeclarationKey, bool IsExported,
+    ImmutableArray<PrivateForeignInterfaceMemberDefinitionAssignment> Members);
+
+/// <summary>Assigns a private owner proxy and complete provider member map.</summary>
+/// <param name="InterfaceOrdinal">The owner's ordinal in the checked interface table.</param>
+/// <param name="LocalDeclarationKey">The explicit local owner proxy key.</param>
+/// <param name="SelectedModuleIdentity">The exact selected provider Module.</param>
+/// <param name="SelectedExportKey">The exact selected provider owner key.</param>
+/// <param name="Members">The complete ordered local/member provider-key map.</param>
+public sealed record PrivateForeignInterfaceImportAssignment(
+    int InterfaceOrdinal, string LocalDeclarationKey,
+    string SelectedModuleIdentity, string SelectedExportKey,
+    ImmutableArray<PrivateForeignInterfaceMemberImportAssignment> Members);
+
 public sealed partial class PrivateModuleIdentityInputs
 {
     /// <summary>
@@ -77,7 +110,35 @@ public sealed partial class PrivateModuleIdentityInputs
         IReadOnlyList<PrivateNominalImportSelection> imports,
         IReadOnlyList<PrivateEnumMemberSelection> enumMembers,
         IReadOnlyList<PrivateSourceEnumDefinitionAssignment>
-            sourceEnumDefinitions)
+            sourceEnumDefinitions) =>
+        CreateFromSelectors(program, usingModuleIdentity, definitions, imports,
+            enumMembers, sourceEnumDefinitions, [], []);
+
+    /// <summary>
+    /// Resolves explicit nominal and foreign-interface assignments in one
+    /// checked program snapshot and captures the resulting private identities.
+    /// </summary>
+    /// <param name="program">The exact bound-program snapshot to select from.</param>
+    /// <param name="usingModuleIdentity">The logical identity of the using module.</param>
+    /// <param name="definitions">Owned declarations and their explicit local keys.</param>
+    /// <param name="imports">Imported declarations and their explicit provider keys.</param>
+    /// <param name="enumMembers">Complete Core enum-member identity assignments.</param>
+    /// <param name="sourceEnumDefinitions">Complete source-enum identity and member-key assignments.</param>
+    /// <param name="foreignInterfaceDefinitions">Owned FNI owners and complete local member keys.</param>
+    /// <param name="foreignInterfaceImports">Imported FNI owners and complete provider member keys.</param>
+    /// <returns>Validated identity inputs associated with <paramref name="program"/>.</returns>
+    public static PrivateModuleIdentityInputs CreateFromSelectors(
+        BoundProgram program,
+        string usingModuleIdentity,
+        IReadOnlyList<PrivateNominalDefinitionSelection> definitions,
+        IReadOnlyList<PrivateNominalImportSelection> imports,
+        IReadOnlyList<PrivateEnumMemberSelection> enumMembers,
+        IReadOnlyList<PrivateSourceEnumDefinitionAssignment>
+            sourceEnumDefinitions,
+        IReadOnlyList<PrivateForeignInterfaceDefinitionAssignment>
+            foreignInterfaceDefinitions,
+        IReadOnlyList<PrivateForeignInterfaceImportAssignment>
+            foreignInterfaceImports)
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentNullException.ThrowIfNull(usingModuleIdentity);
@@ -85,6 +146,8 @@ public sealed partial class PrivateModuleIdentityInputs
         ArgumentNullException.ThrowIfNull(imports);
         ArgumentNullException.ThrowIfNull(enumMembers);
         ArgumentNullException.ThrowIfNull(sourceEnumDefinitions);
+        ArgumentNullException.ThrowIfNull(foreignInterfaceDefinitions);
+        ArgumentNullException.ThrowIfNull(foreignInterfaceImports);
         if (!IsValidModuleIdentity(usingModuleIdentity))
         {
             throw new ArgumentException(
@@ -154,7 +217,8 @@ public sealed partial class PrivateModuleIdentityInputs
         }
 
         return Create(program, usingModuleIdentity, resolvedDefinitions,
-            resolvedImports, resolvedEnumMembers, sourceEnumDefinitions);
+            resolvedImports, resolvedEnumMembers, sourceEnumDefinitions,
+            foreignInterfaceDefinitions, foreignInterfaceImports);
     }
 
     private static PrimitiveType ResolveDeclaration(BoundProgram program,

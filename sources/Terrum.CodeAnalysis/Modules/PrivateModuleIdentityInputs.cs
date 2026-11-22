@@ -58,6 +58,20 @@ public sealed partial class PrivateModuleIdentityInputs
         BoundEnumDefinition Definition,
         PrivateSourceEnumDefinitionAssignment Assignment);
 
+    private sealed record ForeignInterfaceCapture(
+        int InterfaceOrdinal,
+        BoundSourceInterfaceDeclarationHandle? SourceDeclaration,
+        BoundPrivateForeignInterfaceOrigin? ProviderOrigin,
+        BoundModuleImport? ModuleImport,
+        BoundPrivateForeignInterfaceOrigin Origin);
+
+    private sealed record ForeignInterfaceValidationResult(
+        ImmutableArray<PrivateForeignInterfaceDefinitionAssignment>
+            Definitions,
+        ImmutableArray<PrivateForeignInterfaceImportAssignment> Imports,
+        ImmutableArray<BoundPrivateForeignInterfaceOrigin?> Origins,
+        ImmutableArray<ForeignInterfaceCapture> Captures);
+
     private PrivateModuleIdentityInputs(BoundProgram program,
         string usingModuleIdentity,
         ImmutableArray<PrivateNominalDefinition> definitions,
@@ -65,7 +79,15 @@ public sealed partial class PrivateModuleIdentityInputs
         ImmutableArray<PrivateEnumMemberAssignment> enumMembers,
         ImmutableArray<PrivateSourceEnumDefinitionAssignment>
             sourceEnumDefinitions,
-        ImmutableArray<SourceEnumCapture> sourceEnumCaptures)
+        ImmutableArray<PrivateForeignInterfaceDefinitionAssignment>
+            foreignInterfaceDefinitions,
+        ImmutableArray<PrivateForeignInterfaceImportAssignment>
+            foreignInterfaceImports,
+        ImmutableArray<BoundPrivateForeignInterfaceOrigin?>
+            foreignInterfaceOrigins,
+        ImmutableArray<SourceEnumCapture> sourceEnumCaptures,
+        ImmutableArray<ForeignInterfaceCapture>
+            foreignInterfaceCaptures)
     {
         Program = program;
         UsingModuleIdentity = usingModuleIdentity;
@@ -73,11 +95,17 @@ public sealed partial class PrivateModuleIdentityInputs
         Imports = imports;
         EnumMembers = enumMembers;
         SourceEnumDefinitions = sourceEnumDefinitions;
+        ForeignInterfaceDefinitions = foreignInterfaceDefinitions;
+        ForeignInterfaceImports = foreignInterfaceImports;
+        ForeignInterfaceOrigins = foreignInterfaceOrigins;
         _sourceEnumCaptures = sourceEnumCaptures;
+        _foreignInterfaceCaptures = foreignInterfaceCaptures;
     }
 
     private readonly ImmutableArray<SourceEnumCapture>
         _sourceEnumCaptures;
+    private readonly ImmutableArray<ForeignInterfaceCapture>
+        _foreignInterfaceCaptures;
 
     internal BoundProgram Program { get; }
 
@@ -96,6 +124,17 @@ public sealed partial class PrivateModuleIdentityInputs
     /// <summary>Gets the explicit source-enum declaration and member-key assignments.</summary>
     public ImmutableArray<PrivateSourceEnumDefinitionAssignment>
         SourceEnumDefinitions { get; }
+
+    /// <summary>Gets the complete owned foreign-interface assignments.</summary>
+    public ImmutableArray<PrivateForeignInterfaceDefinitionAssignment>
+        ForeignInterfaceDefinitions { get; }
+
+    /// <summary>Gets the complete imported foreign-interface assignments.</summary>
+    public ImmutableArray<PrivateForeignInterfaceImportAssignment>
+        ForeignInterfaceImports { get; }
+
+    internal ImmutableArray<BoundPrivateForeignInterfaceOrigin?>
+        ForeignInterfaceOrigins { get; }
 
     /// <summary>Captures validated nominal identities for a checked program snapshot.</summary>
     /// <param name="program">The exact bound-program snapshot to which the inputs apply.</param>
@@ -141,7 +180,32 @@ public sealed partial class PrivateModuleIdentityInputs
         IReadOnlyList<PrivateNominalImport> imports,
         IReadOnlyList<PrivateEnumMemberAssignment> enumMembers,
         IReadOnlyList<PrivateSourceEnumDefinitionAssignment>
-            sourceEnumDefinitions)
+            sourceEnumDefinitions) =>
+        Create(program, usingModuleIdentity, definitions, imports,
+            enumMembers, sourceEnumDefinitions, [], []);
+
+    /// <summary>Captures complete private nominal and foreign-interface identities.</summary>
+    /// <param name="program">The exact bound-program snapshot to which the inputs apply.</param>
+    /// <param name="usingModuleIdentity">The logical identity of the using Module.</param>
+    /// <param name="definitions">Owned nominal definitions and their local keys.</param>
+    /// <param name="imports">Imported nominal declarations and selected provider keys.</param>
+    /// <param name="enumMembers">Complete Core identities for selected nominal enum members.</param>
+    /// <param name="sourceEnumDefinitions">Complete source enum identity and member-key assignments.</param>
+    /// <param name="foreignInterfaceDefinitions">Owned FNI owners and complete local member keys.</param>
+    /// <param name="foreignInterfaceImports">Imported FNI owners and complete provider member keys.</param>
+    /// <returns>The validated identity inputs bound to <paramref name="program"/>.</returns>
+    public static PrivateModuleIdentityInputs Create(
+        BoundProgram program,
+        string usingModuleIdentity,
+        IReadOnlyList<PrivateNominalDefinition> definitions,
+        IReadOnlyList<PrivateNominalImport> imports,
+        IReadOnlyList<PrivateEnumMemberAssignment> enumMembers,
+        IReadOnlyList<PrivateSourceEnumDefinitionAssignment>
+            sourceEnumDefinitions,
+        IReadOnlyList<PrivateForeignInterfaceDefinitionAssignment>
+            foreignInterfaceDefinitions,
+        IReadOnlyList<PrivateForeignInterfaceImportAssignment>
+            foreignInterfaceImports)
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentNullException.ThrowIfNull(usingModuleIdentity);
@@ -149,6 +213,8 @@ public sealed partial class PrivateModuleIdentityInputs
         ArgumentNullException.ThrowIfNull(imports);
         ArgumentNullException.ThrowIfNull(enumMembers);
         ArgumentNullException.ThrowIfNull(sourceEnumDefinitions);
+        ArgumentNullException.ThrowIfNull(foreignInterfaceDefinitions);
+        ArgumentNullException.ThrowIfNull(foreignInterfaceImports);
         if (BoundEnumTypes.HasStandardDeclarations(
                 program.EnumDefinitions))
         {
@@ -259,12 +325,20 @@ public sealed partial class PrivateModuleIdentityInputs
             sourceEnumCaptures);
         ValidateEnumMemberAssignments(program, usingModuleIdentity,
             owned, imported, enumMembers, enumMemberAssignments);
+        var foreignInterfaceInputs
+            = ValidateForeignInterfaceAssignments(program,
+                usingModuleIdentity, foreignInterfaceDefinitions,
+                foreignInterfaceImports, localKeys);
 
         return new PrivateModuleIdentityInputs(program, usingModuleIdentity,
             owned.MoveToImmutable(), imported.MoveToImmutable(),
             enumMemberAssignments.MoveToImmutable(),
             sourceEnumAssignments.MoveToImmutable(),
-            sourceEnumCaptures.MoveToImmutable());
+            foreignInterfaceInputs.Definitions,
+            foreignInterfaceInputs.Imports,
+            foreignInterfaceInputs.Origins,
+            sourceEnumCaptures.MoveToImmutable(),
+            foreignInterfaceInputs.Captures);
     }
 
     internal bool IsFor(BoundProgram program) =>
@@ -299,8 +373,77 @@ public sealed partial class PrivateModuleIdentityInputs
                     nameof(reboundProgram));
             }
         }
+        var foreignInterfaceOrdinals = new Dictionary<int, int>(
+            _foreignInterfaceCaptures.Length);
+        foreach (var capture in _foreignInterfaceCaptures)
+        {
+            var matches = reboundProgram.Interfaces.Select(
+                    (definition, index) => (definition, index))
+                .Where(item => capture.SourceDeclaration is not null
+                    ? ReferenceEquals(item.definition.SourceDeclaration,
+                        capture.SourceDeclaration)
+                    : capture.ProviderOrigin is not null
+                        && ReferenceEquals(
+                            item.definition.PrivateForeignInterfaceOrigin,
+                            capture.ProviderOrigin)
+                        && item.definition.ModuleImport
+                            == capture.ModuleImport)
+                .ToArray();
+            if (matches.Length != 1
+                || (capture.SourceDeclaration is not null
+                    ? !IsValidSourceForeignInterfaceAssociation(
+                        matches[0].definition,
+                        capture.SourceDeclaration)
+                    : !BoundPrivateForeignInterfaceOriginContract.IsValid(
+                        matches[0].definition))
+                || !foreignInterfaceOrdinals.TryAdd(
+                    capture.InterfaceOrdinal, matches[0].index))
+            {
+                throw new ArgumentException(
+                    "A foreign-interface identity capture cannot be rebound to a different declaration snapshot.",
+                    nameof(reboundProgram));
+            }
+        }
+
+        var foreignDefinitions
+            = ImmutableArray.CreateBuilder<
+                PrivateForeignInterfaceDefinitionAssignment>(
+                    ForeignInterfaceDefinitions.Length);
+        foreach (var assignment in ForeignInterfaceDefinitions)
+        {
+            if (!foreignInterfaceOrdinals.TryGetValue(
+                    assignment.InterfaceOrdinal, out var ordinal))
+            {
+                throw new ArgumentException(
+                    "A foreign-interface definition assignment lost its checked declaration association.",
+                    nameof(reboundProgram));
+            }
+            foreignDefinitions.Add(assignment with {
+                InterfaceOrdinal = ordinal,
+            });
+        }
+
+        var foreignImports
+            = ImmutableArray.CreateBuilder<
+                PrivateForeignInterfaceImportAssignment>(
+                    ForeignInterfaceImports.Length);
+        foreach (var assignment in ForeignInterfaceImports)
+        {
+            if (!foreignInterfaceOrdinals.TryGetValue(
+                    assignment.InterfaceOrdinal, out var ordinal))
+            {
+                throw new ArgumentException(
+                    "A foreign-interface import assignment lost its checked declaration association.",
+                    nameof(reboundProgram));
+            }
+            foreignImports.Add(assignment with {
+                InterfaceOrdinal = ordinal,
+            });
+        }
         return Create(reboundProgram, UsingModuleIdentity, Definitions,
-            Imports, EnumMembers, SourceEnumDefinitions);
+            Imports, EnumMembers, SourceEnumDefinitions,
+            foreignDefinitions.MoveToImmutable(),
+            foreignImports.MoveToImmutable());
     }
 
     internal ImmutableArray<(PrimitiveType Type,

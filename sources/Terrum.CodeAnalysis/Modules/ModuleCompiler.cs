@@ -188,6 +188,8 @@ public static partial class ModuleCompiler
         out ImmutableArray<int> checkedReferenceMapping)
     {
         var declarations = ImportDeclarations(producer);
+        var foreignInterfaces
+            = CreatePrivateForeignInterfaceReferenceDefinitions(producer);
         var classes = ProjectPrivateClassDefinitions(producer.Classes,
             producer.NominalTypeOrigins, out var classMapping);
         var additionalTypes = PublicStructureNominalRoots(
@@ -196,7 +198,9 @@ public static partial class ModuleCompiler
                 producer.EnumDefinitions))
             .Concat(Private105NativeAddressContractRoots(
                 producer.Functions.Where(static item => item.Import),
-                producer.NativeFunctionPointerSignatures));
+                producer.NativeFunctionPointerSignatures))
+            .Concat(PrivateForeignInterfaceTypeRoots(foreignInterfaces,
+                producer.NativePointerTypes));
         var projection = ProjectNativeContracts(declarations, producer.Structures,
             producer.NativePointerTypes, producer.NativeFunctionPointerSignatures,
             producer.NativeFixedArrayTypes,
@@ -250,6 +254,10 @@ public static partial class ModuleCompiler
             producer.NominalTypeOrigins, producer.Structures, structures,
             classMapping, producer.EnumDefinitions,
             projection.EnumDefinitions, projection.EnumMapping);
+        foreignInterfaces = [.. foreignInterfaces.Select(@interface =>
+            RemapPrivateForeignInterfaceDefinition(@interface,
+                producer.Structures, structures, projection,
+                classMapping))];
         var privateClassReferences = CreatePrivateClassReferences(
             producer.Structures, producer.Classes,
             producer.CheckedReferenceTypes,
@@ -276,7 +284,8 @@ public static partial class ModuleCompiler
             projection.FunctionPointerSignatures, projection.PointerTypes,
             fixedArrayTypes, checkedReferenceTypes, nominalTypeOrigins,
             classes, privateClassReferences, producer.FormatVersion,
-            coverageProgram, projection.EnumDefinitions);
+            coverageProgram, projection.EnumDefinitions,
+            foreignInterfaces);
     }
 
     private static CompilationReference CreateProjectedReference(
@@ -298,7 +307,8 @@ public static partial class ModuleCompiler
             privateClassReferences = default,
         int formatVersion = WideFixedLayoutVersion,
         BoundProgram? coverageProgram = null,
-        ImmutableArray<BoundEnumDefinition> enumDefinitions = default)
+        ImmutableArray<BoundEnumDefinition> enumDefinitions = default,
+        ImmutableArray<BoundInterfaceDefinition> interfaces = default)
     {
         var rawCoverageProgram = coverageProgram
             ?? CreatePrivate106CoverageProgram(structures, classes,
@@ -400,7 +410,8 @@ public static partial class ModuleCompiler
             privateNominalTypeOrigins:
                 canonicalModule.NominalTypeOrigins,
             classes: canonicalModule.Classes,
-            privateClassReferences: privateClassReferences);
+            privateClassReferences: privateClassReferences,
+            interfaces: interfaces.IsDefault ? [] : interfaces);
     }
 
     internal static (
@@ -472,7 +483,8 @@ public static partial class ModuleCompiler
         var declarationCount = 0;
         foreach (var function in module.Functions)
         {
-            if (function.Import)
+            if (function.Import
+                && function.ForeignInterfaceMember is null)
             {
                 declarationCount++;
             }
@@ -480,7 +492,8 @@ public static partial class ModuleCompiler
         var declarations = ImmutableArray.CreateBuilder<BoundFunction>(declarationCount);
         foreach (var function in module.Functions)
         {
-            if (function.Import)
+            if (function.Import
+                && function.ForeignInterfaceMember is null)
             {
                 declarations.Add(Declaration(function.Function
                     ?? throw new ModuleFormatException("Missing export declaration.")));
@@ -1600,12 +1613,23 @@ public static partial class ModuleCompiler
 
     private static void ValidateProducer(Module producer)
     {
-        var names = new Dictionary<string, int>(producer.Functions.Length, StringComparer.Ordinal);
+        var names = new Dictionary<string, int>(producer.Functions.Length,
+            StringComparer.Ordinal);
         var nativeCallableEntryNames = new HashSet<string>(StringComparer.Ordinal);
+        var functions = ImmutableArray.CreateBuilder<BoundFunction>(
+            producer.Functions.Count(static item =>
+                item.ForeignInterfaceMember is null));
         for (var index = 0; index < producer.Functions.Length; index++)
         {
             var item = producer.Functions[index];
-            names.Add(item.Name, index);
+            if (item.ForeignInterfaceMember is not null)
+            {
+                continue;
+            }
+            names.Add(item.Name, functions.Count);
+            functions.Add(item.Function
+                ?? throw new ModuleFormatException(
+                    "Missing producer body."));
             if (item.Function is BoundFunction function
                 && function.NativeCallableEntryName is string entryName
                 && (function.NativeFunctionPointerType is null
@@ -1615,11 +1639,10 @@ public static partial class ModuleCompiler
                 throw new ModuleFormatException("Producer contains an invalid or duplicate native callable entry.");
             }
         }
-        var functions = ImmutableArray.CreateBuilder<BoundFunction>(producer.Functions.Length);
-        foreach (var function in producer.Functions)
+        if (functions.Count == 0 && producer.ForeignInterfaces.IsEmpty)
         {
-            functions.Add(function.Function
-                ?? throw new ModuleFormatException("Missing producer body."));
+            throw new ModuleFormatException(
+                "A producer must retain an ordinary export or foreign-interface owner.");
         }
         var program = Resolve(new BoundProgram(functions.MoveToImmutable(), -1) {
             Structures = producer.Structures,
@@ -1630,6 +1653,7 @@ public static partial class ModuleCompiler
             CheckedReferenceTypes = producer.CheckedReferenceTypes,
             EnumDefinitions = producer.EnumDefinitions,
             PrivateNominalTypeOrigins = producer.NominalTypeOrigins,
+            Interfaces = ReconstructPrivateForeignInterfaces(producer),
             PrivateClassReferences = CreatePrivateClassReferences(
                 producer.Structures, producer.Classes,
                 producer.CheckedReferenceTypes,
@@ -1654,6 +1678,10 @@ public static partial class ModuleCompiler
         }
         try
         {
+            if (program.Functions.IsEmpty && program.Interfaces.IsEmpty)
+            {
+                return;
+            }
             if (program.Functions.Any(static function => function.DirectNativeImport is not null))
             {
                 SemanticVerifier.VerifyLibraryWithDirectNativeImports(program);
@@ -1757,10 +1785,22 @@ public static partial class ModuleCompiler
             throw new ModuleContractException(
                 "The private semantic module format does not preserve nominal interface witnesses.");
         }
-        if (!program.Interfaces.IsEmpty)
+        if (program.Interfaces.IsDefault)
         {
             throw new ModuleContractException(
-                "The private semantic module format does not preserve interface declarations.");
+                "The producer bound-interface table is uninitialized.");
+        }
+        if (program.Interfaces.Any(static definition =>
+                definition.ForeignNativeInterface is null))
+        {
+            throw new ModuleContractException(
+                "The private semantic module format does not preserve ordinary interface declarations.");
+        }
+        if (!program.Interfaces.IsEmpty
+            && selectedFormatVersion != ForeignInterfacePrivateVersion)
+        {
+            throw new ModuleContractException(
+                "Foreign-interface declarations require the exact PF111 private schema selection.");
         }
         if (program.Functions.Any(static function =>
             function.ImportedGenericMethod is not null))
@@ -1855,9 +1895,14 @@ public static partial class ModuleCompiler
         var privateNominalRoots = PrivateNominalInputRoots(program,
             identityInputs);
         var names = new HashSet<string>(exports, StringComparer.Ordinal);
-        if (names.Count == 0 || names.Contains("Main"))
+        var hasForeignInterfaceDeclarations
+            = program.Interfaces.Any(static definition =>
+                definition.ForeignNativeInterface is not null);
+        if ((names.Count == 0 && !hasForeignInterfaceDeclarations)
+            || names.Contains("Main"))
         {
-            throw new ModuleFormatException("A producer needs exported functions other than Main.");
+            throw new ModuleFormatException(
+                "A producer needs exported functions or foreign-interface declarations other than Main.");
         }
         var indexes = new HashSet<int>(names.Count);
         var exportedIndexes = new HashSet<int>(names.Count);
@@ -2051,8 +2096,17 @@ public static partial class ModuleCompiler
                 RemapClass(@class, program.Structures, structures),
                 enumMapping));
         }
+        var foreignInterfaceRecords
+            = CreatePrivateForeignInterfaceModuleRecords(program,
+                identityInputs, selectedFormatVersion, isConsumer: false,
+                firstModuleFunctionIndex: moduleFunctions.Count,
+                remapType: type => RemapEnumType(
+                    RemapType(type, program.Structures, structures),
+                    enumMapping));
+        moduleFunctions.AddRange(foreignInterfaceRecords.Functions);
         var module = new Module(false, -1, structures, moduleFunctions.MoveToImmutable()) {
             Classes = classes.MoveToImmutable(),
+            ForeignInterfaces = foreignInterfaceRecords.Interfaces,
             EnumDefinitions = program.EnumDefinitions,
             NativeFunctionPointerSignatures = nativeFunctionPointerSignatures,
             NativePointerTypes = nativePointerTypes,
@@ -2560,9 +2614,22 @@ public static partial class ModuleCompiler
                         declaration.ExpectedDirectNativeImport,
                         program.Structures, structures),
             }).ToImmutableArray();
-        var module = new Module(true, entryPoint, structures, remapped) {
+        var foreignInterfaceRecords
+            = CreatePrivateForeignInterfaceModuleRecords(program,
+                identityInputs, selectedFormatVersion, isConsumer: true,
+                firstModuleFunctionIndex: remapped.Length,
+                remapType: type => RemapEnumType(
+                        RemapType(type, program.Structures, structures),
+                        IdentityEnumMapping(program.EnumDefinitions.Length)));
+        var moduleFunctions = ImmutableArray.CreateBuilder<ModuleFunction>(
+            remapped.Length + foreignInterfaceRecords.Functions.Length);
+        moduleFunctions.AddRange(remapped);
+        moduleFunctions.AddRange(foreignInterfaceRecords.Functions);
+        var module = new Module(true, entryPoint, structures,
+            moduleFunctions.MoveToImmutable()) {
             Classes = [.. program.Classes.Select(@class => RemapClass(@class, program.Structures, structures))],
             EnumDefinitions = program.EnumDefinitions,
+            ForeignInterfaces = foreignInterfaceRecords.Interfaces,
             ImportedStructures = importedTypes.ToImmutable(),
             NativeFunctionPointerSignatures = nativeFunctionPointerSignatures,
             NativePointerTypes = nativePointerTypes,
@@ -2777,6 +2844,10 @@ public static partial class ModuleCompiler
         var producerOwned = new List<int>();
         foreach (var declaration in consumer.Functions)
         {
+            if (declaration.ForeignInterfaceMember is not null)
+            {
+                continue;
+            }
             if (!names.TryAdd(declaration.Name, functions.Count))
             {
                 throw new ModuleFormatException("Duplicate consumer symbol.");
@@ -2897,6 +2968,10 @@ public static partial class ModuleCompiler
         }
         foreach (var exported in producer.Functions)
         {
+            if (exported.ForeignInterfaceMember is not null)
+            {
+                continue;
+            }
             if (exported.Function is { Intrinsic: not (BoundIntrinsic.None or BoundIntrinsic.ClassTryCreate) }
                 && names.TryGetValue(exported.Name, out var intrinsicIndex))
             {
@@ -3004,6 +3079,32 @@ public static partial class ModuleCompiler
         producerClassReferences =
             [.. producerClassReferences.Select(static reference =>
                 reference with { IsSourceLookupRoot = false })];
+        var linkedInterfaces
+            = ImmutableArray.CreateBuilder<BoundInterfaceDefinition>();
+        foreach (var definition in ReconstructPrivateForeignInterfaces(
+                     consumer))
+        {
+            linkedInterfaces.Add(
+                RemapPrivateForeignInterfaceDefinition(definition,
+                    consumer.Structures, combinedStructures,
+                    fixedArrayMappings[0],
+                    functionPointerMappings[0],
+                    nativePointerMappings[0],
+                    checkedReferenceMappings[0],
+                    consumerClassMapping.ToArray(), enumMappings[0]));
+        }
+        foreach (var definition in ReconstructPrivateForeignInterfaces(
+                     producer))
+        {
+            linkedInterfaces.Add(
+                RemapPrivateForeignInterfaceDefinition(definition,
+                    renamedProducerStructures, combinedStructures,
+                    fixedArrayMappings[1],
+                    functionPointerMappings[1],
+                    nativePointerMappings[1],
+                    checkedReferenceMappings[1],
+                    producerClassMapping.ToArray(), enumMappings[1]));
+        }
         var result = new BoundProgram(functions.ToImmutable(), consumer.EntryPoint) {
             Structures = combinedStructures,
             Classes = [.. consumer.Classes.Select(@class =>
@@ -3038,6 +3139,7 @@ public static partial class ModuleCompiler
             NativeFixedArrayTypes = nativeFixedArrayTypes,
             CheckedReferenceTypes = checkedReferenceTypes,
             EnumDefinitions = enumDefinitions,
+            Interfaces = linkedInterfaces.ToImmutable(),
             PrivateNominalTypeOrigins = [
                 .. consumerNominalOrigins,
                 .. producerNominalOrigins,
@@ -8643,6 +8745,11 @@ public static partial class ModuleCompiler
                 module.Functions.Length);
             foreach (var item in module.Functions)
             {
+                if (item.ForeignInterfaceMember is not null)
+                {
+                    functions.Add(item);
+                    continue;
+                }
                 if (item.Function is BoundFunction function)
                 {
                     functions.Add(item with {
@@ -8755,6 +8862,9 @@ public static partial class ModuleCompiler
                 FormatVersion = requestedFormatVersion,
             };
         }
+        ValidatePrivateForeignInterfaceDirectory(module, reading: false);
+        module = CanonicalizePrivateForeignInterfaceModule(module);
+        ValidatePrivateForeignInterfaceDirectory(module, reading: false);
         using var stream = new MemoryStream();
         using var writer = new ModuleWriter(stream) {
             FormatVersion = module.FormatVersion,
@@ -8765,6 +8875,7 @@ public static partial class ModuleCompiler
             NativeFixedArrayTypes = module.NativeFixedArrayTypes,
             CheckedReferenceTypes = module.CheckedReferenceTypes,
             NominalTypeOrigins = module.NominalTypeOrigins,
+            ForeignInterfaces = module.ForeignInterfaces,
             EnumDefinitions = module.EnumDefinitions,
             InvocationBuffers = module.InvocationBuffers,
             SourceFunctions = program.Functions,
@@ -8940,7 +9051,7 @@ public static partial class ModuleCompiler
                 module.NativePointerTypes, module.NativeFixedArrayTypes);
             WritePrivateNominalTypeOrigins(writer, module);
             WritePrivateNominalEnumDefinitions(writer, module);
-            writer.Write(0); // foreignInterfaceCount
+            WritePrivateForeignInterfaceDirectory(writer, module);
         }
         writer.Write(module.Functions.Length);
         var names = program.Functions.Select(function => function.Name).ToArray();
@@ -8995,13 +9106,27 @@ public static partial class ModuleCompiler
                     throw new ModuleContractException(
                         "Module native-output metadata differs from its function declaration.");
                 }
-                ValidateNativeOutputContracts(outputRole, outputContracts, item.Contract, module.Structures,
-                    module.NativeFunctionPointerSignatures,
-                    module.NativePointerTypes,
-                    private105: module.FormatVersion
-                        is CheckedReferenceVersion
-                            or ForeignInterfacePrivateVersion,
-                    enumDefinitions: module.EnumDefinitions);
+                if (item.ForeignInterfaceMember is null)
+                {
+                    ValidateNativeOutputContracts(outputRole,
+                        outputContracts, item.Contract, module.Structures,
+                        module.NativeFunctionPointerSignatures,
+                        module.NativePointerTypes,
+                        private105: module.FormatVersion
+                            is CheckedReferenceVersion
+                                or ForeignInterfacePrivateVersion,
+                        enumDefinitions: module.EnumDefinitions);
+                }
+                else if ((!outputContracts.IsEmpty
+                            && outputRole
+                                != NativeOutputDeclarationRole
+                                    .ForeignInterfaceMethod)
+                        || (outputContracts.IsEmpty
+                            && outputRole is not null))
+                {
+                    throw new ModuleContractException(
+                        "PF111 foreign-member NativeOutput role differs from its collection.");
+                }
                 PutNativeOutputContracts(writer, outputRole, outputContracts);
             }
             if (UsesCheckedReferenceBaseline(module.FormatVersion))
@@ -9075,6 +9200,9 @@ public static partial class ModuleCompiler
                 = ReadPrivateNominalTypeOrigins(reader);
             var enumDefinitions = ReadPrivateNominalEnumDefinitions(reader,
                 nominalTypeOrigins, structures);
+            var foreignInterfaces
+                = ReadPrivateForeignInterfaceDirectory(reader,
+                    nominalTypeOrigins);
             if (!NativeFixedArrayContract.IsValidTable(structures,
                     nativeFixedArrayTypes, checkedReferenceTypes,
                     enumDefinitions))
@@ -9114,6 +9242,7 @@ public static partial class ModuleCompiler
                 moduleReader.CheckedReferenceTypes = checkedReferenceTypes;
                 moduleReader.NominalTypeOrigins = nominalTypeOrigins;
                 moduleReader.EnumDefinitions = enumDefinitions;
+                moduleReader.ForeignInterfaces = foreignInterfaces;
                 moduleReader.HasReadEnumDefinitions
                     = UsesCheckedReferenceBaseline(
                         moduleReader.FormatVersion);
@@ -9140,6 +9269,7 @@ public static partial class ModuleCompiler
                 CheckedReferenceTypes = checkedReferenceTypes,
                 EnumDefinitions = enumDefinitions,
                 NominalTypeOrigins = nominalTypeOrigins,
+                ForeignInterfaces = foreignInterfaces,
                 RequiresSourceGrant = requiresSourceGrant,
                 InvocationProfileId = invocationProfileId,
                 InvocationBuffers = invocationBuffers,
@@ -9147,6 +9277,8 @@ public static partial class ModuleCompiler
             };
             ValidatePrivateNominalTypeOrigins(module, reading: true,
                 requireCompleteClosure: true);
+            ValidatePrivateForeignInterfaceDirectory(module,
+                reading: true);
             ValidateAddressOnlyNestedBacking(module);
             if (module.FormatVersion is DirectNativeImportVersion or DirectNativeParameterVersion
                 && !module.Functions.Any(static item =>
@@ -9708,7 +9840,14 @@ public static partial class ModuleCompiler
             return (null, []);
         }
         var role = (NativeOutputDeclarationRole)reader.ReadByte();
-        if (reader.ReadByte() != 0 || reader.ReadUInt16() != 0)
+        if (role is not (NativeOutputDeclarationRole.DirectImport
+                or NativeOutputDeclarationRole.ForeignInterfaceMethod)
+            || (role
+                    == NativeOutputDeclarationRole.ForeignInterfaceMethod
+                && reader is not ModuleReader {
+                    FormatVersion: ForeignInterfacePrivateVersion,
+                })
+            || reader.ReadByte() != 0 || reader.ReadUInt16() != 0)
         {
             throw new ModuleFormatException("Native-output collection flags or reserved bits are invalid.");
         }
@@ -9752,6 +9891,10 @@ public static partial class ModuleCompiler
         }
 
         var result = outputs.MoveToImmutable();
+        if (role == NativeOutputDeclarationRole.ForeignInterfaceMethod)
+        {
+            return (role, result);
+        }
         ValidateNativeOutputContracts(role, result, contract, structures,
             functionPointerSignatures, nativePointerTypes,
             private105: reader is ModuleReader {
@@ -10004,7 +10147,15 @@ public static partial class ModuleCompiler
         {
             var name = GetString(reader);
             var contract = GetString(reader);
-            if (!TryContractPromises(contract.AsSpan(), out _, out _, out _))
+            var isPrivateForeignInterfaceContract
+                = IsPrivateForeignInterfaceMemberContract(contract);
+            if ((isPrivateForeignInterfaceContract
+                    && reader is not ModuleReader {
+                        FormatVersion: ForeignInterfacePrivateVersion,
+                    })
+                || (!isPrivateForeignInterfaceContract
+                    && !TryContractPromises(contract.AsSpan(), out _, out _,
+                        out _)))
             {
                 throw new ModuleFormatException(
                     "Module declaration contains an invalid or retired effect token.");
@@ -10045,7 +10196,13 @@ public static partial class ModuleCompiler
                 throw new ModuleFormatException(
                     "Module declaration contains an array-derived runtime contract.");
             }
-            if (name.Length == 0 || !seen.Add(name) || (expectedConsumer ? import == hasBody : !hasBody))
+            var foreignInterfaceMember
+                = private106Metadata.ForeignInterfaceMember;
+            if (name.Length == 0
+                || (foreignInterfaceMember is null && !seen.Add(name))
+                || (foreignInterfaceMember is null
+                    ? expectedConsumer ? import == hasBody : !hasBody
+                    : hasBody))
             {
                 throw new ModuleFormatException("Invalid module declaration.");
             }
@@ -10217,7 +10374,8 @@ public static partial class ModuleCompiler
             }
             else if (reader is ModuleReader {
                     FormatVersion: CheckedReferenceVersion or ForeignInterfacePrivateVersion,
-                } && function is null)
+                } && function is null
+                && foreignInterfaceMember is null)
             {
                 ValidatePrivate105BodylessFunctionContract(contract,
                     import, structures, nativeFunctionPointerSignatures,
@@ -10255,6 +10413,7 @@ public static partial class ModuleCompiler
                 throw new ModuleFormatException("Optional managed handles have no persisted module ABI.");
             }
             if (expectedConsumer && import
+                && foreignInterfaceMember is null
                 && (contract.Split('|') is not { Length: > 3 } parts || parts[3] != "E"))
             {
                 throw new ModuleFormatException("Consumer import lacks an accessible contract.");
@@ -10335,6 +10494,7 @@ public static partial class ModuleCompiler
                 ExpectedCopyOriginSummaryData =
                     function is null
                         ? private106Metadata.CopyOriginSummary : null,
+                ForeignInterfaceMember = foreignInterfaceMember,
             };
             if (HasUnsupportedModuleCallerUnsafeContract(item, structures, valueTypes))
             {
@@ -13813,6 +13973,8 @@ public static partial class ModuleCompiler
     {
         public int FormatVersion { get; init; } = Version;
         public ImmutableArray<BoundClass> Classes { get; init; } = [];
+        public ImmutableArray<PrivateForeignInterface>
+            ForeignInterfaces { get; init; } = [];
         public ImmutableArray<string> ImportedStructures { get; init; } = [];
         public ImmutableArray<NativeFunctionPointerSignatureDefinition> NativeFunctionPointerSignatures { get; init; } = [];
         public ImmutableArray<NativePointerTypeDefinition> NativePointerTypes { get; init; } = [];
@@ -13847,7 +14009,30 @@ public static partial class ModuleCompiler
         public bool HasDeclaredRawUnionReturnCoverage { get; init; }
         public ImmutableArray<byte> DeclaredRawUnionReturnCoverage
             { get; init; } = [];
+        public PrivateForeignInterfaceMemberSurface?
+            ForeignInterfaceMember { get; init; }
     }
+    internal sealed record PrivateForeignInterface(
+        BoundPrivateForeignInterfaceBinding Binding,
+        string LookupName,
+        bool IsPublic,
+        uint VTableByteOffset,
+        ImmutableArray<PrivateForeignInterfaceMember> Members);
+    internal sealed record PrivateForeignInterfaceMember(
+        BoundPrivateForeignInterfaceBinding Binding,
+        int ModuleFunctionIndex);
+    internal sealed record PrivateForeignInterfaceMemberSurface(
+        int ForeignInterfaceIndex,
+        int DeclaredMethodOrdinal,
+        PrimitiveType ResultType,
+        PrimitiveType ReceiverType,
+        bool DoesNotReturn,
+        ImmutableArray<PrivateForeignInterfaceFormal> Formals);
+    internal sealed record PrivateForeignInterfaceFormal(
+        string Name,
+        PrimitiveType Type,
+        bool HasDefault,
+        BoundConstant? DefaultValue);
     private sealed record SymbolicCall(string Name, ImmutableArray<BoundExpression> Arguments, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span)
     {
         public ImmutableArray<int> ArgumentParameterIndices { get; init; }

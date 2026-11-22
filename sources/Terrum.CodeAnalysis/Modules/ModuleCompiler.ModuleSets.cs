@@ -505,6 +505,30 @@ public static partial class ModuleCompiler
                 spanTypeImportRemappers[referenceIndex].RemapImports(
                     references[referenceIndex]));
         }
+        var allInterfaces
+            = ImmutableArray.CreateBuilder<BoundInterfaceDefinition>();
+        for (var referenceIndex = 0;
+            referenceIndex < references.Count; referenceIndex++)
+        {
+            var reference = references[referenceIndex];
+            foreach (var definition in reference.Interfaces)
+            {
+                var mapped = RemapPrivateForeignInterfaceDefinition(
+                    definition, reference.Structures, allTypes,
+                    fixedArrayMappings[referenceIndex],
+                    functionPointerMappings[referenceIndex],
+                    nativePointerMappings[referenceIndex],
+                    checkedReferenceMappings[referenceIndex],
+                    classMappings[referenceIndex],
+                    enumMappings[referenceIndex]);
+                mapped = BoundTreeTraversal.RewriteTypes(mapped,
+                    type => RemapGenericNominalType(referenceIndex, type));
+                mapped = BoundTreeTraversal.RewriteTypes(mapped,
+                    type => RemapSpanType(type,
+                        spanTypeMerge.TypeMappings[referenceIndex]));
+                allInterfaces.Add(mapped);
+            }
+        }
         return new CompilationReference(allTypes, functions.MoveToImmutable(), references[0].RuntimePolicy,
             nativeFunctionPointerSignatures: nativeFunctionPointerSignatures,
             nativePointerTypes: nativePointerTypes,
@@ -515,6 +539,7 @@ public static partial class ModuleCompiler
             classes: allClasses,
             privateClassReferences:
                 allPrivateClassReferences.ToImmutable(),
+            interfaces: allInterfaces.ToImmutable(),
             genericNominalTypeDefinitions: allGenericNominalDefinitions,
             genericNominalTypeInstances:
                 spanRemappedGenericNominalInstances.ToImmutable(),
@@ -1475,11 +1500,20 @@ public static partial class ModuleCompiler
         }
         ValidatePrivateNominalImportsAgainstReference(consumer,
             reference);
+        ValidatePrivateForeignInterfacesAgainstReference(consumer,
+            reference, providerFunctionPointerMapping,
+            providerNativePointerMapping, providerCheckedReferenceMapping,
+            CreatePrivateEnumTypeMapping(reference.EnumDefinitions,
+                consumer.EnumDefinitions));
         IReadOnlyDictionary<string, BoundFunction>? exports = null;
         var hasPrivateManagedState = HasPrivateManagedState(consumer);
         var hasUnsupportedManagedImport = false;
         foreach (var imported in consumer.Functions)
         {
+            if (imported.ForeignInterfaceMember is not null)
+            {
+                continue;
+            }
             if (!imported.Import)
             {
                 continue;
@@ -1624,14 +1658,26 @@ public static partial class ModuleCompiler
             throw new ModuleContractException("Managed graph import crosses a non-Copy boundary.");
         }
         var providerFunctions = exports ?? ImmutableDictionary<string, BoundFunction>.Empty;
-        var names = new Dictionary<string, int>(consumer.Functions.Length, StringComparer.Ordinal);
+        var ordinaryFunctionCount = consumer.Functions.Count(
+            static item => item.ForeignInterfaceMember is null);
+        var names = new Dictionary<string, int>(ordinaryFunctionCount,
+            StringComparer.Ordinal);
         for (var index = 0; index < consumer.Functions.Length; index++)
         {
-            names.Add(consumer.Functions[index].Name, index);
+            var item = consumer.Functions[index];
+            if (item.ForeignInterfaceMember is null)
+            {
+                names.Add(item.Name, names.Count);
+            }
         }
-        var functions = ImmutableArray.CreateBuilder<BoundFunction>(consumer.Functions.Length);
+        var functions = ImmutableArray.CreateBuilder<BoundFunction>(
+            ordinaryFunctionCount);
         foreach (var item in consumer.Functions)
         {
+            if (item.ForeignInterfaceMember is not null)
+            {
+                continue;
+            }
             if (!item.Import)
             {
                 functions.Add(item.Function
@@ -1663,6 +1709,7 @@ public static partial class ModuleCompiler
             NativeFixedArrayTypes = consumer.NativeFixedArrayTypes,
             CheckedReferenceTypes = consumer.CheckedReferenceTypes,
             EnumDefinitions = consumer.EnumDefinitions,
+            Interfaces = ReconstructPrivateForeignInterfaces(consumer),
             PrivateNominalTypeOrigins = consumer.NominalTypeOrigins,
             PrivateClassReferences = CreatePrivateClassReferences(
                 consumer.Structures, consumer.Classes,

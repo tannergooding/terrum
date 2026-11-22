@@ -550,6 +550,28 @@ public static partial class ModuleCompiler
                 spanTypeImportRemappers[provider].RemapImports(
                     references[provider]));
         }
+        var allInterfaces
+            = ImmutableArray.CreateBuilder<BoundInterfaceDefinition>();
+        for (var provider = 0; provider < references.Count; provider++)
+        {
+            var reference = references[provider];
+            foreach (var definition in reference.Interfaces)
+            {
+                var mapped = RemapPrivateForeignInterfaceDefinition(
+                    definition, reference.Structures, combined,
+                    fixedArrayMappings[provider],
+                    functionPointerMappings[provider],
+                    nativePointerMappings[provider],
+                    checkedReferenceMappings[provider],
+                    classMappings[provider], enumMappings[provider]);
+                mapped = BoundTreeTraversal.RewriteTypes(mapped,
+                    type => RemapGenericNominalType(provider, type));
+                mapped = BoundTreeTraversal.RewriteTypes(mapped,
+                    type => RemapSpanType(type,
+                        spanTypeMerge.TypeMappings[provider]));
+                allInterfaces.Add(mapped);
+            }
+        }
         return new CompilationReference(combined, functions.MoveToImmutable(), references[0].RuntimePolicy,
             nativeFunctionPointerSignatures: nativeFunctionPointerSignatures,
             nativePointerTypes: nativePointerTypes,
@@ -559,6 +581,7 @@ public static partial class ModuleCompiler
             privateNominalTypeOrigins: privateNominalTypeOrigins,
             classes: combinedClasses,
             privateClassReferences: privateClassReferences.ToImmutable(),
+            interfaces: allInterfaces.ToImmutable(),
             genericNominalTypeDefinitions: allGenericNominalDefinitions,
             genericNominalTypeInstances:
                 spanRemappedGenericNominalInstances.ToImmutable(),
@@ -1486,6 +1509,9 @@ public static partial class ModuleCompiler
                 = ReadPrivateNominalTypeOrigins(reader);
             var enumDefinitions = ReadPrivateNominalEnumDefinitions(reader,
                 nominalTypeOrigins, structures);
+            var foreignInterfaces
+                = ReadPrivateForeignInterfaceDirectory(reader,
+                    nominalTypeOrigins);
             ValidatePrivateReferenceTypeUses(checkedReferenceTypes,
                 invocationBuffers, structures, classes,
                 nativeFunctionPointerSignatures, nativePointerTypes,
@@ -1510,6 +1536,7 @@ public static partial class ModuleCompiler
                     checkedReferenceTypes;
                 moduleReader.NominalTypeOrigins = nominalTypeOrigins;
                 moduleReader.EnumDefinitions = enumDefinitions;
+                moduleReader.ForeignInterfaces = foreignInterfaces;
                 moduleReader.HasReadEnumDefinitions
                     = UsesCheckedReferenceBaseline(moduleReader.FormatVersion);
                 moduleReader.HasReadCheckedReferenceTypes
@@ -1534,11 +1561,14 @@ public static partial class ModuleCompiler
                 CheckedReferenceTypes = checkedReferenceTypes,
                 EnumDefinitions = enumDefinitions,
                 NominalTypeOrigins = nominalTypeOrigins,
+                ForeignInterfaces = foreignInterfaces,
                 RequiresSourceGrant = requiresSourceGrant,
                 RuntimePolicy = policy,
             };
             ValidatePrivateNominalTypeOrigins(module, reading: true,
                 requireCompleteClosure: true);
+            ValidatePrivateForeignInterfaceDirectory(module,
+                reading: true);
             ValidateAddressOnlyNestedBacking(module);
             var retainedProfile = RetainedNativeProfile(module);
             if ((profile == "native-20" && classes.IsEmpty)

@@ -90,6 +90,7 @@ internal sealed partial class Binder
     private sealed record ResolvedInterfaceType(
         string QualifiedName,
         BoundModuleImport? ModuleImport,
+        BoundPrivateForeignInterfaceBinding? PrivateForeignInterfaceBinding,
         ImmutableArray<BoundInterfaceFormal> Formals);
 
     private readonly record struct InterfaceConstantFormal(
@@ -218,6 +219,15 @@ internal sealed partial class Binder
             var hasForeignNativeInterfaceAttribute = parts.Any(part =>
                 part.Declaration.Children.OfType<SyntaxNode>()
                     .Any(IsForeignNativeInterfaceAttribute));
+            var sourceInterfaceDeclaration
+                = hasForeignNativeInterfaceAttribute
+                    ? new BoundSourceInterfaceDeclarationHandle(
+                        qualifiedName, first.IsPartial,
+                        [.. parts.Select(part =>
+                            new BoundSourceInterfacePart(
+                                _trees.IndexOf(part.Tree), part.Tree,
+                                part.Declaration))])
+                    : null;
             var bases = ImmutableArray.CreateBuilder<BoundInterfaceType>();
             var constraints = ImmutableArray.CreateBuilder<BoundInterfaceConstraint>();
             var members = ImmutableArray.CreateBuilder<BoundInterfaceMemberDefinition>();
@@ -276,7 +286,8 @@ internal sealed partial class Binder
                     nativeCallableDefaultConvention,
                     nativeCallableDefaultExpression,
                     inheritedNativeCallableMemberOrdinals,
-                    hasForeignNativeInterfaceAttribute));
+                    hasForeignNativeInterfaceAttribute,
+                    sourceInterfaceDeclaration));
             }
 
             var boundMembers = members.ToImmutable();
@@ -310,6 +321,7 @@ internal sealed partial class Binder
                 Accessibility = first.Accessibility,
                 AttributeTokens = first.AttributeTokens,
                 ForeignNativeInterface = foreignNativeInterface,
+                SourceDeclaration = sourceInterfaceDeclaration,
                 SourceInputOrdinal = _trees.IndexOf(first.Tree),
             });
         }
@@ -3234,7 +3246,11 @@ internal sealed partial class Binder
             return new BoundInterfaceType(
                 BoundInterfaceTypeKind.Nominal, PrimitiveType.Void, interfaceName, -1,
                 arguments.MoveToImmutable(), isWritableType, isOptionalType, isGcType, false)
-                { ModuleImport = resolvedInterface.ModuleImport };
+            {
+                ModuleImport = resolvedInterface.ModuleImport,
+                PrivateForeignInterfaceBinding
+                    = resolvedInterface.PrivateForeignInterfaceBinding,
+            };
         }
 
         if (allowGenericNominalConstantDomain
@@ -4017,7 +4033,8 @@ internal sealed partial class Binder
             var (selectedName, selectedArity) = selectedLocalMatches[0];
             var formals = GetInterfaceFormals(selectedName, selectedArity,
                 moduleImport: null, interfaces);
-            resolvedInterface = new ResolvedInterfaceType(selectedName, null, formals);
+            resolvedInterface = new ResolvedInterfaceType(selectedName, null,
+                null, formals);
             return selectedName;
         }
 
@@ -4026,7 +4043,10 @@ internal sealed partial class Binder
                 && candidates.Contains(definition.QualifiedName)
                 && CanOmitInterfaceArguments(definition.Formals, arity))
             .OrderByDescending(definition => definition.Formals.Length == arity)
-            .GroupBy(static definition => definition.ModuleImport)
+            .GroupBy(static definition => (
+                definition.ModuleImport,
+                PrivateBinding: definition
+                    .PrivateForeignInterfaceOrigin?.Owner))
             .Select(static group => group.First()).ToArray();
         if (importedInterfaces.Length > 1)
         {
@@ -4038,6 +4058,7 @@ internal sealed partial class Binder
             resolvedInterface = new ResolvedInterfaceType(
                 importedInterfaces[0].QualifiedName,
                 importedInterfaces[0].ModuleImport,
+                importedInterfaces[0].PrivateForeignInterfaceOrigin?.Owner,
                 importedInterfaces[0].Formals);
             return importedInterfaces[0].QualifiedName;
         }
@@ -4090,7 +4111,9 @@ internal sealed partial class Binder
         NativeCallingConvention? interfaceDefaultConvention,
         SyntaxNode? interfaceDefaultExpression,
         List<int> inheritedDefaultMemberOrdinals,
-        bool hasForeignNativeInterfaceAttribute)
+        bool hasForeignNativeInterfaceAttribute,
+        BoundSourceInterfaceDeclarationHandle?
+            sourceInterfaceDeclaration)
     {
         var result = ImmutableArray.CreateBuilder<BoundInterfaceMemberDefinition>();
         var interfaceConstantParameters = InterfaceConstantParameters(ownerFormals,
@@ -4342,8 +4365,9 @@ internal sealed partial class Binder
             {
                 Report("TRM3001", "A private interface helper must have a complete body.", declaration.Span);
             }
+            var memberOrdinal = firstOrdinal + result.Count;
             result.Add(new BoundInterfaceMemberDefinition(
-                firstOrdinal + result.Count,
+                memberOrdinal,
                 name,
                 declarationKey,
                 memberKind,
@@ -4377,6 +4401,11 @@ internal sealed partial class Binder
                 DeclaredRequiresUnsafeCaller = declaredRequiresUnsafeCaller,
                 RequiresMutableReceiver = requiresMutableReceiver,
                 NativeCallableConvention = nativeCallableConvention,
+                SourceDeclaration = sourceInterfaceDeclaration is null
+                    ? null
+                    : new BoundSourceInterfaceMemberHandle(
+                        sourceInterfaceDeclaration, memberOrdinal, part.Tree,
+                        declaration),
                 SourceInputOrdinal = _trees.IndexOf(part.Tree),
                 SourceDeclarationSpan = declaration.Span,
             });

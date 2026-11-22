@@ -36,7 +36,8 @@ public static partial class ModuleCompiler
         Private105CopyOriginSummaryData? CopyOriginSummary,
         ImmutableArray<BoundDependencyContract> GeneralDependencyContracts,
         ImmutableArray<NativeFunctionPointerSelector> CheckedOutputSelectors,
-        ImmutableArray<NativeFunctionPointerOutputState> CheckedOutputStates);
+        ImmutableArray<NativeFunctionPointerOutputState> CheckedOutputStates,
+        PrivateForeignInterfaceMemberSurface? ForeignInterfaceMember);
 
     private static void WritePrivateCheckedReferenceTypes(
         BinaryWriter writer,
@@ -994,11 +995,10 @@ public static partial class ModuleCompiler
             .ToArray();
         if (enumOrigins.Length != count
             || enumOrigins.Any(item => !seenOrigins.Contains(item.index))
-            || !BoundEnumTypes.IsValidTable(definitions.ToImmutable())
-            || Count(reader, MaximumNodes) != 0)
+            || !BoundEnumTypes.IsValidTable(definitions.ToImmutable()))
         {
             throw new ModuleFormatException(
-                "Private enum directory is incomplete or an unsupported foreign-interface directory is present.");
+                "Private enum directory is incomplete.");
         }
 
         return definitions.MoveToImmutable();
@@ -1009,6 +1009,7 @@ public static partial class ModuleCompiler
     {
         var function = item.Function;
         var expectedDirectNativeImport = item.ExpectedDirectNativeImport;
+        var foreignInterfaceMember = item.ForeignInterfaceMember;
         var copyOriginSummary = function is BoundFunction
             { CopyOriginSummary: BoundCopyOriginSummary summary }
             && writer is ModuleWriter summaryWriter
@@ -1025,14 +1026,36 @@ public static partial class ModuleCompiler
                 : throw new ModuleContractException(
                     "Private NativeOutput rows differ from their declaration Dependency contracts.")
             : item.GeneralDependencyContracts;
+        var foreignInterfacePointerTypes = writer is ModuleWriter pointerWriter
+            ? pointerWriter.NativePointerTypes : [];
         var generalDependencyRows = CreatePrivate106GeneralDependencyRows(
             generalDependencyContracts, item.Contract,
-            nativeOutputContracts);
-        var (checkedOutputSelectors, checkedOutputStates) =
-            GetPrivateCheckedOutputStateVectors(item.Function,
-                item.Contract, item.CheckedOutputSelectors,
-                item.CheckedOutputStates,
-                item.HasPrivateCheckedOutputStateMetadata);
+            nativeOutputContracts, foreignInterfaceMember,
+            foreignInterfacePointerTypes);
+        ImmutableArray<NativeFunctionPointerSelector> checkedOutputSelectors;
+        ImmutableArray<NativeFunctionPointerOutputState> checkedOutputStates;
+        if (foreignInterfaceMember is not null)
+        {
+            if (item.CheckedOutputSelectors.IsDefault
+                || item.CheckedOutputStates.IsDefault
+                || !item.CheckedOutputSelectors.IsEmpty
+                || !item.CheckedOutputStates.IsEmpty
+                || item.HasPrivateCheckedOutputStateMetadata)
+            {
+                throw new ModuleContractException(
+                    "PF111 foreign members cannot carry checked-output selector/state rows.");
+            }
+            checkedOutputSelectors = [];
+            checkedOutputStates = [];
+        }
+        else
+        {
+            (checkedOutputSelectors, checkedOutputStates)
+                = GetPrivateCheckedOutputStateVectors(item.Function,
+                    item.Contract, item.CheckedOutputSelectors,
+                    item.CheckedOutputStates,
+                    item.HasPrivateCheckedOutputStateMetadata);
+        }
         if (writer is not ModuleWriter outputStateWriter)
         {
             throw new ModuleContractException(
@@ -1043,17 +1066,19 @@ public static partial class ModuleCompiler
                 sourceFunction => sourceFunction.Name == item.Name);
         if (checkedOutputSelectors.Length > MaximumNodes
             || checkedOutputStates.Length > MaximumNodes
-            || !PrivateCheckedOutputFormalTypesAreValid(
+            || (foreignInterfaceMember is null
+                && !PrivateCheckedOutputFormalTypesAreValid(
                 checkedOutputOwner, item.Contract,
                 outputStateWriter.Structures, outputStateWriter.Classes,
                 outputStateWriter.NativeFunctionPointerSignatures,
                 outputStateWriter.NativePointerTypes,
                 outputStateWriter.NativeFixedArrayTypes,
                 outputStateWriter.CheckedReferenceTypes,
-                outputStateWriter.SourceProgram)
-            || !PrivateCheckedOutputDependenciesAreValid(
+                outputStateWriter.SourceProgram))
+            || (foreignInterfaceMember is null
+                && !PrivateCheckedOutputDependenciesAreValid(
                 generalDependencyContracts, function, item.Contract,
-                nativeOutputContracts, checkedOutputStates))
+                nativeOutputContracts, checkedOutputStates)))
         {
             throw new ModuleContractException(
                 "Private checked output-state vectors or output dependencies are invalid.");
@@ -1066,6 +1091,18 @@ public static partial class ModuleCompiler
             "|DirectNativeImport:", StringComparison.Ordinal);
         var hasNativeImportResolutionContract = item.Contract.Contains(
             "|NativeImportResolution:", StringComparison.Ordinal);
+        if (foreignInterfaceMember is not null
+            && (writer is not ModuleWriter {
+                    FormatVersion: ForeignInterfacePrivateVersion,
+                }
+                || function is not null
+                || item.ImportedNativeVTableMethod is not null
+                || expectedDirectNativeImport is not null
+                || item.HasOwnershipTransfer))
+        {
+            throw new ModuleContractException(
+                "PF111 foreign member metadata has an invalid module-function role.");
+        }
         // Local raw-union coverage is re-derived from the persisted body;
         // declaration-only coverage promises have no private carrier here.
         if ((function is not null
@@ -1097,7 +1134,7 @@ public static partial class ModuleCompiler
                     || (!function.RawUnionReturnCoverage.IsEmpty
                         && function.IsExternal)))
             || (function is null
-                && (!item.Import
+                && ((!item.Import && foreignInterfaceMember is null)
                     || hasPrivateDependencyContract
                     || (item.ImportedNativeVTableMethod is null
                         && hasVTableParameterContract)
@@ -1153,7 +1190,8 @@ public static partial class ModuleCompiler
         }
         WritePrivate106RawUnionReturnCoverage(writer, item);
         WritePrivate105CopyOriginSummary(writer, copyOriginSummary);
-        writer.Write((byte)0); // no foreign-interface member variant
+        WritePrivateForeignInterfaceMemberSurface(writer,
+            foreignInterfaceMember);
         if (expectedDirectNativeImport is not null)
         {
             ValidatePrivate105ExpectedDirectNativeImport(writer, item,
@@ -1779,7 +1817,9 @@ public static partial class ModuleCompiler
         CreatePrivate106GeneralDependencyRows(
         ImmutableArray<BoundDependencyContract> dependencies,
         string contract,
-        ImmutableArray<NativeOutputContract> nativeOutputContracts)
+        ImmutableArray<NativeOutputContract> nativeOutputContracts,
+        PrivateForeignInterfaceMemberSurface? foreignInterfaceMember = null,
+        ImmutableArray<NativePointerTypeDefinition> nativePointerTypes = default)
     {
         if (dependencies.IsDefault || nativeOutputContracts.IsDefault)
         {
@@ -1788,7 +1828,8 @@ public static partial class ModuleCompiler
         }
 
         var (parameterCount, hasReceiverSource,
-            hasReceiverDestination) = PrivateDependencySignature(contract);
+            hasReceiverDestination) = PrivateDependencySignature(contract,
+                foreignInterfaceMember, nativePointerTypes);
         var maximumRows = PrivateGeneralDependencyRowCountLimit(
             parameterCount, hasReceiverSource);
 
@@ -2055,10 +2096,30 @@ public static partial class ModuleCompiler
                 "Private general Dependency source is not representable."),
         };
 
+    private static ImmutableArray<Private106GeneralDependencyRow>
+        ReadPrivate106GeneralDependencyRows(BinaryReader reader)
+    {
+        var count = CountRows(reader, MaximumNodes, 12,
+            "general Dependency rows");
+        var rows
+            = ImmutableArray.CreateBuilder<Private106GeneralDependencyRow>(
+                count);
+        for (var index = 0; index < count; index++)
+        {
+            rows.Add(new Private106GeneralDependencyRow(
+                reader.ReadByte(), reader.ReadByte(), reader.ReadByte(),
+                reader.ReadByte(), reader.ReadUInt32(), reader.ReadUInt32()));
+        }
+        return rows.MoveToImmutable();
+    }
+
     private static ImmutableArray<BoundDependencyContract>
         ReadPrivate106GeneralDependencyContracts(
         BinaryReader reader, string contract,
-        ImmutableArray<NativeOutputContract> nativeOutputContracts)
+        ImmutableArray<NativeOutputContract> nativeOutputContracts,
+        PrivateForeignInterfaceMemberSurface? foreignInterfaceMember = null,
+        ImmutableArray<NativePointerTypeDefinition> nativePointerTypes = default,
+        ImmutableArray<Private106GeneralDependencyRow>? suppliedRows = null)
     {
         if (nativeOutputContracts.IsDefault)
         {
@@ -2067,11 +2128,20 @@ public static partial class ModuleCompiler
         }
 
         var (parameterCount, hasReceiverSource,
-            hasReceiverDestination) = PrivateDependencySignature(contract);
+            hasReceiverDestination) = PrivateDependencySignature(contract,
+                foreignInterfaceMember, nativePointerTypes);
         var maximumRows = PrivateGeneralDependencyRowCountLimit(
             parameterCount, hasReceiverSource);
-        var rowCount = CountRows(reader, maximumRows, 12,
-            "general Dependency rows");
+        var rowCount = suppliedRows is ImmutableArray<
+                Private106GeneralDependencyRow> rowsFromVariant
+            ? rowsFromVariant.Length
+            : CountRows(reader, maximumRows, 12,
+                "general Dependency rows");
+        if (rowCount > maximumRows)
+        {
+            throw new ModuleFormatException(
+                "Private general Dependency row count exceeds the signature limit.");
+        }
         var outputFormals = new HashSet<int>();
         foreach (var output in nativeOutputContracts)
         {
@@ -2090,9 +2160,13 @@ public static partial class ModuleCompiler
             byte SourceKind, uint SourceOrdinal)>();
         for (var index = 0; index < rowCount; index++)
         {
-            var row = new Private106GeneralDependencyRow(
-                reader.ReadByte(), reader.ReadByte(), reader.ReadByte(),
-                reader.ReadByte(), reader.ReadUInt32(), reader.ReadUInt32());
+            var row = suppliedRows is ImmutableArray<
+                    Private106GeneralDependencyRow> supplied
+                ? supplied[index]
+                : new Private106GeneralDependencyRow(
+                    reader.ReadByte(), reader.ReadByte(), reader.ReadByte(),
+                    reader.ReadByte(), reader.ReadUInt32(),
+                    reader.ReadUInt32());
             if (!IsValidPrivateGeneralDependencyRow(row, parameterCount,
                     hasReceiverSource, hasReceiverDestination)
                 || (row.DestinationKind == 2 && row.Phase == 1
@@ -2241,6 +2315,50 @@ public static partial class ModuleCompiler
             return false;
         }
 
+        return PrivateGeneralDependencyRowsSatisfy(expectedRows, actualRows);
+    }
+
+    internal static bool PrivateForeignInterfaceDependencyContractsSatisfy(
+        ImmutableArray<BoundDependencyContract> expected,
+        PrivateForeignInterfaceMemberSurface expectedSurface,
+        ImmutableArray<NativePointerTypeDefinition> expectedPointerTypes,
+        ImmutableArray<NativeOutputContract> expectedOutputs,
+        ImmutableArray<BoundDependencyContract> actual,
+        PrivateForeignInterfaceMemberSurface actualSurface,
+        ImmutableArray<NativePointerTypeDefinition> actualPointerTypes,
+        ImmutableArray<NativeOutputContract> actualOutputs,
+        string contract)
+    {
+        if (expected.IsDefault || actual.IsDefault
+            || expectedSurface is null || actualSurface is null)
+        {
+            return false;
+        }
+
+        ImmutableArray<Private106GeneralDependencyRow> expectedRows;
+        ImmutableArray<Private106GeneralDependencyRow> actualRows;
+        try
+        {
+            expectedRows = CreatePrivate106GeneralDependencyRows(expected,
+                contract, expectedOutputs, expectedSurface,
+                expectedPointerTypes);
+            actualRows = CreatePrivate106GeneralDependencyRows(actual,
+                contract, actualOutputs, actualSurface,
+                actualPointerTypes);
+        }
+        catch (ModuleContractException)
+        {
+            return false;
+        }
+
+        return PrivateGeneralDependencyRowsSatisfy(expectedRows,
+            actualRows);
+    }
+
+    private static bool PrivateGeneralDependencyRowsSatisfy(
+        ImmutableArray<Private106GeneralDependencyRow> expectedRows,
+        ImmutableArray<Private106GeneralDependencyRow> actualRows)
+    {
         var expectedOffset = 0;
         var actualOffset = 0;
         while (expectedOffset < expectedRows.Length
@@ -2396,6 +2514,41 @@ public static partial class ModuleCompiler
         return (parameterCount, hasReceiverSource,
             hasReceiverDestination);
     }
+
+    private static (int ParameterCount, bool HasReceiverSource,
+        bool HasReceiverDestination) PrivateDependencySignature(
+        string contract,
+        PrivateForeignInterfaceMemberSurface? foreignInterfaceMember,
+        ImmutableArray<NativePointerTypeDefinition> nativePointerTypes)
+    {
+        if (foreignInterfaceMember is null)
+        {
+            return PrivateDependencySignature(contract);
+        }
+        if (!IsPrivateForeignInterfaceMemberContract(contract)
+            || foreignInterfaceMember.Formals.IsDefault
+            || nativePointerTypes.IsDefault)
+        {
+            throw new ModuleContractException(
+                "PF111 foreign-interface Dependency metadata has no complete member signature.");
+        }
+
+        var receiverType = foreignInterfaceMember.ReceiverType;
+        var hasReceiverDestination
+            = NativePointerTypes.IsType(receiverType)
+            && (uint)NativePointerTypes.Index(receiverType)
+                < (uint)nativePointerTypes.Length
+            && nativePointerTypes[NativePointerTypes.Index(receiverType)]
+                is { PointeeType: PrimitiveType.Void, IsWritable: true };
+        return (foreignInterfaceMember.Formals.Length, true,
+            hasReceiverDestination);
+    }
+
+    private static bool IsPrivateForeignInterfaceMemberContract(
+        string contract)
+        => contract is "|NativeCallable:Unmanaged"
+            or "|NativeCallable:Cdecl"
+            or "|NativeCallable:Stdcall";
 
     private static int PrivateGeneralDependencyRowCountLimit(
         int parameterCount, bool hasReceiverSource)
@@ -3250,15 +3403,21 @@ public static partial class ModuleCompiler
         {
             return default;
         }
-        if (!import && !hasBody)
+        ImmutableArray<Private106GeneralDependencyRow>? foreignGeneralRows
+            = null;
+        var generalDependencyContracts
+            = ImmutableArray<BoundDependencyContract>.Empty;
+        if (IsPrivateForeignInterfaceMemberContract(contract))
         {
-            throw new ModuleFormatException(
-                "A private revision 106 bodyless declaration must be an import.");
+            foreignGeneralRows
+                = ReadPrivate106GeneralDependencyRows(reader);
         }
-
-        var generalDependencyContracts =
-            ReadPrivate106GeneralDependencyContracts(reader, contract,
-                nativeOutputContracts);
+        else
+        {
+            generalDependencyContracts
+                = ReadPrivate106GeneralDependencyContracts(reader,
+                    contract, nativeOutputContracts);
+        }
         var (checkedOutputSelectors, checkedOutputStates) =
             ReadPrivate106CheckedOutputStateVectors(reader, contract,
                 hasBody, generalDependencyContracts,
@@ -3266,19 +3425,45 @@ public static partial class ModuleCompiler
         var rawUnionReturnCoverage
             = ReadPrivate106RawUnionReturnCoverage(reader);
         var copyOriginSummary = ReadPrivate105CopyOriginSummary(reader);
-        var foreignInterfaceVariant = reader.ReadByte();
-        var hasDirectImportExpectation = GetBool(reader);
-        if (foreignInterfaceVariant != 0)
+        var foreignInterfaceMember
+            = ReadPrivateForeignInterfaceMemberSurface(reader);
+        if (foreignGeneralRows is ImmutableArray<
+                Private106GeneralDependencyRow> unvalidatedForeignRows)
+        {
+            if (foreignInterfaceMember is null
+                || reader is not ModuleReader foreignInterfaceReader)
+            {
+                throw new ModuleFormatException(
+                    "PF111 general Dependency rows require a foreign member surface.");
+            }
+            generalDependencyContracts
+                = ReadPrivate106GeneralDependencyContracts(reader,
+                    contract, nativeOutputContracts,
+                    foreignInterfaceMember,
+                    foreignInterfaceReader.NativePointerTypes,
+                    unvalidatedForeignRows);
+        }
+        else if (foreignInterfaceMember is not null)
         {
             throw new ModuleFormatException(
-                "Private revision 106 declaration metadata exceeds the current checked-reference type-table slice.");
+                "A foreign member uses a non-foreign private declaration contract.");
+        }
+        var hasDirectImportExpectation = GetBool(reader);
+        if ((foreignInterfaceMember is null && !import && !hasBody)
+            || (foreignInterfaceMember is not null && hasBody)
+            || (foreignInterfaceMember is not null
+                && hasDirectImportExpectation))
+        {
+            throw new ModuleFormatException(
+                "Private declaration function-body or foreign-member metadata is invalid.");
         }
 
         if (!hasDirectImportExpectation)
         {
             return new Private106FunctionMetadata(rawUnionReturnCoverage,
                 null, copyOriginSummary, generalDependencyContracts,
-                checkedOutputSelectors, checkedOutputStates);
+                checkedOutputSelectors, checkedOutputStates,
+                foreignInterfaceMember);
         }
         if (!import || hasBody)
         {
@@ -3319,7 +3504,8 @@ public static partial class ModuleCompiler
             new DirectNativeImport(libraryName, exportName, []) {
                 Parameters = parameters.MoveToImmutable(),
             }, copyOriginSummary, generalDependencyContracts,
-            checkedOutputSelectors, checkedOutputStates);
+            checkedOutputSelectors, checkedOutputStates,
+            foreignInterfaceMember);
     }
 
     private static (
@@ -3330,6 +3516,19 @@ public static partial class ModuleCompiler
         ImmutableArray<BoundDependencyContract> dependencies,
         ImmutableArray<NativeOutputContract> nativeOutputContracts)
     {
+        if (IsPrivateForeignInterfaceMemberContract(contract))
+        {
+            if (CountRows(reader, MaximumNodes, 12,
+                    "foreign-member checked output selectors") != 0
+                || CountRows(reader, MaximumNodes, 12,
+                    "foreign-member checked output states") != 0)
+            {
+                throw new ModuleFormatException(
+                    "PF111 foreign members cannot carry checked-output selector/state rows.");
+            }
+            return ([], []);
+        }
+
         var (parameterCount, _, _) = PrivateDependencySignature(contract);
         var selectorCount = CountRows(reader, MaximumNodes, 12,
             "checked output selectors");

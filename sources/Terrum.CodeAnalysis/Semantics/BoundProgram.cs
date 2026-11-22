@@ -345,6 +345,8 @@ internal sealed record BoundInterfaceType(
 {
     internal BoundInterfaceTypeParameterScope TypeParameterScope { get; init; }
     internal BoundModuleImport? ModuleImport { get; init; }
+    internal BoundPrivateForeignInterfaceBinding?
+        PrivateForeignInterfaceBinding { get; init; }
     internal BoundGenericNominalTypeIdentity? GenericNominalTypeIdentity
         { get; init; }
     internal int SourceGenericTypeDefinitionIndex { get; init; } = -1;
@@ -401,11 +403,133 @@ internal sealed record BoundInterfaceDefinition(
     internal ImmutableArray<string> AttributeTokens { get; init; } = [];
     internal BoundModuleImport? ModuleImport { get; init; }
     internal BoundForeignNativeInterfaceLayout? ForeignNativeInterface { get; init; }
+    internal BoundSourceInterfaceDeclarationHandle? SourceDeclaration
+        { get; init; }
+    internal BoundPrivateForeignInterfaceOrigin?
+        PrivateForeignInterfaceOrigin { get; init; }
     internal int SourceInputOrdinal { get; init; } = -1;
 }
 
 internal sealed record BoundForeignNativeInterfaceLayout(
     uint VTableByteOffset);
+
+internal enum BoundPrivateForeignInterfaceBindingKind : byte
+{
+    OwnedDefinition = 1,
+    ImportedExpectation = 2,
+}
+
+internal sealed record BoundPrivateForeignInterfaceBinding(
+    BoundPrivateForeignInterfaceBindingKind Kind,
+    bool IsExported,
+    string UsingModuleIdentity,
+    string LocalDeclarationKey,
+    string? SelectedModuleIdentity = null,
+    string? SelectedExportKey = null);
+
+internal sealed record BoundPrivateForeignInterfaceOrigin(
+    BoundPrivateForeignInterfaceBinding Owner,
+    ImmutableArray<BoundPrivateForeignInterfaceBinding> Members);
+
+internal static class BoundPrivateForeignInterfaceOriginContract
+{
+    internal static bool IsValid(BoundInterfaceDefinition definition)
+    {
+        var origin = definition.PrivateForeignInterfaceOrigin;
+        if (definition.ForeignNativeInterface is null || origin is null
+            || !IsValidBinding(origin.Owner)
+            || origin.Members.IsDefault
+            || origin.Members.Length != definition.Members.Length)
+        {
+            return false;
+        }
+
+        var owner = origin.Owner;
+        if (owner.Kind
+                == BoundPrivateForeignInterfaceBindingKind.ImportedExpectation
+            && (definition.Accessibility
+                    != BoundInterfaceAccessibility.Public
+                || definition.ModuleImport is not
+                    BoundModuleImport moduleImport
+                || moduleImport.ProducerIdentity
+                    != owner.SelectedModuleIdentity
+                || moduleImport.ExportKey != owner.SelectedExportKey))
+        {
+            return false;
+        }
+        if (owner.Kind
+                == BoundPrivateForeignInterfaceBindingKind.OwnedDefinition
+            && definition.Accessibility is not (
+                BoundInterfaceAccessibility.Public
+                or BoundInterfaceAccessibility.Internal))
+        {
+            return false;
+        }
+
+        var localKeys = new HashSet<string>(StringComparer.Ordinal)
+        {
+            owner.LocalDeclarationKey,
+        };
+        for (var index = 0; index < origin.Members.Length; index++)
+        {
+            var binding = origin.Members[index];
+            var member = definition.Members[index];
+            if (!IsValidBinding(binding)
+                || binding.Kind != owner.Kind
+                || binding.IsExported != owner.IsExported
+                || binding.UsingModuleIdentity
+                    != owner.UsingModuleIdentity
+                || !localKeys.Add(binding.LocalDeclarationKey)
+                || member is null
+                || (definition.SourceDeclaration is null
+                    ? member.DeclarationKey
+                        != binding.LocalDeclarationKey
+                    : !definition.SourceDeclaration.IsValid
+                        || member.SourceDeclaration is not
+                            BoundSourceInterfaceMemberHandle
+                                sourceMember
+                        || !sourceMember.IsValid
+                        || sourceMember.Ordinal != index
+                        || !ReferenceEquals(sourceMember.Owner,
+                            definition.SourceDeclaration))
+                || !member.AdditionalDeclarationKeys.IsEmpty
+                || (owner.Kind
+                        == BoundPrivateForeignInterfaceBindingKind
+                            .ImportedExpectation
+                    && binding.SelectedModuleIdentity
+                        != owner.SelectedModuleIdentity))
+            {
+                return false;
+            }
+        }
+
+        return owner.Kind
+                != BoundPrivateForeignInterfaceBindingKind.OwnedDefinition
+            || !owner.IsExported || definition.IsPublic;
+    }
+
+    private static bool IsValidBinding(
+        BoundPrivateForeignInterfaceBinding? binding)
+    {
+        if (binding is null
+            || string.IsNullOrEmpty(binding.UsingModuleIdentity)
+            || string.IsNullOrEmpty(binding.LocalDeclarationKey))
+        {
+            return false;
+        }
+
+        return binding.Kind switch {
+            BoundPrivateForeignInterfaceBindingKind.OwnedDefinition =>
+                binding.SelectedModuleIdentity is null
+                && binding.SelectedExportKey is null,
+            BoundPrivateForeignInterfaceBindingKind.ImportedExpectation =>
+                !binding.IsExported
+                && !string.IsNullOrEmpty(binding.SelectedModuleIdentity)
+                && !string.IsNullOrEmpty(binding.SelectedExportKey),
+            _ => false,
+        };
+    }
+}
 
 internal enum BoundInterfaceAccessibility : byte
 {
@@ -501,6 +625,8 @@ internal sealed record BoundInterfaceMemberDefinition(
     internal bool RequiresMutableReceiver { get; init; }
     internal NativeCallingConvention? NativeCallableConvention { get; init; }
     internal ImmutableArray<NativeOutputContract> NativeOutputContracts { get; init; } = [];
+    internal BoundSourceInterfaceMemberHandle? SourceDeclaration
+        { get; init; }
     internal int SourceInputOrdinal { get; init; } = -1;
     internal TextSpan SourceDeclarationSpan { get; init; }
 }

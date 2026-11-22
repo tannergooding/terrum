@@ -24,6 +24,8 @@ public static partial class ModuleCompiler
             CheckedReferenceTypes { get; init; } = [];
         internal ImmutableArray<BoundPrivateNominalTypeOrigin>
             NominalTypeOrigins { get; init; } = [];
+        internal ImmutableArray<PrivateForeignInterface>
+            ForeignInterfaces { get; init; } = [];
         internal ImmutableArray<BoundEnumDefinition> EnumDefinitions { get; init; } = [];
         internal ImmutableArray<HostBuffer> InvocationBuffers { get; init; } = [];
         internal ImmutableArray<BoundFunction> SourceFunctions { get; init; } = [];
@@ -54,6 +56,8 @@ public static partial class ModuleCompiler
         internal bool HasReadEnumDefinitions { get; set; }
         internal ImmutableArray<BoundPrivateNominalTypeOrigin>
             NominalTypeOrigins { get; set; } = [];
+        internal ImmutableArray<PrivateForeignInterface>
+            ForeignInterfaces { get; set; } = [];
         internal ImmutableArray<HostBuffer> InvocationBuffers { get; set; } = [];
         internal bool HasReadCheckedReferenceTypes { get; set; }
         internal ImmutableArray<NativePointerTypeDefinition> NativePointerTypes { get; set; } = [];

@@ -15,7 +15,9 @@ internal static class BoundInterfaceContract
         string? ProducerIdentity,
         string? ExportKey,
         uint TargetRequirement,
-        uint RuntimePolicy);
+        uint RuntimePolicy,
+        string? PrivateUsingModuleIdentity,
+        string? PrivateLocalDeclarationKey);
 
     internal static bool IsValidTable(
         ImmutableArray<BoundInterfaceDefinition> interfaces,
@@ -78,7 +80,15 @@ internal static class BoundInterfaceContract
                             || !member.Constraints.IsEmpty
                             || !member.Accessors.IsEmpty)))
                 || !definitions.TryAdd(Identity(definition.QualifiedName,
-                    definition.Formals.Length, moduleImport), definition))
+                    definition.Formals.Length, moduleImport,
+                    definition.PrivateForeignInterfaceOrigin?.Owner),
+                    definition))
+            {
+                return false;
+            }
+            if (definition.PrivateForeignInterfaceOrigin is not null
+                && !BoundPrivateForeignInterfaceOriginContract.IsValid(
+                    definition))
             {
                 return false;
             }
@@ -773,7 +783,8 @@ internal static class BoundInterfaceContract
             if (definition is null || string.IsNullOrWhiteSpace(
                     definition.QualifiedName)
                 || !definitions.TryAdd(Identity(definition.QualifiedName,
-                    definition.Formals.Length, definition.ModuleImport),
+                    definition.Formals.Length, definition.ModuleImport,
+                    definition.PrivateForeignInterfaceOrigin?.Owner),
                     definition))
             {
                 return false;
@@ -874,7 +885,8 @@ internal static class BoundInterfaceContract
             if (definition is null || string.IsNullOrWhiteSpace(
                     definition.QualifiedName)
                 || !definitions.TryAdd(Identity(definition.QualifiedName,
-                    definition.Formals.Length, definition.ModuleImport),
+                    definition.Formals.Length, definition.ModuleImport,
+                    definition.PrivateForeignInterfaceOrigin?.Owner),
                     definition))
             {
                 return false;
@@ -933,9 +945,11 @@ internal static class BoundInterfaceContract
         var definition = interfaces.FirstOrDefault(candidate =>
             candidate is not null
             && Identity(candidate.QualifiedName, candidate.Formals.Length,
-                candidate.ModuleImport)
+                candidate.ModuleImport,
+                candidate.PrivateForeignInterfaceOrigin?.Owner)
                 == Identity(type.NominalName!,
-                    type.TypeArguments.Length, type.ModuleImport));
+                    type.TypeArguments.Length, type.ModuleImport,
+                    type.PrivateForeignInterfaceBinding));
         if (definition is null
             || (uint)identity.MemberOrdinal
                 >= (uint)definition.Members.Length
@@ -989,7 +1003,8 @@ internal static class BoundInterfaceContract
             if (definition is null || string.IsNullOrWhiteSpace(
                     definition.QualifiedName)
                 || !definitions.TryAdd(Identity(definition.QualifiedName,
-                    definition.Formals.Length, definition.ModuleImport),
+                    definition.Formals.Length, definition.ModuleImport,
+                    definition.PrivateForeignInterfaceOrigin?.Owner),
                     definition))
             {
                 return false;
@@ -1016,7 +1031,8 @@ internal static class BoundInterfaceContract
             }
             if (current.NominalName is not string nominalName
                 || !definitions.TryGetValue(Identity(nominalName,
-                    current.TypeArguments.Length, current.ModuleImport),
+                    current.TypeArguments.Length, current.ModuleImport,
+                    current.PrivateForeignInterfaceBinding),
                     out var definition)
                 || current.TypeArguments.IsDefault
                 || current.TypeArguments.Length != definition.Formals.Length)
@@ -1093,7 +1109,8 @@ internal static class BoundInterfaceContract
             if (definition is null || string.IsNullOrWhiteSpace(
                     definition.QualifiedName)
                 || !definitions.TryAdd(Identity(definition.QualifiedName,
-                    definition.Formals.Length, definition.ModuleImport),
+                    definition.Formals.Length, definition.ModuleImport,
+                    definition.PrivateForeignInterfaceOrigin?.Owner),
                     definition))
             {
                 return false;
@@ -1121,7 +1138,8 @@ internal static class BoundInterfaceContract
             }
             if (current.NominalName is not string nominalName
                 || !definitions.TryGetValue(Identity(nominalName,
-                    current.TypeArguments.Length, current.ModuleImport),
+                    current.TypeArguments.Length, current.ModuleImport,
+                    current.PrivateForeignInterfaceBinding),
                     out var definition))
             {
                 return false;
@@ -1283,7 +1301,9 @@ internal static class BoundInterfaceContract
                     || type.SourceGenericTypeDefinitionIndex != -1
                     || type.IsGenericNominalConstantDomain
                     || !definitions.TryGetValue(Identity(type.NominalName,
-                        type.TypeArguments.Length, type.ModuleImport), out nominalDefinition)
+                        type.TypeArguments.Length, type.ModuleImport,
+                        type.PrivateForeignInterfaceBinding),
+                        out nominalDefinition)
                     || nominalDefinition.Formals.Length != type.TypeArguments.Length)
                 {
                     return false;
@@ -2118,7 +2138,9 @@ internal static class BoundInterfaceContract
             if (definition is null || string.IsNullOrWhiteSpace(definition.QualifiedName)
                 || definition.Formals.IsDefault
                 || !definitions.TryAdd(Identity(definition.QualifiedName,
-                    definition.Formals.Length, definition.ModuleImport), definition))
+                    definition.Formals.Length, definition.ModuleImport,
+                    definition.PrivateForeignInterfaceOrigin?.Owner),
+                    definition))
             {
                 return false;
             }
@@ -2154,7 +2176,8 @@ internal static class BoundInterfaceContract
             foreach (var baseType in definition.Bases)
             {
                 if (!Visit(Identity(baseType.NominalName!,
-                    baseType.TypeArguments.Length, baseType.ModuleImport), depth + 1))
+                    baseType.TypeArguments.Length, baseType.ModuleImport,
+                    baseType.PrivateForeignInterfaceBinding), depth + 1))
                 {
                     return false;
                 }
@@ -2163,9 +2186,13 @@ internal static class BoundInterfaceContract
             return true;
         }
     }
-    private static InterfaceKey Identity(string name, int arity, BoundModuleImport? import) =>
+    private static InterfaceKey Identity(string name, int arity,
+        BoundModuleImport? import,
+        BoundPrivateForeignInterfaceBinding? privateBinding = null) =>
         new(name, arity, import?.ProducerIdentity, import?.ExportKey,
-            import?.TargetRequirement ?? 0, import?.RuntimePolicy ?? 0);
+            import?.TargetRequirement ?? 0, import?.RuntimePolicy ?? 0,
+            privateBinding?.UsingModuleIdentity,
+            privateBinding?.LocalDeclarationKey);
 
     private static bool TryGetGenericNominalTypeDefinition(
         BoundGenericNominalTypeIdentity identity,
@@ -2201,6 +2228,8 @@ internal static class BoundInterfaceContract
             || left.TypeParameterScope != right.TypeParameterScope
             || left.NominalName != right.NominalName
             || left.ModuleImport != right.ModuleImport
+            || left.PrivateForeignInterfaceBinding
+                != right.PrivateForeignInterfaceBinding
             || left.GenericNominalTypeIdentity
                 != right.GenericNominalTypeIdentity
             || left.SourceGenericTypeDefinitionIndex
@@ -2239,6 +2268,9 @@ internal static class BoundInterfaceContract
             || (!sameImportedNominal
                 && expected.NominalName != provider.NominalName)
             || expected.ModuleImport != provider.ModuleImport
+            || !AreEquivalentPrivateForeignInterfaceBindings(
+                expected.PrivateForeignInterfaceBinding,
+                provider.PrivateForeignInterfaceBinding)
             || expected.GenericNominalTypeIdentity
                 != provider.GenericNominalTypeIdentity
             || expected.SourceGenericTypeDefinitionIndex
@@ -2270,6 +2302,32 @@ internal static class BoundInterfaceContract
             }
         }
         return true;
+    }
+
+    private static bool AreEquivalentPrivateForeignInterfaceBindings(
+        BoundPrivateForeignInterfaceBinding? expected,
+        BoundPrivateForeignInterfaceBinding? provider)
+    {
+        if (expected == provider)
+        {
+            return true;
+        }
+
+        return expected is {
+                Kind: BoundPrivateForeignInterfaceBindingKind
+                    .ImportedExpectation,
+                IsExported: false,
+                SelectedModuleIdentity: not null,
+                SelectedExportKey: not null,
+            }
+            && provider is {
+                Kind: BoundPrivateForeignInterfaceBindingKind.OwnedDefinition,
+                IsExported: true,
+            }
+            && expected.SelectedModuleIdentity
+                == provider.UsingModuleIdentity
+            && expected.SelectedExportKey
+                == provider.LocalDeclarationKey;
     }
 
     internal static bool AreEquivalentAssociatedTypeIdentities(

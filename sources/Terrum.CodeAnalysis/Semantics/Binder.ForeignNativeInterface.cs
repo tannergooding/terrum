@@ -478,7 +478,9 @@ internal sealed partial class Binder
         var matches = _interfaces.Where(definition =>
                 StringComparer.Ordinal.Equals(definition.QualifiedName,
                     interfaceName)
-                && definition.ModuleImport == resolved.ModuleImport)
+                && definition.ModuleImport == resolved.ModuleImport
+                && definition.PrivateForeignInterfaceOrigin?.Owner
+                    == resolved.PrivateForeignInterfaceBinding)
             .ToArray();
         if (matches is not [{ } definition]
             || definition.ForeignNativeInterface is null)
@@ -491,6 +493,8 @@ internal sealed partial class Binder
             BoundInterfaceTypeKind.Nominal, PrimitiveType.Void,
             definition.QualifiedName, -1, [], false, false, false, false) {
             ModuleImport = definition.ModuleImport,
+            PrivateForeignInterfaceBinding
+                = resolved.PrivateForeignInterfaceBinding,
         };
         return true;
     }
