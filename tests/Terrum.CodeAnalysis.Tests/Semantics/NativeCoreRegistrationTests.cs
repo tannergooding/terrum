@@ -8154,6 +8154,213 @@ internal sealed class NativeCoreRegistrationTests
     }
 
     [Test]
+    public void StandardForeignNativeInterfaceParameterSurfaceRemapsProviderRows()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-native-interface-parameter-surface-1";
+        const string probeSource = """
+            [Terrum.Interop.NativeCallable]
+            [Terrum.Interop.ForeignNativeInterface(
+                VTableByteOffset: uint32(0))]
+            public interface IProbe {
+                public unsafe int32 Read(ptr<int32> source,
+                    int32 extra = 1);
+            }
+            """;
+        const string shiftedProviderSource = """
+            [Terrum.Interop.NativeCallable]
+            [Terrum.Interop.ForeignNativeInterface(
+                VTableByteOffset: uint32(0))]
+            public interface IExtra {
+                public unsafe int32 Prefix(ptr<float64> input,
+                    int32 offset = 2);
+            }
+
+            [Terrum.Interop.NativeCallable]
+            [Terrum.Interop.ForeignNativeInterface(
+                VTableByteOffset: uint32(0))]
+            public interface IProbe {
+                public unsafe int32 Read(ptr<int32> source,
+                    int32 extra = 1);
+            }
+            """;
+        var options = new CompilationOptions {
+            NativeCoreRegistration = CreateRegistration(
+                includeForeignNativeInterface: true),
+        };
+
+        byte[] EmitProvider(string source)
+        {
+            var compilation = Compilation.CreateLibrary(
+                SyntaxTree.Parse(source), options);
+            Assert.That(compilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine,
+                    compilation.Diagnostics));
+            var program = compilation.Program
+                ?? throw new AssertionException(
+                    "Expected a bound FNI provider.");
+            var exports = program.Interfaces.Select(definition =>
+                new TrRmSourceTypeExport("", definition.QualifiedName,
+                    $"provider/{definition.QualifiedName}") {
+                    GenericArity = 0,
+                    InterfaceMethodExports = [
+                        .. definition.Members.Select(member =>
+                            new TrRmSourceInterfaceMethodExport(
+                                member.SourceInputOrdinal,
+                                member.SourceDeclarationSpan,
+                                $"provider/{definition.QualifiedName}."
+                                    + member.Name)),
+                    ],
+                }).ToArray();
+            return TrRmExecutableCompiler.EmitStandard(program,
+                "provider.module", schemaIdentity, 1, exports);
+        }
+
+        var providerArtifact = EmitProvider(probeSource);
+        var shiftedProviderArtifact = EmitProvider(shiftedProviderSource);
+        var schema
+            = TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft;
+        var providerTables = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
+                providerArtifact, schema));
+        var shiftedProviderTables = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
+                shiftedProviderArtifact, schema));
+        int FindReadMethodRow(
+            TrRmStructuralMetadataValidator.ValidatedExecutionTables tables)
+            => Enumerable.Range(1, tables.Methods.Count).Single(row =>
+                tables.Methods.GetName(row) == "Read");
+        var providerReadRow = FindReadMethodRow(providerTables);
+        var shiftedReadRow = FindReadMethodRow(shiftedProviderTables);
+        Assert.That(shiftedReadRow, Is.GreaterThan(providerReadRow));
+        Assert.That(providerTables.MethodParameterLabels
+            .TryGetNameStringRow(providerReadRow, 0, out var providerNameRow),
+            Is.True);
+        Assert.That(providerTables.Strings.DecodeName(providerNameRow),
+            Is.EqualTo("source"));
+        Assert.That(shiftedProviderTables.MethodParameterLabels
+            .TryGetNameStringRow(shiftedReadRow, 0,
+                out var shiftedNameRow), Is.True);
+        Assert.That(shiftedProviderTables.Strings.DecodeName(shiftedNameRow),
+            Is.EqualTo("source"));
+        Assert.That(providerTables.MethodParameterLabels
+            .TryGetDefaultConstantSourceRow(providerReadRow, 1,
+                out var providerDefaultRow), Is.True);
+        Assert.That(shiftedProviderTables.MethodParameterLabels
+            .TryGetDefaultConstantSourceRow(shiftedReadRow, 1,
+                out var shiftedDefaultRow), Is.True);
+        AssertDefaultPayload(providerTables, providerDefaultRow);
+        AssertDefaultPayload(shiftedProviderTables, shiftedDefaultRow);
+
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            providerArtifact);
+        var shiftedProviderInput = new TrRmStandardArtifactInput(
+            schemaIdentity, shiftedProviderArtifact);
+        var providerReference = TrRmExecutableCompiler.CreateStandardReference(
+            providerInput, "provider.module", []);
+        const string consumerSource = """
+            int32 Invoke(ptr<void> receiver, ptr<int32> source) {
+                unsafe { return IProbe.Read(receiver, source); }
+            }
+            """;
+        var consumerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(consumerSource), providerReference, options);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            consumerCompilation.Program
+                ?? throw new AssertionException(
+                    "Expected a bound FNI consumer."),
+            "consumer.module", schemaIdentity, 1, []);
+        var consumerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            consumerArtifact);
+        var replacementReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                consumerInput, "consumer.module", [shiftedProviderInput]);
+        var replacementCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(consumerSource), replacementReference, options);
+        Assert.That(replacementCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                replacementCompilation.Diagnostics));
+        var replacementProgram = replacementCompilation.Program
+            ?? throw new AssertionException(
+                "Expected a provider-replaced FNI consumer.");
+        AssertReadSurface(replacementProgram);
+        AssertReadCallDefault(replacementProgram);
+
+        var sourceFreeCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(""), replacementReference, options);
+        Assert.That(sourceFreeCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                sourceFreeCompilation.Diagnostics));
+        var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(
+            sourceFreeCompilation.Program
+                ?? throw new AssertionException(
+                    "Expected a source-free FNI consumer."),
+            "forwarder.module", schemaIdentity, 1, []);
+        var reloadedReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    reemittedArtifact), "forwarder.module",
+                [shiftedProviderInput]);
+        var reloadedCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(""), reloadedReference, options);
+        Assert.That(reloadedCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                reloadedCompilation.Diagnostics));
+        var reloadedProgram = reloadedCompilation.Program
+            ?? throw new AssertionException(
+                "Expected the reloaded source-free FNI consumer.");
+        AssertReadSurface(reloadedProgram);
+        AssertReadCallDefault(reloadedProgram);
+
+        static void AssertReadSurface(BoundProgram program)
+        {
+            var member = program.Interfaces.Single(definition =>
+                    definition.QualifiedName == "IProbe")
+                .Members.Single(candidate => candidate.Name == "Read");
+            Assert.That(member.Parameters.Select(static parameter =>
+                    parameter.Name),
+                Is.EqualTo(new[] { "source", "extra" }));
+            Assert.That(member.Parameters[1].DefaultValue?.Value,
+                Is.EqualTo(1L));
+        }
+
+        static void AssertDefaultPayload(
+            TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+            uint constantSourceRow)
+        {
+            var frozenValueNode = checked((int)tables.ConstantSources
+                .GetPayloadReference(checked((int)constantSourceRow)));
+            Assert.That(tables.FrozenValueNodes.GetScalarPayload(
+                    frozenValueNode, tables.Blobs).ToArray(),
+                Is.EqualTo(new byte[] { 1, 0, 0, 0 }));
+        }
+
+        static void AssertReadCallDefault(BoundProgram program)
+        {
+            var invoke = program.Functions.Single(function =>
+                function.Name == "Invoke");
+            var calls = new List<BoundCall>();
+            Assert.That(BoundTreeTraversal.VisitExpressions(invoke.Body,
+                expression =>
+                {
+                    if (expression is BoundCall {
+                            ForeignInterfaceCall: not null,
+                        } call)
+                    {
+                        calls.Add(call);
+                    }
+                }), Is.True);
+            Assert.That(calls, Has.Count.EqualTo(1));
+            Assert.That(calls[0].Arguments, Has.Count.EqualTo(2));
+            Assert.That(((BoundConstant)calls[0].Arguments[1]).Value,
+                Is.EqualTo(1L));
+        }
+    }
+
+    [Test]
     public void ForeignNativeInterfaceProjectsMutableReceiverAsWritablePointer()
     {
         var registration = CreateRegistration(
