@@ -103,11 +103,43 @@ and currently missing carriers remain independent gates.
 `trrm/1-draft-layout-queries-terrum-fnptr-1`.
 It means exactly the accepted `trrm/1-draft-layout-queries-1` baseline,
 including its governing chapters/catalog, amended only by this document's
-owner changes above. Proposed internal selector: `TerrumFunctionPointerDraft`,
-a distinct non-flag `TrRmArtifactSchema` selection. No on-wire profile field
-is added. The candidate registry's top-level `schema` and the candidate
+owner changes above. **Unapproved internal selection:** retain
+`TrRmArtifactSchema.Standard` and select the exact successor through
+`standardSchemaIdentity`. No `TerrumFunctionPointerDraft` enum member is
+proposed. No on-wire profile field is added. The candidate registry's
+top-level `schema` and the candidate
 semantic-manifest chapter's current-draft identity both use this exact name;
 neither continues to identify the unamended baseline.
+
+The existing [artifact index](../../sources/Terrum.CodeAnalysis/Modules/TrRmArtifactIndex.cs)
+already stores `Schema` and `StandardSchemaIdentity` independently and
+checks allowed combinations. Extend that closed identity/operation-support
+gate with the single pair `(Standard, exact successor identity)`.
+The existing gate does not yet recognize this candidate; merely storing a
+new string is not implementation. A new enum profile is unnecessary because
+the framing, table layouts and Body schema are unchanged, while it would require
+allow-list changes in otherwise unchanged readers.
+
+The identity must reach the check that changes:
+[structural metadata validation](../../sources/Terrum.CodeAnalysis/Modules/TrRmStructuralMetadataValidator.cs)
+currently passes only `index.Schema`, not `index.StandardSchemaIdentity`,
+to TypeSpec construction. **Unapproved transport requirement:** carry the
+checked exact identity into internal TypeSpec reader/validation and writer/
+row-construction paths, including standalone TypeSpec preflight when it claims
+successor support. Retain it through copied/appended TypeSpec tables, dependency
+materialization and re-encoding. Do not reset a successor operation
+to an identity-less Standard overload. Unchanged readers can continue using
+`Standard`; their enum alone must not authorize the zero-domain amendment.
+
+The structural zero gate is exactly **Standard plus the selected successor
+identity**, with that operation's successor support established. Independently
+require the using Module's `NativeBoundaryContracts 1/1` and the applicable
+value/invocation closure under the selected catalog before affected use.
+Feature rows do not select the schema or enable zero under the old baseline;
+no new Feature ID or caller-supplied permission Boolean is proposed.
+Null/no explicit identity retains existing baseline behavior. An unknown
+identity, incompatible enum/identity pair or unsupported successor operation
+fails before schema-dependent work, including direct TypeSpec entry paths.
 
 Under [draft format versioning](../specs/representation/format-versioning.md),
 retain `(1,0)`, governing edition `1` and the stated Feature revisions.
@@ -117,8 +149,8 @@ header pair, filename, Feature list or successful parse does not prove that
 agreement. Select and retain the exact profile for each root/dependency input
 and destination; cache reuse includes that selection and binding context.
 
-Existing `Standard` defaults and other named drafts keep their own selected
-schemas. In particular, the
+Identity-less `Standard` defaults and other named drafts keep their own
+selected schemas. In particular, the
 [foreign-invocation profiles](trrm-draft-schema-profile-selection.md)
 explicitly exclude default-convention amendments: they do not acquire zero
 by being non-Development, sharing `0x0D`, or referencing this proposal.
@@ -139,10 +171,12 @@ automatic roll-forward is introduced.
 * **Produce:** carry the bound convention unchanged through shared bound-tree
   traversal/rewriting and verification; emit a bodyless anchor from the
   complete selected static type, not a foreign NativeCallable surrogate.
-  Construct and validate zero rows only under the successor. Default
-  Standard factories/encoders continue to enforce `1..4`. Missing signature,
-  contract or capability support refuses affected production before output
-  publication; an unreachable call does not excuse retained type erasure.
+  Construct and validate zero rows only with the checked
+  `(Standard, successor identity)` selection. Default identity-less Standard
+  factories/encoders continue to enforce `1..4`; writer-side validation must
+  receive the same identity, not only the enum. Missing signature, contract
+  or capability support refuses affected production before output publication;
+  an unreachable call does not excuse retained type erasure.
 * **Consume and bind:** safely check selected framing, exact extent,
   qualifiers, domain, typed anchor bounds/roles, complete references and
   required support before affected use. A successful lookup can return
@@ -193,10 +227,10 @@ These are **unapproved acceptance requirements, not executed results**.
 | Area | Required cases and outcome |
 |---|---|
 | Source | Bare scalar `fnptr` retains Native/Terrum `0`; all four registered explicit conventions retain `1..4`. Reject implicit cross-convention initialization, argument/result conversion and projection, including nested aliases. |
-| Selected codec | Data-driven `0..4` successor round trips preserve seven bytes, typed anchor and exact identity. Old Standard rejects zero; foreign-only cases remain valid. No Development signature section is used. |
+| Selected codec | Data-driven `0..4` round trips with `(Standard, successor identity)` preserve seven bytes, typed anchor and exact identity. Identity-less/old-baseline Standard rejects zero even with Feature `1/1`; foreign-only cases remain valid. No Development signature section is used. |
 | Domain/bounds | Reject `5`, `255`, nonzero qualifiers, six/eight-byte rows, zero/high-byte-set/wrong-namespace/out-of-table anchors. Accept the largest representable anchor only with valid actual table/owner bounds. |
 | Roles | Zero in callable NativeImport or `000C` rejects; data-import no-convention zero stays valid. A zero TypeSpec does not make its anchor callable or supply NativeCallable/NativeExport. |
-| Selection | Unknown selector, mismatched root/dependency context and unassigned composite fail without publication. Common-subset bytes do not trigger schema auto-detection; missing required Feature/carrier support still refuses use. |
+| Selection/transport | Unknown identity, wrong enum/identity pair, mismatched root/dependency context and unassigned composite fail without publication. Exercise index-to-TypeSpec, writer validation and copied/appended table identity retention. Common-subset bytes do not trigger auto-detection; missing required Feature/carrier support still refuses use. |
 | Binding/remapping | Different anchor rows with equal complete zero contracts compare equal; zero versus Unmanaged rejects even with equal carriers. Reorder/deduplicate nested rows and packed Modules while retaining original expectations, selectors, maps and code origins. |
 | Address/invocation | Existing foreign NativeAddress positive cases stay foreign; foreign target plus zero view rejects. Bare source ordinary-address support is separate from Standard admission. Removing unsafe authorization or losing required output/backing facts rejects. |
 | Lowering | After actual support exists, separately qualify source-to-successor, source-free `call.value`, joint-lowered headless execution and target refusal. Serialization/emission alone is not runtime or independent-ABI evidence. |
@@ -214,6 +248,7 @@ draft.
 | [NativeCoreRegistrationTests](../../tests/Terrum.CodeAnalysis.Tests/Semantics/NativeCoreRegistrationTests.cs) `BareFunctionPointerUsesTheTerrumDefaultConvention`; [NativeFunctionPointerTests](../../tests/Terrum.CodeAnalysis.Tests/Native/Interop/NativeFunctionPointerTests.cs) `NativeAddressInfersOrdinaryTerrumFunctionContract` | Active source tests assert zero identity and ordinary address behavior; they do not establish Standard persistence or a general ABI. |
 | [TypeSpec reader](../../sources/Terrum.CodeAnalysis/Modules/TrRm/TrRmTypeSpecTableReader.cs), [writer](../../sources/Terrum.CodeAnalysis/Modules/TrRm/TrRmTypeSpecTableWriter.cs), [row tests](../../tests/Terrum.CodeAnalysis.Tests/Modules/TrRm/TrRmTypeSpecTableReaderTests.cs), [register fixtures](../../tests/Terrum.CodeAnalysis.Tests/Modules/TrRm/TrRmRegisterBodyReaderTests.cs) | The tracked baseline accepts and positively tests zero across Standard-schema paths. Uncommitted guard/test edits currently enforce `1..4` but do not yet provide the proposed exact successor selection, so they are not an integrated implementation. |
 | [NativeAddress producer](../../sources/Terrum.CodeAnalysis/Modules/TrRmExecutableCompiler.NativeAddress.cs), [record tests](../../tests/Terrum.CodeAnalysis.Tests/Modules/TrRm/TrRmRegisterBodyNativeAddressTests.cs), [standalone TypeSpec checks](../../sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneTypeSpecValidation.terrum) | Actual formation/profile checks remain distinct from TypeSpec identity. The uncommitted Standard producer guard refuses the Terrum convention, while standalone WP1 preflight is not yet gated by the proposed successor identity. Zero reserved fields in a 12-byte NativeAddress record are not the seven-byte TypeSpec's convention. |
+| [Artifact index](../../sources/Terrum.CodeAnalysis/Modules/TrRmArtifactIndex.cs) constructor / `StandardSchemaIdentity`; [structural validator](../../sources/Terrum.CodeAnalysis/Modules/TrRmStructuralMetadataValidator.cs) TypeSpec construction | The index already retains and checks a separate exact identity; the TypeSpec handoff currently omits it. Narrow identity registration and explicit transport, not a new enum profile, supply the missing internal gate. |
 | [Test project](../../tests/Terrum.CodeAnalysis.Tests/Terrum.CodeAnalysis.Tests.csproj), [test props](../../tests/Directory.Build.props), [test targets](../../tests/Directory.Build.targets) | The cited fixtures are normal NUnit compile inputs, not excluded prototypes. Test source is evidence of expectations, not a passing run. |
 
 Remaining **unapproved** decisions are whether to adopt this zero-domain/
