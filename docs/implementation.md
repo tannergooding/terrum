@@ -1380,14 +1380,14 @@ typed ConstantMap/TypedFrozenValues loads, including literal arguments within ne
 calls and mixed outer inputs. The fallback conditional-output form separately
 supports up to 13 total nested-call results and distinct scalar-literal
 register inputs, including literal arguments within nested calls.
-Direct FNI return calls and final calls in mixed call sequences also accept
-wrapping integer arithmetic and floating unary/binary operations over
-Home-rooted scalar expression trees with typed scalar ConstantMap leaves when
-they are not mixed with nested CallSite inputs; source-free decoding restores
-the operation tree. Regressions are added but remain unverified under the
-active hold.
-Checked integer arithmetic, nested-call expression interleaving, and
-arithmetic in conditional-output Bodies remain open.
+Direct FNI return calls, final calls in mixed call sequences, and fallback
+conditional-output calls also accept wrapping integer arithmetic and floating
+unary/binary operations over Home-rooted scalar expression trees with typed
+scalar ConstantMap leaves when they are not mixed with nested CallSite inputs.
+Conditional-output expression preparation precedes output reservation, and
+source-free decoding restores the operation trees. Regressions are added but
+remain unverified under the active hold.
+Checked integer arithmetic and nested-call expression interleaving remain open.
 For conditional-output Bodies, nested calls execute in source argument order
 before output reservation, and source-free re-emission preserves that order
 across formal remapping. Imported-provider source-free
