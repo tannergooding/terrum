@@ -6063,6 +6063,7 @@ internal sealed class NativeCoreRegistrationTests
                 [Blittable] [Layout(LayoutKind.Sequential)]
                 public struct Point {
                     public Coordinates Position;
+                    public ptr<int32> Link;
                 }
                 """), typeProviderOptions);
         Assert.That(typeProviderCompilation.HasErrors, Is.False,
@@ -7371,6 +7372,8 @@ internal sealed class NativeCoreRegistrationTests
                         FieldExports = [
                             new TrRmSourceFieldExport("Position",
                                 "provider/Point.Position"),
+                            new TrRmSourceFieldExport("Link",
+                                "provider/Point.Link"),
                         ],
                     },
                     new TrRmSourceTypeExport("", "IProbe",
@@ -7392,6 +7395,7 @@ internal sealed class NativeCoreRegistrationTests
             [Blittable] [Layout(LayoutKind.Sequential)]
             public struct Point {
                 public Coordinates Position;
+                public ptr<int32> Link;
             }
             [Blittable] [Layout(LayoutKind.Sequential)]
             public struct Coordinates {
@@ -7471,6 +7475,13 @@ internal sealed class NativeCoreRegistrationTests
                 .GetBindingForImportRow(importRow).ExportKey)
             .OrderBy(static exportKey => exportKey, StringComparer.Ordinal),
             Is.EqualTo(new[] { "provider/Coordinates", "provider/Point" }));
+        Assert.That(Enumerable.Range(1, consumerTables.Imports.Count)
+            .Any(importRow =>
+                (consumerTables.Imports.GetExpectedDefinitionForImportRow(
+                    importRow) >> 24) == 0x14
+                && consumerTables.Imports.GetBindingForImportRow(importRow)
+                    .ExportKey == "provider/Point.Link"),
+            Is.True);
 
         var reboundReference = TrRmExecutableCompiler
             .CreateStandardReference(
@@ -7484,6 +7495,8 @@ internal sealed class NativeCoreRegistrationTests
                 && structure.StandardTypeOrigin?.IsLookupRoot == true);
         Assert.That(reboundPoint.StandardTypeOrigin?.Provider.ModuleIdentity,
             Is.EqualTo("provider.module"));
+        Assert.That(NativePointerTypes.IsType(reboundPoint.Fields.Single(
+            static field => field.Name == "Link").Type), Is.True);
         Assert.That(reboundReference.Structures.Count(
             static structure => structure.StandardLayoutOnly),
             Is.EqualTo(2));
@@ -7533,6 +7546,13 @@ internal sealed class NativeCoreRegistrationTests
                 reemittedStructureImportRow).ExportKey,
             Is.EqualTo("provider/Point"));
         Assert.That(Enumerable.Range(1, reemittedTables.Imports.Count)
+            .Any(importRow =>
+                (reemittedTables.Imports.GetExpectedDefinitionForImportRow(
+                    importRow) >> 24) == 0x14
+                && reemittedTables.Imports.GetBindingForImportRow(importRow)
+                    .ExportKey == "provider/Point.Link"),
+            Is.True);
+        Assert.That(Enumerable.Range(1, reemittedTables.Imports.Count)
             .Where(importRow => (reemittedTables.Imports
                 .GetExpectedDefinitionForImportRow(importRow) >> 24)
                     == 0x13
@@ -7551,10 +7571,11 @@ internal sealed class NativeCoreRegistrationTests
                         relocatedProviderArtifact),
                 ]);
         Assert.That(reloadedReference.Interfaces, Has.Length.EqualTo(1));
-        Assert.That(reloadedReference.Structures.Any(
+        var reloadedPoint = reloadedReference.Structures.Single(
             static structure => structure.Name == "Point"
-                && structure.StandardTypeOrigin?.IsLookupRoot == true),
-            Is.True);
+                && structure.StandardTypeOrigin?.IsLookupRoot == true);
+        Assert.That(NativePointerTypes.IsType(reloadedPoint.Fields.Single(
+            static field => field.Name == "Link").Type), Is.True);
         var reloadedConsumer = Compilation.CreateLibrary(
             SyntaxTree.Parse("""
                 int32 Invoke(ptr<void> receiver, ptr<Point> point) {
@@ -7574,6 +7595,17 @@ internal sealed class NativeCoreRegistrationTests
                     consumerArtifact), "consumer.module", [
                     new TrRmStandardArtifactInput(schemaIdentity,
                         incompatibleArtifact),
+                ]));
+
+        var incompatiblePointerArtifact = EmitProvider(
+            relocatedProviderSource.Replace("ptr<int32> Link",
+                "ptr<float64> Link", StringComparison.Ordinal));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    consumerArtifact), "consumer.module", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        incompatiblePointerArtifact),
                 ]));
     }
 

@@ -383,13 +383,12 @@ public static partial class TrRmExecutableCompiler
             foreach (var field in structure.Fields)
             {
                 if (field is null
-                    || NativePointerTypes.IsType(field.Type)
                     || NativeFunctionPointerTypes.IsType(field.Type)
                     || NativeFixedArrayTypes.IsType(field.Type)
                     || BoundEnumTypes.IsType(field.Type))
                 {
                     throw Unsupported(
-                        "The current F+I aggregate layout slice admits scalar, raw-pointer and inline-struct fields only.");
+                        "The current F+I aggregate layout slice admits scalar, raw-pointer, typed-pointer and inline-struct fields only.");
                 }
 
                 Visit(field.Type, false, depth + 1);

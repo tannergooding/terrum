@@ -1325,13 +1325,17 @@ reconstructs local layouts and emits TypeDef Imports for imported aggregate
 views. Source-free loading binds those expectations to the selected provider,
 compares the retained layout and field contract, and uses the selected
 provider's structure identity in the FNI ABI view. This bounded
-producer/consumer slice supports scalar, raw-pointer and inline-struct fields;
+producer/consumer slice supports scalar, raw-pointer, typed-pointer-to-scalar
+and inline-struct fields;
 nested inline-struct provider TypeDefs, compatible provider TypeDef-row
 relocation, a two-provider nested aggregate chain, missing/duplicate/misselected
 Imports, wrong provider ModuleRefs, expected-TypeDef-owner substitution,
 invalid ModuleRef owners, requirement mismatches, incompatible-layout
 replacement and source-free re-emission regressions are added but unverified
-under the active hold. Source emission retains the exact selected provider
+under the active hold. A typed-pointer field also round-trips through the
+selected provider and source-free re-emission, and rejects a provider that
+changes its pointee type; these regressions remain unverified. Source emission
+retains the exact selected provider
 ExportKey and refuses ambiguous aliases; a regression selects the non-first
 A2 key from a non-first co-located Module. The nested chain is also rebound
 with provider order reversed and a compatible Middle TypeDef/FieldDef/Layout
@@ -1341,7 +1345,7 @@ in Module 1 and selects Middle from Module 2. These paths are source-free
 re-emitted/reloaded and remain unverified. Provider v4 intentionally selects
 one FNI Module root; independent multi-root FNI composition is not selected by
 the proposal.
-Typed-pointer/function-pointer aggregate fields and full
+Function-pointer aggregate fields, typed pointers to aggregate pointees, and full
 Import/Export/PS1/Contract/graph row remapping remain open. FNI call
 lowering now stages the receiver before source-order arguments, maps explicit
 formals to the receiver-first Windows x64 ABI, and dispatches through the
