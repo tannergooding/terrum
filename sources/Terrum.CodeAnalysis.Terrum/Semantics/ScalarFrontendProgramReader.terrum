@@ -533,6 +533,21 @@ bool ScalarProgramReaderCallRoot(int32 root, int32 node)
     return root >= 0 && root < node;
 }
 
+bool ScalarProgramReaderSupportedConversion(int32 sourceType,
+    int32 targetType)
+{
+    bool sourceInteger = sourceType == 1 || sourceType == 2
+        || sourceType == 3 || sourceType == 4 || sourceType == 6;
+    bool targetInteger = targetType == 1 || targetType == 2
+        || targetType == 3 || targetType == 4 || targetType == 6;
+    bool sourceFloating = sourceType == 7 || sourceType == 8;
+    bool targetFloating = targetType == 7 || targetType == 8;
+    return sourceInteger && targetInteger
+        || (sourceInteger || sourceFloating) && targetFloating
+        || sourceFloating && (targetType == 1 || targetType == 2
+            || targetType == 3 || targetType == 4);
+}
+
 bool ScalarProgramReaderNodeShape(int32 body, int32 operation,
     int32 type, int32 node, int32 parameterCount, int32 localCount)
 {
@@ -600,6 +615,8 @@ bool ScalarProgramReaderNodeShape(int32 body, int32 operation,
         || operation == 86 || operation == 87 || operation == 110)
     {
         return ScalarProgramReaderCallRoot(left, node)
+            && (operation != 83
+                || ScalarProgramReaderSupportedConversion(leftType, type))
             && (operation == 83 || type == leftType)
             && right == -1 && third == 0 && high == 0;
     }

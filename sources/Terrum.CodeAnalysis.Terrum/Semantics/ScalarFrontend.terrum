@@ -4647,6 +4647,21 @@ mut class ScalarFrontendState
         return true;
     }
 
+    private bool ScalarFrontendSupportedConversion(int32 sourceType,
+        int32 targetType)
+    {
+        bool sourceInteger = sourceType == 1 || sourceType == 2
+            || sourceType == 3 || sourceType == 4 || sourceType == 6;
+        bool targetInteger = targetType == 1 || targetType == 2
+            || targetType == 3 || targetType == 4 || targetType == 6;
+        bool sourceFloating = sourceType == 7 || sourceType == 8;
+        bool targetFloating = targetType == 7 || targetType == 8;
+        return sourceInteger && targetInteger
+            || (sourceInteger || sourceFloating) && targetFloating
+            || sourceFloating && (targetType == 1 || targetType == 2
+                || targetType == 3 || targetType == 4);
+    }
+
     private mut bool ParseTreePrefix(
         int32 expected, int32 depth, ref<init int32> node, Span<Token> tokenView)
     {
@@ -4755,7 +4770,7 @@ mut class ScalarFrontendState
                 return false;
             }
             int32 sourceType = TreeWord(operand, 1);
-            if (sourceType == 5 || sourceType == 0)
+            if (!ScalarFrontendSupportedConversion(sourceType, target))
             {
                 FailTreeType(operand);
                 return false;
