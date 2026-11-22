@@ -1351,13 +1351,15 @@ correlated publication rules. PE-emission regressions cover reordered formals,
 slot 1, the high offset path and an imported aggregate view; they remain
 unverified under the active hold. Standard FNI Bodies now emit and source-free
 decode bounded receiver-first MethodMap CallSites for direct non-void return
-calls, direct void calls followed by void returns, and ordered sequences of up
-to 13 void/no-output FNI calls. Ordinary inputs may be read from caller
-parameters or scalar locals initialized from a direct
-parameter read; direct non-void and void-call Bodies can also nest up to 13
-scalar-returning, no-output FNI CallSites as explicit inputs (12 when staged
-locals reserve register 1), plus scalar literal inputs through typed
-ConstantMap/TypedFrozenValues loads, including literal arguments within nested
+calls, direct void calls followed by void returns, ordered sequences of up to
+13 no-output FNI calls ending in unit return, and mixed sequences of up to 13
+no-output calls where a void-call prefix is followed by a direct value result.
+The receiver is a direct parameter. Direct-call inputs may use scalar locals
+initialized from parameter reads; sequence inputs use direct parameters or
+typed scalar ConstantMap values. Direct non-void and void-call Bodies can also
+nest up to 13 scalar-returning, no-output FNI CallSites as explicit inputs
+(12 when staged locals reserve register 1), plus scalar literal inputs through
+typed ConstantMap/TypedFrozenValues loads, including literal arguments within nested
 calls and mixed outer inputs. The fallback conditional-output form separately
 supports up to 13 total nested-call results and distinct scalar-literal
 register inputs, including literal arguments within nested calls.
@@ -1365,7 +1367,9 @@ For conditional-output Bodies, nested calls execute in source argument order
 before output reservation, and source-free re-emission preserves that order
 across formal remapping. Imported-provider source-free
 load/re-emission and Windows x64 success/partial-failure regressions remain
-unverified under the hold. The receiver is a direct parameter. One non-void
+unverified under the hold. Local/imported mixed-call-sequence regressions cover
+source order, the final value result, malformed result selectors, and
+source-free re-emission; they remain unverified under the hold. One non-void
 call may reserve distinct local `init` Homes for each NativeOutput formal;
 source-use 6
 and reservation records use the receiver-first flattened ordinal
