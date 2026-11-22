@@ -4,6 +4,25 @@ namespace Terrum.CodeAnalysis;
 // unsupported artifact schema; 4 is a duplicate MethodRoot triple.
 public static int32 ValidateStandaloneMethodImportInput()
 {
+    int32 expectedCallableCapacity
+        = Host.StandaloneMethodRoots.Length / 5
+            + ((Host.StandaloneArtifacts.Length / 12 + 1) * 2);
+    if (Host.StandaloneSourceProgramStatus.Length == 1)
+    {
+        if (Host.StandaloneLocalCallableCount.Length != 1
+            || Host.StandaloneSourceCallableInfo.Length % 12 != 0)
+        {
+            return 1;
+        }
+        expectedCallableCapacity
+            = expectedCallableCapacity
+                + Host.StandaloneSourceCallableInfo.Length / 12;
+    }
+    else if (Host.StandaloneSourceProgramStatus.Length != 0)
+    {
+        return 1;
+    }
+
     if (Host.StandaloneRequest.Length != 6
         || Host.StandaloneArtifactInputs.Length % 4 != 0
         || Host.StandaloneMethodRoots.Length % 5 != 0
@@ -39,8 +58,7 @@ public static int32 ValidateStandaloneMethodImportInput()
         || Host.StandaloneResolvedExpectedImportOrder.Length
             != Host.StandaloneArtifacts.Length / 12 + 1
         || Host.StandaloneCallableTypeIds.Length
-            < Host.StandaloneMethodRoots.Length / 5
-                + ((Host.StandaloneArtifacts.Length / 12 + 1) * 2)
+            != expectedCallableCapacity
         || Host.StandaloneCallableEffects.Length
             != Host.StandaloneCallableTypeIds.Length
         || Host.StandaloneSectionKinds.Length

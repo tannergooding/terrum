@@ -775,6 +775,159 @@ internal sealed class StandaloneMethodImportInputTests
         Assert.That(NativeJit.Execute(remapProgram,
                 (NativeRuntimePolicy)policy),
             Is.EqualTo(0));
+
+        var callVariantSource = SourceText.From(
+            "using api; void Main(void unitValue, "
+            + "ref<init int32> output, int32 value) { unsafe { "
+            + "Unit(unitValue); Init(ref init output); Unsafe(value); } }");
+        var callVariantInput = new StandaloneMethodImportInput(Agreement,
+            "consumer/module", [
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateMethodProviderArtifact("provider/unit",
+                        "api.Unit", resultTypeSpecRef: 0xF200_0000,
+                        scalarParameter: true,
+                        parameterTypeSpecRef: 0xF200_0000)),
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateMethodProviderArtifact("provider/init",
+                        "api.Init", resultTypeSpecRef: 0xF200_0000,
+                        scalarParameter: true,
+                        parameterTypeSpecRef: 0x1100_0001,
+                        typeSpecSection:
+                            TrRmTypeSpecTableWriter.InitializationReference(
+                                0xF200_0008, isWritable: true))),
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateMethodProviderArtifact("provider/unsafe",
+                        "api.Unsafe", effectsMask: 4,
+                        scalarParameter: true)),
+            ], [
+                new StandaloneMethodRoot(0, "provider/unit", "api.Unit"),
+                new StandaloneMethodRoot(1, "provider/init", "api.Init"),
+                new StandaloneMethodRoot(2, "provider/unsafe",
+                    "api.Unsafe"),
+            ]);
+        const string callVariantVerificationSource = """
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                if (Scan() < 1) { return 60; }
+                int32 status = BindStandaloneOwnedSourceProgram();
+                if (status != 0) { return status; }
+                status = NormalizeStandaloneOwnedSourceProgram();
+                if (status != 0) { return status; }
+                if (Host.StandaloneSourceProgramStatus[0] != 0
+                    || Host.StandaloneNormalizedProgramStatus[0] != 0
+                    || Host.StandaloneSourceParameterCount[0] != 3
+                    || Host.StandaloneSourceDirectCallCount[0] != 3
+                    || Host.StandaloneSourceCallArgumentCount[0] != 3
+                    || Host.StandaloneSourceStatements[0] != 2
+                    || Host.StandaloneSourceStatements[3] != 2
+                    || Host.StandaloneSourceStatements[6] != 2
+                    || Host.StandaloneSourceBodies[11] != 1
+                    || Host.StandaloneNormalizedHomeCount[0] != 3
+                    || Host.StandaloneInvokeCount[0] != 3
+                    || Host.StandaloneInvokeInputCount[0] != 3
+                    || Host.StandaloneNormalizedOperationCount[0] != 3
+                    || Host.StandaloneSourceCallArguments[2] != 0
+                    || Host.StandaloneSourceCallArguments[5] != 5
+                    || Host.StandaloneSourceCallArguments[8] != 1
+                    || Host.StandaloneInvokeInputs[0] != 0
+                    || Host.StandaloneInvokeInputs[1] != 0
+                    || Host.StandaloneInvokeInputs[2] != 0
+                    || Host.StandaloneInvokeInputs[3] != 2
+                    || Host.StandaloneInvokeInputs[4] != 5
+                    || Host.StandaloneInvokeInputs[5] != 0
+                    || Host.StandaloneInvokeInputs[6] != 2
+                    || Host.StandaloneInvokeInputs[7] != 1
+                    || Host.StandaloneInvokeInputs[8] != 1
+                    || Host.StandaloneInvokes[5] != 0
+                    || Host.StandaloneInvokes[15] != 0
+                    || Host.StandaloneInvokes[25] != 2
+                    || Host.StandaloneInvokes[26] != 2) {
+                    return 61;
+                }
+                return 0;
+            }
+            """;
+        var callVariantComponents
+            = new List<SyntaxTree>(sourcePaths.Length + 1);
+        foreach (var sourcePath in sourcePaths)
+        {
+            var path = TerrumProjectPaths.RepositoryFile(root, sourcePath);
+            var tree = SyntaxTree.Parse(await File.ReadAllTextAsync(path)
+                .ConfigureAwait(true), path);
+            Assert.That(tree.HasErrors, Is.False,
+                string.Join(Environment.NewLine, tree.Diagnostics));
+            callVariantComponents.Add(tree);
+        }
+        callVariantComponents.Add(SyntaxTree.Parse(
+            callVariantVerificationSource,
+            "standalone-owned-call-variants-tests.terrum"));
+
+        var callVariantBuffers = ScannerHost.CreateBuffers(
+            callVariantSource).AddRange(
+            callVariantInput.Capture().CreateSourceCallHostBuffers(
+                callVariantSource));
+        var callVariantCompilation = Compilation.Create(
+            callVariantComponents, callVariantBuffers, policy);
+        Assert.That(callVariantCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                callVariantCompilation.Diagnostics));
+        var callVariantProgram = callVariantCompilation.Program
+            ?? throw new AssertionException(
+                "Expected a bound standalone call-variant validator.");
+        Assert.That(NativeJit.Execute(callVariantProgram,
+                (NativeRuntimePolicy)policy),
+            Is.EqualTo(0));
+
+        var unauthorizedUnsafeSource = SourceText.From(
+            "using api; int32 Main(int32 value) { "
+            + "return Unsafe(value); }");
+        const string unauthorizedUnsafeVerificationSource = """
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                if (Scan() < 1) { return 70; }
+                int32 status = BindStandaloneOwnedSourceProgram();
+                if (status != 2
+                    || Host.StandaloneSourceProgramStatus[0] != 2
+                    || Host.StandaloneResolvedRootCount[0] != 0
+                    || Host.StandaloneLocalCallableCount[0] != 0
+                    || Host.StandaloneSourceDirectCallCount[0] != 0) {
+                    return 71;
+                }
+                return 0;
+            }
+            """;
+        var unauthorizedUnsafeComponents
+            = new List<SyntaxTree>(sourcePaths.Length + 1);
+        foreach (var sourcePath in sourcePaths)
+        {
+            var path = TerrumProjectPaths.RepositoryFile(root, sourcePath);
+            var tree = SyntaxTree.Parse(await File.ReadAllTextAsync(path)
+                .ConfigureAwait(true), path);
+            Assert.That(tree.HasErrors, Is.False,
+                string.Join(Environment.NewLine, tree.Diagnostics));
+            unauthorizedUnsafeComponents.Add(tree);
+        }
+        unauthorizedUnsafeComponents.Add(SyntaxTree.Parse(
+            unauthorizedUnsafeVerificationSource,
+            "standalone-owned-unsafe-rejection-tests.terrum"));
+
+        var unauthorizedUnsafeBuffers = ScannerHost.CreateBuffers(
+            unauthorizedUnsafeSource).AddRange(
+            callVariantInput.Capture().CreateSourceCallHostBuffers(
+                unauthorizedUnsafeSource));
+        var unauthorizedUnsafeCompilation = Compilation.Create(
+            unauthorizedUnsafeComponents, unauthorizedUnsafeBuffers,
+            policy);
+        Assert.That(unauthorizedUnsafeCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                unauthorizedUnsafeCompilation.Diagnostics));
+        var unauthorizedUnsafeProgram
+            = unauthorizedUnsafeCompilation.Program
+                ?? throw new AssertionException(
+                    "Expected a standalone unsafe-call rejection validator.");
+        Assert.That(NativeJit.Execute(unauthorizedUnsafeProgram,
+                (NativeRuntimePolicy)policy),
+            Is.EqualTo(0));
     }
 
     [TestCase(BoundRuntimePolicy.FailFast)]
@@ -1686,7 +1839,9 @@ internal sealed class StandaloneMethodImportInputTests
     private static byte[] CreateMethodProviderArtifact(
         string moduleIdentity, string exportKey,
         uint resultTypeSpecRef = 0xF200_0008, uint effectsMask = 0,
-        bool scalarParameter = false)
+        bool scalarParameter = false,
+        uint parameterTypeSpecRef = 0xF200_0008,
+        byte[]? typeSpecSection = null)
     {
         var stringSection = TrRmStringTableWriter.EncodeNames([
             (moduleIdentity, 0),
@@ -1727,7 +1882,7 @@ internal sealed class StandaloneMethodImportInputTests
             BinaryPrimitives.WriteUInt32LittleEndian(
                 paramSection.AsSpan(4), 0);
             BinaryPrimitives.WriteUInt32LittleEndian(
-                paramSection.AsSpan(8), 0xF200_0008);
+                paramSection.AsSpan(8), parameterTypeSpecRef);
         }
         var exportSection = new byte[8];
         BinaryPrimitives.WriteUInt32LittleEndian(
@@ -1746,6 +1901,11 @@ internal sealed class StandaloneMethodImportInputTests
             sections.Add(new TrRmSection(0x0018, 0, 1,
                 paramSection));
         }
+        if (typeSpecSection is not null)
+        {
+            sections.Add(new TrRmSection(0x0003, 0, 1,
+                typeSpecSection));
+        }
         if (effectsMask != 0)
         {
             var effectsRow = new byte[12];
@@ -1758,6 +1918,8 @@ internal sealed class StandaloneMethodImportInputTests
             sections.Add(new TrRmSection(0x001B, 0, 1,
                 TrRmVariableTableWriter.EncodeBlobs([effectsRow])));
         }
+        sections.Sort(static (left, right)
+            => left.Kind.CompareTo(right.Kind));
         return TrRmArtifactWriter.Encode(sections);
     }
 
