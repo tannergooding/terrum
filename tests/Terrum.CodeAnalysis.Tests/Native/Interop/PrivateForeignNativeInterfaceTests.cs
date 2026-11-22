@@ -168,7 +168,13 @@ internal sealed class PrivateForeignNativeInterfaceTests
                 NativeFniDispatch>(NativeLibrary.GetExport(library,
                     "Dispatch"));
             Assert.That(dispatch(receiver), Is.EqualTo(42));
+            var failureCallback
+                = new NativeFniTryRead(WriteUnpublishedOutput);
+            Marshal.WriteIntPtr(vtable,
+                Marshal.GetFunctionPointerForDelegate(failureCallback));
+            Assert.That(dispatch(receiver), Is.Zero);
             GC.KeepAlive(callback);
+            GC.KeepAlive(failureCallback);
         }
         finally
         {
@@ -1010,5 +1016,13 @@ internal sealed class PrivateForeignNativeInterfaceTests
         _ = receiver;
         Marshal.WriteInt32(output, 42);
         return 1;
+    }
+
+    private static int WriteUnpublishedOutput(IntPtr receiver,
+        IntPtr output)
+    {
+        _ = receiver;
+        Marshal.WriteInt32(output, 99);
+        return 0;
     }
 }
