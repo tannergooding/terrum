@@ -59,10 +59,37 @@ public static class TrRmTypeSpecTableWriter
     public static byte[] NativeFunctionPointer(byte callingConvention,
         uint signatureContractMethodDef)
     {
+        if (callingConvention is 0 or > 4)
+        {
+            throw new ArgumentOutOfRangeException(nameof(callingConvention));
+        }
+        return NativeFunctionPointerCore(callingConvention,
+            signatureContractMethodDef);
+    }
+
+    internal static byte[] NativeFunctionPointer(byte callingConvention,
+        uint signatureContractMethodDef, string standardSchemaIdentity)
+    {
+        if (!TrRmArtifactSchemaFacts
+                .IsSelectedTerrumFunctionPointerSchemaIdentity(
+                    standardSchemaIdentity))
+        {
+            throw new ArgumentException(
+                "Terrum convention rows require the exact selected schema identity.",
+                nameof(standardSchemaIdentity));
+        }
         if (callingConvention > 4)
         {
             throw new ArgumentOutOfRangeException(nameof(callingConvention));
         }
+
+        return NativeFunctionPointerCore(callingConvention,
+            signatureContractMethodDef);
+    }
+
+    private static byte[] NativeFunctionPointerCore(byte callingConvention,
+        uint signatureContractMethodDef)
+    {
         if (signatureContractMethodDef is 0 or > 0xFF_FFFF)
         {
             throw new ArgumentOutOfRangeException(nameof(signatureContractMethodDef));
@@ -187,7 +214,8 @@ public static class TrRmTypeSpecTableWriter
         int typeDefCount, int importCount, int genericParamCount,
         int nativeFunctionPointerSignatureCount, TrRmArtifactSchema schema,
         int methodDefCount = 0, int predicateCaptureCount = 0,
-        TrRmA3LayoutResourceLedger? resourceLedger = null)
+        TrRmA3LayoutResourceLedger? resourceLedger = null,
+        string? standardSchemaIdentity = null)
     {
         ArgumentNullException.ThrowIfNull(rows);
         var result = resourceLedger is null
@@ -196,7 +224,7 @@ public static class TrRmTypeSpecTableWriter
         _ = new TrRmTypeSpecTableReader(result, rows.Count,
             typeDefCount, importCount, genericParamCount,
             nativeFunctionPointerSignatureCount, schema, methodDefCount,
-            predicateCaptureCount, resourceLedger);
+            predicateCaptureCount, resourceLedger, standardSchemaIdentity);
         return result;
     }
 

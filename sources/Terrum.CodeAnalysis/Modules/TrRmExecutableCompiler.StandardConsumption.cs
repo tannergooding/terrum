@@ -4322,6 +4322,9 @@ public static partial class TrRmExecutableCompiler
         {
             StandardLayoutQueriesSchemaIdentity
                 => TrRmArtifactSchema.Standard,
+            TrRmArtifactSchemaFacts
+                .StandardTerrumFunctionPointerSchemaIdentity
+                => TrRmArtifactSchema.Standard,
             StandardForeignInvocationSchemaIdentity
                 => TrRmArtifactSchema.ForeignInvocationDraft,
             StandardForeignNativeInterfaceSchemaIdentity
@@ -4471,6 +4474,14 @@ public static partial class TrRmExecutableCompiler
         }
 
         if (IsSelectedTypeDefBindingEqualitySchemaIdentity(schemaIdentity))
+        {
+            return new TrRmArtifactIndex(artifact, schema, resourceLedger,
+                usesNativePointerLoads: false,
+                standardSchemaIdentity: schemaIdentity);
+        }
+
+        if (TrRmArtifactSchemaFacts
+            .IsSelectedTerrumFunctionPointerSchemaIdentity(schemaIdentity))
         {
             return new TrRmArtifactIndex(artifact, schema, resourceLedger,
                 usesNativePointerLoads: false,

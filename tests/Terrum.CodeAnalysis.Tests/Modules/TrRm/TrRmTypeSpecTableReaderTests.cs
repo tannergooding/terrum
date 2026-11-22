@@ -49,22 +49,50 @@ internal sealed class TrRmTypeSpecTableReaderTests
     }
 
     [Test]
-    public void StandardFunctionPointerAcceptsTerrumConventionTagZero()
+    public void BaselineStandardFunctionPointerRejectsTerrumConvention()
     {
-        var standardRow = TrRmTypeSpecTableWriter.NativeFunctionPointer(0, 2);
-        Assert.That(standardRow, Is.EqualTo(new byte[]
-            { 0x0D, 0, 0, 2, 0, 0, 0 }));
-        var section = TrRmTypeSpecTableWriter.Encode(
-            [new ReadOnlyMemory<byte>(standardRow)], 0, 0, 0, 0,
-            schema: TrRmArtifactSchema.Standard, methodDefCount: 2);
-        var reader = new TrRmTypeSpecTableReader(section, 1, 0, 0, 0,
-            nativeFunctionPointerSignatureCount: 0,
-            schema: TrRmArtifactSchema.Standard, methodDefCount: 2);
+        _ = Assert.Throws<ArgumentOutOfRangeException>(
+            () => TrRmTypeSpecTableWriter.NativeFunctionPointer(0, 2));
+        byte[] invalidRow = [0x0D, 0, 0, 2, 0, 0, 0];
+        var section = TrRmVariableTableWriter.EncodeBlobs([
+            new ReadOnlyMemory<byte>(invalidRow),
+        ]);
+        _ = Assert.Throws<InvalidDataException>(
+            () => ReadStandardTypeSpecTable(section, 2));
+    }
 
+    [Test]
+    public void TerrumFunctionPointerZeroRequiresExactSuccessorIdentity()
+    {
+        var standardSchemaIdentity
+            = TrRmArtifactSchemaFacts
+                .StandardTerrumFunctionPointerSchemaIdentity;
+        var standardRow = TrRmTypeSpecTableWriter.NativeFunctionPointer(
+            0, 2, standardSchemaIdentity);
+        var typeSpecSection = TrRmTypeSpecTableWriter.Encode([
+            new ReadOnlyMemory<byte>(standardRow),
+        ], 0, 0, 0, 0,
+            schema: TrRmArtifactSchema.Standard, methodDefCount: 2,
+            standardSchemaIdentity: standardSchemaIdentity);
+        var reader = new TrRmTypeSpecTableReader(typeSpecSection, 1,
+            0, 0, 0, nativeFunctionPointerSignatureCount: 0,
+            schema: TrRmArtifactSchema.Standard, methodDefCount: 2,
+            standardSchemaIdentity: standardSchemaIdentity);
         Assert.That(reader.TryGetNativeFunctionPointerAnchor(1,
             out var convention, out var methodDefRow), Is.True);
         Assert.That(convention, Is.EqualTo(0));
         Assert.That(methodDefRow, Is.EqualTo(2));
+
+        var artifact = TrRmArtifactWriter.Encode([
+            new TrRmSection(0x0001, 0, 1, new byte[48]),
+        ], TrRmArtifactSchema.Standard,
+            standardSchemaIdentity: standardSchemaIdentity);
+        Assert.That(artifact, Is.Not.Empty);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmArtifactWriter.Encode([
+                new TrRmSection(0x0001, 0, 1, new byte[48]),
+            ], TrRmArtifactSchema.Standard,
+                standardSchemaIdentity: "trrm/unknown"));
     }
 
     [Test]
@@ -141,7 +169,7 @@ internal sealed class TrRmTypeSpecTableReaderTests
     {
         var rows = new ReadOnlyMemory<byte>[]
         {
-            TrRmTypeSpecTableWriter.NativeFunctionPointer(0, 1),
+            TrRmTypeSpecTableWriter.NativeFunctionPointer(1, 1),
             new byte[] { 0x06, 0, 1, 0, 0, 0 },
             new byte[] { 0x06, 0, 2, 0, 0, 0 },
             new byte[] { 0x01, 0, 0x8C, 8 },
@@ -446,6 +474,16 @@ internal sealed class TrRmTypeSpecTableReaderTests
             nativeFunctionPointerSignatureCount, schema, methodDefCount);
     }
 
+    private static void ReadStandardTypeSpecTable(byte[] section,
+        int methodDefCount, string? standardSchemaIdentity = null)
+    {
+        _ = new TrRmTypeSpecTableReader(section, 1, 0, 0, 0,
+            nativeFunctionPointerSignatureCount: 0,
+            schema: TrRmArtifactSchema.Standard,
+            methodDefCount: methodDefCount,
+            standardSchemaIdentity: standardSchemaIdentity);
+    }
+
     private static byte[] ReadRow(byte[] bytes, int row)
     {
         var reader = new TrRmTypeSpecTableReader(bytes, 1, 0, 0, 0);
@@ -463,7 +501,7 @@ internal sealed class TrRmTypeSpecTableReaderTests
     private static byte[] CreateA3FunctionPointerChain(int depth)
     {
         var rows = new ReadOnlyMemory<byte>[depth];
-        rows[0] = TrRmTypeSpecTableWriter.NativeFunctionPointer(0, 1);
+        rows[0] = TrRmTypeSpecTableWriter.NativeFunctionPointer(1, 1);
         for (var index = 1; index < depth; index++)
         {
             var row = new byte[6];

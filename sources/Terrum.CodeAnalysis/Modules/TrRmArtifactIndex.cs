@@ -66,6 +66,20 @@ internal enum TrRmArtifactSchema
 
 internal static class TrRmArtifactSchemaFacts
 {
+    internal const string StandardTerrumFunctionPointerSchemaIdentity
+        = "trrm/1-draft-layout-queries-terrum-fnptr-1";
+
+    internal static bool IsSelectedTerrumFunctionPointerSchemaIdentity(
+        string? standardSchemaIdentity)
+        => standardSchemaIdentity
+            == StandardTerrumFunctionPointerSchemaIdentity;
+
+    internal static bool UsesTerrumFunctionPointer(
+        this TrRmArtifactSchema schema, string? standardSchemaIdentity)
+        => schema == TrRmArtifactSchema.Standard
+            && IsSelectedTerrumFunctionPointerSchemaIdentity(
+                standardSchemaIdentity);
+
     internal static bool IsDevelopmentProfile(this TrRmArtifactSchema schema) =>
         schema is TrRmArtifactSchema.Development
             or TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft
@@ -585,10 +599,13 @@ public readonly ref struct TrRmArtifactIndex
                 && StandaloneMethodImportOutputFramer
                     .IsSelectedGeneralPredicateGraphsWitnessProjectionsSchema(
                         standardSchemaIdentity);
+        var isTerrumFunctionPointerSchema
+            = schema.UsesTerrumFunctionPointer(standardSchemaIdentity);
         if (standardSchemaIdentity is not null
             && !isClassInstanceLayoutSchema
             && !isLocalAggregatePointerLoadsSchema
             && !isStandaloneGeneralPredicateGraphsWitnessProjectionsSchema
+            && !isTerrumFunctionPointerSchema
             && (!isTypeDefBindingEqualitySchema
                 || TrRmExecutableCompiler.GetForeignInvocationSchema(
                     standardSchemaIdentity) != schema))

@@ -1891,7 +1891,8 @@ public static class TrRmStructuralMetadataValidator
                 typeDefCount, importCount, genericParamCount,
                 selectedNativeFunctionPointerSignatureCount, index.Schema,
                 methodDefCount, predicateCaptureCount,
-                selectedA3LayoutResourceLedger);
+                selectedA3LayoutResourceLedger,
+                index.StandardSchemaIdentity);
         var frozenValueNodes = !developmentProfile && frozenValueNodeCount != 0
             ? new TrRmFrozenValueNodeTableReader(frozenValueNodeBytes,
                 frozenValueNodeCount, typeSpecs, blobCount, frozenValueChildCount,

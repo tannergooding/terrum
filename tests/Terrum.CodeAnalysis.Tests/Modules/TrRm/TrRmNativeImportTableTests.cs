@@ -732,15 +732,17 @@ internal sealed class TrRmNativeImportTableTests
             includeNativeAddress: true, firstAnchorConvention: 0,
             anchorHasUnitResult: true,
             schema: TrRmArtifactSchema.ForeignInvocationDraft);
-        Assert.DoesNotThrow(() => ValidateAnchorMethodMapArtifact(registerResult,
-            TrRmArtifactSchema.ForeignInvocationDraft));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            ValidateAnchorMethodMapArtifact(registerResult,
+                TrRmArtifactSchema.ForeignInvocationDraft));
 
         var homeResult = CreateAnchorMethodMapArtifact(0x1600_0001,
             includeNativeAddress: true, firstAnchorConvention: 0,
             anchorHasUnitResult: true, nativeAddressResultKind: 2,
             schema: TrRmArtifactSchema.ForeignInvocationDraft);
-        Assert.DoesNotThrow(() => ValidateAnchorMethodMapArtifact(homeResult,
-            TrRmArtifactSchema.ForeignInvocationDraft));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            ValidateAnchorMethodMapArtifact(homeResult,
+                TrRmArtifactSchema.ForeignInvocationDraft));
 
         var nativeCallableTarget = CreateAnchorMethodMapArtifact(0x1600_0001,
             includeNativeAddress: true, includeNativeCallableTarget: true,
@@ -768,14 +770,16 @@ internal sealed class TrRmNativeImportTableTests
                 TrRmArtifactSchema.ForeignInvocationDraft));
 
         var wrongSignature = CreateAnchorMethodMapArtifact(0x1600_0001,
-            includeNativeAddress: true, firstAnchorConvention: 0,
+            includeNativeAddress: true, includeNativeCallableTarget: true,
+            firstAnchorConvention: 1,
             schema: TrRmArtifactSchema.ForeignInvocationDraft);
         _ = Assert.Throws<InvalidDataException>(() =>
             ValidateAnchorMethodMapArtifact(wrongSignature,
                 TrRmArtifactSchema.ForeignInvocationDraft));
 
         var anchorAsTarget = CreateAnchorMethodMapArtifact(0x1600_0002,
-            includeNativeAddress: true, firstAnchorConvention: 0,
+            includeNativeAddress: true, includeNativeCallableTarget: true,
+            firstAnchorConvention: 1,
             anchorHasUnitResult: true,
             schema: TrRmArtifactSchema.ForeignInvocationDraft);
         _ = Assert.Throws<InvalidDataException>(() =>
@@ -783,7 +787,8 @@ internal sealed class TrRmNativeImportTableTests
                 TrRmArtifactSchema.ForeignInvocationDraft));
 
         var wrongTypeMapForm = CreateAnchorMethodMapArtifact(0x1600_0001,
-            includeNativeAddress: true, firstAnchorConvention: 0,
+            includeNativeAddress: true, includeNativeCallableTarget: true,
+            firstAnchorConvention: 1,
             anchorHasUnitResult: true,
             nativeAddressPointerTypeToken: 0x1100_0002,
             schema: TrRmArtifactSchema.ForeignInvocationDraft);
@@ -792,7 +797,8 @@ internal sealed class TrRmNativeImportTableTests
                 TrRmArtifactSchema.ForeignInvocationDraft));
 
         var wrongHomeType = CreateAnchorMethodMapArtifact(0x1600_0001,
-            includeNativeAddress: true, firstAnchorConvention: 0,
+            includeNativeAddress: true, includeNativeCallableTarget: true,
+            firstAnchorConvention: 1,
             anchorHasUnitResult: true, nativeAddressResultKind: 2,
             nativeAddressHomeTypeToken: 0x1100_0002,
             schema: TrRmArtifactSchema.ForeignInvocationDraft);
@@ -1519,23 +1525,43 @@ internal sealed class TrRmNativeImportTableTests
             featureRows.Length);
         var modules = new TrRmModuleTableReader(moduleBytes, 1, strings,
             0, typeDefCount, artifactMethodCount, 0, featureRows.Length);
+        var usesTerrumFunctionPointerSuccessor
+            = firstAnchorConvention == 0
+                || secondAnchorConvention == 0;
+        var typeSpecSchema = usesTerrumFunctionPointerSuccessor
+            ? TrRmArtifactSchema.Standard : schema;
+        var typeSpecSchemaIdentity = usesTerrumFunctionPointerSuccessor
+            ? TrRmArtifactSchemaFacts
+                .StandardTerrumFunctionPointerSchemaIdentity
+            : null;
+        var firstAnchorRow = firstAnchorConvention == 0
+            ? TrRmTypeSpecTableWriter.NativeFunctionPointer(
+                firstAnchorConvention, 2, typeSpecSchemaIdentity!)
+            : TrRmTypeSpecTableWriter.NativeFunctionPointer(
+                firstAnchorConvention, 2);
         var typeSpecRows = new List<ReadOnlyMemory<byte>>
         {
             TrRmTypeSpecTableWriter.Builtin(0),
             TrRmTypeSpecTableWriter.Builtin(8),
-            TrRmTypeSpecTableWriter.NativeFunctionPointer(firstAnchorConvention, 2),
+            firstAnchorRow,
         };
         if (secondAnchorConvention is byte convention)
         {
-            typeSpecRows.Add(TrRmTypeSpecTableWriter.NativeFunctionPointer(
-                convention, distinctSecondAnchor ? 3u : 2u));
+            typeSpecRows.Add(convention == 0
+                ? TrRmTypeSpecTableWriter.NativeFunctionPointer(convention,
+                    distinctSecondAnchor ? 3u : 2u,
+                    typeSpecSchemaIdentity!)
+                : TrRmTypeSpecTableWriter.NativeFunctionPointer(convention,
+                    distinctSecondAnchor ? 3u : 2u));
         }
         var typeSpecBytes = TrRmTypeSpecTableWriter.Encode(typeSpecRows,
-            typeDefCount, 0, 0, 0, schema: schema,
-            methodDefCount: artifactMethodCount);
+            typeDefCount, 0, 0, 0, schema: typeSpecSchema,
+            methodDefCount: artifactMethodCount,
+            standardSchemaIdentity: typeSpecSchemaIdentity);
         var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes, typeSpecRows.Count,
-            typeDefCount, 0, 0, 0, schema: schema,
-            methodDefCount: artifactMethodCount);
+            typeDefCount, 0, 0, 0, schema: typeSpecSchema,
+            methodDefCount: artifactMethodCount,
+            standardSchemaIdentity: typeSpecSchemaIdentity);
         var signatureRows = new List<TrRmMethodSigRow>
         {
             new TrRmMethodSigRow(0xF200_0000, 0, 0, 0, 0, 0),

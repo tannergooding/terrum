@@ -37,6 +37,7 @@ public readonly ref struct TrRmTypeSpecTableReader
     private readonly int _methodDefCount;
     private readonly int _predicateCaptureCount;
     private readonly TrRmArtifactSchema _schema;
+    private readonly bool _usesTerrumFunctionPointer;
     private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
     private readonly ushort[] _compactValueTypeKeys;
 
@@ -53,7 +54,8 @@ public readonly ref struct TrRmTypeSpecTableReader
         int typeDefCount, int importCount, int genericParamCount,
         int nativeFunctionPointerSignatureCount, TrRmArtifactSchema schema,
         int methodDefCount = 0, int predicateCaptureCount = 0,
-        TrRmA3LayoutResourceLedger? resourceLedger = null)
+        TrRmA3LayoutResourceLedger? resourceLedger = null,
+        string? standardSchemaIdentity = null)
     {
         if (!ValidCount(recordCount) || !ValidCount(typeDefCount)
             || !ValidCount(importCount)
@@ -145,6 +147,8 @@ public readonly ref struct TrRmTypeSpecTableReader
         _methodDefCount = methodDefCount;
         _predicateCaptureCount = predicateCaptureCount;
         _schema = schema;
+        _usesTerrumFunctionPointer
+            = schema.UsesTerrumFunctionPointer(standardSchemaIdentity);
         _resourceLedger = resourceLedger;
         _nativeFunctionPointerTypeKeyCount = schema.IsDevelopmentProfile()
             ? nativeFunctionPointerSignatureCount
@@ -177,6 +181,7 @@ public readonly ref struct TrRmTypeSpecTableReader
         _methodDefCount = source._methodDefCount;
         _predicateCaptureCount = source._predicateCaptureCount;
         _schema = source._schema;
+        _usesTerrumFunctionPointer = source._usesTerrumFunctionPointer;
         _resourceLedger = source._resourceLedger;
         _compactValueTypeKeys = source._compactValueTypeKeys;
     }
@@ -1560,7 +1565,9 @@ public readonly ref struct TrRmTypeSpecTableReader
                     var methodDef = Read(bytes, 3);
                     var convention = ReadByte(bytes, 2);
                     _resourceLedger?.ConsumeWork(3);
-                    if (convention > 4 || methodDef == 0
+                    if (convention > 4
+                        || (convention == 0 && !_usesTerrumFunctionPointer)
+                        || methodDef == 0
                         || methodDef > _methodDefCount)
                     {
                         throw InvalidType();

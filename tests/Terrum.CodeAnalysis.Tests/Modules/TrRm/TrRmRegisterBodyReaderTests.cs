@@ -2318,7 +2318,7 @@ internal sealed class TrRmRegisterBodyReaderTests
             0, 0, 2, 0, featureRows.Length);
         ReadOnlyMemory<byte>[] typeSpecRows =
         [
-            TrRmTypeSpecTableWriter.NativeFunctionPointer(0, 2),
+            TrRmTypeSpecTableWriter.NativeFunctionPointer(1, 2),
         ];
         var typeSpecBytes = TrRmTypeSpecTableWriter.Encode(
             typeSpecRows, 0, 0, 0, 0,
@@ -2635,7 +2635,7 @@ internal sealed class TrRmRegisterBodyReaderTests
             0, 0, 4, 0, featureRows.Length);
         ReadOnlyMemory<byte>[] typeSpecRows =
         [
-            TrRmTypeSpecTableWriter.NativeFunctionPointer(0, 2),
+            TrRmTypeSpecTableWriter.NativeFunctionPointer(1, 2),
         ];
         var typeSpecBytes = TrRmTypeSpecTableWriter.Encode(
             typeSpecRows, 0, 0, 0, 0,
@@ -2864,7 +2864,7 @@ internal sealed class TrRmRegisterBodyReaderTests
             0, 0, 2, 0, featureRows.Length);
         ReadOnlyMemory<byte>[] typeSpecRows =
         [
-            TrRmTypeSpecTableWriter.NativeFunctionPointer(0, 2),
+            TrRmTypeSpecTableWriter.NativeFunctionPointer(1, 2),
             TrRmTypeSpecTableWriter.InlineFamily(0x8C, 0x0D, 1),
             TrRmTypeSpecTableWriter.InlineFamily(
                 0x8C, actualPointeeCode, actualQualifier),

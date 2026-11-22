@@ -6931,11 +6931,12 @@ public static partial class TrRmExecutableCompiler
         var typeRows = typeRowsList.ToArray();
         var typeBytes = TrRmTypeSpecTableWriter.Encode(typeRows, typeDefCount,
             pendingStandardImports.Count, 0,
-            nativeFunctionPointerSignatureRows.Count, schema);
+            nativeFunctionPointerSignatureRows.Count, schema,
+            standardSchemaIdentity: standardSchemaIdentity);
         var types = new TrRmTypeSpecTableReader(typeBytes, typeRows.Length,
             typeDefCount, pendingStandardImports.Count, 0,
             nativeFunctionPointerSignatureRows.Count,
-            schema);
+            schema, standardSchemaIdentity: standardSchemaIdentity);
         var sigBytes = signatures.Count == 0 ? []
             : TrRmMethodSigTableWriter.Encode(signatures, types,
                 parameters.Count, 0);
@@ -7538,6 +7539,7 @@ public static partial class TrRmExecutableCompiler
         var artifactSchemaIdentity
             = IsSelectedTypeDefBindingEqualitySchemaIdentity(
                 standardSchemaIdentity)
+                || standardTerrumFunctionPointerProfile
                 ? standardSchemaIdentity : null;
         var artifact = TrRmArtifactWriter.Encode(sections, schema,
             standardSchemaIdentity: artifactSchemaIdentity);
@@ -7586,7 +7588,8 @@ public static partial class TrRmExecutableCompiler
         {
             _ = TrRmStructuralMetadataValidator
                 .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
-                    artifact, schema));
+                    artifact, schema,
+                    standardSchemaIdentity: artifactSchemaIdentity));
         }
         else if (schema.UsesGeneralPredicateGraphs()
             && schema.UsesGenericMethodCalls())
@@ -7700,12 +7703,17 @@ public static partial class TrRmExecutableCompiler
         var standardNativeParameterProfile
             = standardNativePointerLoads
                 && schema.UsesNativeParameterContracts();
+        var standardTerrumFunctionPointerProfile
+            = TrRmArtifactSchemaFacts
+                .IsSelectedTerrumFunctionPointerSchemaIdentity(
+                    standardSchemaIdentity);
         var standardRegisterBodies
             = standardInitializationReferenceBodies
                 || standardConstruction2MethodLinkingProfile;
         if (standardSchemaIdentity is not null
             && (!(standardInitializationReferenceBodies
-                    || standardConstruction2MethodLinkingProfile)
+                    || standardConstruction2MethodLinkingProfile
+                    || standardTerrumFunctionPointerProfile)
                 || schema != GetForeignInvocationSchema(
                     standardSchemaIdentity)))
         {
@@ -7768,7 +7776,10 @@ public static partial class TrRmExecutableCompiler
                 && (IsSelectedC1ClassInstanceLayoutSchemaIdentity(
                         selectedSchemaIdentity)
                     || IsSelectedTypeDefBindingEqualitySchemaIdentity(
-                        selectedSchemaIdentity))
+                        selectedSchemaIdentity)
+                    || TrRmArtifactSchemaFacts
+                        .IsSelectedTerrumFunctionPointerSchemaIdentity(
+                            selectedSchemaIdentity))
                     ? new TrRmArtifactIndex(artifact, schema, null,
                         usesNativePointerLoads: false,
                         standardSchemaIdentity: selectedSchemaIdentity)

@@ -306,6 +306,16 @@ public static partial class TrRmExecutableCompiler
 
         var targetMethodRow = targetIndex + 1;
         var callerMethodRow = callerIndex + 1;
+        if (signature.CallingConvention is not (
+                NativeCallingConvention.Unmanaged
+                or NativeCallingConvention.Cdecl
+                or NativeCallingConvention.Stdcall
+                or NativeCallingConvention.Vectorcall))
+        {
+            throw Unsupported(
+                "Standard function-pointer TypeSpecs require an explicit registered convention.");
+        }
+
         var anchorMethodRow = program.Functions.Length + 1;
         ReserveA3Collection(a3LayoutResourceLedger, 1);
         ReserveA3Buffer(a3LayoutResourceLedger, 7);
