@@ -1355,10 +1355,12 @@ calls and direct void calls followed by void returns. Ordinary inputs may be
 read from caller parameters or scalar locals initialized from a direct
 parameter read; a single scalar-returning, no-output FNI call may also be
 nested as an outer explicit input, with both MethodMap targets and evaluation
-order preserved. The fallback conditional-output form also supports one
-scalar-returning, no-output FNI call as an explicit input and scalar literal
-inputs through typed ConstantMap/TypedFrozenValues loads; the nested call
-executes before output reservation. Imported-provider source-free
+order preserved. The fallback conditional-output form also supports up to 13
+scalar-returning, no-output FNI CallSites as explicit inputs, or scalar literal
+inputs through typed ConstantMap/TypedFrozenValues loads. Nested calls execute
+in source argument order before output reservation, and source-free
+re-emission preserves that order across formal remapping. The two input forms
+cannot be mixed. Imported-provider source-free
 load/re-emission and Windows x64 success/partial-failure regressions remain
 unverified under the hold. The receiver is a direct parameter. One non-void
 call may reserve distinct local `init` Homes for each NativeOutput formal;
@@ -1426,9 +1428,9 @@ TypeSpec/D5 Body path, including non-first output-formal and named-input
 remapping; producer, source-free consumer, re-emission and Windows x64
 success/failure execution coverage, including NonNegative's zero-success
 boundary, is added but unverified under the hold. Other side-effecting
-argument expressions beyond one nested scalar/no-output FNI input, declared
-FNI defaults and constant domains beyond scalar literals, additional or
-repeated FNI calls beyond one nested-input/output pair, condition selectors
+argument expressions beyond the bounded nested-call forms, combinations of
+nested-call and ConstantMap inputs, declared FNI defaults and constant domains
+beyond scalar literals, additional outer FNI calls in one Body, condition selectors
 beyond NonZero/NonNegative, other Body control-flow shapes, nonreturning-call
 forms beyond the terminal subset and reservation cancellation remain open.
 Supervised native execution, private persistence and dependent runtime work
