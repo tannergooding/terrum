@@ -953,7 +953,125 @@ public static partial class ModuleCompiler
         {
             Reject("PF111 foreign-interface aggregate outputs require positive Copy evidence and a complete rootless layout closure.");
         }
+        if (!HasPrivateForeignInterfaceNominalTypeClosure(module,
+                reconstructed))
+        {
+            Reject("PF111 foreign-interface signatures and aggregate storage require complete private nominal type origins.");
+        }
         reconstructedInterfaces = reconstructed;
+    }
+
+    private static bool HasPrivateForeignInterfaceNominalTypeClosure(
+        Module module, ImmutableArray<BoundInterfaceDefinition> interfaces)
+    {
+        if (module.NominalTypeOrigins.IsDefault)
+        {
+            return false;
+        }
+
+        var visitedTypes = new HashSet<PrimitiveType>();
+        foreach (var definition in interfaces)
+        {
+            foreach (var member in definition.Members)
+            {
+                if (member.ResultType is not BoundInterfaceType resultType
+                    || resultType.Kind
+                        != BoundInterfaceTypeKind.Primitive
+                    || !Visit(resultType.PrimitiveType))
+                {
+                    return false;
+                }
+                if (!ForeignNativeInterfaceContract.TryGetReceiverType(
+                        member, module.NativePointerTypes,
+                        out var receiverType)
+                    || !Visit(receiverType))
+                {
+                    return false;
+                }
+                foreach (var parameter in member.Parameters)
+                {
+                    if (parameter.Type.Kind
+                            != BoundInterfaceTypeKind.Primitive
+                        || !Visit(parameter.Type.PrimitiveType))
+                    {
+                        return false;
+                    }
+                }
+                foreach (var output in member.NativeOutputContracts)
+                {
+                    if (!Visit(output.PointeeType))
+                    {
+                        return false;
+                    }
+                }
+            }
+        }
+        return true;
+
+        bool Visit(PrimitiveType type)
+        {
+            if (!visitedTypes.Add(type))
+            {
+                return true;
+            }
+            if (NativeFixedArrayTypes.IsType(type)
+                || CheckedReferenceTypes.IsType(type)
+                || ManagedClassTypes.IsManaged(type))
+            {
+                return false;
+            }
+            if (BoundEnumTypes.IsType(type))
+            {
+                return BoundEnumTypes.IsValidType(type,
+                        module.EnumDefinitions)
+                    && HasNominalOrigin(type);
+            }
+            if (NativePointerTypes.IsType(type))
+            {
+                return NativePointerTypeContract.IsValidType(type,
+                        module.NativePointerTypes)
+                    && Visit(module.NativePointerTypes[
+                        NativePointerTypes.Index(type)].PointeeType);
+            }
+            if (NativeFunctionPointerTypes.IsType(type))
+            {
+                if (!NativeFunctionPointerContract.IsValidType(type,
+                        module.NativeFunctionPointerSignatures))
+                {
+                    return false;
+                }
+                var signature = module.NativeFunctionPointerSignatures[
+                    NativeFunctionPointerTypes.Index(type)];
+                return Visit(signature.ReturnType)
+                    && signature.ParameterTypes.All(Visit)
+                    && signature.NativeParameters.All(parameter =>
+                        Visit(parameter.PointeeType));
+            }
+            if (type is PrimitiveType.Void
+                or PrimitiveType.NativeRawPointer
+                or PrimitiveType.NativeUtf16ZPointer
+                or PrimitiveType.NativeUtf8ZPointer
+                || PrimitiveTypeFacts.ScalarWidth(type) > 0)
+            {
+                return true;
+            }
+
+            var structureIndex = (int)type - 100;
+            if (structureIndex < 0
+                || (uint)structureIndex
+                    >= (uint)module.Structures.Length
+                || !HasNominalOrigin(type))
+            {
+                return false;
+            }
+
+            return module.Structures[structureIndex].Fields.All(field =>
+                Visit(field.Type));
+        }
+
+        bool HasNominalOrigin(PrimitiveType type)
+            => module.NominalTypeOrigins.Any(origin =>
+                origin.PrivateType == type);
     }
 
     private static bool HasPrivateForeignInterfaceCopyEvidence(
@@ -1550,8 +1668,9 @@ public static partial class ModuleCompiler
                 }
 
                 var expectedMember = expected.Members[memberOrdinal];
+                var actualMemberSource = actual.Members[memberOrdinal];
                 var actualMember = BoundTreeTraversal.RewriteTypes(
-                    actual.Members[memberOrdinal], type =>
+                    actualMemberSource, type =>
                     {
                         type = RemapType(type, provider.Structures,
                             consumer.Structures);
@@ -1567,7 +1686,12 @@ public static partial class ModuleCompiler
                         expectedMember, actualMember,
                         consumer.Structures,
                         consumer.NativeFunctionPointerSignatures,
-                        consumer.NativePointerTypes))
+                        consumer.NativePointerTypes)
+                    || !ArePrivateForeignInterfaceMemberTypeOriginsCompatible(
+                        expectedMember, actualMemberSource, consumer,
+                        provider, providerFunctionPointerMapping,
+                        providerNativePointerMapping,
+                        providerEnumMapping))
                 {
                     throw new ModuleContractException(
                         "Selected foreign-interface provider changed an expected member ABI, effect, output or dependency contract.");
@@ -1669,6 +1793,328 @@ public static partial class ModuleCompiler
             contract);
     }
 
+    private static bool ArePrivateForeignInterfaceMemberTypeOriginsCompatible(
+        BoundInterfaceMemberDefinition expected,
+        BoundInterfaceMemberDefinition actual, Module consumer,
+        CompilationReference provider,
+        ImmutableArray<PrimitiveType> providerFunctionPointerMapping,
+        ImmutableArray<PrimitiveType> providerNativePointerMapping,
+        ImmutableArray<int> providerEnumMapping)
+    {
+        if (expected.ResultType is not BoundInterfaceType expectedResult
+            || actual.ResultType is not BoundInterfaceType actualResult
+            || expected.Parameters.IsDefault
+            || actual.Parameters.IsDefault
+            || expected.Parameters.Length != actual.Parameters.Length
+            || expected.NativeOutputContracts.IsDefault
+            || actual.NativeOutputContracts.IsDefault
+            || expected.NativeOutputContracts.Length
+                != actual.NativeOutputContracts.Length)
+        {
+            return false;
+        }
+
+        var visited = new HashSet<(PrimitiveType Expected,
+            PrimitiveType Actual)>();
+        if (!AreTypesEquivalent(expectedResult.PrimitiveType,
+                actualResult.PrimitiveType))
+        {
+            return false;
+        }
+        for (var index = 0; index < expected.Parameters.Length; index++)
+        {
+            if (!AreTypesEquivalent(
+                    expected.Parameters[index].Type.PrimitiveType,
+                    actual.Parameters[index].Type.PrimitiveType))
+            {
+                return false;
+            }
+        }
+        for (var index = 0;
+            index < expected.NativeOutputContracts.Length; index++)
+        {
+            if (!AreTypesEquivalent(
+                    expected.NativeOutputContracts[index].PointeeType,
+                    actual.NativeOutputContracts[index].PointeeType))
+            {
+                return false;
+            }
+        }
+        return true;
+
+        bool AreTypesEquivalent(PrimitiveType expectedType,
+            PrimitiveType actualType)
+        {
+            if (!visited.Add((expectedType, actualType)))
+            {
+                return true;
+            }
+            if (NativeFixedArrayTypes.IsType(expectedType)
+                || NativeFixedArrayTypes.IsType(actualType)
+                || CheckedReferenceTypes.IsType(expectedType)
+                || CheckedReferenceTypes.IsType(actualType)
+                || ManagedClassTypes.IsManaged(expectedType)
+                || ManagedClassTypes.IsManaged(actualType))
+            {
+                return false;
+            }
+
+            if (NativePointerTypes.IsType(expectedType)
+                || NativePointerTypes.IsType(actualType))
+            {
+                if (!NativePointerTypes.IsType(expectedType)
+                    || !NativePointerTypes.IsType(actualType))
+                {
+                    return false;
+                }
+                var expectedIndex
+                    = NativePointerTypes.Index(expectedType);
+                var actualIndex = NativePointerTypes.Index(actualType);
+                if ((uint)expectedIndex
+                        >= (uint)consumer.NativePointerTypes.Length
+                    || (uint)actualIndex
+                        >= (uint)provider.NativePointerTypes.Length
+                    || (uint)actualIndex
+                        >= (uint)providerNativePointerMapping.Length
+                    || providerNativePointerMapping[actualIndex]
+                        != expectedType)
+                {
+                    return false;
+                }
+                var expectedPointer = consumer.NativePointerTypes[
+                    expectedIndex];
+                var actualPointer = provider.NativePointerTypes[
+                    actualIndex];
+                return expectedPointer.IsWritable
+                        == actualPointer.IsWritable
+                    && AreTypesEquivalent(expectedPointer.PointeeType,
+                        actualPointer.PointeeType);
+            }
+
+            if (NativeFunctionPointerTypes.IsType(expectedType)
+                || NativeFunctionPointerTypes.IsType(actualType))
+            {
+                if (!NativeFunctionPointerTypes.IsType(expectedType)
+                    || !NativeFunctionPointerTypes.IsType(actualType))
+                {
+                    return false;
+                }
+                var expectedIndex
+                    = NativeFunctionPointerTypes.Index(expectedType);
+                var actualIndex
+                    = NativeFunctionPointerTypes.Index(actualType);
+                if ((uint)expectedIndex
+                        >= (uint)consumer.NativeFunctionPointerSignatures
+                            .Length
+                    || (uint)actualIndex
+                        >= (uint)provider.NativeFunctionPointerSignatures
+                            .Length
+                    || (uint)actualIndex
+                        >= (uint)providerFunctionPointerMapping.Length
+                    || providerFunctionPointerMapping[actualIndex]
+                        != expectedType)
+                {
+                    return false;
+                }
+
+                var expectedSignature
+                    = consumer.NativeFunctionPointerSignatures[
+                        expectedIndex];
+                var actualSignature
+                    = provider.NativeFunctionPointerSignatures[
+                        actualIndex];
+                if (expectedSignature.CallingConvention
+                        != actualSignature.CallingConvention
+                    || expectedSignature.EffectsMask
+                        != actualSignature.EffectsMask
+                    || !expectedSignature.Selectors.SequenceEqual(
+                        actualSignature.Selectors)
+                    || !expectedSignature.OutputStates.SequenceEqual(
+                        actualSignature.OutputStates)
+                    || !expectedSignature.Dependencies.SequenceEqual(
+                        actualSignature.Dependencies)
+                    || expectedSignature.ParameterTypes.Length
+                        != actualSignature.ParameterTypes.Length
+                    || expectedSignature.NativeParameters.Length
+                        != actualSignature.NativeParameters.Length
+                    || !AreTypesEquivalent(
+                        expectedSignature.ReturnType,
+                        actualSignature.ReturnType))
+                {
+                    return false;
+                }
+                for (var parameterIndex = 0;
+                    parameterIndex
+                        < expectedSignature.ParameterTypes.Length;
+                    parameterIndex++)
+                {
+                    if (!AreTypesEquivalent(
+                            expectedSignature.ParameterTypes[
+                                parameterIndex],
+                            actualSignature.ParameterTypes[
+                                parameterIndex]))
+                    {
+                        return false;
+                    }
+                }
+                for (var parameterIndex = 0;
+                    parameterIndex
+                        < expectedSignature.NativeParameters.Length;
+                    parameterIndex++)
+                {
+                    var expectedParameter
+                        = expectedSignature.NativeParameters[
+                            parameterIndex];
+                    var actualParameter
+                        = actualSignature.NativeParameters[
+                            parameterIndex];
+                    if (expectedParameter.ParameterIndex
+                            != actualParameter.ParameterIndex
+                        || expectedParameter.Access
+                            != actualParameter.Access
+                        || expectedParameter.Retention
+                            != actualParameter.Retention
+                        || expectedParameter.Extent
+                            != actualParameter.Extent
+                        || !AreTypesEquivalent(
+                            expectedParameter.PointeeType,
+                            actualParameter.PointeeType))
+                    {
+                        return false;
+                    }
+                }
+                return true;
+            }
+
+            if (BoundEnumTypes.IsType(expectedType)
+                || BoundEnumTypes.IsType(actualType))
+            {
+                if (!BoundEnumTypes.IsType(expectedType)
+                    || !BoundEnumTypes.IsType(actualType))
+                {
+                    return false;
+                }
+                var expectedIndex = BoundEnumTypes.Index(expectedType);
+                var actualIndex = BoundEnumTypes.Index(actualType);
+                return (uint)expectedIndex
+                        < (uint)consumer.EnumDefinitions.Length
+                    && (uint)actualIndex
+                        < (uint)provider.EnumDefinitions.Length
+                    && (uint)actualIndex
+                        < (uint)providerEnumMapping.Length
+                    && providerEnumMapping[actualIndex] == expectedIndex
+                    && SamePrivateEnumContractShape(
+                        PrivateEnumExpectation(consumer.EnumDefinitions[
+                            expectedIndex]),
+                        provider.EnumDefinitions[actualIndex])
+                    && HasMatchingNominalOrigins(expectedType,
+                        actualType);
+            }
+
+            var expectedStructureIndex = (int)expectedType - 100;
+            var actualStructureIndex = (int)actualType - 100;
+            var isExpectedStructure
+                = expectedStructureIndex >= 0
+                    && (uint)expectedStructureIndex
+                        < (uint)consumer.Structures.Length;
+            var isActualStructure = actualStructureIndex >= 0
+                && (uint)actualStructureIndex
+                    < (uint)provider.Structures.Length;
+            if (isExpectedStructure || isActualStructure)
+            {
+                if (!isExpectedStructure || !isActualStructure)
+                {
+                    return false;
+                }
+
+                var expectedStructure = consumer.Structures[
+                    expectedStructureIndex];
+                var actualStructure = provider.Structures[
+                    actualStructureIndex];
+                if (!StringComparer.Ordinal.Equals(
+                        expectedStructure.Name, actualStructure.Name)
+                    || !SameStructure(expectedStructure,
+                        actualStructure, consumer.Structures,
+                        provider.Structures,
+                        consumer.NativeFunctionPointerSignatures,
+                        provider.NativeFunctionPointerSignatures,
+                        consumer.NativePointerTypes,
+                        provider.NativePointerTypes,
+                        consumer.NativeFixedArrayTypes,
+                        provider.NativeFixedArrayTypes,
+                        consumer.Classes, provider.Classes)
+                    || !HasMatchingNominalOrigins(expectedType,
+                        actualType)
+                    || expectedStructure.Fields.Length
+                        != actualStructure.Fields.Length)
+                {
+                    return false;
+                }
+
+                for (var fieldIndex = 0;
+                    fieldIndex < expectedStructure.Fields.Length;
+                    fieldIndex++)
+                {
+                    if (!AreTypesEquivalent(
+                            expectedStructure.Fields[fieldIndex].Type,
+                            actualStructure.Fields[fieldIndex].Type))
+                    {
+                        return false;
+                    }
+                }
+                return true;
+            }
+
+            return expectedType == actualType;
+        }
+
+        bool HasMatchingNominalOrigins(PrimitiveType expectedType,
+            PrimitiveType actualType)
+        {
+            var expectedOrigins = consumer.NominalTypeOrigins.Where(
+                    origin => origin.PrivateType == expectedType)
+                .ToArray();
+            var actualOrigins = provider.PrivateNominalTypeOrigins.Where(
+                    origin => origin.PrivateType == actualType)
+                .ToArray();
+            if (expectedOrigins.Length == 0 || actualOrigins.Length == 0)
+            {
+                return false;
+            }
+
+            foreach (var expectedOrigin in expectedOrigins)
+            {
+                var hasMatchingActual = expectedOrigin.OriginKind switch {
+                    BoundPrivateNominalOriginKind.OwnedDefinition =>
+                        actualOrigins.Any(actualOrigin =>
+                            actualOrigin.OriginKind
+                                == BoundPrivateNominalOriginKind
+                                    .OwnedDefinition
+                            && actualOrigin.UsingModuleIdentity
+                                == expectedOrigin.UsingModuleIdentity
+                            && actualOrigin.LocalDeclarationKey
+                                == expectedOrigin.LocalDeclarationKey),
+                    BoundPrivateNominalOriginKind.ImportedExpectation =>
+                        actualOrigins.Any(actualOrigin =>
+                            actualOrigin.OriginKind
+                                == BoundPrivateNominalOriginKind
+                                    .OwnedDefinition
+                            && actualOrigin.IsExported
+                            && actualOrigin.UsingModuleIdentity
+                                == expectedOrigin.SelectedModuleIdentity
+                            && actualOrigin.LocalDeclarationKey
+                                == expectedOrigin.SelectedExportKey),
+                    _ => false,
+                };
+                if (!hasMatchingActual)
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+    }
+
     private static PrivateForeignInterfaceMemberSurface
         CreatePrivateForeignInterfaceMemberSurface(
             BoundInterfaceMemberDefinition member,
@@ -1727,6 +2173,36 @@ public static partial class ModuleCompiler
                     static parameter => parameter.Type.PrimitiveType));
                 roots.AddRange(member.NativeOutputContracts.Select(
                     static output => output.PointeeType));
+            }
+        }
+        return roots.ToImmutable();
+    }
+
+    private static ImmutableArray<PrimitiveType>
+        PrivateForeignInterfaceModuleTypeRoots(Module module)
+    {
+        var roots = ImmutableArray.CreateBuilder<PrimitiveType>();
+        foreach (var definition in module.ForeignInterfaces)
+        {
+            foreach (var member in definition.Members)
+            {
+                if ((uint)member.ModuleFunctionIndex
+                        >= (uint)module.Functions.Length
+                    || module.Functions[member.ModuleFunctionIndex]
+                        .ForeignInterfaceMember
+                        is not PrivateForeignInterfaceMemberSurface surface)
+                {
+                    throw new ModuleContractException(
+                        "PF111 foreign-interface nominal closure has no member surface.");
+                }
+
+                roots.Add(surface.ResultType);
+                roots.Add(surface.ReceiverType);
+                roots.AddRange(surface.Formals.Select(
+                    static formal => formal.Type));
+                roots.AddRange(module.Functions[
+                        member.ModuleFunctionIndex].NativeOutputContracts
+                    .Select(static output => output.PointeeType));
             }
         }
         return roots.ToImmutable();

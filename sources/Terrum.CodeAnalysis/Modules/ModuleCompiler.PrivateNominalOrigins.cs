@@ -52,7 +52,9 @@ public static partial class ModuleCompiler
         var hasExplicitInputs = inputs is not null
             && (!inputs.Definitions.IsEmpty || !inputs.Imports.IsEmpty
                 || !inputs.EnumMembers.IsEmpty
-                || !inputs.SourceEnumDefinitions.IsEmpty);
+                || !inputs.SourceEnumDefinitions.IsEmpty
+                || !inputs.ForeignInterfaceDefinitions.IsEmpty
+                || !inputs.ForeignInterfaceImports.IsEmpty);
         var hasInheritedOrigins
             = !sourceProgram.PrivateNominalTypeOrigins.IsEmpty;
         var selectsRevision105 = !module.CheckedReferenceTypes.IsEmpty
@@ -78,6 +80,7 @@ public static partial class ModuleCompiler
                 module.CheckedReferenceTypes, module.Structures,
                 module.Classes, module.NativeFunctionPointerSignatures,
                 module.NativePointerTypes, module.NativeFixedArrayTypes)
+            && module.ForeignInterfaces.IsEmpty
             && !module.EnumDefinitions.Any(static definition =>
                 definition.Identity
                     is BoundEnumDeclarationIdentity.Source))
@@ -1355,6 +1358,10 @@ public static partial class ModuleCompiler
             {
                 AddType(root);
             }
+        }
+        foreach (var root in PrivateForeignInterfaceModuleTypeRoots(module))
+        {
+            AddType(root);
         }
 
         foreach (var item in module.Functions)

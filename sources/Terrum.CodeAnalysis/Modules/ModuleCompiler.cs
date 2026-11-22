@@ -6477,6 +6477,29 @@ public static partial class ModuleCompiler
                         PointeeType = RemapEnumType(output.PointeeType,
                             mapping),
                     })],
+                ForeignInterfaceMember
+                    = item.ForeignInterfaceMember is
+                        PrivateForeignInterfaceMemberSurface surface
+                    ? surface with {
+                        ResultType = RemapEnumType(surface.ResultType,
+                            mapping),
+                        ReceiverType = RemapEnumType(
+                            surface.ReceiverType, mapping),
+                        Formals = [.. surface.Formals.Select(formal =>
+                            formal with {
+                                Type = RemapEnumType(formal.Type,
+                                    mapping),
+                                DefaultValue =
+                                    formal.DefaultValue is
+                                        BoundConstant defaultValue
+                                        ? BoundTreeTraversal.RewriteTypes(
+                                            defaultValue,
+                                            type => RemapEnumType(type,
+                                                mapping))
+                                        : null,
+                            })],
+                    }
+                    : null,
                 ExpectedDirectNativeImport = expectedImport,
             });
         }
