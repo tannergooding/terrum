@@ -1056,7 +1056,8 @@ internal sealed class NativeCoreRegistrationTests
                     unsafe {
                         IProbe.Ping(receiver, value);
                         return IProbe.Read(receiver,
-                            second: IProbe.Nested(receiver, value),
+                            second: Identity(
+                                IProbe.Nested(receiver, value)),
                             first: first / divisor);
                     }
                 }
@@ -1069,6 +1070,7 @@ internal sealed class NativeCoreRegistrationTests
                             second: IProbe.Nested(receiver, value));
                     }
                 }
+                int32 Identity(int32 value) { return value; }
                 """), reference, options);
         Assert.That(consumerCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine,
@@ -1084,9 +1086,11 @@ internal sealed class NativeCoreRegistrationTests
         AssertInstructionOrder("NestedThenChecked", nestedFirst: true);
         AssertInstructionOrder("CheckedThenNested", nestedFirst: false);
         AssertSequenceInstructionOrder(consumerArtifact,
-            "SequenceNestedThenChecked", nestedFirst: true);
+            "SequenceNestedThenChecked", nestedFirst: true,
+            nestedCallCount: 2);
         AssertSequenceInstructionOrder(consumerArtifact,
-            "SequenceCheckedThenNested", nestedFirst: false);
+            "SequenceCheckedThenNested", nestedFirst: false,
+            nestedCallCount: 1);
 
         var loaded = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(schemaIdentity, consumerArtifact),
@@ -1105,9 +1109,11 @@ internal sealed class NativeCoreRegistrationTests
         AssertArgumentOrder(reloaded, "SequenceNestedThenChecked", 1, 0);
         AssertArgumentOrder(reloaded, "SequenceCheckedThenNested", 0, 1);
         AssertSequenceInstructionOrder(reemitted,
-            "SequenceNestedThenChecked", nestedFirst: true);
+            "SequenceNestedThenChecked", nestedFirst: true,
+            nestedCallCount: 2);
         AssertSequenceInstructionOrder(reemitted,
-            "SequenceCheckedThenNested", nestedFirst: false);
+            "SequenceCheckedThenNested", nestedFirst: false,
+            nestedCallCount: 1);
         var pointerInputCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse("""
                 int32 RejectPointerMix(ptr<void> receiver, int32 first,
@@ -1169,7 +1175,7 @@ internal sealed class NativeCoreRegistrationTests
         }
 
         static void AssertSequenceInstructionOrder(byte[] artifact,
-            string name, bool nestedFirst)
+            string name, bool nestedFirst, int nestedCallCount)
         {
             var tables = TrRmStructuralMetadataValidator
                 .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
@@ -1193,18 +1199,27 @@ internal sealed class NativeCoreRegistrationTests
             }
 
             var checkedArithmeticOffset = Array.IndexOf(code, (byte)0xC0);
-            Assert.That(callOffsets, Has.Count.EqualTo(3), name);
+            Assert.That(callOffsets,
+                Has.Count.EqualTo(nestedCallCount + 2), name);
             Assert.That(checkedArithmeticOffset,
                 Is.GreaterThanOrEqualTo(0), name);
+            var nestedCallOffsets = callOffsets.Skip(1)
+                .Take(nestedCallCount).ToArray();
             Assert.That(callOffsets[0],
-                Is.LessThan(Math.Min(callOffsets[1],
+                Is.LessThan(Math.Min(nestedCallOffsets[0],
                     checkedArithmeticOffset)), name);
             Assert.That(nestedFirst
-                    ? callOffsets[1] < checkedArithmeticOffset
-                    : checkedArithmeticOffset < callOffsets[1],
+                    ? nestedCallOffsets[^1] < checkedArithmeticOffset
+                    : checkedArithmeticOffset < nestedCallOffsets[0],
                 Is.True, name);
-            Assert.That(callOffsets[2],
-                Is.GreaterThan(Math.Max(callOffsets[1],
+            for (var index = 1; index < nestedCallOffsets.Length; index++)
+            {
+                Assert.That(nestedCallOffsets[index - 1],
+                    Is.LessThan(nestedCallOffsets[index]), name);
+            }
+
+            Assert.That(callOffsets[^1],
+                Is.GreaterThan(Math.Max(nestedCallOffsets[^1],
                     checkedArithmeticOffset)), name);
         }
 
