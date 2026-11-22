@@ -7023,9 +7023,9 @@ internal sealed class NativeCoreRegistrationTests
             "provider.module", schemaIdentity, 1, [typeExport]);
         var schema
             = TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft;
+        var index = new TrRmArtifactIndex(artifact, schema);
         var tables = TrRmStructuralMetadataValidator
-            .ValidateAndGetExecutionTables(new TrRmArtifactIndex(artifact,
-                schema));
+            .ValidateAndGetExecutionTables(index);
         var anchorTypeSpecRows = new List<int>();
         for (var typeSpecRow = 1;
             typeSpecRow <= tables.TypeSpecs.Count; typeSpecRow++)
@@ -7053,6 +7053,40 @@ internal sealed class NativeCoreRegistrationTests
         var callbackType = reference.Interfaces.Single().Members.Single()
             .Parameters.Single().Type.PrimitiveType;
         Assert.That(NativeFunctionPointerTypes.IsType(callbackType), Is.True);
+
+        Assert.That(index.TryGetSection(0x0011, out var typeSpecSection,
+            out var typeSpecCount), Is.True);
+        var malformedTypeSpecSection = typeSpecSection.ToArray();
+        var anchorTypeSpecBytes = tables.TypeSpecs
+            .GetTypeSpecBytes(anchorTypeSpecRows[0]).ToArray();
+        var anchorTypeSpecOffset = typeSpecSection.IndexOf(
+            anchorTypeSpecBytes);
+        Assert.That(anchorTypeSpecOffset, Is.GreaterThanOrEqualTo(0));
+        var interfaceMethodRow
+            = tables.InterfaceMethods.GetMethodDefRow(1);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            malformedTypeSpecSection.AsSpan(anchorTypeSpecOffset + 3,
+                sizeof(uint)), checked((uint)interfaceMethodRow));
+        var malformedSections = new List<TrRmSection>(index.SectionCount);
+        for (var sectionIndex = 0;
+            sectionIndex < index.SectionCount;
+            sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var bytes, out var count);
+            malformedSections.Add(kind == 0x0011
+                ? new TrRmSection(kind, flags,
+                    checked((uint)typeSpecCount), malformedTypeSpecSection)
+                : new TrRmSection(kind, flags, checked((uint)count),
+                    bytes.ToArray()));
+        }
+
+        var malformedAnchorArtifact
+            = TrRmArtifactWriter.Encode(malformedSections, schema);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    malformedAnchorArtifact), "provider.module", []));
 
         var caller = Compilation.CreateLibrary(SyntaxTree.Parse("""
             using Terrum.Interop;
