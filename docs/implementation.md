@@ -1467,8 +1467,8 @@ MethodMap, success-predicate, branch-target and reservation rejection are
 covered by regressions; they remain unverified under the hold. Malformed FNI
 OutputState regressions also cover duplicate success publication, retargeting a
 state to a non-output formal and swapping success/complement selectors; they
-remain unverified. Aggregate
-output consumption is being implemented under the distinct, unapproved AC1
+remain unverified. Aggregate output consumption is being implemented under
+the distinct, unapproved AC1
 selection. Its current slice carries nominal Copy evidence, checks closed
 rootless aggregate storage and Feature 2/13 closure, and emits/decodes
 success-correlated aggregate D5 reads with an explicit fallback. A
@@ -1480,6 +1480,16 @@ AC1 root, including A2 Copy-bearing TypeDef providers; a missing-Copy A2
 replacement and changed-layout regression, plus malformed D5/Home rejection,
 are added but remain unverified. Broader provider composition/remapping,
 native lowering and qualification remain open.
+Fallback conditional-output Bodies now admit multiple NativeOutput formals
+when they share one success/complement selector pair and Live/Vacant state
+partition. Each scalar or pointer output has a distinct initialization Home
+and a reservation validated against its formal; source-free loading retains
+the complete provider output contracts, including dependencies, while only
+the selected returned output is read on success. This subset excludes AC1
+aggregate cells. A mixed `int32`/typed-pointer output regression covers
+reversed named-formal mapping, source-free load/re-emission, mismatched
+selectors, and missing, duplicate and mismatched reservations; it remains
+unverified under the active hold.
 The artifact `build-trrm-library` route now admits an explicitly selected AC1
 consumer with AC1, PS1 and A2 providers. Its regression separates a PS1 FNI
 method provider from an A2 Copy-positive TypeDef provider and checks that the

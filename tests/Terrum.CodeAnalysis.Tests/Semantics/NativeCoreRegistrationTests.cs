@@ -1637,6 +1637,23 @@ internal sealed class NativeCoreRegistrationTests
                     When: Terrum.Interop.NativeOutputCondition.NonNegative)]
                 public unsafe int32 TryReadPair(int32 first, int32 second,
                     write ptr<int32> value);
+                [param(firstOutput): Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonNegative)]
+                [param(secondOutput): Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonNegative)]
+                public unsafe int32 TryReadTwo(ptr<void> backing,
+                    int32 value,
+                    write ptr<int32> firstOutput,
+                    [Terrum.CodeAnalysis.DependsOn(nameof(backing))]
+                    [Terrum.CodeAnalysis.ForwardsBacking(nameof(backing))]
+                    write ptr<ptr<int32>> secondOutput);
+                [param(firstOutput): Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonNegative)]
+                [param(secondOutput): Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                public unsafe int32 TryReadTwoMismatched(int32 value,
+                    write ptr<int32> firstOutput,
+                    write ptr<ptr<int32>> secondOutput);
                 public unsafe int32 GetIndex(int32 index);
                 public unsafe int32 Pair(int32 first, int32 second);
                 public unsafe void Touch();
@@ -1706,6 +1723,20 @@ internal sealed class NativeCoreRegistrationTests
                     }
                 }
 
+                int32 InvokeTwoOutputs(ptr<void> receiver,
+                    ptr<void> backing, int32 value, int32 fallback) {
+                    unsafe {
+                        init int32 firstOutput;
+                        init ptr<int32> secondOutput;
+                        int32 status = IProbe.TryReadTwo(receiver, backing,
+                            value,
+                            secondOutput: &init secondOutput,
+                            firstOutput: &init firstOutput);
+                        if (status >= 0) { return firstOutput; }
+                        return fallback;
+                    }
+                }
+
                 int32 InvokeMixedDirect(ptr<void> receiver, int32 first,
                     int32 second) {
                     unsafe {
@@ -1729,6 +1760,7 @@ internal sealed class NativeCoreRegistrationTests
                 consumerCompilation.Diagnostics));
         var consumerProgram = consumerCompilation.Program
             ?? throw new AssertionException("Expected a bound consumer.");
+        AssertTwoOutputs(consumerProgram, sourceArgumentOrder: true);
         var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
             consumerProgram, "consumer.module", schemaIdentity, 1, []);
         var schema
@@ -1844,10 +1876,66 @@ internal sealed class NativeCoreRegistrationTests
         Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
                 conditionalSequenceBody.GetRecord(4)[4..]),
             Is.EqualTo((ushort)3));
+        var twoOutputsRow = Enumerable.Range(1, consumerTables.Methods.Count)
+            .Single(row =>
+                consumerTables.Methods.GetName(row) == "InvokeTwoOutputs");
+        var twoOutputsBody = consumerTables.Bodies.GetRegisterBody(
+            consumerTables.Methods.GetBodyRow(twoOutputsRow),
+            consumerTables.Contracts.Count);
+        var twoOutputsCode = twoOutputsBody.GetBlockCode(0).ToArray();
+        Assert.That(twoOutputsBody.RecordCount, Is.EqualTo(5));
+        Assert.That(twoOutputsCode.Take(10), Is.EqualTo(new byte[] {
+            0xDF, 0, 2, 0, 0xDF, 0, 3, 0, 0x90, 1,
+        }));
+        var twoOutputsCallSite = twoOutputsBody.GetRecord(1);
+        Assert.That((twoOutputsCallSite[32], twoOutputsCallSite[33],
+                BinaryPrimitives.ReadUInt16LittleEndian(
+                    twoOutputsCallSite[34..])),
+            Is.EqualTo(((byte)2, (byte)6, (ushort)4)));
+        Assert.That((twoOutputsCallSite[36], twoOutputsCallSite[37],
+                BinaryPrimitives.ReadUInt16LittleEndian(
+                    twoOutputsCallSite[38..])),
+            Is.EqualTo(((byte)2, (byte)6, (ushort)5)));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+                twoOutputsBody.GetRecord(2)[6..]),
+            Is.EqualTo((ushort)4));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                twoOutputsBody.GetRecord(2)[8..]),
+            Is.EqualTo(3u));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+                twoOutputsBody.GetRecord(3)[6..]),
+            Is.EqualTo((ushort)5));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                twoOutputsBody.GetRecord(3)[8..]),
+            Is.EqualTo(4u));
+
+        var mismatchedCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                int32 InvokeMismatchedOutputs(ptr<void> receiver,
+                    int32 value, int32 fallback) {
+                    unsafe {
+                        init int32 firstOutput;
+                        init ptr<int32> secondOutput;
+                        int32 status = IProbe.TryReadTwoMismatched(
+                            receiver, value, &init firstOutput,
+                            &init secondOutput);
+                        if (status >= 0) { return firstOutput; }
+                        return fallback;
+                    }
+                }
+                """), reference, options);
+        Assert.That(mismatchedCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                mismatchedCompilation.Diagnostics));
+        Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.EmitStandard(
+                mismatchedCompilation.Program!, "mismatched-consumer.module",
+                schemaIdentity, 1, []));
 
         var loaded = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(schemaIdentity, consumerArtifact),
             "consumer.module", [providerInput]);
+        AssertTwoOutputs(loaded, sourceArgumentOrder: false);
         AssertComputedInputs(loaded);
         AssertMixedInputs(loaded);
         AssertConditionalSequence(loaded, sourceArgumentOrder: false);
@@ -1858,11 +1946,32 @@ internal sealed class NativeCoreRegistrationTests
         var reloaded = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(schemaIdentity,
                 reemittedArtifact), "consumer.module", [providerInput]);
+        AssertTwoOutputs(reloaded, sourceArgumentOrder: false);
         AssertComputedInputs(reloaded);
         AssertMixedInputs(reloaded);
         AssertConditionalSequence(reloaded, sourceArgumentOrder: false);
         AssertMixedReturnInputs(reloaded, "InvokeMixedDirect");
         AssertMixedReturnInputs(reloaded, "InvokeMixedSequence");
+
+        var outputBodyRow = consumerTables.Methods.GetBodyRow(twoOutputsRow);
+        AssertRejectsMalformedOutputReservation(
+            RewriteOutputReservation(
+                consumerArtifact, outputBodyRow, 3,
+                static record => BinaryPrimitives.WriteUInt32LittleEndian(
+                    record.AsSpan(8), 0)),
+            "missing-output-formal");
+        AssertRejectsMalformedOutputReservation(
+            RewriteOutputReservation(
+                consumerArtifact, outputBodyRow, 3,
+                static record => BinaryPrimitives.WriteUInt32LittleEndian(
+                    record.AsSpan(8), 2)),
+            "duplicate-output-formal");
+        AssertRejectsMalformedOutputReservation(
+            RewriteOutputReservation(
+                consumerArtifact, outputBodyRow, 3,
+                static record => BinaryPrimitives.WriteUInt16LittleEndian(
+                    record.AsSpan(6), 3)),
+            "mismatched-output-home");
 
         var checkedOptions = new CompilationOptions {
             NativeCoreRegistration = native,
@@ -1989,6 +2098,121 @@ internal sealed class NativeCoreRegistrationTests
             Assert.That(second.Right, Is.TypeOf<BoundConstant>());
             Assert.That(selectedCall.Arguments[2],
                 Is.TypeOf<BoundNativeOutputReservation>());
+        }
+
+        static void AssertTwoOutputs(BoundProgram program,
+            bool sourceArgumentOrder)
+        {
+            var function = program.Functions.Single(
+                static candidate => candidate.Name == "InvokeTwoOutputs");
+            BoundCall? foreignCall = null;
+            Assert.That(BoundTreeTraversal.VisitExpressions(function.Body,
+                expression =>
+                {
+                    if (expression is BoundCall call
+                        && call.ForeignInterfaceCall?.Member.Name
+                            == "TryReadTwo")
+                    {
+                        foreignCall = call;
+                    }
+                }), Is.True);
+            var selectedCall = foreignCall
+                ?? throw new AssertionException("Expected an FNI call.");
+            Assert.That(selectedCall.Arguments.Length, Is.EqualTo(4));
+            Assert.That(selectedCall.ParameterIndex(0), Is.EqualTo(0));
+            Assert.That(selectedCall.Arguments[0], Is.TypeOf<BoundRead>());
+            Assert.That(selectedCall.ParameterIndex(1), Is.EqualTo(1));
+            Assert.That(selectedCall.Arguments[1], Is.TypeOf<BoundRead>());
+            Assert.That(selectedCall.ParameterIndex(2),
+                Is.EqualTo(sourceArgumentOrder ? 3 : 2));
+            Assert.That(selectedCall.ParameterIndex(3),
+                Is.EqualTo(sourceArgumentOrder ? 2 : 3));
+            var firstReservation = (BoundNativeOutputReservation)
+                selectedCall.Arguments[sourceArgumentOrder ? 3 : 2];
+            var secondReservation = (BoundNativeOutputReservation)
+                selectedCall.Arguments[sourceArgumentOrder ? 2 : 3];
+            Assert.That(firstReservation.Variable, Is.EqualTo(4));
+            Assert.That(firstReservation.PointeeType,
+                Is.EqualTo(PrimitiveType.Int32));
+            Assert.That(secondReservation.Variable, Is.EqualTo(5));
+            Assert.That(NativePointerTypes.IsType(
+                    secondReservation.PointeeType),
+                Is.True);
+            Assert.That(secondReservation.PointeeType,
+                Is.Not.EqualTo(firstReservation.PointeeType));
+            Assert.That(function.Variables[4].IsInitializationLocal,
+                Is.True);
+            Assert.That(function.Variables[5].IsInitializationLocal,
+                Is.True);
+            var outputReads = new HashSet<int>();
+            Assert.That(BoundTreeTraversal.VisitExpressions(function.Body,
+                expression =>
+                {
+                    if (expression is BoundRead read
+                        && read.Variable is 4 or 5)
+                    {
+                        _ = outputReads.Add(read.Variable);
+                    }
+                }), Is.True);
+            Assert.That(outputReads, Is.EquivalentTo(new[] { 4 }));
+            var outputContracts = selectedCall.ForeignInterfaceCall!
+                .NativeOutputContracts.OrderBy(
+                    static contract => contract.FormalOrdinal).ToArray();
+            Assert.That(outputContracts.Length, Is.EqualTo(2));
+            Assert.That(outputContracts[1].Dependencies.Length,
+                Is.EqualTo(1));
+            Assert.That(outputContracts[1].Dependencies[0],
+                Is.EqualTo(new NativeOutputDependency(2,
+                    NativeOutputDependencySourceKind.Formal,
+                    NativeOutputDependencyRelationship.Forward,
+                    NativeOutputPublicationPhase.NormalCompletion, 3, 0)));
+        }
+
+        void AssertRejectsMalformedOutputReservation(byte[] malformed,
+            string identity)
+        {
+            Assert.Throws<InvalidDataException>(() =>
+                TrRmExecutableCompiler.LoadStandard(
+                    new TrRmStandardArtifactInput(schemaIdentity, malformed),
+                    identity, [providerInput]));
+        }
+
+        byte[] RewriteOutputReservation(byte[] artifact, int bodyRow,
+            int recordIndex, Action<byte[]> updateRecord)
+        {
+            var index = new TrRmArtifactIndex(artifact, schema);
+            Assert.That(index.TryGetSection(0x20, out var bodyBytes,
+                out var bodyCount), Is.True);
+            var bodyTable = new TrRmBodyTableReader(bodyBytes, bodyCount);
+            var rows = new ReadOnlyMemory<byte>[bodyCount];
+            for (var row = 1; row <= bodyCount; row++)
+            {
+                rows[row - 1] = bodyTable.GetRow(row).ToArray();
+            }
+
+            var bodyBytesForRow = rows[bodyRow - 1].ToArray();
+            var bodyReader = new TrRmRegisterBodyReader(bodyBytesForRow,
+                schema: schema);
+            var record = bodyReader.GetRecord(recordIndex).ToArray();
+            var recordOffset = bodyBytesForRow.AsSpan().IndexOf(record);
+            Assert.That(recordOffset, Is.GreaterThanOrEqualTo(0));
+            updateRecord(record);
+            record.AsSpan().CopyTo(bodyBytesForRow.AsSpan(recordOffset));
+            rows[bodyRow - 1] = bodyBytesForRow;
+
+            var rewrittenBodies = TrRmVariableTableWriter.EncodeBodies(rows);
+            var sections = new List<TrRmSection>(index.SectionCount);
+            for (var sectionIndex = 0;
+                sectionIndex < index.SectionCount;
+                sectionIndex++)
+            {
+                index.GetSection(sectionIndex, out var kind, out var flags,
+                    out var bytes, out var count);
+                sections.Add(new TrRmSection(kind, flags, (uint)count,
+                    kind == 0x20 ? rewrittenBodies : bytes.ToArray()));
+            }
+
+            return TrRmArtifactWriter.EncodeDevelopment(sections);
         }
 
         static void AssertConditionalSequence(BoundProgram program,
