@@ -12,6 +12,74 @@ namespace Terrum.CodeAnalysis.Tests.Semantics.Frontend;
 [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
 internal sealed class ConversionFrontendProjectionTests
 {
+    [Test]
+    public void ReaderMatchesCompleteScalarConversionPairMatrix()
+    {
+        string[] typeNames = [
+            "", "int32", "uint32", "int64", "uint64", "bool", "char16",
+            "float32", "float64",
+        ];
+        for (var sourceType = 1; sourceType <= 8; sourceType++)
+        {
+            for (var targetType = 1; targetType <= 8; targetType++)
+            {
+                var sourceName = typeNames[sourceType];
+                var targetName = typeNames[targetType];
+                var cast = $"{targetName}(value)";
+                var text = $"public {targetName} Convert({sourceName} value) => {cast};";
+                var source = SourceText.From(text);
+                var words = new int[ScalarFrontendHost.WordCount];
+                words[0] = 87;
+                words[1] = 1;
+                words[2] = 1;
+                words[5] = targetType;
+                words[6] = 1;
+                words[7] = sourceType;
+                words[9] = text.IndexOf("Convert", StringComparison.Ordinal);
+                words[10] = "Convert".Length;
+                var parameter = text.IndexOf("value", StringComparison.Ordinal);
+                words[11] = parameter;
+                words[12] = "value".Length;
+                words[37] = 2;
+                words[38] = -1;
+                words[39] = 1;
+                words[40] = -1;
+                words[41] = 1;
+                var castStart = text.IndexOf(cast, StringComparison.Ordinal);
+                var argumentStart = castStart + targetName.Length + 1;
+                words[42] = 0;
+                words[43] = sourceType;
+                words[44] = argumentStart;
+                words[45] = "value".Length;
+                words[46] = 1;
+                words[47] = -1;
+                words[50] = 83;
+                words[51] = targetType;
+                words[52] = castStart;
+                words[53] = cast.Length;
+                words[54] = 0;
+                words[55] = -1;
+
+                // Bit n represents target type code n.
+                var targetMask = sourceType is 1 or 2 or 3 or 4 or 6
+                    ? 0x1DE : sourceType is 7 or 8 ? 0x19E : 0;
+                var expected = (targetMask & (1 << targetType)) != 0;
+                if (expected)
+                {
+                    Assert.That(ScalarFrontendHost.ReadResult(source,
+                        Encode(words)).IsValid, Is.True,
+                        $"{sourceName} -> {targetName}");
+                }
+                else
+                {
+                    Assert.Throws<ArgumentException>(() =>
+                        ScalarFrontendHost.ReadResult(source, Encode(words)),
+                        $"{sourceName} -> {targetName}");
+                }
+            }
+        }
+    }
+
     [TestCase(7,"0",0)]
     [TestCase(7,"55296",55296)]
     [TestCase(7,"0xFFFF",65535)]
