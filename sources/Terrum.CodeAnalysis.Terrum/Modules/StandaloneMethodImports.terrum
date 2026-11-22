@@ -105,10 +105,8 @@ int32 CatalogStandaloneProviderImports(int32 rootCount)
             || Host.StandaloneResolvedImportOrder.Length
                 <= importCount + importSectionCount
             || importCount + importSectionCount > importCapacity - 1
-            || !TryValidateStandaloneVariableTableIndex(artifactStart,
-                artifactLength, importStart,
-                Host.StandaloneSectionLengths[importEntry],
-                importSectionCount, 12, 1))
+            || int64(Host.StandaloneSectionLengths[importEntry])
+                != int64(importSectionCount) * 12)
         {
             return 3;
         }
@@ -414,9 +412,7 @@ int32 ValidateStandaloneProviderModuleRefs(int32 artifactOrdinal,
         return 0;
     }
     if (moduleRefStart == 0
-        || !TryValidateStandaloneVariableTableIndex(artifactStart,
-            artifactLength, moduleRefStart, moduleRefLength,
-            moduleRefCount, 12, 1))
+        || int64(moduleRefLength) != int64(moduleRefCount) * 12)
     {
         return 3;
     }
@@ -520,9 +516,8 @@ int32 ValidateStandaloneCallableMethod(int32 artifactOrdinal,
         = Host.StandaloneSectionStarts[signatureEntry];
     int32 signatureSectionLength
         = Host.StandaloneSectionLengths[signatureEntry];
-    if (!TryValidateStandaloneVariableTableIndex(artifactStart,
-            artifactLength, methodSectionStart, methodSectionLength,
-            methodCount, 28, methodDefRow))
+    if (int64(methodSectionLength) != int64(methodCount) * 28
+        || int64(signatureSectionLength) != int64(signatureCount) * 24)
     {
         return 3;
     }
@@ -578,13 +573,6 @@ int32 ValidateStandaloneCallableMethod(int32 artifactOrdinal,
         return 2;
     }
 
-    if (!TryValidateStandaloneVariableTableIndex(artifactStart,
-            artifactLength, signatureSectionStart,
-            signatureSectionLength, signatureCount, 24,
-            int32(methodSigRow)))
-    {
-        return 3;
-    }
     int32 signatureOffset = signatureSectionStart
         + ((int32(methodSigRow) - 1) * 24);
     init uint32 resultTypeSpecRef;
