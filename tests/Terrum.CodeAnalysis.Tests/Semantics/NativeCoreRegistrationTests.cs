@@ -3850,40 +3850,71 @@ internal sealed class NativeCoreRegistrationTests
         var leafReference = TrRmExecutableCompiler.CreateStandardReference(
             new TrRmStandardArtifactInput(schemaIdentity, leafArtifact),
             "leaf.module", []);
-        var middleCompilation = Compilation.CreateLibrary(
-            SyntaxTree.Parse(middleSource), leafReference, options);
-        Assert.That(middleCompilation.HasErrors, Is.False,
-            string.Join(Environment.NewLine,
-                middleCompilation.Diagnostics));
-        var middleProgram = middleCompilation.Program
-            ?? throw new AssertionException(
-                "Expected a bound middle FNI provider.");
-        var middleMember = middleProgram.Interfaces.Single(
-            static definition => definition.QualifiedName == "IMiddle")
-            .Members.Single();
-        var middleArtifact = TrRmExecutableCompiler.EmitStandard(
-            middleProgram, "middle.module", schemaIdentity, 1, [
-                new TrRmSourceTypeExport("", "Middle",
-                    "middle/Middle") {
-                    FieldExports = [
-                        new TrRmSourceFieldExport("Child",
-                            "middle/Middle.Child"),
-                    ],
-                },
-                new TrRmSourceTypeExport("", "IMiddle",
-                    "middle/IMiddle") {
-                    GenericArity = 0,
-                    InterfaceMethodExports = [
-                        new TrRmSourceInterfaceMethodExport(
-                            middleMember.SourceInputOrdinal,
-                            middleMember.SourceDeclarationSpan,
-                            "middle/IMiddle.Read"),
-                    ],
-                },
-            ]);
+        byte[] EmitMiddleProvider(string source)
+        {
+            var compilation = Compilation.CreateLibrary(
+                SyntaxTree.Parse(source), leafReference, options);
+            Assert.That(compilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            var program = compilation.Program
+                ?? throw new AssertionException(
+                    "Expected a bound middle FNI provider.");
+            var member = program.Interfaces.Single(
+                static definition => definition.QualifiedName == "IMiddle")
+                .Members.Single();
+            return TrRmExecutableCompiler.EmitStandard(program,
+                "middle.module", schemaIdentity, 1, [
+                    new TrRmSourceTypeExport("", "Middle",
+                        "middle/Middle") {
+                        FieldExports = [
+                            new TrRmSourceFieldExport("Child",
+                                "middle/Middle.Child"),
+                        ],
+                    },
+                    new TrRmSourceTypeExport("", "IMiddle",
+                        "middle/IMiddle") {
+                        GenericArity = 0,
+                        InterfaceMethodExports = [
+                            new TrRmSourceInterfaceMethodExport(
+                                member.SourceInputOrdinal,
+                                member.SourceDeclarationSpan,
+                                "middle/IMiddle.Read"),
+                        ],
+                    },
+                ]);
+        }
+
+        var middleArtifact = EmitMiddleProvider(middleSource);
+        const string relocatedMiddleSource = """
+            using Terrum.Interop;
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Prefix {
+                public uint32 Marker;
+            }
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Middle {
+                public Leaf Child;
+            }
+            [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+            [ForeignNativeInterface(VTableByteOffset: uint32(8))]
+            public interface IMiddle {
+                public unsafe int32 Read(ptr<Middle> middle);
+            }
+            """;
+        var relocatedMiddleArtifact
+            = EmitMiddleProvider(relocatedMiddleSource);
         var middleTables = TrRmStructuralMetadataValidator
             .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
                 middleArtifact, schema));
+        var relocatedMiddleTables = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
+                relocatedMiddleArtifact, schema));
+        Assert.That(middleTables.Exports.TryGetDefinitionForKey(1,
+            "middle/Middle", out var middleDefinitionId), Is.True);
+        Assert.That(relocatedMiddleTables.Exports.TryGetDefinitionForKey(1,
+            "middle/Middle", out var relocatedMiddleDefinitionId), Is.True);
+        Assert.That(relocatedMiddleDefinitionId,
+            Is.Not.EqualTo(middleDefinitionId));
         var nestedLeafImport = Enumerable.Range(1,
                 middleTables.Imports.Count)
             .Single(importRow => {
@@ -3922,6 +3953,62 @@ internal sealed class NativeCoreRegistrationTests
                 "Expected a bound nested aggregate consumer.");
         var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
             consumerProgram, "consumer.module", schemaIdentity, 1, []);
+        var relocatedProviderReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    consumerArtifact), "consumer.module", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        leafArtifact),
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        relocatedMiddleArtifact),
+                ]);
+        var relocatedMiddle = relocatedProviderReference.Structures.Single(
+            static structure => structure.Name == "Middle");
+        Assert.That(relocatedMiddle.StandardTypeOrigin!.Provider
+            .ModuleIdentity, Is.EqualTo("middle.module"));
+        Assert.That(relocatedMiddle.StandardTypeOrigin.DefinitionId,
+            Is.EqualTo(relocatedMiddleDefinitionId));
+        var relocatedConsumerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                int32 Invoke(ptr<void> receiver, ptr<Middle> middle) {
+                    unsafe { return IMiddle.Read(receiver, middle); }
+                }
+                """), relocatedProviderReference);
+        Assert.That(relocatedConsumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                relocatedConsumerCompilation.Diagnostics));
+        var relocatedReemissionCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(""), relocatedProviderReference);
+        Assert.That(relocatedReemissionCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                relocatedReemissionCompilation.Diagnostics));
+        var relocatedReemittedArtifact = TrRmExecutableCompiler.EmitStandard(
+            relocatedReemissionCompilation.Program
+                ?? throw new AssertionException(
+                    "Expected a relocated source-free FNI consumer."),
+            "relocated.forwarder", schemaIdentity, 1, []);
+        var reloadedRelocatedReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    relocatedReemittedArtifact), "relocated.forwarder", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        relocatedMiddleArtifact),
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        leafArtifact),
+                ]);
+        Assert.That(reloadedRelocatedReference.Structures.Single(
+            static structure => structure.Name == "Middle")
+            .StandardTypeOrigin!.DefinitionId,
+            Is.EqualTo(relocatedMiddleDefinitionId));
+        var reloadedRelocatedCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                int32 Invoke(ptr<void> receiver, ptr<Middle> middle) {
+                    unsafe { return IMiddle.Read(receiver, middle); }
+                }
+                """), reloadedRelocatedReference);
+        Assert.That(reloadedRelocatedCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                reloadedRelocatedCompilation.Diagnostics));
         var consumerTables = TrRmStructuralMetadataValidator
             .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
                 consumerArtifact, schema));

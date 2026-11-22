@@ -1328,9 +1328,15 @@ provider's structure identity in the FNI ABI view. This bounded
 producer/consumer slice supports scalar, raw-pointer and inline-struct fields;
 nested inline-struct provider TypeDefs, compatible provider TypeDef-row
 relocation, a two-provider nested aggregate chain, missing/duplicate/misselected
-and requirement-mismatched Import rejection, incompatible-layout replacement
-and source-free re-emission regressions are added but unverified under the
-active hold.
+Imports, wrong provider ModuleRefs, expected-TypeDef-owner substitution,
+invalid ModuleRef owners, requirement mismatches, incompatible-layout
+replacement and source-free re-emission regressions are added but unverified
+under the active hold. Source emission retains the exact selected provider
+ExportKey and refuses ambiguous aliases; a regression selects the non-first
+A2 key. The nested chain is also rebound with provider order reversed and a
+compatible Middle TypeDef/FieldDef/Layout row shift, then source-free
+re-emitted and reloaded. Co-located Module and broader raw-row/dependency
+composition permutations remain open.
 Typed-pointer/function-pointer aggregate fields and full
 Import/Export/PS1/Contract/graph row remapping remain open. FNI call
 lowering now stages the receiver before source-order arguments, maps explicit
