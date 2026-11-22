@@ -2205,6 +2205,8 @@ public static partial class TrRmExecutableCompiler
             return false;
         }
 
+        // The Body bitwise operations are equivalent only when a skipped
+        // logical right operand has no effects or failure.
         if (binary.Type == PrimitiveType.Bool
             && binary.Left.Type == PrimitiveType.Bool
             && binary.Right.Type == PrimitiveType.Bool
@@ -2223,6 +2225,19 @@ public static partial class TrRmExecutableCompiler
                 binary.Left.Type, binary.Operator, out _))
         {
             opcode = 0xC2;
+            return true;
+        }
+
+        if (binary.Type == PrimitiveType.Bool
+            && binary.Left.Type == PrimitiveType.Bool
+            && binary.Right.Type == PrimitiveType.Bool
+            && (binary.Operator is TokenKind.AmpersandAmpersand
+                or TokenKind.PipePipe)
+            && !ForeignInterfaceScalarInputExpressionMayThrow(
+                binary.Right))
+        {
+            opcode = binary.Operator == TokenKind.AmpersandAmpersand
+                ? (byte)0x30 : (byte)0x31;
             return true;
         }
 

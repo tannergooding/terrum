@@ -1389,10 +1389,14 @@ register inputs, including literal arguments within nested calls.
 FNI scalar expression inputs support wrapping integer arithmetic, checked
 integer negation/add/subtract/multiply/divide/remainder, and floating unary and
 binary operations over Home-rooted trees with typed scalar ConstantMap leaves.
-They also support integer/Boolean AND, OR and XOR, type-directed integer
-bitwise and Boolean logical NOT, plus Boolean equality and inequality through
-C2. Integer and float32/float64 comparisons use C2 relation results followed
-by C3 predicate selection; inequality uses the relation mask that includes
+They also support integer/Boolean bitwise AND, OR and XOR, type-directed
+integer bitwise and Boolean logical NOT, plus Boolean equality and inequality
+through C2. Boolean `&&` and `||` are admitted when their right operand is a
+supported pure, non-throwing scalar tree; they use the corresponding Boolean
+bitwise opcode because eager evaluation is then observationally equivalent.
+Source-free decoding canonicalizes those expressions to Boolean `&` and `|`.
+Integer and float32/float64 comparisons use C2 relation results followed by
+C3 predicate selection; inequality uses the relation mask that includes
 unordered floating results, and source-free loading rejects unsupported
 predicate masks. Shift expressions use the registered short Body opcodes and
 retain any fixed/native integer type on a Home-rooted count.
@@ -1403,7 +1407,7 @@ source domain before the `uint32` scalar Body bridge; other integer
 expression operators remain open.
 Direct-return, mixed-sequence, and fallback conditional-output Bodies can
 combine nested CallSite inputs with non-throwing wrapping integer,
-integer/Boolean bitwise operations, Boolean logical NOT and
+integer/Boolean bitwise operations, Boolean logical NOT and `&&`/`||`,
 equality/inequality, total conversions, numeric comparisons, or floating
 expressions;
 nested-call order is preserved, and conditional-output input preparation

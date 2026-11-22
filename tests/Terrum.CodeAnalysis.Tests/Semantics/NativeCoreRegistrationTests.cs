@@ -653,6 +653,12 @@ internal sealed class NativeCoreRegistrationTests
     [TestCase("bool", "value & true", (byte)0x30,
         TokenKind.Ampersand, false, SourceArithmeticProfile.Development,
         BoundIntegerOverflowBehavior.Checked, (ushort)2, false)]
+    [TestCase("bool", "value && true", (byte)0x30,
+        TokenKind.Ampersand, false, SourceArithmeticProfile.Development,
+        BoundIntegerOverflowBehavior.Checked, (ushort)2, false)]
+    [TestCase("bool", "value || false", (byte)0x31,
+        TokenKind.Pipe, false, SourceArithmeticProfile.Development,
+        BoundIntegerOverflowBehavior.Checked, (ushort)2, false)]
     [TestCase("bool", "value == true", (byte)0xC2,
         TokenKind.EqualsEquals, false, SourceArithmeticProfile.Development,
         BoundIntegerOverflowBehavior.Checked, (ushort)2, false)]
@@ -875,6 +881,67 @@ internal sealed class NativeCoreRegistrationTests
                 Assert.That(binary.Right.Type, Is.EqualTo(expectedType));
             }
         }
+    }
+
+    [Test]
+    public void StandardForeignNativeInterfaceRejectsFallibleShortCircuitRightOperands()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-native-interface-parameter-surface-1";
+        var registration = CreateRegistration(
+            includeForeignNativeInterface: true);
+        var options = new CompilationOptions {
+            NativeCoreRegistration = registration,
+            LayoutCoreRegistration = CreateLayoutRegistration(registration),
+            SourceArithmeticProfile = SourceArithmeticProfile.Development,
+        };
+        var providerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Terrum.Interop;
+                [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+                [ForeignNativeInterface(VTableByteOffset: uint32(0))]
+                public interface IProbe {
+                    public unsafe bool Read(bool value);
+                }
+                """), options);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+        var providerProgram = providerCompilation.Program
+            ?? throw new AssertionException("Expected a bound provider.");
+        var providerInterface = providerProgram.Interfaces.Single();
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerProgram, "provider.module", schemaIdentity, 1, [
+                new TrRmSourceTypeExport("", "IProbe", "provider/IProbe") {
+                    GenericArity = 0,
+                    InterfaceMethodExports = [.. providerInterface.Members
+                        .Select(member =>
+                            new TrRmSourceInterfaceMethodExport(
+                                member.SourceInputOrdinal,
+                                member.SourceDeclarationSpan,
+                                $"provider/IProbe.{member.Name}"))],
+                },
+            ]);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, providerArtifact),
+            "provider.module", []);
+        var consumerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                bool RejectShortCircuit(ptr<void> receiver, bool value,
+                    int32 divisor) {
+                    unsafe {
+                        return IProbe.Read(receiver,
+                            value && (int32(1) / divisor != 0));
+                    }
+                }
+                """), reference, options);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.EmitStandard(
+                consumerCompilation.Program!, "consumer.module",
+                schemaIdentity, 1, []));
     }
 
     [Test]
