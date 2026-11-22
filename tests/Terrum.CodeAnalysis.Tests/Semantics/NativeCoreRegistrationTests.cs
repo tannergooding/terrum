@@ -2310,7 +2310,7 @@ internal sealed class NativeCoreRegistrationTests
 
         const string schemaIdentity
             = "trrm/1-draft-foreign-native-interface-aggregate-output-consumption-1";
-        const string source = """
+        const string providerSource = """
             using Terrum.Interop;
             [Blittable] [Layout(LayoutKind.Sequential)]
             public struct Inner {
@@ -2337,6 +2337,8 @@ internal sealed class NativeCoreRegistrationTests
                         this, nameof(source))]
                     write ptr<Payload> value);
             }
+            """;
+        const string consumerSource = """
             Payload InvokePayload(ptr<void> receiver, ptr<int32> source,
                 ptr<int32> tagSource, Payload fallback) {
                 init Payload value;
@@ -2356,18 +2358,20 @@ internal sealed class NativeCoreRegistrationTests
             LayoutCoreRegistration = CreateLayoutRegistration(native),
             NativeOutputCoreRegistration = output,
         };
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
-            options);
-        Assert.That(compilation.HasErrors, Is.False,
-            string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = compilation.Program
+        var providerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(providerSource), options);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+        var providerProgram = providerCompilation.Program
             ?? throw new AssertionException("Expected a bound provider.");
-        var members = program.Interfaces.Single().Members;
+        var members = providerProgram.Interfaces.Single().Members;
         Assert.That(members.Length, Is.EqualTo(2));
         var getTag = members.Single(member => member.Name == "GetTag");
         var tryReadPayload = members.Single(
             member => member.Name == "TryReadPayload");
-        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerProgram,
             "provider.module", schemaIdentity, 1, [
                 new TrRmSourceTypeExport("", "Inner", "provider/Inner") {
                     FieldExports = [
@@ -2401,31 +2405,70 @@ internal sealed class NativeCoreRegistrationTests
         var schema
             = TrRmArtifactSchema
                 .ForeignNativeInterfaceAggregateOutputConsumptionDraft;
-        var tables = TrRmStructuralMetadataValidator
+        var providerTables = TrRmStructuralMetadataValidator
             .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
-                artifact, schema));
+                providerArtifact, schema));
         foreach (var exportKey in new[] {
             "provider/Inner",
             "provider/Payload",
         })
         {
-            Assert.That(tables.Exports.TryGetDefinitionForKey(1, exportKey,
+            Assert.That(providerTables.Exports.TryGetDefinitionForKey(1, exportKey,
                 out var definition), Is.True);
             var typeDef = checked((int)(definition & 0x00FF_FFFF));
-            Assert.That(tables.TypeDefs.HasDeclaredCopy(typeDef), Is.True);
+            Assert.That(providerTables.TypeDefs.HasDeclaredCopy(typeDef),
+                Is.True);
         }
-        Assert.That(TrRmFeatureManifestValidator.Requires(tables.Features,
-            tables.Modules, 1,
+        Assert.That(TrRmFeatureManifestValidator.Requires(
+            providerTables.Features, providerTables.Modules, 1,
             TrRmFeatureTableReader.RootlessNativeValuesFeatureId, schema),
             Is.True);
-        Assert.That(TrRmFeatureManifestValidator.Requires(tables.Features,
-            tables.Modules, 1,
+        Assert.That(TrRmFeatureManifestValidator.Requires(
+            providerTables.Features, providerTables.Modules, 1,
             TrRmFeatureTableReader.LayoutQueriesFeatureId, schema), Is.True);
 
-        var method = Enumerable.Range(1, tables.Methods.Count).Single(row =>
-            tables.Methods.GetName(row) == "InvokePayload");
-        var body = tables.Bodies.GetRegisterBody(
-            tables.Methods.GetBodyRow(method), tables.Contracts.Count);
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            providerArtifact);
+        var providerReference
+            = TrRmExecutableCompiler.CreateStandardReference(providerInput,
+                "provider.module", []);
+        var consumerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(consumerSource), providerReference, options);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumerProgram = consumerCompilation.Program
+            ?? throw new AssertionException("Expected a bound consumer.");
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            consumerProgram, "consumer.module", schemaIdentity, 1, []);
+        var consumerTables = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
+                consumerArtifact, schema));
+        foreach (var exportKey in new[] {
+            "provider/Inner",
+            "provider/Payload",
+        })
+        {
+            var importRow = Enumerable.Range(1,
+                    consumerTables.Imports.Count).Single(row =>
+                    (consumerTables.Imports
+                        .GetExpectedDefinitionForImportRow(row) >> 24)
+                        == 0x13
+                    && StringComparer.Ordinal.Equals(
+                        consumerTables.Imports.GetBindingForImportRow(row)
+                            .ExportKey, exportKey));
+            var expectedDefinition = consumerTables.Imports
+                .GetExpectedDefinitionForImportRow(importRow);
+            Assert.That(consumerTables.TypeDefs.HasDeclaredCopy(
+                checked((int)(expectedDefinition & 0x00FF_FFFF))), Is.True);
+        }
+
+        var method = Enumerable.Range(1, consumerTables.Methods.Count)
+            .Single(row =>
+                consumerTables.Methods.GetName(row) == "InvokePayload");
+        var body = consumerTables.Bodies.GetRegisterBody(
+            consumerTables.Methods.GetBodyRow(method),
+            consumerTables.Contracts.Count);
         Assert.That(body.BlockCount, Is.EqualTo(3));
         Assert.That(body.RecordCount, Is.EqualTo(5));
         Assert.That(body.MethodCount, Is.EqualTo(2));
@@ -2445,15 +2488,21 @@ internal sealed class NativeCoreRegistrationTests
             = BinaryPrimitives.ReadUInt16LittleEndian(outputHome[2..]);
         var outputTypeToken = BinaryPrimitives.ReadUInt32LittleEndian(
             body.TypeMap[outputTypeMapIndex * sizeof(uint)..]);
-        Assert.That(outputTypeToken >> 24, Is.EqualTo(0x13u));
+        Assert.That(outputTypeToken >> 24, Is.EqualTo(0x1Cu));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+            body.MethodMap) >> 24, Is.EqualTo(0x1Cu));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+            body.MethodMap[sizeof(uint)..]) >> 24, Is.EqualTo(0x1Cu));
         Assert.That(body.GetBlockCode(1).ToArray(),
             Is.EqualTo(new byte[] { 0xD5, 0, 4, 0, 0x17, 0 }));
         Assert.That(body.GetBlockCode(2).ToArray(),
             Is.EqualTo(new byte[] { 0xD5, 0, 3, 0, 0x17, 0 }));
 
-        var loaded = TrRmExecutableCompiler.LoadStandard(
-            new TrRmStandardArtifactInput(schemaIdentity, artifact),
-            "provider.module", []);
+        var consumerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            consumerArtifact);
+        var providers = new[] { providerInput };
+        var loaded = TrRmExecutableCompiler.LoadStandard(consumerInput,
+            "consumer.module", providers);
         var function = loaded.Functions.Single(function =>
             function.Name == "InvokePayload");
         var conditional = function.Body.Statements.OfType<BoundIf>().Single();
@@ -2464,7 +2513,7 @@ internal sealed class NativeCoreRegistrationTests
         Assert.That(((BoundRead)outputReturn.Value).Variable,
             Is.EqualTo(function.ParameterCount));
         Assert.That(((BoundRead)fallbackReturn.Value).Variable,
-            Is.EqualTo(2));
+            Is.EqualTo(3));
         var image = NativeEmitter.EmitLibrary(loaded, ["InvokePayload"],
             NativeRuntimePolicy.FailFast);
         Assert.That(image[..2], Is.EqualTo(new byte[] {
@@ -2474,6 +2523,15 @@ internal sealed class NativeCoreRegistrationTests
             Is.EqualTo(24));
         await AssertNestedAggregatePayloadOutputAsync(image, "InvokePayload")
             .ConfigureAwait(true);
+        var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(loaded,
+            "consumer.module", schemaIdentity, 1, []);
+        var reloaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                reemittedArtifact), "consumer.module", providers);
+        var reloadedImage = NativeEmitter.EmitLibrary(reloaded,
+            ["InvokePayload"], NativeRuntimePolicy.FailFast);
+        await AssertNestedAggregatePayloadOutputAsync(reloadedImage,
+            "InvokePayload").ConfigureAwait(true);
     }
 
     [Test]

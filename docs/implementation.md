@@ -1358,8 +1358,9 @@ nested as an outer explicit input, with both MethodMap targets and evaluation
 order preserved. The conditional-output form now also supports one
 scalar-returning, no-output FNI call as an explicit input, using direct
 parameter inputs and executing the nested call before output reservation; its
-source-free/Windows x64 success and partial-failure regression remains
-unverified under the hold. The receiver is a direct parameter. One non-void call may
+imported-provider load/re-emission and Windows x64 success/partial-failure
+regression remains unverified under the hold. The receiver is a direct
+parameter. One non-void call may
 reserve distinct local `init` Homes for each NativeOutput formal; source-use 6
 and reservation records use the receiver-first flattened ordinal
 (`formal n` maps to input `n+1`). Source-free decoding restores the
