@@ -1208,8 +1208,11 @@ internal sealed class NativeCoreRegistrationTests
                 }
             }
 
-            int32 GetIndexViaFni(ptr<void> receiver, ptr<int32> source) {
-                unsafe { return IProbe.GetIndex(receiver, source); }
+            int32 GetIndexViaFni(ptr<void> receiver, ptr<int32> source,
+                int32 bias) {
+                unsafe {
+                    return IProbe.GetIndexWithBias(receiver, source, bias);
+                }
             }
 
             int32 InvokeNestedLocalValueSequence(ptr<void> receiver,
@@ -1217,7 +1220,7 @@ internal sealed class NativeCoreRegistrationTests
                 unsafe {
                     IProbe.TouchValue(receiver, 42);
                     return IProbe.UseIndex(receiver,
-                        GetIndexViaFni(receiver, source));
+                        GetIndexViaFni(receiver, source, 7));
                 }
             }
 
@@ -1553,8 +1556,11 @@ internal sealed class NativeCoreRegistrationTests
                 }
             }
 
-            int32 GetIndexViaFni(ptr<void> receiver, ptr<int32> source) {
-                unsafe { return IProbe.GetIndex(receiver, source); }
+            int32 GetIndexViaFni(ptr<void> receiver, ptr<int32> source,
+                int32 bias) {
+                unsafe {
+                    return IProbe.GetIndexWithBias(receiver, source, bias);
+                }
             }
 
             int32 InvokeNestedLocalValueSequence(ptr<void> receiver,
@@ -1562,7 +1568,7 @@ internal sealed class NativeCoreRegistrationTests
                 unsafe {
                     IProbe.TouchValue(receiver, 42);
                     return IProbe.UseIndex(receiver,
-                        GetIndexViaFni(receiver, source));
+                        GetIndexViaFni(receiver, source, 7));
                 }
             }
 
@@ -2874,8 +2880,8 @@ internal sealed class NativeCoreRegistrationTests
             Assert.That(body.BlockCount, Is.EqualTo(1));
             Assert.That(body.RecordCount, Is.EqualTo(4));
             Assert.That(body.MethodCount, Is.EqualTo(3));
-            Assert.That(body.ConstantCount, Is.EqualTo(1));
-            Assert.That(body.ConstantMap.Length, Is.EqualTo(8));
+            Assert.That(body.ConstantCount, Is.EqualTo(2));
+            Assert.That(body.ConstantMap.Length, Is.EqualTo(16));
             for (var methodIndex = 0; methodIndex < body.MethodCount;
                 methodIndex++)
             {
@@ -3341,15 +3347,19 @@ internal sealed class NativeCoreRegistrationTests
                         helperCall[10..]),
                     BinaryPrimitives.ReadUInt32LittleEndian(
                         helperCall[12..])),
-                Is.EqualTo(((byte)0, (byte)1, (ushort)2, 2u)));
+                Is.EqualTo(((byte)0, (byte)1, (ushort)3, 3u)));
             Assert.That((helperCall[20], helperCall[21],
                     BinaryPrimitives.ReadUInt16LittleEndian(
                         helperCall[22..]),
                     helperCall[24], helperCall[25],
                     BinaryPrimitives.ReadUInt16LittleEndian(
-                        helperCall[26..])),
+                        helperCall[26..]),
+                    helperCall[28], helperCall[29],
+                    BinaryPrimitives.ReadUInt16LittleEndian(
+                        helperCall[30..])),
                 Is.EqualTo(((byte)2, (byte)1, (ushort)0,
-                    (byte)2, (byte)1, (ushort)1)));
+                    (byte)2, (byte)1, (ushort)1,
+                    (byte)1, (byte)1, (ushort)2)));
             Assert.That((outerCall[5],
                     BinaryPrimitives.ReadUInt16LittleEndian(
                         outerCall[10..]),
@@ -3361,11 +3371,11 @@ internal sealed class NativeCoreRegistrationTests
                         outerCall[26..])),
                 Is.EqualTo(((byte)1, (ushort)0,
                     (byte)2, (byte)1, (ushort)0,
-                    (byte)1, (byte)1, (ushort)2)));
+                    (byte)1, (byte)1, (ushort)3)));
             Assert.That(body.GetBlockCode(0).ToArray(),
                 Is.EqualTo(new byte[] {
-                    0x16, 1, 0x90, 1, 0x90, 2, 0x90, 3,
-                    0x17, 0,
+                    0x16, 1, 0x16, 0x12,
+                    0x90, 1, 0x90, 2, 0x90, 3, 0x17, 0,
                 }));
         }
 
@@ -4453,11 +4463,15 @@ internal sealed class NativeCoreRegistrationTests
                 }), Is.True);
             Assert.That(localCalls, Has.Count.EqualTo(1));
             Assert.That(foreignCalls, Has.Count.EqualTo(2));
-            Assert.That(program.Functions[localCalls.Single().Function].Name,
+            var localCall = localCalls.Single();
+            Assert.That(program.Functions[localCall.Function].Name,
                 Is.EqualTo("GetIndexViaFni"));
-            Assert.That(localCalls.Single().Arguments.Select(argument =>
-                    ((BoundRead)argument).Variable),
-                Is.EqualTo(new[] { 0, 1 }));
+            Assert.That(((BoundRead)localCall.Arguments[0]).Variable,
+                Is.EqualTo(0));
+            Assert.That(((BoundRead)localCall.Arguments[1]).Variable,
+                Is.EqualTo(1));
+            Assert.That(((BoundConstant)localCall.Arguments[2]).Value,
+                Is.EqualTo(7L));
 
             var prefixCall = foreignCalls.Single(call =>
                 GetMemberName(call) == "TouchValue");
@@ -4481,9 +4495,11 @@ internal sealed class NativeCoreRegistrationTests
                 }), Is.True);
             Assert.That(helperCalls, Has.Count.EqualTo(1));
             Assert.That(GetMemberName(helperCalls.Single()),
-                Is.EqualTo("GetIndex"));
-            Assert.That(((BoundRead)helperCalls.Single().Arguments.Single())
+                Is.EqualTo("GetIndexWithBias"));
+            Assert.That(((BoundRead)helperCalls.Single().Arguments[0])
                 .Variable, Is.EqualTo(1));
+            Assert.That(((BoundRead)helperCalls.Single().Arguments[1])
+                .Variable, Is.EqualTo(2));
             foreach (var call in foreignCalls.Concat(helperCalls))
             {
                 Assert.That(call.ForeignInterfaceCall!.Member
