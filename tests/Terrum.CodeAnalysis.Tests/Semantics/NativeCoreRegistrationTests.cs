@@ -8174,6 +8174,7 @@ internal sealed class NativeCoreRegistrationTests
             public interface IExtra {
                 public unsafe int32 Prefix(ptr<float64> input,
                     int32 offset = 2);
+                public unsafe int32 Wide(int64 value);
             }
 
             [Terrum.Interop.NativeCallable]
@@ -8251,6 +8252,65 @@ internal sealed class NativeCoreRegistrationTests
                 out var shiftedDefaultRow), Is.True);
         AssertDefaultPayload(providerTables, providerDefaultRow);
         AssertDefaultPayload(shiftedProviderTables, shiftedDefaultRow);
+
+        byte[] RewriteSection(byte[] source, ushort sectionKind,
+            byte[] replacement, int replacementCount)
+        {
+            var sourceIndex = new TrRmArtifactIndex(source, schema);
+            var sections = new List<TrRmSection>(
+            sourceIndex.SectionCount);
+            for (var sectionIndex = 0;
+            sectionIndex < sourceIndex.SectionCount;
+            sectionIndex++)
+            {
+            sourceIndex.GetSection(sectionIndex, out var kind,
+                out var flags, out var bytes, out var count);
+            sections.Add(kind == sectionKind
+                ? new TrRmSection(kind, flags,
+                    checked((uint)replacementCount), replacement)
+                : new TrRmSection(kind, flags,
+                    checked((uint)count), bytes.ToArray()));
+            }
+
+            return TrRmArtifactWriter.Encode(sections, schema);
+        }
+
+        var shiftedProviderIndex = new TrRmArtifactIndex(
+            shiftedProviderArtifact, schema);
+        Assert.That(shiftedProviderIndex.TryGetSection(0x0018,
+            out var parameterBytes, out var parameterCount), Is.True);
+        var wideMethodRow = Enumerable.Range(1,
+            shiftedProviderTables.Methods.Count)
+            .Single(row =>
+            shiftedProviderTables.Methods.GetName(row) == "Wide");
+        var wideSignatureRow
+            = shiftedProviderTables.Methods.GetSignature(wideMethodRow);
+        var (wideParameterStart, wideParameterCount)
+            = shiftedProviderTables.Signatures.GetParamRange(
+            wideSignatureRow);
+        Assert.That(wideParameterCount, Is.EqualTo(1));
+        var wideTypeSpecRef = shiftedProviderTables.Parameters.GetTypeSpec(
+            wideParameterStart);
+        var readSignatureRow
+            = shiftedProviderTables.Methods.GetSignature(shiftedReadRow);
+        var (readParameterStart, readParameterCount)
+            = shiftedProviderTables.Signatures.GetParamRange(
+            readSignatureRow);
+        Assert.That(readParameterCount, Is.EqualTo(2));
+        var mismatchedParameterBytes = parameterBytes.ToArray();
+        var readDefaultParameterOffset = checked(
+            (readParameterStart * 16) + 8);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            mismatchedParameterBytes.AsSpan(
+            readDefaultParameterOffset, sizeof(uint)),
+            wideTypeSpecRef);
+        var mismatchedDefaultArtifact = RewriteSection(
+            shiftedProviderArtifact, 0x0018,
+            mismatchedParameterBytes, parameterCount);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                mismatchedDefaultArtifact), "provider.module", []));
 
         var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
             providerArtifact);
