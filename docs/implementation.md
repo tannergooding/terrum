@@ -1371,19 +1371,23 @@ direct scalar or pointer Homes, typed scalar ConstantMap values, or nested
 scalar/no-output FNI CallSites; child calls execute before the local helper
 CallSite in source order, and its result is consumed by the final FNI call.
 The receiver is a direct parameter. Direct-call inputs may use scalar locals
-initialized from parameter reads; sequence inputs use direct parameters or
-typed scalar ConstantMap values. Direct non-void and void-call Bodies can also
-nest up to 13 scalar-returning, no-output FNI CallSites as explicit inputs
+initialized from parameter reads; sequence prefixes and nested calls use direct
+parameters or typed scalar ConstantMap values, while final-call inputs may
+also use bounded scalar arithmetic. Direct non-void and void-call Bodies can
+also nest up to 13 scalar-returning, no-output FNI CallSites as explicit inputs
 (12 when staged locals reserve register 1), plus scalar literal inputs through
 typed ConstantMap/TypedFrozenValues loads, including literal arguments within nested
 calls and mixed outer inputs. The fallback conditional-output form separately
 supports up to 13 total nested-call results and distinct scalar-literal
 register inputs, including literal arguments within nested calls.
-Direct FNI return-call arguments also support wrapping integer arithmetic and
-floating unary/binary operations over Home-rooted scalar expression trees with
-typed scalar ConstantMap leaves; source-free decoding restores the operation
-tree. A regression is added but remains unverified under the active hold.
-Checked integer arithmetic and arithmetic inside call sequences remain open.
+Direct FNI return calls and final calls in mixed call sequences also accept
+wrapping integer arithmetic and floating unary/binary operations over
+Home-rooted scalar expression trees with typed scalar ConstantMap leaves when
+they are not mixed with nested CallSite inputs; source-free decoding restores
+the operation tree. Regressions are added but remain unverified under the
+active hold.
+Checked integer arithmetic, nested-call expression interleaving, and
+arithmetic in conditional-output Bodies remain open.
 For conditional-output Bodies, nested calls execute in source argument order
 before output reservation, and source-free re-emission preserves that order
 across formal remapping. Imported-provider source-free

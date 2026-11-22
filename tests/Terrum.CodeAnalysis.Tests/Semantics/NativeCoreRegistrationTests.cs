@@ -590,9 +590,8 @@ internal sealed class NativeCoreRegistrationTests
             Assert.That(BoundTreeTraversal.VisitExpressions(invoke.Body,
                 expression =>
                 {
-                    if (expression is BoundCall {
-                            ForeignInterfaceCall: not null,
-                        } call)
+                    if (expression is BoundCall call
+                        && call.ForeignInterfaceCall?.Member.Name == "Read")
                     {
                         foreignCall = call;
                     }
@@ -616,37 +615,40 @@ internal sealed class NativeCoreRegistrationTests
 
     [TestCase("int32", "value + 1", (byte)0x21, TokenKind.Plus, false,
         SourceArithmeticProfile.Release, BoundIntegerOverflowBehavior.Wrapping,
-        (ushort)2)]
+        (ushort)2, false)]
     [TestCase("int32", "value - 1", (byte)0x22, TokenKind.Minus, false,
         SourceArithmeticProfile.Release, BoundIntegerOverflowBehavior.Wrapping,
-        (ushort)2)]
+        (ushort)2, false)]
     [TestCase("int32", "value * 2", (byte)0x23, TokenKind.Star, false,
         SourceArithmeticProfile.Release, BoundIntegerOverflowBehavior.Wrapping,
-        (ushort)2)]
+        (ushort)2, false)]
+    [TestCase("int32", "value + 1", (byte)0x21, TokenKind.Plus, false,
+        SourceArithmeticProfile.Release, BoundIntegerOverflowBehavior.Wrapping,
+        (ushort)2, true)]
     [TestCase("float64", "-value", (byte)0x26, TokenKind.Minus, true,
         SourceArithmeticProfile.Development, BoundIntegerOverflowBehavior.Checked,
-        (ushort)1)]
+        (ushort)1, false)]
     [TestCase("float64", "value + 1", (byte)0x27, TokenKind.Plus, false,
         SourceArithmeticProfile.Development, BoundIntegerOverflowBehavior.Checked,
-        (ushort)2)]
+        (ushort)2, false)]
     [TestCase("float64", "value - 1", (byte)0x28, TokenKind.Minus, false,
         SourceArithmeticProfile.Development, BoundIntegerOverflowBehavior.Checked,
-        (ushort)2)]
+        (ushort)2, false)]
     [TestCase("float64", "value * 2", (byte)0x29, TokenKind.Star, false,
         SourceArithmeticProfile.Development, BoundIntegerOverflowBehavior.Checked,
-        (ushort)2)]
+        (ushort)2, false)]
     [TestCase("float64", "value / 2", (byte)0x2A, TokenKind.Slash, false,
         SourceArithmeticProfile.Development, BoundIntegerOverflowBehavior.Checked,
-        (ushort)2)]
+        (ushort)2, false)]
     [TestCase("float64", "value % 2", (byte)0x2B, TokenKind.Percent, false,
         SourceArithmeticProfile.Development, BoundIntegerOverflowBehavior.Checked,
-        (ushort)2)]
-    public void StandardForeignNativeInterfaceDirectCallAcceptsScalarExpressionInputs(
+        (ushort)2, false)]
+    public void StandardForeignNativeInterfaceCallsAcceptScalarExpressionInputs(
         string type, string expression, byte expectedOpcode,
         TokenKind expectedOperator, bool unary,
         SourceArithmeticProfile arithmeticProfile,
         BoundIntegerOverflowBehavior expectedOverflowBehavior,
-        ushort expectedInputRegister)
+        ushort expectedInputRegister, bool withVoidCallPrefix)
     {
         const string schemaIdentity
             = "trrm/1-draft-foreign-native-interface-parameter-surface-1";
@@ -664,6 +666,7 @@ internal sealed class NativeCoreRegistrationTests
                 [ForeignNativeInterface(VTableByteOffset: uint32(0))]
                 public interface IProbe {
                     public unsafe {{type}} Read({{type}} value);
+                    public unsafe void Touch();
                 }
                 """), options);
         Assert.That(providerCompilation.HasErrors, Is.False,
@@ -671,17 +674,15 @@ internal sealed class NativeCoreRegistrationTests
                 providerCompilation.Diagnostics));
         var providerProgram = providerCompilation.Program
             ?? throw new AssertionException("Expected a bound provider.");
-        var providerMember = providerProgram.Interfaces.Single()
-            .Members.Single();
+        var providerInterface = providerProgram.Interfaces.Single();
         var providerTypeExport = new TrRmSourceTypeExport("", "IProbe",
             "provider/IProbe") {
             GenericArity = 0,
-            InterfaceMethodExports = [
-                new TrRmSourceInterfaceMethodExport(
-                    providerMember.SourceInputOrdinal,
-                    providerMember.SourceDeclarationSpan,
-                    "provider/IProbe.Read"),
-            ],
+            InterfaceMethodExports = [.. providerInterface.Members.Select(
+                member => new TrRmSourceInterfaceMethodExport(
+                    member.SourceInputOrdinal,
+                    member.SourceDeclarationSpan,
+                    $"provider/IProbe.{member.Name}"))],
         };
         var providerArtifact = TrRmExecutableCompiler.EmitStandard(
             providerProgram, "provider.module", schemaIdentity, 1,
@@ -690,10 +691,16 @@ internal sealed class NativeCoreRegistrationTests
             providerArtifact);
         var reference = TrRmExecutableCompiler.CreateStandardReference(
             providerInput, "provider.module", []);
+        var prefixCall = withVoidCallPrefix
+            ? "IProbe.Touch(receiver);"
+            : "";
         var consumerCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse($$"""
                 {{type}} InvokeComputed(ptr<void> receiver, {{type}} value) {
-                    unsafe { return IProbe.Read(receiver, {{expression}}); }
+                    unsafe {
+                        {{prefixCall}}
+                        return IProbe.Read(receiver, {{expression}});
+                    }
                 }
                 """), reference, options);
         Assert.That(consumerCompilation.HasErrors, Is.False,
@@ -719,7 +726,7 @@ internal sealed class NativeCoreRegistrationTests
         Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(body.MethodMap)
                 >> 24,
             Is.EqualTo(0x1Cu));
-        var callSite = body.GetRecord(1);
+        var callSite = body.GetRecord(withVoidCallPrefix ? 2 : 1);
         Assert.That((callSite[24], callSite[25],
                 BinaryPrimitives.ReadUInt16LittleEndian(callSite[26..])),
             Is.EqualTo(((byte)1, (byte)1, expectedInputRegister)));
@@ -753,9 +760,8 @@ internal sealed class NativeCoreRegistrationTests
             Assert.That(BoundTreeTraversal.VisitExpressions(function.Body,
                 expression =>
                 {
-                    if (expression is BoundCall {
-                            ForeignInterfaceCall: not null,
-                        } call)
+                    if (expression is BoundCall call
+                        && call.ForeignInterfaceCall?.Member.Name == "Read")
                     {
                         foreignCall = call;
                     }
