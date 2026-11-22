@@ -1695,6 +1695,7 @@ internal sealed class NativeCoreRegistrationTests
                 int32 InvokeConditionalSequence(ptr<void> receiver,
                     int32 first, int32 second, int32 fallback) {
                     unsafe {
+                        IProbe.Touch(receiver);
                         IProbe.TouchPair(receiver,
                             second: second, first: first);
                         init int32 value;
@@ -1787,6 +1788,8 @@ internal sealed class NativeCoreRegistrationTests
             consumerTables.Methods.GetBodyRow(mixedSequenceRow),
             consumerTables.Contracts.Count);
         AssertMixedReturnCallSite(mixedSequenceBody.GetRecord(3));
+        AssertConditionalSequence(consumerProgram,
+            sourceArgumentOrder: true);
         var conditionalSequenceRow = Enumerable.Range(
                 1, consumerTables.Methods.Count)
             .Single(row =>
@@ -1798,41 +1801,56 @@ internal sealed class NativeCoreRegistrationTests
                 consumerTables.Contracts.Count);
         var conditionalSequenceCode
             = conditionalSequenceBody.GetBlockCode(0).ToArray();
-        Assert.That(conditionalSequenceBody.RecordCount, Is.EqualTo(5));
-        Assert.That(conditionalSequenceBody.MethodCount, Is.EqualTo(2));
-        Assert.That(conditionalSequenceCode.Take(2),
-            Is.EqualTo(new byte[] { 0x90, 1 }));
-        Assert.That(conditionalSequenceCode[2], Is.EqualTo((byte)0xDF));
-        Assert.That((conditionalSequenceCode[6],
-                conditionalSequenceCode[7]),
-            Is.EqualTo(((byte)0x90, (byte)2)));
+        Assert.That(conditionalSequenceBody.RecordCount, Is.EqualTo(6));
+        Assert.That(conditionalSequenceBody.MethodCount, Is.EqualTo(3));
+        Assert.That(conditionalSequenceCode.Take(4),
+            Is.EqualTo(new byte[] { 0x90, 1, 0x90, 2 }));
+        Assert.That(conditionalSequenceCode[4], Is.EqualTo((byte)0xDF));
+        Assert.That((conditionalSequenceCode[8],
+                conditionalSequenceCode[9]),
+            Is.EqualTo(((byte)0x90, (byte)3)));
         Assert.That(conditionalSequenceBody.GetRecord(1)[5],
             Is.EqualTo((byte)0));
         Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
                 conditionalSequenceBody.GetRecord(1)[12..]),
-            Is.EqualTo(3u));
-        Assert.That((conditionalSequenceBody.GetRecord(1)[24],
-                conditionalSequenceBody.GetRecord(1)[25],
+            Is.EqualTo(1u));
+        Assert.That((conditionalSequenceBody.GetRecord(1)[20],
+                conditionalSequenceBody.GetRecord(1)[21],
                 BinaryPrimitives.ReadUInt16LittleEndian(
-                    conditionalSequenceBody.GetRecord(1)[26..])),
-            Is.EqualTo(((byte)2, (byte)1, (ushort)1)));
-        Assert.That((conditionalSequenceBody.GetRecord(1)[28],
-                conditionalSequenceBody.GetRecord(1)[29],
-                BinaryPrimitives.ReadUInt16LittleEndian(
-                    conditionalSequenceBody.GetRecord(1)[30..])),
-            Is.EqualTo(((byte)2, (byte)1, (ushort)2)));
+                    conditionalSequenceBody.GetRecord(1)[22..])),
+            Is.EqualTo(((byte)2, (byte)1, (ushort)0)));
         Assert.That(conditionalSequenceBody.GetRecord(2)[5],
+            Is.EqualTo((byte)0));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                conditionalSequenceBody.GetRecord(2)[12..]),
+            Is.EqualTo(3u));
+        Assert.That((conditionalSequenceBody.GetRecord(2)[20],
+                conditionalSequenceBody.GetRecord(2)[21],
+                BinaryPrimitives.ReadUInt16LittleEndian(
+                    conditionalSequenceBody.GetRecord(2)[22..])),
+            Is.EqualTo(((byte)2, (byte)1, (ushort)0)));
+        Assert.That((conditionalSequenceBody.GetRecord(2)[24],
+                conditionalSequenceBody.GetRecord(2)[25],
+                BinaryPrimitives.ReadUInt16LittleEndian(
+                    conditionalSequenceBody.GetRecord(2)[26..])),
+            Is.EqualTo(((byte)2, (byte)1, (ushort)1)));
+        Assert.That((conditionalSequenceBody.GetRecord(2)[28],
+                conditionalSequenceBody.GetRecord(2)[29],
+                BinaryPrimitives.ReadUInt16LittleEndian(
+                    conditionalSequenceBody.GetRecord(2)[30..])),
+            Is.EqualTo(((byte)2, (byte)1, (ushort)2)));
+        Assert.That(conditionalSequenceBody.GetRecord(3)[5],
             Is.EqualTo((byte)1));
         Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
-                conditionalSequenceBody.GetRecord(3)[4..]),
-            Is.EqualTo((ushort)2));
+                conditionalSequenceBody.GetRecord(4)[4..]),
+            Is.EqualTo((ushort)3));
 
         var loaded = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(schemaIdentity, consumerArtifact),
             "consumer.module", [providerInput]);
         AssertComputedInputs(loaded);
         AssertMixedInputs(loaded);
-        AssertConditionalSequence(loaded);
+        AssertConditionalSequence(loaded, sourceArgumentOrder: false);
         AssertMixedReturnInputs(loaded, "InvokeMixedDirect");
         AssertMixedReturnInputs(loaded, "InvokeMixedSequence");
         var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(loaded,
@@ -1842,7 +1860,7 @@ internal sealed class NativeCoreRegistrationTests
                 reemittedArtifact), "consumer.module", [providerInput]);
         AssertComputedInputs(reloaded);
         AssertMixedInputs(reloaded);
-        AssertConditionalSequence(reloaded);
+        AssertConditionalSequence(reloaded, sourceArgumentOrder: false);
         AssertMixedReturnInputs(reloaded, "InvokeMixedDirect");
         AssertMixedReturnInputs(reloaded, "InvokeMixedSequence");
 
@@ -1973,7 +1991,8 @@ internal sealed class NativeCoreRegistrationTests
                 Is.TypeOf<BoundNativeOutputReservation>());
         }
 
-        static void AssertConditionalSequence(BoundProgram program)
+        static void AssertConditionalSequence(BoundProgram program,
+            bool sourceArgumentOrder)
         {
             var function = program.Functions.Single(
                 static candidate => candidate.Name
@@ -1991,16 +2010,20 @@ internal sealed class NativeCoreRegistrationTests
                 }), Is.True);
             Assert.That(calls.Select(static call =>
                     call.ForeignInterfaceCall!.Member.Name),
-                Is.EqualTo(new[] { "TouchPair", "TryReadPair" }));
-            Assert.That(calls[0].Arguments.Length, Is.EqualTo(2));
-            Assert.That(calls[0].Arguments[0], Is.TypeOf<BoundRead>());
-            Assert.That(((BoundRead)calls[0].Arguments[0]).Variable,
-                Is.EqualTo(1));
-            Assert.That(calls[0].ParameterIndex(0), Is.EqualTo(0));
-            Assert.That(calls[0].Arguments[1], Is.TypeOf<BoundRead>());
-            Assert.That(((BoundRead)calls[0].Arguments[1]).Variable,
-                Is.EqualTo(2));
-            Assert.That(calls[0].ParameterIndex(1), Is.EqualTo(1));
+                Is.EqualTo(new[] {
+                    "Touch", "TouchPair", "TryReadPair",
+                }));
+            Assert.That(calls[1].Arguments.Length, Is.EqualTo(2));
+            Assert.That(calls[1].ParameterIndex(0),
+                Is.EqualTo(sourceArgumentOrder ? 1 : 0));
+            Assert.That(calls[1].Arguments[0], Is.TypeOf<BoundRead>());
+            Assert.That(((BoundRead)calls[1].Arguments[0]).Variable,
+                Is.EqualTo(sourceArgumentOrder ? 2 : 1));
+            Assert.That(calls[1].ParameterIndex(1),
+                Is.EqualTo(sourceArgumentOrder ? 0 : 1));
+            Assert.That(calls[1].Arguments[1], Is.TypeOf<BoundRead>());
+            Assert.That(((BoundRead)calls[1].Arguments[1]).Variable,
+                Is.EqualTo(sourceArgumentOrder ? 1 : 2));
         }
 
         static void AssertCheckedInputs(BoundProgram program)

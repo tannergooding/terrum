@@ -1508,8 +1508,9 @@ boundary, is added but unverified under the hold. Fallback conditional-output
 Bodies now preserve a prefix of no-output unit FNI calls with direct
 scalar/pointer Home inputs before output reservation, within the shared
 13-CallSite invocation limit; source-free loading and re-emission preserve
-that order. A TouchPair-before-output regression is added but remains
-unverified. Other side-effecting argument expressions
+that order. A Touch/TouchPair-before-output regression covers multiple
+prelude calls and reversed named-formal mapping; it remains unverified. Other
+side-effecting argument expressions
 beyond the bounded nested-call forms, combinations of nested-call and
 ConstantMap inputs, declared FNI defaults and constant domains beyond scalar
 literals, outer FNI call shapes beyond direct-Home unit prelude calls,
