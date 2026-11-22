@@ -14,7 +14,8 @@ public static int32 BindStandaloneMethodRoots()
 
     if (!TryBuildStandaloneModuleDirectory())
     {
-        return 3;
+        return Host.StandaloneModuleDirectoryStatus.Length == 1
+            && Host.StandaloneModuleDirectoryStatus[0] == 2 ? 2 : 3;
     }
 
     init int32 usingModuleDirectoryRow;

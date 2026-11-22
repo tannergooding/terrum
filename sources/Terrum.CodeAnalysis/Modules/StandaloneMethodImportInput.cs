@@ -180,6 +180,8 @@ internal readonly record struct CapturedStandaloneMethodImportInput(
                 [.. new int[sectionCapacity]], true),
             new HostBuffer("StandaloneModuleCount", PrimitiveType.Int32,
                 [0], true),
+            new HostBuffer("StandaloneModuleDirectoryStatus",
+                PrimitiveType.Int32, [0], true),
             new HostBuffer("StandaloneModuleDirectory",
                 PrimitiveType.Int32,
                 [.. new int[moduleDirectoryCapacity]], true),

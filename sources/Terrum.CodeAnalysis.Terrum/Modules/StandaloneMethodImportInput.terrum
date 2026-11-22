@@ -10,6 +10,7 @@ public static int32 ValidateStandaloneMethodImportInput()
         || Host.StandaloneSectionCount.Length != 1
         || Host.StandaloneSectionArtifactOrdinal.Length != 1
         || Host.StandaloneModuleCount.Length != 1
+        || Host.StandaloneModuleDirectoryStatus.Length != 1
         || Host.StandaloneResolvedRootCount.Length != 1
         || Host.StandaloneResolvedRoots.Length % 20 != 0
         || Host.StandaloneSectionKinds.Length

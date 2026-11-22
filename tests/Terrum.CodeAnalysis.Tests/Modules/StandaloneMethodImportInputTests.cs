@@ -1,6 +1,5 @@
 using System;
 using System.Buffers.Binary;
-using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.IO;
@@ -37,7 +36,11 @@ internal sealed class StandaloneMethodImportInputTests
                 return TryValidateStandaloneArtifactDirectories() ? 10 : 0;
             }
             bool built = TryBuildStandaloneModuleDirectory();
-            if (Host.Expected[0] < 0) { return built ? 20 : 0; }
+            if (Host.Expected[0] < 0) {
+                if (Host.Expected[0] == -1) { return built ? 20 : 0; }
+                return built || Host.StandaloneModuleDirectoryStatus[0]
+                    != -Host.Expected[0] ? 21 : 0;
+            }
             if (!built || Host.StandaloneModuleCount[0] != Host.Expected[0]) {
                 return 21;
             }
@@ -183,6 +186,7 @@ internal sealed class StandaloneMethodImportInputTests
                 "StandaloneSectionLengths",
                 "StandaloneSectionOrder",
                 "StandaloneModuleCount",
+                "StandaloneModuleDirectoryStatus",
                 "StandaloneModuleDirectory",
                 "StandaloneModuleOrder",
                 "StandaloneResolvedRootCount",
@@ -344,6 +348,81 @@ internal sealed class StandaloneMethodImportInputTests
                 3, 2),
             Is.EqualTo(0));
 
+        var supportedFeature = input with {
+            Artifacts = [
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateMinimalArtifact("provider/b", featureId: 10,
+                        featureRevision: 1)),
+                input.Artifacts[1],
+            ],
+        };
+        var supportedFeatureProgram = Compile(supportedFeature, 3, 0);
+        Assert.That(Run(supportedFeatureProgram, supportedFeature, 3, 0),
+            Is.EqualTo(0));
+
+        var repeatedFeature = input with {
+            Artifacts = [
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateMinimalArtifact("provider/b", featureId: 10,
+                        featureRevision: 1, featureOccurrences: 2)),
+                input.Artifacts[1],
+            ],
+        };
+        var repeatedFeatureProgram = Compile(repeatedFeature, 3, 0);
+        Assert.That(Run(repeatedFeatureProgram, repeatedFeature, 3, 0),
+            Is.EqualTo(0));
+
+        var unsupportedFeature = input with {
+            Artifacts = [
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateMinimalArtifact("provider/b", featureId: 9,
+                        featureRevision: 1)),
+                input.Artifacts[1],
+            ],
+        };
+        var unsupportedFeatureProgram = Compile(unsupportedFeature, -5, 0);
+        Assert.That(Run(unsupportedFeatureProgram, unsupportedFeature, -5, 0),
+            Is.EqualTo(0));
+
+        var unsupportedFeatureRevision = input with {
+            Artifacts = [
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateMinimalArtifact("provider/b", featureId: 10,
+                        featureRevision: 2)),
+                input.Artifacts[1],
+            ],
+        };
+        var unsupportedFeatureRevisionProgram
+            = Compile(unsupportedFeatureRevision, -5, 0);
+        Assert.That(Run(unsupportedFeatureRevisionProgram,
+                unsupportedFeatureRevision, -5, 0),
+            Is.EqualTo(0));
+
+        var unsupportedTarget = input with {
+            Artifacts = [
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateMinimalArtifact("provider/b",
+                        targetRequirement: 0)),
+                input.Artifacts[1],
+            ],
+        };
+        var unsupportedTargetProgram = Compile(unsupportedTarget, -5, 0);
+        Assert.That(Run(unsupportedTargetProgram, unsupportedTarget, -5, 0),
+            Is.EqualTo(0));
+
+        var unsupportedRuntimePolicy = input with {
+            Artifacts = [
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateMinimalArtifact("provider/b", runtimePolicy: 1)),
+                input.Artifacts[1],
+            ],
+        };
+        var unsupportedRuntimeProgram
+            = Compile(unsupportedRuntimePolicy, -5, 0);
+        Assert.That(Run(unsupportedRuntimeProgram, unsupportedRuntimePolicy,
+                -5, 0),
+            Is.EqualTo(0));
+
         var duplicateModule = input with {
             Artifacts = [
                 input.Artifacts[0],
@@ -403,9 +482,13 @@ internal sealed class StandaloneMethodImportInputTests
 
     private static byte[] CreateMinimalArtifact(string moduleIdentity,
         string exportKey = "api/Run", uint methodFlags = 2,
-        bool duplicateMethodExport = false)
+        bool duplicateMethodExport = false, uint featureId = 0,
+        uint featureRevision = 0, int featureOccurrences = 1,
+        uint targetRequirement = 1, uint runtimePolicy = 0,
+        uint governingRuleEdition = 1)
     {
         var methodCount = duplicateMethodExport ? 2 : 1;
+        var featureCount = featureId == 0 ? 0 : featureOccurrences;
         var stringSection = TrRmStringTableWriter.EncodeNames([
             (moduleIdentity, 0),
             ("Implementation", 0),
@@ -413,11 +496,14 @@ internal sealed class StandaloneMethodImportInputTests
         ]);
         var strings = new TrRmStringTableReader(stringSection, 3);
         var moduleSection = TrRmModuleTableWriter.Encode([
-            new TrRmModuleRow(1, 1, 0, 0, 1, 1, 1, 1),
-        ], strings, 0, 0, methodCount, 0);
+            new TrRmModuleRow(1, targetRequirement, runtimePolicy, 0,
+                1, 1, 1, 1, featureCount == 0 ? 0 : 1,
+                featureCount, governingRuleEdition),
+        ], strings, 0, 0, methodCount, 0, featureCount);
         var methodDefSection = new byte[methodCount * 28];
         var methodSigSection = new byte[methodCount * 24];
         var exportSection = new byte[methodCount * 8];
+        var featureSection = new byte[featureCount * 8];
         for (var row = 1; row <= methodCount; row++)
         {
             var methodOffset = (row - 1) * 28;
@@ -437,13 +523,30 @@ internal sealed class StandaloneMethodImportInputTests
             BinaryPrimitives.WriteUInt32LittleEndian(
                 exportSection.AsSpan(((row - 1) * 8) + 4), 3);
         }
-        return TrRmArtifactWriter.Encode([
+        for (var row = 0; row < featureCount; row++)
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                featureSection.AsSpan(row * 8), featureId);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                featureSection.AsSpan((row * 8) + 4), featureRevision);
+        }
+
+        var sections = new List<TrRmSection> {
             new TrRmSection(0x0001, 0, 1, moduleSection),
             new TrRmSection(0x0002, 0, 3, stringSection),
-            new TrRmSection(0x0016, 0, methodCount, methodDefSection),
-            new TrRmSection(0x0017, 0, methodCount, methodSigSection),
-            new TrRmSection(0x001D, 0, methodCount, exportSection),
-        ]);
+        };
+        if (featureCount != 0)
+        {
+            sections.Add(new TrRmSection(0x0004, 0,
+                (uint)featureCount, featureSection));
+        }
+        sections.Add(new TrRmSection(0x0016, 0,
+            (uint)methodCount, methodDefSection));
+        sections.Add(new TrRmSection(0x0017, 0,
+            (uint)methodCount, methodSigSection));
+        sections.Add(new TrRmSection(0x001D, 0,
+            (uint)methodCount, exportSection));
+        return TrRmArtifactWriter.Encode(sections);
     }
 
     private static byte[] CreateTypeAndMethodArtifact(string moduleIdentity)

@@ -2,13 +2,35 @@ namespace Terrum.CodeAnalysis;
 
 public static bool TryBuildStandaloneModuleDirectory()
 {
+    if (Host.StandaloneModuleDirectoryStatus.Length != 1)
+    {
+        return false;
+    }
+
+    Host.StandaloneModuleDirectoryStatus[0] = 0;
+    bool built = BuildStandaloneModuleDirectoryCore();
+    if (!built && Host.StandaloneModuleDirectoryStatus[0] == 0)
+    {
+        Host.StandaloneModuleDirectoryStatus[0] = 3;
+    }
+    return built;
+}
+
+bool BuildStandaloneModuleDirectoryCore()
+{
     if (Host.StandaloneModuleCount.Length != 1)
     {
         return false;
     }
     Host.StandaloneModuleCount[0] = 0;
-    if (ValidateStandaloneMethodImportInput() != 0
-        || !TryValidateStandaloneArtifactDirectories()
+    int32 inputStatus = ValidateStandaloneMethodImportInput();
+    if (inputStatus != 0)
+    {
+        Host.StandaloneModuleDirectoryStatus[0]
+            = inputStatus == 2 || inputStatus == 3 ? 2 : 3;
+        return false;
+    }
+    if (!TryValidateStandaloneArtifactDirectories()
         || Host.StandaloneModuleDirectory.Length % 8 != 0)
     {
         return false;
@@ -121,8 +143,8 @@ public static bool TryBuildStandaloneModuleDirectory()
                     ref init sourceFileStart)
                 || identityStringRow == 0
                 || identityStringRow > uint32(stringCount)
-                || governingRuleEdition != 1
-                || targetRequirement != 1 || runtimePolicy != 0
+                || governingRuleEdition == 0
+                || targetRequirement > 1 || runtimePolicy > 1
                 || entryMethod > uint32(methodDefCount)
                 || moduleFlags != 0
                 || !IsStandaloneModuleFeatureRange(
@@ -151,6 +173,12 @@ public static bool TryBuildStandaloneModuleDirectory()
                     stringSectionLength, stringCount,
                     int32(identityStringRow)))
             {
+                return false;
+            }
+            if (governingRuleEdition != 1 || targetRequirement != 1
+                || runtimePolicy != 0)
+            {
+                Host.StandaloneModuleDirectoryStatus[0] = 2;
                 return false;
             }
 

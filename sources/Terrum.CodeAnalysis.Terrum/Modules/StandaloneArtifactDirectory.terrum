@@ -464,6 +464,32 @@ bool ValidateStandaloneArtifactFeatures(int32 artifactStart,
         {
             return false;
         }
+
+        // The initial import operation supports only PublishedPredicates 1/1.
+        for (mut int32 featureOffset = 0;
+            featureOffset < int32(moduleFeatureCount);
+            featureOffset = featureOffset + 1)
+        {
+            int32 featureRow = int32(featureFirst) + featureOffset;
+            int32 featureRowStart = featureStart
+                + ((featureRow - 1) * 8);
+            init uint32 featureId;
+            init uint32 ruleRevision;
+            if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                    artifactLength, featureRowStart,
+                    ref init featureId)
+                || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                    artifactLength, featureRowStart + 4,
+                    ref init ruleRevision))
+            {
+                return false;
+            }
+            if (featureId != 10 || ruleRevision != 1)
+            {
+                Host.StandaloneModuleDirectoryStatus[0] = 2;
+                return false;
+            }
+        }
     }
 
     return true;
