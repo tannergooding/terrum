@@ -50,7 +50,7 @@ internal sealed partial class ScalarFrontendInvocationProfileTests
 
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
-    public async Task ScalarFrontendReaderRejectsUnsupportedConversionPairsAsync(
+    public async Task ScalarFrontendReaderRejectsInvalidConversionsAndRetiredEffectsAsync(
         BoundRuntimePolicy policy)
     {
         var writerTrees = await ReadComponentsAsync(s_frontendComponents, """
@@ -161,6 +161,23 @@ internal sealed partial class ScalarFrontendInvocationProfileTests
         Assert.That(rejected.ExitCode, Is.EqualTo(2));
         Assert.That(rejected.Data.AsSpan(
             rejected.BufferOffsets[ScalarFrontendHost.BufferIndex],
+            ScalarFrontendHost.WordCount * sizeof(int))
+            .IndexOfAnyExcept((byte)0), Is.EqualTo(-1));
+
+        var retiredNoThrowWords = words.ToArray();
+        var mainBody = 4 + 4;
+        retiredNoThrowWords[mainBody + 2] |= 2;
+        var retiredNoThrowBuffers = buffers.SetItem(
+            ScalarFrontendHost.ProgramBufferIndex,
+            buffers[ScalarFrontendHost.ProgramBufferIndex] with {
+                Values = [.. retiredNoThrowWords],
+            });
+        var retiredNoThrow = NativeJit.ExecuteWithData(reader with {
+            Buffers = retiredNoThrowBuffers,
+        }, (NativeRuntimePolicy)policy);
+        Assert.That(retiredNoThrow.ExitCode, Is.EqualTo(2));
+        Assert.That(retiredNoThrow.Data.AsSpan(
+            retiredNoThrow.BufferOffsets[ScalarFrontendHost.BufferIndex],
             ScalarFrontendHost.WordCount * sizeof(int))
             .IndexOfAnyExcept((byte)0), Is.EqualTo(-1));
     }

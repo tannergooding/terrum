@@ -808,6 +808,7 @@ bool ScalarProgramReaderValidateFrame(int32 function,
                 || namespaceNameStart + namespaceNameLength > sourceStart)
         || Host.FrontendProgram[body] != 88 || Host.FrontendProgram[body + 1] != 1
         || Host.FrontendProgram[body + 2] < 0 || Host.FrontendProgram[body + 2] > 15
+        || (Host.FrontendProgram[body + 2] & 2) != 0
         || Host.FrontendProgram[body + 3] != 0 || Host.FrontendProgram[body + 4] != 0
         || Host.FrontendProgram[body + 5] < 0 || Host.FrontendProgram[body + 5] > 15
         || Host.FrontendProgram[body + 6] < 0 || Host.FrontendProgram[body + 6] > 4
