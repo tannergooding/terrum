@@ -1339,7 +1339,8 @@ pointees now round-trip through the selected provider and source-free
 re-emission, including an inline-pointee TypeDef row shift; changed pointee
 types reject. Function-pointer fields with pointer-to-aggregate signature
 inputs now round-trip through selected-provider rebinding and source-free
-re-emission across the same TypeDef-row shift; incompatible signatures reject.
+re-emission across provider TypeDef and function-pointer anchor MethodDef
+row shifts; incompatible signatures reject.
 These regressions remain unverified. Source emission retains the
 exact selected provider ExportKey and refuses ambiguous aliases; a regression selects the non-first
 A2 key from a non-first co-located Module. The nested chain is also rebound

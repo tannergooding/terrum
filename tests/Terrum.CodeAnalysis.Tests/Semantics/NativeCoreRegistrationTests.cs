@@ -7358,43 +7358,45 @@ internal sealed class NativeCoreRegistrationTests
             var providerProgram = providerCompilation.Program
                 ?? throw new AssertionException(
                     "Expected a bound aggregate provider.");
-            var providerMember = providerProgram.Interfaces.Single()
-                .Members.Single();
-            return TrRmExecutableCompiler.EmitStandard(providerProgram,
-                "provider.module", schemaIdentity, 1, [
-                    new TrRmSourceTypeExport("", "Coordinates",
-                        "provider/Coordinates") {
-                        FieldExports = [
-                            new TrRmSourceFieldExport("X",
-                                "provider/Coordinates.X"),
-                            new TrRmSourceFieldExport("Y",
-                                "provider/Coordinates.Y"),
-                        ],
-                    },
-                    new TrRmSourceTypeExport("", "Point",
-                        "provider/Point") {
-                        FieldExports = [
-                            new TrRmSourceFieldExport("Position",
-                                "provider/Point.Position"),
-                            new TrRmSourceFieldExport("Link",
-                                "provider/Point.Link"),
-                            new TrRmSourceFieldExport("Related",
-                                "provider/Point.Related"),
-                            new TrRmSourceFieldExport("Callback",
-                                "provider/Point.Callback"),
-                        ],
-                    },
-                    new TrRmSourceTypeExport("", "IProbe",
-                        "provider/IProbe") {
+            var typeExports = new List<TrRmSourceTypeExport> {
+                new("", "Coordinates", "provider/Coordinates") {
+                    FieldExports = [
+                        new TrRmSourceFieldExport("X",
+                            "provider/Coordinates.X"),
+                        new TrRmSourceFieldExport("Y",
+                            "provider/Coordinates.Y"),
+                    ],
+                },
+                new("", "Point", "provider/Point") {
+                    FieldExports = [
+                        new TrRmSourceFieldExport("Position",
+                            "provider/Point.Position"),
+                        new TrRmSourceFieldExport("Link",
+                            "provider/Point.Link"),
+                        new TrRmSourceFieldExport("Related",
+                            "provider/Point.Related"),
+                        new TrRmSourceFieldExport("Callback",
+                            "provider/Point.Callback"),
+                    ],
+                },
+            };
+            typeExports.AddRange(providerProgram.Interfaces.Select(
+                shiftedDefinition =>
+                    new TrRmSourceTypeExport("", shiftedDefinition.QualifiedName,
+                        $"provider/{shiftedDefinition.QualifiedName}") {
                         GenericArity = 0,
                         InterfaceMethodExports = [
-                            new TrRmSourceInterfaceMethodExport(
-                                providerMember.SourceInputOrdinal,
-                                providerMember.SourceDeclarationSpan,
-                                "provider/IProbe.Read"),
+                            .. shiftedDefinition.Members.Select(
+                                shiftedMember =>
+                                    new TrRmSourceInterfaceMethodExport(
+                                        shiftedMember.SourceInputOrdinal,
+                                        shiftedMember.SourceDeclarationSpan,
+                                        $"provider/{shiftedDefinition.QualifiedName}."
+                                            + shiftedMember.Name)),
                         ],
-                    },
-                ]);
+                    }));
+            return TrRmExecutableCompiler.EmitStandard(providerProgram,
+                "provider.module", schemaIdentity, 1, typeExports);
         }
 
         var providerArtifact = EmitProvider(providerSource);
@@ -7412,6 +7414,13 @@ internal sealed class NativeCoreRegistrationTests
             public struct Coordinates {
                 public int32 X;
                 public int32 Y;
+            }
+            [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+            [ForeignNativeInterface(VTableByteOffset: uint32(0))]
+            public interface IExtra {
+                public unsafe int32 Apply(
+                    [NativeCallConv(NativeCallingConvention.Cdecl)]
+                    fnptr<float64, float64> callback);
             }
             [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
             [ForeignNativeInterface(VTableByteOffset: uint32(0))]
@@ -7439,6 +7448,40 @@ internal sealed class NativeCoreRegistrationTests
             Is.True);
         Assert.That(relocatedPointDefinition, Is.Not.EqualTo(
             originalPointDefinition));
+        var originalPointTypeDef = checked((int)(
+            originalPointDefinition & 0x00FF_FFFF));
+        var (originalFirstField, originalEndField)
+            = providerTables.TypeDefs.GetFieldRange(originalPointTypeDef);
+        var originalCallbackField = Enumerable.Range(originalFirstField,
+                originalEndField - originalFirstField)
+            .Single(fieldRow =>
+                providerTables.Fields.GetName(fieldRow) == "Callback");
+        var originalCallbackTypeSpec = providerTables.TypeSpecs.GetTypeSpecRef(
+            providerTables.Fields.GetTypeSpecRef(originalCallbackField));
+        Assert.That(originalCallbackTypeSpec.Form, Is.EqualTo(0x0D));
+        var originalCallbackAnchorMethod
+            = providerTables.NativeFunctionPointerAnchors
+                .GetAnchorMethodDefRow(originalCallbackTypeSpec.Row);
+        var relocatedPointTypeDef = checked((int)(
+            relocatedPointDefinition & 0x00FF_FFFF));
+        var (relocatedFirstField, relocatedEndField)
+            = relocatedProviderTables.TypeDefs.GetFieldRange(
+                relocatedPointTypeDef);
+        var relocatedCallbackField = Enumerable.Range(relocatedFirstField,
+                relocatedEndField - relocatedFirstField)
+            .Single(fieldRow =>
+                relocatedProviderTables.Fields.GetName(fieldRow)
+                    == "Callback");
+        var relocatedCallbackTypeSpec
+            = relocatedProviderTables.TypeSpecs.GetTypeSpecRef(
+                relocatedProviderTables.Fields.GetTypeSpecRef(
+                    relocatedCallbackField));
+        Assert.That(relocatedCallbackTypeSpec.Form, Is.EqualTo(0x0D));
+        var relocatedCallbackAnchorMethod
+            = relocatedProviderTables.NativeFunctionPointerAnchors
+                .GetAnchorMethodDefRow(relocatedCallbackTypeSpec.Row);
+        Assert.That(relocatedCallbackAnchorMethod,
+            Is.Not.EqualTo(originalCallbackAnchorMethod));
         var providerReference = TrRmExecutableCompiler
             .CreateStandardReference(
                 new TrRmStandardArtifactInput(schemaIdentity,
@@ -7647,7 +7690,8 @@ internal sealed class NativeCoreRegistrationTests
                     new TrRmStandardArtifactInput(schemaIdentity,
                         relocatedProviderArtifact),
                 ]);
-        Assert.That(reloadedReference.Interfaces, Has.Length.EqualTo(1));
+        Assert.That(reloadedReference.Interfaces.Any(
+            static definition => definition.QualifiedName == "IProbe"), Is.True);
         var reloadedPoint = reloadedReference.Structures.Single(
             static structure => structure.Name == "Point"
                 && structure.StandardTypeOrigin?.IsLookupRoot == true);
