@@ -2821,7 +2821,7 @@ public static partial class TrRmExecutableCompiler
             if (nestedCall.ForeignInterfaceCall is null)
             {
                 return TryValidateLocalScalarInputCall(nestedCall,
-                    expectedType);
+                    expectedType, outerMember);
             }
 
             if (nestedCall.Function != BoundCall.ForeignInterfaceFunction
@@ -2899,7 +2899,8 @@ public static partial class TrRmExecutableCompiler
         }
 
         bool TryValidateLocalScalarInputCall(BoundCall nestedCall,
-            PrimitiveType expectedType)
+            PrimitiveType expectedType,
+            BoundInterfaceMemberIdentity outerMember)
         {
             if (nestedCall.ForeignInterfaceCall is not null
                 || nestedCall.Function == BoundCall.ForeignInterfaceFunction
@@ -2981,6 +2982,21 @@ public static partial class TrRmExecutableCompiler
                     && constant.Bits.IsCanonicalFor(constant.Type))
                 {
                     constantInputs.Add((constant.Type, constant.Bits));
+                    if (constantInputs.Count
+                        + nestedInputBuilder.Count > 13)
+                    {
+                        return false;
+                    }
+                }
+                else if (GetNestedForeignInterfaceCall(argument)
+                        is BoundCall nestedInputCall
+                    && nestedInputCall.Type == formalType
+                    && !nestedInputBuilder.Any(existing =>
+                        ReferenceEquals(existing, nestedInputCall))
+                    && TryValidateNestedCall(nestedInputCall, formalType,
+                        outerMember))
+                {
+                    nestedInputBuilder.Add(nestedInputCall);
                     if (constantInputs.Count
                         + nestedInputBuilder.Count > 13)
                     {
@@ -3625,7 +3641,14 @@ public static partial class TrRmExecutableCompiler
                     || constant.RepresentationType != constant.Type
                     || !constant.Bits.IsCanonicalFor(constant.Type))
                 {
-                    return null;
+                    if (GetNestedForeignInterfaceCall(argument)
+                            is not BoundCall nestedInputCall
+                        || nestedInputCall.Type != formalType
+                        || !nestedCalls.Any(nested =>
+                            ReferenceEquals(nested, nestedInputCall)))
+                    {
+                        return null;
+                    }
                 }
 
                 seenParameters[formal] = true;
@@ -7830,6 +7853,13 @@ public static partial class TrRmExecutableCompiler
                             // The caller-unsafe FNI target makes this CallSite the authored unsafe assertion.
                             var authorizedCall
                                 = new BoundUnsafeExpression(call, default);
+                            foreach (var consumedRegister
+                                in nestedFormalByRegister.Keys)
+                            {
+                                valueByRegister.Remove(consumedRegister);
+                            }
+                            callSiteValueResultRegisters.RemoveAll(
+                                nestedFormalByRegister.ContainsKey);
                             if (hasValueResult
                                 && !valueByRegister.TryAdd(resultIndex,
                                     authorizedCall))
@@ -7968,10 +7998,15 @@ public static partial class TrRmExecutableCompiler
                                         "A Standard F+I local value CallSite overwrites the outer result register.");
                                 }
 
-                                var localArguments
-                                    = ImmutableArray.CreateBuilder<
-                                        BoundExpression>(
-                                        localTarget.ParameterCount);
+                                var priorResultRegisters
+                                    = callSiteValueResultRegisters.ToArray();
+                                var localArgumentsByFormal
+                                    = new BoundExpression?[
+                                        localTarget.ParameterCount];
+                                var nestedFormalByRegister
+                                    = new Dictionary<ushort, int>(
+                                        priorResultRegisters.Length);
+                                var nestedFormalIndices = new HashSet<int>();
                                 var localInputOffset = 20;
                                 for (var formal = 0;
                                     formal < localTarget.ParameterCount;
@@ -8004,7 +8039,33 @@ public static partial class TrRmExecutableCompiler
                                         && constant.Bits.IsCanonicalFor(
                                             constant.Type))
                                     {
-                                        localArguments.Add(constant);
+                                        localArgumentsByFormal[formal]
+                                            = constant;
+                                    }
+                                    else if (selectorKind == 1
+                                        && sourceUse == 1
+                                        && selectorIndex < 14
+                                        && valueByRegister.TryGetValue(
+                                            selectorIndex,
+                                            out var nestedRegisterInput)
+                                        && nestedRegisterInput.Type
+                                            == parameter.Type
+                                        && callSiteValueResultRegisters
+                                            .Contains(selectorIndex)
+                                        && GetNestedForeignInterfaceCall(
+                                            nestedRegisterInput) is not null)
+                                    {
+                                        if (!nestedFormalByRegister.TryAdd(
+                                                selectorIndex, formal)
+                                            || !nestedFormalIndices.Add(
+                                                formal))
+                                        {
+                                            throw Invalid(
+                                                "A Standard F+I local value CallSite reuses a nested result register.");
+                                        }
+
+                                        localArgumentsByFormal[formal]
+                                            = nestedRegisterInput;
                                     }
                                     else if (selectorKind == 2
                                         && sourceUse == 1
@@ -8022,9 +8083,10 @@ public static partial class TrRmExecutableCompiler
                                             selectorIndex]].Type
                                             == parameter.Type)
                                     {
-                                        localArguments.Add(new BoundRead(
+                                        localArgumentsByFormal[formal]
+                                            = new BoundRead(
                                             homeVariables[selectorIndex],
-                                            parameter.Type, default));
+                                            parameter.Type, default);
                                     }
                                     else
                                     {
@@ -8035,6 +8097,52 @@ public static partial class TrRmExecutableCompiler
                                     localInputOffset += 4;
                                 }
 
+                                var localArguments
+                                    = ImmutableArray.CreateBuilder<
+                                        BoundExpression>(
+                                        localTarget.ParameterCount);
+                                var localArgumentParameterIndices
+                                    = ImmutableArray.CreateBuilder<int>(
+                                        localTarget.ParameterCount);
+                                foreach (var nestedResultRegister
+                                    in priorResultRegisters)
+                                {
+                                    if (!nestedFormalByRegister.TryGetValue(
+                                            nestedResultRegister,
+                                            out var formal))
+                                    {
+                                        continue;
+                                    }
+
+                                    localArguments.Add(
+                                        localArgumentsByFormal[formal]
+                                        ?? throw Invalid(
+                                            "A Standard F+I local value CallSite omits a nested input formal."));
+                                    localArgumentParameterIndices.Add(formal);
+                                }
+                                for (var formal = 0;
+                                    formal < localTarget.ParameterCount;
+                                    formal++)
+                                {
+                                    if (nestedFormalIndices.Contains(formal))
+                                    {
+                                        continue;
+                                    }
+
+                                    localArguments.Add(
+                                        localArgumentsByFormal[formal]
+                                        ?? throw Invalid(
+                                            "A Standard F+I local value CallSite omits a formal input."));
+                                    localArgumentParameterIndices.Add(formal);
+                                }
+
+                                foreach (var consumedRegister
+                                    in nestedFormalByRegister.Keys)
+                                {
+                                    valueByRegister.Remove(consumedRegister);
+                                }
+                                callSiteValueResultRegisters.RemoveAll(
+                                    nestedFormalByRegister.ContainsKey);
                                 if (!valueByRegister.TryAdd(resultIndex,
                                         new BoundCall(localTargetFunction,
                                             localArguments.MoveToImmutable(),
@@ -8042,6 +8150,9 @@ public static partial class TrRmExecutableCompiler
                                             IsUnsafeAuthorized =
                                                 localTarget
                                                     .RequiresUnsafeCaller,
+                                            ArgumentParameterIndices =
+                                                localArgumentParameterIndices
+                                                    .MoveToImmutable(),
                                         }))
                                 {
                                     throw Invalid(
@@ -8735,12 +8846,16 @@ public static partial class TrRmExecutableCompiler
                 = GetNestedForeignInterfaceCall(expression);
         }
 
-        var nestedInputCalls = nestedInputOuterCall is BoundCall outerCall
-            ? outerCall.Arguments
-                .Select(GetNestedSequenceInputCall)
-                .OfType<BoundCall>()
-                .ToArray()
-            : Array.Empty<BoundCall>();
+        var nestedInputCallsBuilder = new List<BoundCall>();
+        if (nestedInputOuterCall is BoundCall outerCall)
+        {
+            foreach (var argument in outerCall.Arguments)
+            {
+                AddNestedSequenceInputCalls(argument);
+            }
+        }
+
+        var nestedInputCalls = nestedInputCallsBuilder.ToArray();
         BoundCall? GetNestedSequenceInputCall(BoundExpression expression)
         {
             var call = GetUnwrappedBoundCall(expression);
@@ -8748,6 +8863,25 @@ public static partial class TrRmExecutableCompiler
                 && (call.ForeignInterfaceCall is not null
                     || IsValidLocalScalarInputCall(call))
                 ? call : null;
+        }
+
+        void AddNestedSequenceInputCalls(BoundExpression expression)
+        {
+            if (GetNestedSequenceInputCall(expression)
+                is not BoundCall nestedCall)
+            {
+                return;
+            }
+
+            if (nestedCall.ForeignInterfaceCall is null)
+            {
+                foreach (var argument in nestedCall.Arguments)
+                {
+                    AddNestedSequenceInputCalls(argument);
+                }
+            }
+
+            nestedInputCallsBuilder.Add(nestedCall);
         }
 
         bool IsValidLocalScalarInputTarget(BoundFunction target)
@@ -8830,11 +8964,38 @@ public static partial class TrRmExecutableCompiler
                         return false;
                     }
                 }
-                else if (argument is not BoundConstant constant
-                    || !DirectNativeImportContract.IsScalar(constant.Type)
-                    || constant.Type != formalType
-                    || constant.RepresentationType != constant.Type
-                    || !constant.Bits.IsCanonicalFor(constant.Type))
+                else if (!(argument is BoundConstant constant
+                        && DirectNativeImportContract.IsScalar(
+                            constant.Type)
+                        && constant.Type == formalType
+                        && constant.RepresentationType == constant.Type
+                        && constant.Bits.IsCanonicalFor(constant.Type))
+                    && !(GetNestedForeignInterfaceCall(argument)
+                        is BoundCall nestedInputCall
+                        && nestedInputCall.Type == formalType
+                        && DirectNativeImportContract.IsScalar(
+                            nestedInputCall.Type)
+                        && nestedInputCall.Function
+                            == BoundCall.ForeignInterfaceFunction
+                        && nestedInputCall.IsUnsafeAuthorized
+                        && nestedInputCall.ForeignInterfaceCall is
+                            BoundForeignInterfaceCall nestedForeignCall
+                        && !nestedForeignCall.DoesNotReturn
+                        && nestedForeignCall.NativeOutputContracts.IsEmpty
+                        && nestedForeignCall.Receiver is BoundRead {
+                            Type: PrimitiveType.NativeRawPointer,
+                        }
+                        && nestedInputCall.Arguments.All(
+                            static nestedArgument =>
+                                nestedArgument is BoundRead
+                                || nestedArgument is BoundConstant
+                                    nestedConstant
+                                    && DirectNativeImportContract.IsScalar(
+                                        nestedConstant.Type)
+                                    && nestedConstant.RepresentationType
+                                        == nestedConstant.Type
+                                    && nestedConstant.Bits.IsCanonicalFor(
+                                        nestedConstant.Type))))
                 {
                     return false;
                 }

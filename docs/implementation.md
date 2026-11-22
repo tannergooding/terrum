@@ -1357,8 +1357,9 @@ no-output calls where a void-call prefix (including safe local MethodDef calls
 with direct Home inputs) is followed by a direct value result, including
 bounded nested scalar/no-output inputs to that final call. Those nested inputs
 may also be a safe local scalar-returning MethodDef call whose arguments are
-direct scalar or pointer parameters, or typed scalar ConstantMap values; its
-CallSite result is consumed by the final FNI call.
+direct scalar or pointer Homes, typed scalar ConstantMap values, or nested
+scalar/no-output FNI CallSites; child calls execute before the local helper
+CallSite in source order, and its result is consumed by the final FNI call.
 The receiver is a direct parameter. Direct-call inputs may use scalar locals
 initialized from parameter reads; sequence inputs use direct parameters or
 typed scalar ConstantMap values. Direct non-void and void-call Bodies can also
@@ -1376,8 +1377,8 @@ unverified under the hold. Local/imported mixed-call-sequence regressions cover
 source order, local MethodDef prefix mapping, multiple nested final-call inputs
 in reversed formal order, a local scalar-returning MethodDef input, a defaulted
 scalar formal encoded through ConstantMap, the final value result, malformed
-result selectors, and source-free re-emission; they remain unverified under the
-hold. One non-void
+result selectors, a local helper consuming a nested FNI result, and source-free
+re-emission; they remain unverified under the hold. One non-void
 call may reserve distinct local `init` Homes for each NativeOutput formal;
 source-use 6
 and reservation records use the receiver-first flattened ordinal
