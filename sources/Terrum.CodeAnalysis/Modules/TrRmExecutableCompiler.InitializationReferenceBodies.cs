@@ -1988,7 +1988,9 @@ public static partial class TrRmExecutableCompiler
 
         if (seenParameters.Any(static seen => !seen)
             || (hasThrowingScalarExpression
-                && nestedInputCalls.Count != 0)
+                && nestedInputCalls.Count != 0
+                && !CanMixCheckedForeignInterfaceExpressionsWithNestedCalls(
+                    boundCall, program))
             || inputHomeVariables.Count != fallbackLocal - 1)
         {
             return false;
@@ -2626,6 +2628,47 @@ public static partial class TrRmExecutableCompiler
         };
     }
 
+    private static bool CanMixCheckedForeignInterfaceExpressionsWithNestedCalls(
+        BoundCall call, BoundProgram program)
+    {
+        if (call.ForeignInterfaceCall is not
+                BoundForeignNativeInterfaceCall foreignCall
+            || !ForeignNativeInterfaceContract.TryCreateCallTarget(
+                foreignCall, program, out var target))
+        {
+            return false;
+        }
+
+        var outputFormals = target.NativeOutputContracts
+            .Select(static output => output.FormalOrdinal)
+            .ToHashSet();
+        for (var argumentIndex = 0;
+            argumentIndex < call.Arguments.Length;
+            argumentIndex++)
+        {
+            var formal = call.ParameterIndex(argumentIndex);
+            if ((uint)formal >= (uint)target.ParameterCount)
+            {
+                return false;
+            }
+
+            if (outputFormals.Contains(formal)
+                || GetNestedForeignInterfaceCall(
+                    call.Arguments[argumentIndex]) is not null)
+            {
+                continue;
+            }
+
+            if (!DirectNativeImportContract.IsScalar(
+                    target.Variables[formal].Type))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private static int EmitForeignInterfaceScalarInputExpression(
         BoundExpression expression, PrimitiveType expectedType,
         Func<int> allocateRegister,
@@ -3112,7 +3155,9 @@ public static partial class TrRmExecutableCompiler
             || !stagedLocalVariables.SetEquals(
                 stagedLocalBuilder.Select(static local => local.Variable))
             || (hasThrowingScalarExpression
-                && nestedForeignInterfaceCalls.Count != 0)
+                && nestedForeignInterfaceCalls.Count != 0
+                && !CanMixCheckedForeignInterfaceExpressionsWithNestedCalls(
+                    boundCall, program))
             || function.Variables.Length != function.ParameterCount
                 + outputVariables.Count + stagedLocalVariables.Count)
         {
@@ -8012,6 +8057,7 @@ public static partial class TrRmExecutableCompiler
         var statements = ImmutableArray.CreateBuilder<BoundStatement>();
         var outputPlaceByRegister = new Dictionary<int, BoundExpression>();
         var valueByRegister = new Dictionary<int, BoundExpression>();
+        var valueRegisterWriteOrder = new Dictionary<int, int>();
         var initializedLocals = new HashSet<int>();
         var initializedValueLocals = new HashSet<int>();
         var stores = 0;
@@ -8095,6 +8141,7 @@ public static partial class TrRmExecutableCompiler
 
                     valueByRegister[destinationRegister] = new BoundRead(
                         formalOrdinal, variables[formalOrdinal].Type, default);
+                    valueRegisterWriteOrder[destinationRegister] = position;
                     break;
                 }
                 case 0x16:
@@ -8118,6 +8165,7 @@ public static partial class TrRmExecutableCompiler
                             "A Standard F+I ConstantMap load has an invalid register or typed scalar entry.");
                     }
 
+                    valueRegisterWriteOrder[destinationRegister] = position;
                     break;
                 }
                 case >= 0x20 and <= 0x2B:
@@ -8173,6 +8221,7 @@ public static partial class TrRmExecutableCompiler
                         }
 
                         valueByRegister[destinationRegister] = unary;
+                        valueRegisterWriteOrder[destinationRegister] = position;
                         break;
                     }
 
@@ -8220,6 +8269,7 @@ public static partial class TrRmExecutableCompiler
                     }
 
                     valueByRegister[destinationRegister] = binary;
+                    valueRegisterWriteOrder[destinationRegister] = position;
                     break;
                 }
                 case 0xC0:
@@ -8274,6 +8324,7 @@ public static partial class TrRmExecutableCompiler
                         }
 
                         valueByRegister[destinationRegister] = unary;
+                        valueRegisterWriteOrder[destinationRegister] = position;
                         break;
                     }
 
@@ -8312,6 +8363,7 @@ public static partial class TrRmExecutableCompiler
                     }
 
                     valueByRegister[destinationRegister] = binary;
+                    valueRegisterWriteOrder[destinationRegister] = position;
                     break;
                 }
                 case 0xC2:
@@ -8383,6 +8435,7 @@ public static partial class TrRmExecutableCompiler
                     }
 
                     valueByRegister[destinationRegister] = binary;
+                    valueRegisterWriteOrder[destinationRegister] = position;
                     break;
                 }
                 case 0xC3:
@@ -8419,6 +8472,7 @@ public static partial class TrRmExecutableCompiler
                         OverflowBehavior
                             = BoundIntegerOverflowBehavior.Checked,
                     };
+                    valueRegisterWriteOrder[destinationRegister] = position;
                     pendingForeignInterfaceComparison = null;
                     break;
                 }
@@ -8951,6 +9005,9 @@ public static partial class TrRmExecutableCompiler
 
                             var argumentsByFormal = new BoundExpression?[
                                 member.Parameters.Length];
+                            var argumentRegisterByFormal
+                                = new int[member.Parameters.Length];
+                            Array.Fill(argumentRegisterByFormal, -1);
                             var nestedFormalByRegister
                                 = new Dictionary<ushort, int>(
                                     callSiteValueResultRegisters.Count);
@@ -9027,14 +9084,17 @@ public static partial class TrRmExecutableCompiler
                                     && registerArgument.Type == formalType)
                                 {
                                     if (callSiteValueResultRegisters.Contains(
-                                            selectorIndex)
-                                        && (!nestedFormalByRegister.TryAdd(
-                                                selectorIndex, formal)
-                                            || !nestedFormalIndices.Add(
-                                                formal)))
+                                            selectorIndex))
                                     {
-                                        throw Invalid(
-                                            "A ForeignNativeInterface CallSite reuses a nested result register.");
+                                        if (!nestedFormalByRegister.TryAdd(
+                                                selectorIndex, formal)
+                                            || !nestedFormalIndices.Add(formal)
+                                            || GetUnwrappedBoundCall(
+                                                registerArgument) is null)
+                                        {
+                                            throw Invalid(
+                                                "A ForeignNativeInterface CallSite reuses or misclassifies a nested result register.");
+                                        }
                                     }
                                     else if (registerArgument is BoundUnary or
                                         BoundBinary or BoundCast)
@@ -9065,6 +9125,8 @@ public static partial class TrRmExecutableCompiler
 
                                     argumentsByFormal[formal]
                                         = registerArgument;
+                                    argumentRegisterByFormal[formal]
+                                        = selectorIndex;
                                 }
                                 else if (selectorKind == 2
                                     && sourceUse == 1
@@ -9108,10 +9170,26 @@ public static partial class TrRmExecutableCompiler
                             }
 
                             if (hasThrowingScalarExpressionInput
-                                && nestedFormalByRegister.Count != 0)
+                                && nestedFormalByRegister.Count != 0
+                                && (statements.Any(static statement =>
+                                    statement is BoundExpressionStatement
+                                        expressionStatement
+                                    && GetUnwrappedBoundCall(
+                                        expressionStatement.Expression)
+                                        is not null)
+                                    || Enumerable.Range(0,
+                                        member.Parameters.Length)
+                                    .Any(formal =>
+                                        !outputContractsByFormal
+                                            .ContainsKey(formal)
+                                        && !nestedFormalIndices.Contains(
+                                            formal)
+                                        && !DirectNativeImportContract
+                                            .IsScalar(member.Parameters[
+                                                formal].Type.PrimitiveType)))
                             {
                                 throw Invalid(
-                                    "A Standard F+I direct-return or mixed-sequence CallSite cannot reorder checked arithmetic around nested CallSites.");
+                                    "A Standard F+I CallSite cannot preserve checked-expression order with nested Calls when a non-nested input is not a scalar value.");
                             }
 
                             var arguments
@@ -9121,38 +9199,23 @@ public static partial class TrRmExecutableCompiler
                             var argumentParameterIndices
                                 = ImmutableArray.CreateBuilder<int>(
                                     member.Parameters.Length);
-                            var orderedNestedInputCount = 0;
-                            foreach (var nestedRegister
-                                in callSiteValueResultRegisters)
-                            {
-                                if (!nestedFormalByRegister.TryGetValue(
-                                        nestedRegister, out var formal))
+                            // Final register definitions retain nested-call and
+                            // expression order; Home and constant inputs are pure.
+                            var orderedFormals = Enumerable.Range(0,
+                                    member.Parameters.Length)
+                                .OrderBy(formal =>
                                 {
-                                    continue;
-                                }
-
-                                arguments.Add(argumentsByFormal[formal]
-                                    ?? throw Invalid(
-                                        "A ForeignNativeInterface CallSite omits a nested input formal."));
-                                argumentParameterIndices.Add(formal);
-                                orderedNestedInputCount++;
-                            }
-
-                            if (orderedNestedInputCount
-                                != nestedFormalByRegister.Count)
+                                    var register
+                                        = argumentRegisterByFormal[formal];
+                                    return register >= 0
+                                        && valueRegisterWriteOrder
+                                            .TryGetValue(register,
+                                                out var writeOrder)
+                                        ? writeOrder : int.MaxValue;
+                                })
+                                .ThenBy(static formal => formal);
+                            foreach (var formal in orderedFormals)
                             {
-                                throw Invalid(
-                                    "A ForeignNativeInterface CallSite references a non-FNI result register.");
-                            }
-
-                            for (var formal = 0;
-                                formal < member.Parameters.Length; formal++)
-                            {
-                                if (nestedFormalIndices.Contains(formal))
-                                {
-                                    continue;
-                                }
-
                                 arguments.Add(argumentsByFormal[formal]
                                     ?? throw Invalid(
                                         "A ForeignNativeInterface CallSite omits a formal input."));
@@ -9204,6 +9267,7 @@ public static partial class TrRmExecutableCompiler
                             if (hasValueResult)
                             {
                                 callSiteValueResultRegisters.Add(resultIndex);
+                                valueRegisterWriteOrder[resultIndex] = position;
                             }
                             if (!hasValueResult)
                             {
@@ -9494,6 +9558,7 @@ public static partial class TrRmExecutableCompiler
                                 }
 
                                 callSiteValueResultRegisters.Add(resultIndex);
+                                valueRegisterWriteOrder[resultIndex] = position;
                                 calls++;
                                 break;
                             }
@@ -9590,6 +9655,7 @@ public static partial class TrRmExecutableCompiler
                             && IsValidLocalScalarInputTarget(target))
                         {
                             callSiteValueResultRegisters.Add(resultIndex);
+                            valueRegisterWriteOrder[resultIndex] = position;
                         }
 
                         calls++;
@@ -9859,6 +9925,7 @@ public static partial class TrRmExecutableCompiler
                     }
 
                     valueByRegister[register] = conversion;
+                    valueRegisterWriteOrder[register] = position;
                     conversions++;
                     break;
                 }
@@ -11381,6 +11448,7 @@ public static partial class TrRmExecutableCompiler
         var availableRegisters = new HashSet<ushort>();
         var writableExpressionRegisters = new HashSet<ushort>();
         var scalarExpressionResultRegisters = new HashSet<ushort>();
+        var registerWriteOrder = new Dictionary<ushort, int>();
         var scalarExpressionHomeLoadCount = 0;
         var expressionNestedCallIndex = 0;
         var pendingScalarComparison
@@ -11442,6 +11510,7 @@ public static partial class TrRmExecutableCompiler
                 }
 
                 expressionNestedCallIndex++;
+                registerWriteOrder[resultRegister] = preparationOffset;
                 preparationOffset += 2;
                 continue;
             }
@@ -11471,6 +11540,7 @@ public static partial class TrRmExecutableCompiler
 
                 writableExpressionRegisters.Add(destinationRegister);
                 scalarExpressionHomeLoadCount++;
+                registerWriteOrder[destinationRegister] = preparationOffset;
                 preparationOffset += 2;
                 continue;
             }
@@ -11547,6 +11617,8 @@ public static partial class TrRmExecutableCompiler
                 registerInputs[comparisonDestination] = comparison;
                 _ = scalarExpressionResultRegisters.Add(
                     comparisonDestination);
+                registerWriteOrder[comparisonDestination]
+                    = preparationOffset;
                 preparationOffset += 4;
                 continue;
             }
@@ -11588,6 +11660,8 @@ public static partial class TrRmExecutableCompiler
                 registerInputs[pendingComparison.Register] = comparison;
                 _ = scalarExpressionResultRegisters.Add(
                     pendingComparison.Register);
+                registerWriteOrder[pendingComparison.Register]
+                    = preparationOffset;
                 pendingScalarComparison = null;
                 preparationOffset += 4;
                 continue;
@@ -11692,6 +11766,7 @@ public static partial class TrRmExecutableCompiler
                 registerInputs[checkedDestination] = checkedOperation;
                 _ = scalarExpressionResultRegisters.Add(
                     checkedDestination);
+                registerWriteOrder[checkedDestination] = preparationOffset;
                 preparationOffset += 4;
                 continue;
             }
@@ -11726,6 +11801,8 @@ public static partial class TrRmExecutableCompiler
                 registerInputs[destinationRegister] = conversion;
                 _ = scalarExpressionResultRegisters.Add(
                     destinationRegister);
+                registerWriteOrder[destinationRegister]
+                    = preparationOffset;
                 preparationOffset += 2;
                 continue;
             }
@@ -11810,6 +11887,7 @@ public static partial class TrRmExecutableCompiler
             _ = scalarExpressionResultRegisters.Remove(sourceRegister);
             registerInputs[destinationRegister] = operation;
             _ = scalarExpressionResultRegisters.Add(destinationRegister);
+            registerWriteOrder[destinationRegister] = preparationOffset;
             preparationOffset += 2;
         }
 
@@ -11827,6 +11905,8 @@ public static partial class TrRmExecutableCompiler
 
         var argumentsByFormal = new BoundExpression?[
             member.Parameters.Length];
+        var argumentRegisterByFormal = new int[member.Parameters.Length];
+        Array.Fill(argumentRegisterByFormal, -1);
         var nestedFormalByRegister = new Dictionary<ushort, int>(
             nestedCallCount);
         var nestedFormalIndices = new HashSet<int>();
@@ -11918,6 +11998,7 @@ public static partial class TrRmExecutableCompiler
                 }
 
                 argumentsByFormal[formal] = registerInput;
+                argumentRegisterByFormal[formal] = homeIndex;
             }
             else
             {
@@ -11947,41 +12028,48 @@ public static partial class TrRmExecutableCompiler
                 != scalarExpressionHomeLoadCount
             || scalarExpressionResultRegisters.Count != 0
             || (hasThrowingScalarExpressionInput
-                && nestedInputCount != 0)
+                && nestedInputCount != 0
+                && Enumerable.Range(0, member.Parameters.Length).Any(
+                    formal => formal != outputContract.FormalOrdinal
+                        && !nestedFormalIndices.Contains(formal)
+                        && !DirectNativeImportContract.IsScalar(
+                            member.Parameters[formal].Type.PrimitiveType)))
             || inputHomeVariables.Count != inputVariableLimit - 1)
         {
             throw Invalid(
                 "The Standard F+I conditional-output inputs do not match their source parameters and register values.");
         }
 
-        var arguments = ImmutableArray.CreateBuilder<BoundExpression>(
-            member.Parameters.Length);
-        var argumentParameterIndices
-            = ImmutableArray.CreateBuilder<int>(member.Parameters.Length);
         for (var nestedRegister = 1;
             nestedRegister <= nestedCallCount;
             nestedRegister++)
         {
-            if (!nestedFormalByRegister.TryGetValue(
-                    checked((ushort)nestedRegister), out var formal))
+            if (!nestedFormalByRegister.ContainsKey(
+                    checked((ushort)nestedRegister)))
             {
                 throw Invalid(
-                    "The Standard F+I conditional-output Body does not use each nested result in record order.");
+                    "The Standard F+I conditional-output Body does not use each nested result register.");
             }
-
-            arguments.Add(argumentsByFormal[formal]
-                ?? throw Invalid(
-                    "The Standard F+I conditional-output CallSite omits a nested result formal."));
-            argumentParameterIndices.Add(formal);
         }
 
-        for (var formal = 0; formal < member.Parameters.Length; formal++)
-        {
-            if (nestedFormalIndices.Contains(formal))
+        var arguments = ImmutableArray.CreateBuilder<BoundExpression>(
+            member.Parameters.Length);
+        var argumentParameterIndices
+            = ImmutableArray.CreateBuilder<int>(member.Parameters.Length);
+        // Final register definitions retain nested-call and expression order;
+        // Home and constant inputs are pure.
+        var orderedFormals = Enumerable.Range(0, member.Parameters.Length)
+            .OrderBy(formal =>
             {
-                continue;
-            }
-
+                var register = argumentRegisterByFormal[formal];
+                return register >= 0
+                    && registerWriteOrder.TryGetValue(
+                        checked((ushort)register), out var writeOrder)
+                    ? writeOrder : int.MaxValue;
+            })
+            .ThenBy(static formal => formal);
+        foreach (var formal in orderedFormals)
+        {
             arguments.Add(argumentsByFormal[formal]
                 ?? throw Invalid(
                     "The Standard F+I conditional-output CallSite omits a formal input."));

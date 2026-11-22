@@ -986,6 +986,183 @@ internal sealed class NativeCoreRegistrationTests
     }
 
     [Test]
+    public void StandardForeignNativeInterfaceCallsPreserveCheckedAndNestedInputOrder()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-native-interface-parameter-surface-1";
+        var registration = CreateRegistration(
+            includeForeignNativeInterface: true);
+        var options = new CompilationOptions {
+            NativeCoreRegistration = registration,
+            LayoutCoreRegistration = CreateLayoutRegistration(registration),
+            SourceArithmeticProfile = SourceArithmeticProfile.Development,
+        };
+        var providerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Terrum.Interop;
+                [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+                [ForeignNativeInterface(VTableByteOffset: uint32(0))]
+                public interface IProbe {
+                    public unsafe int32 Read(int32 first, int32 second);
+                    public unsafe int32 Nested(int32 value);
+                    public unsafe int32 ReadPointer(int32 first,
+                        ptr<int32> target, int32 second);
+                }
+                """), options);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+        var providerProgram = providerCompilation.Program
+            ?? throw new AssertionException("Expected a bound provider.");
+        var providerInterface = providerProgram.Interfaces.Single();
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerProgram, "provider.module", schemaIdentity, 1, [
+                new TrRmSourceTypeExport("", "IProbe", "provider/IProbe") {
+                    GenericArity = 0,
+                    InterfaceMethodExports = [.. providerInterface.Members
+                        .Select(member =>
+                            new TrRmSourceInterfaceMethodExport(
+                                member.SourceInputOrdinal,
+                                member.SourceDeclarationSpan,
+                                $"provider/IProbe.{member.Name}"))],
+                },
+            ]);
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            providerArtifact);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            providerInput, "provider.module", []);
+        var consumerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                int32 NestedThenChecked(ptr<void> receiver, int32 first,
+                    int32 divisor, int32 value) {
+                    unsafe {
+                        return IProbe.Read(receiver,
+                            second: IProbe.Nested(receiver, value),
+                            first: first / divisor);
+                    }
+                }
+                int32 CheckedThenNested(ptr<void> receiver, int32 first,
+                    int32 divisor, int32 value) {
+                    unsafe {
+                        return IProbe.Read(receiver,
+                            first: first / divisor,
+                            second: IProbe.Nested(receiver, value));
+                    }
+                }
+                """), reference, options);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumerProgram = consumerCompilation.Program
+            ?? throw new AssertionException("Expected a bound consumer.");
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            consumerProgram, "consumer.module", schemaIdentity, 1, []);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
+                consumerArtifact,
+                TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft));
+        AssertInstructionOrder("NestedThenChecked", nestedFirst: true);
+        AssertInstructionOrder("CheckedThenNested", nestedFirst: false);
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, consumerArtifact),
+            "consumer.module", [providerInput]);
+        AssertArgumentOrder(loaded, "NestedThenChecked", 1, 0);
+        AssertArgumentOrder(loaded, "CheckedThenNested", 0, 1);
+        var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
+            "consumer.module", schemaIdentity, 1, []);
+        var reloaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, reemitted),
+            "consumer.module", [providerInput]);
+        AssertArgumentOrder(reloaded, "NestedThenChecked", 1, 0);
+        AssertArgumentOrder(reloaded, "CheckedThenNested", 0, 1);
+        var pointerInputCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                int32 RejectPointerMix(ptr<void> receiver, int32 first,
+                    int32 divisor, int32 nestedValue, ptr<int32> target) {
+                    unsafe {
+                        return IProbe.ReadPointer(receiver, first / divisor,
+                            target, IProbe.Nested(receiver, nestedValue));
+                    }
+                }
+                """), reference, options);
+        Assert.That(pointerInputCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                pointerInputCompilation.Diagnostics));
+        Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.EmitStandard(
+                pointerInputCompilation.Program!, "pointer-consumer.module",
+                schemaIdentity, 1, []));
+
+        void AssertInstructionOrder(string name, bool nestedFirst)
+        {
+            var row = Enumerable.Range(1, tables.Methods.Count)
+                .Single(candidate => tables.Methods.GetName(candidate)
+                    == name);
+            var body = tables.Bodies.GetRegisterBody(
+                tables.Methods.GetBodyRow(row), tables.Contracts.Count);
+            var code = body.GetBlockCode(0).ToArray();
+            var nestedCallOffset = Array.IndexOf(code, (byte)0x90);
+            var checkedArithmeticOffset = Array.IndexOf(code, (byte)0xC0);
+            Assert.That(nestedCallOffset, Is.GreaterThanOrEqualTo(0), name);
+            Assert.That(checkedArithmeticOffset,
+                Is.GreaterThanOrEqualTo(0), name);
+            Assert.That(code[checkedArithmeticOffset + 1],
+                Is.EqualTo((byte)0x0C), name);
+            Assert.That(nestedFirst
+                    ? nestedCallOffset < checkedArithmeticOffset
+                    : checkedArithmeticOffset < nestedCallOffset,
+                Is.True, name);
+        }
+
+        static void AssertArgumentOrder(BoundProgram program, string name,
+            int firstFormal, int secondFormal)
+        {
+            var function = program.Functions.Single(
+                candidate => candidate.Name == name);
+            BoundCall? outerCall = null;
+            _ = BoundTreeTraversal.VisitExpressions(function.Body,
+                expression =>
+                {
+                    if (expression is BoundCall call
+                        && call.ForeignInterfaceCall?.Member.Name == "Read")
+                    {
+                        outerCall = call;
+                    }
+                });
+            var selectedCall = outerCall
+                ?? throw new AssertionException("Expected the FNI Read call.");
+            Assert.That(selectedCall.Arguments.Length, Is.EqualTo(2));
+            Assert.That(selectedCall.ParameterIndex(0),
+                Is.EqualTo(firstFormal));
+            Assert.That(selectedCall.ParameterIndex(1),
+                Is.EqualTo(secondFormal));
+            var nestedArgumentIndex = firstFormal == 1 ? 0 : 1;
+            var nestedCallFound = false;
+            _ = BoundTreeTraversal.VisitExpressions(
+                selectedCall.Arguments[nestedArgumentIndex], expression =>
+                {
+                    if (expression is BoundCall call
+                        && call.ForeignInterfaceCall?.Member.Name == "Nested")
+                    {
+                        Assert.That(call.Arguments.Single(),
+                            Is.TypeOf<BoundRead>());
+                        nestedCallFound = true;
+                    }
+                });
+            Assert.That(nestedCallFound, Is.True);
+            var checkedArgumentIndex = firstFormal == 0 ? 0 : 1;
+            var checkedExpression
+                = selectedCall.Arguments[checkedArgumentIndex];
+            Assert.That(checkedExpression, Is.TypeOf<BoundBinary>());
+            Assert.That(((BoundBinary)checkedExpression).Operator,
+                Is.EqualTo(TokenKind.Slash));
+            Assert.That(((BoundBinary)checkedExpression).OverflowBehavior,
+                Is.EqualTo(BoundIntegerOverflowBehavior.Checked));
+        }
+    }
+
+    [Test]
     public void StandardForeignNativeInterfaceShiftsPreserveTypedCountHomes()
     {
         const string schemaIdentity
@@ -1194,6 +1371,7 @@ internal sealed class NativeCoreRegistrationTests
                             IProbe.GetIndex(receiver, first), second * 2);
                     }
                 }
+
                 """), reference, options);
         Assert.That(consumerCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine,
@@ -1295,6 +1473,32 @@ internal sealed class NativeCoreRegistrationTests
                         return fallback;
                     }
                 }
+                int32 InvokeNestedThenChecked(ptr<void> receiver,
+                    int32 first, int32 divisor, int32 nestedValue,
+                    int32 fallback) {
+                    init int32 value;
+                    unsafe {
+                        int32 status = IProbe.TryReadPair(receiver,
+                            second: IProbe.GetIndex(receiver, nestedValue),
+                            first: first / divisor,
+                            value: &init value);
+                        if (status >= 0) { return value; }
+                        return fallback;
+                    }
+                }
+                int32 InvokeCheckedThenNested(ptr<void> receiver,
+                    int32 first, int32 divisor, int32 nestedValue,
+                    int32 fallback) {
+                    init int32 value;
+                    unsafe {
+                        int32 status = IProbe.TryReadPair(receiver,
+                            first: first / divisor,
+                            second: IProbe.GetIndex(receiver, nestedValue),
+                            value: &init value);
+                        if (status >= 0) { return value; }
+                        return fallback;
+                    }
+                }
                 """), reference, checkedOptions);
         Assert.That(checkedCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine,
@@ -1314,16 +1518,30 @@ internal sealed class NativeCoreRegistrationTests
             checkedTables.Contracts.Count);
         Assert.That(checkedBody.GetBlockCode(0).ToArray(),
             Does.Contain((byte)0xC0));
+        AssertCheckedArgumentInstructionOrder(
+            GetCheckedBodyCode("InvokeNestedThenChecked"),
+            nestedFirst: true);
+        AssertCheckedArgumentInstructionOrder(
+            GetCheckedBodyCode("InvokeCheckedThenNested"),
+            nestedFirst: false);
         var loadedChecked = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(schemaIdentity, checkedArtifact),
             "checked-consumer.module", [providerInput]);
         AssertCheckedInputs(loadedChecked);
+        AssertMixedCheckedInputOrder(loadedChecked,
+            "InvokeNestedThenChecked", 1, 0);
+        AssertMixedCheckedInputOrder(loadedChecked,
+            "InvokeCheckedThenNested", 0, 1);
         var reemittedChecked = TrRmExecutableCompiler.EmitStandard(
             loadedChecked, "checked-consumer.module", schemaIdentity, 1, []);
         var reloadedChecked = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(schemaIdentity, reemittedChecked),
             "checked-consumer.module", [providerInput]);
         AssertCheckedInputs(reloadedChecked);
+        AssertMixedCheckedInputOrder(reloadedChecked,
+            "InvokeNestedThenChecked", 1, 0);
+        AssertMixedCheckedInputOrder(reloadedChecked,
+            "InvokeCheckedThenNested", 0, 1);
 
         static void AssertComputedInputs(BoundProgram program)
         {
@@ -1389,6 +1607,82 @@ internal sealed class NativeCoreRegistrationTests
             Assert.That(second.Operator, Is.EqualTo(TokenKind.Star));
             Assert.That(second.OverflowBehavior,
                 Is.EqualTo(BoundIntegerOverflowBehavior.Checked));
+        }
+
+        byte[] GetCheckedBodyCode(string name)
+        {
+            var row = Enumerable.Range(1, checkedTables.Methods.Count)
+                .Single(candidate => checkedTables.Methods.GetName(candidate)
+                    == name);
+            var body = checkedTables.Bodies.GetRegisterBody(
+                checkedTables.Methods.GetBodyRow(row),
+                checkedTables.Contracts.Count);
+            return body.GetBlockCode(0).ToArray();
+        }
+
+        static void AssertCheckedArgumentInstructionOrder(byte[] code,
+            bool nestedFirst)
+        {
+            var nestedCallOffset = Array.IndexOf(code, (byte)0x90);
+            var checkedArithmeticOffset = Array.IndexOf(code, (byte)0xC0);
+            Assert.That(nestedCallOffset, Is.GreaterThanOrEqualTo(0));
+            Assert.That(checkedArithmeticOffset,
+                Is.GreaterThanOrEqualTo(0));
+            Assert.That(code[checkedArithmeticOffset + 1],
+                Is.EqualTo((byte)0x0C));
+            Assert.That(nestedFirst
+                    ? nestedCallOffset < checkedArithmeticOffset
+                    : checkedArithmeticOffset < nestedCallOffset,
+                Is.True);
+        }
+
+        static void AssertMixedCheckedInputOrder(BoundProgram program,
+            string functionName, int firstFormal, int secondFormal)
+        {
+            var function = program.Functions.Single(
+                candidate => candidate.Name == functionName);
+            BoundCall? foreignCall = null;
+            _ = BoundTreeTraversal.VisitExpressions(function.Body,
+                expression =>
+                {
+                    if (expression is BoundCall call
+                        && call.ForeignInterfaceCall?.Member.Name
+                            == "TryReadPair")
+                    {
+                        foreignCall = call;
+                    }
+                });
+            var selectedCall = foreignCall
+                ?? throw new AssertionException(
+                    "Expected the FNI TryReadPair call.");
+            Assert.That(selectedCall.ParameterIndex(0),
+                Is.EqualTo(firstFormal));
+            Assert.That(selectedCall.ParameterIndex(1),
+                Is.EqualTo(secondFormal));
+            Assert.That(selectedCall.ParameterIndex(2), Is.EqualTo(2));
+            var nestedArgumentIndex = secondFormal == 1 ? 1 : 0;
+            var checkedArgumentIndex = firstFormal == 0 ? 0 : 1;
+            var checkedExpression
+                = selectedCall.Arguments[checkedArgumentIndex];
+            Assert.That(checkedExpression, Is.TypeOf<BoundBinary>());
+            Assert.That(((BoundBinary)checkedExpression).Operator,
+                Is.EqualTo(TokenKind.Slash));
+            Assert.That(((BoundBinary)checkedExpression).OverflowBehavior,
+                Is.EqualTo(BoundIntegerOverflowBehavior.Checked));
+            var nestedFound = false;
+            _ = BoundTreeTraversal.VisitExpressions(
+                selectedCall.Arguments[nestedArgumentIndex], expression =>
+                {
+                    if (expression is BoundCall call
+                        && call.ForeignInterfaceCall?.Member.Name
+                            == "GetIndex")
+                    {
+                        nestedFound = true;
+                    }
+                });
+            Assert.That(nestedFound, Is.True);
+            Assert.That(selectedCall.Arguments[2],
+                Is.TypeOf<BoundNativeOutputReservation>());
         }
 
         static void AssertMixedReturnCallSite(ReadOnlySpan<byte> callSite)

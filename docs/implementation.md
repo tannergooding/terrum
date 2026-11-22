@@ -1404,13 +1404,16 @@ expression operators remain open.
 Direct-return, mixed-sequence, and fallback conditional-output Bodies can
 combine nested CallSite inputs with non-throwing wrapping integer,
 integer/Boolean bitwise operations, Boolean logical NOT and
-equality/inequality, or floating expressions;
+equality/inequality, total conversions, numeric comparisons, or floating
+expressions;
 nested-call order is preserved, and conditional-output input preparation
 precedes output reservation. Source-free decoding restores the
-operation trees. Checked integer and shift expressions remain limited to
-Bodies without nested CallSites until their cross-call evaluation order
-survives source-free reconstruction. Regressions are added but remain
-unverified under the active hold.
+operation trees. Checked integer and shift expressions may also combine with
+nested CallSites in direct-return and conditional-output Bodies when every
+non-nested formal input is scalar; the emitted preparation and source-free
+argument mapping preserve their order. The mixed multi-call sequence route
+still rejects checked-expression/nested-CallSite combinations. Regressions are
+added but remain unverified under the active hold.
 For conditional-output Bodies, nested calls execute in source argument order
 before output reservation, and source-free re-emission preserves that order
 across formal remapping. Imported-provider source-free
