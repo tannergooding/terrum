@@ -34,6 +34,11 @@ internal sealed class NativeCoreRegistrationTests
         IntPtr receiver, IntPtr source, NativeAggregatePoint fallback);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate NativeAggregateNestedPayload
+        NativeAggregateNestedPayloadFunction(IntPtr receiver, IntPtr source,
+            NativeAggregateNestedPayload fallback);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int NativePointerOutputCallback(IntPtr receiver,
         IntPtr source, int tag, out IntPtr value);
 
@@ -46,6 +51,20 @@ internal sealed class NativeCoreRegistrationTests
     {
         public long X;
         public long Y;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeAggregateNestedInner
+    {
+        public long X;
+        public long Y;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeAggregateNestedPayload
+    {
+        public NativeAggregateNestedInner Inner;
+        public long Z;
     }
 
     [Test]
@@ -2274,6 +2293,155 @@ internal sealed class NativeCoreRegistrationTests
             reloadedFunction.ReturnType)].PointeeType,
             Is.EqualTo(PrimitiveType.Int32));
         return reloaded;
+    }
+
+    [Test]
+    public async Task StandardForeignNativeInterfaceConsumesNestedAggregateOutputLargerThanSixteenBytesUnderAc1()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-native-interface-aggregate-output-consumption-1";
+        const string source = """
+            using Terrum.Interop;
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Inner {
+                public int64 X;
+                public int64 Y;
+            }
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Payload {
+                public Inner Inner;
+                public int64 Z;
+            }
+            [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+            [ForeignNativeInterface(VTableByteOffset: uint32(0))]
+            public interface IProbe {
+                [param(value): NativeOutput(
+                    When: NativeOutputCondition.NonZero)]
+                public unsafe int32 TryReadPayload(ptr<int32> source,
+                    [Terrum.CodeAnalysis.DependsOn(this, nameof(source))]
+                    [Terrum.CodeAnalysis.ForwardsBacking(
+                        this, nameof(source))]
+                    write ptr<Payload> value);
+            }
+            Payload InvokePayload(ptr<void> receiver, ptr<int32> source,
+                Payload fallback) {
+                init Payload value;
+                unsafe {
+                    int32 status = IProbe.TryReadPayload(
+                        receiver, source, &init value);
+                    if (status != 0) { return value; }
+                    return fallback;
+                }
+            }
+            """;
+        var (native, output) = NativeOutputCoreRegistrationTests
+            .CreateCombinedRegistrations(includeForeignNativeInterface: true);
+        var options = new CompilationOptions {
+            NativeCoreRegistration = native,
+            LayoutCoreRegistration = CreateLayoutRegistration(native),
+            NativeOutputCoreRegistration = output,
+        };
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+            options);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program
+            ?? throw new AssertionException("Expected a bound provider.");
+        var member = program.Interfaces.Single().Members.Single();
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "provider.module", schemaIdentity, 1, [
+                new TrRmSourceTypeExport("", "Inner", "provider/Inner") {
+                    FieldExports = [
+                        new TrRmSourceFieldExport("X", "provider/Inner.X"),
+                        new TrRmSourceFieldExport("Y", "provider/Inner.Y"),
+                    ],
+                },
+                new TrRmSourceTypeExport("", "Payload",
+                    "provider/Payload") {
+                    FieldExports = [
+                        new TrRmSourceFieldExport("Inner",
+                            "provider/Payload.Inner"),
+                        new TrRmSourceFieldExport("Z", "provider/Payload.Z"),
+                    ],
+                },
+                new TrRmSourceTypeExport("", "IProbe",
+                    "provider/IProbe") {
+                    GenericArity = 0,
+                    InterfaceMethodExports = [
+                        new TrRmSourceInterfaceMethodExport(
+                            member.SourceInputOrdinal,
+                            member.SourceDeclarationSpan,
+                            "provider/IProbe.TryReadPayload"),
+                    ],
+                },
+            ]);
+        var schema
+            = TrRmArtifactSchema
+                .ForeignNativeInterfaceAggregateOutputConsumptionDraft;
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
+                artifact, schema));
+        foreach (var exportKey in new[] {
+            "provider/Inner",
+            "provider/Payload",
+        })
+        {
+            Assert.That(tables.Exports.TryGetDefinitionForKey(1, exportKey,
+                out var definition), Is.True);
+            var typeDef = checked((int)(definition & 0x00FF_FFFF));
+            Assert.That(tables.TypeDefs.HasDeclaredCopy(typeDef), Is.True);
+        }
+        Assert.That(TrRmFeatureManifestValidator.Requires(tables.Features,
+            tables.Modules, 1,
+            TrRmFeatureTableReader.RootlessNativeValuesFeatureId, schema),
+            Is.True);
+        Assert.That(TrRmFeatureManifestValidator.Requires(tables.Features,
+            tables.Modules, 1,
+            TrRmFeatureTableReader.LayoutQueriesFeatureId, schema), Is.True);
+
+        var method = Enumerable.Range(1, tables.Methods.Count).Single(row =>
+            tables.Methods.GetName(row) == "InvokePayload");
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(method), tables.Contracts.Count);
+        Assert.That(body.BlockCount, Is.EqualTo(3));
+        Assert.That(body.HomeCount, Is.EqualTo(5));
+        var outputHome = body.HomeMap.Slice(3 * 8, 8);
+        var outputTypeMapIndex
+            = BinaryPrimitives.ReadUInt16LittleEndian(outputHome[2..]);
+        var outputTypeToken = BinaryPrimitives.ReadUInt32LittleEndian(
+            body.TypeMap[outputTypeMapIndex * sizeof(uint)..]);
+        Assert.That(outputTypeToken >> 24, Is.EqualTo(0x13u));
+        Assert.That(body.GetBlockCode(1).ToArray(),
+            Is.EqualTo(new byte[] { 0xD5, 0, 3, 0, 0x17, 0 }));
+        Assert.That(body.GetBlockCode(2).ToArray(),
+            Is.EqualTo(new byte[] { 0xD5, 0, 2, 0, 0x17, 0 }));
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            "provider.module", []);
+        var function = loaded.Functions.Single(function =>
+            function.Name == "InvokePayload");
+        var conditional = function.Body.Statements.OfType<BoundIf>().Single();
+        var outputReturn = (BoundReturn)conditional.Then.Statements.Single();
+        var fallbackReturn = (BoundReturn)function.Body.Statements[^1];
+        Assert.That(outputReturn.Value, Is.TypeOf<BoundRead>());
+        Assert.That(fallbackReturn.Value, Is.TypeOf<BoundRead>());
+        Assert.That(((BoundRead)outputReturn.Value).Variable,
+            Is.EqualTo(function.ParameterCount));
+        Assert.That(((BoundRead)fallbackReturn.Value).Variable,
+            Is.EqualTo(2));
+        var image = NativeEmitter.EmitLibrary(loaded, ["InvokePayload"],
+            NativeRuntimePolicy.FailFast);
+        Assert.That(image[..2], Is.EqualTo(new byte[] {
+            (byte)'M', (byte)'Z',
+        }));
+        Assert.That(Marshal.SizeOf<NativeAggregateNestedPayload>(),
+            Is.EqualTo(24));
+        await AssertNestedAggregatePayloadOutputAsync(image, "InvokePayload")
+            .ConfigureAwait(true);
     }
 
     [Test]
@@ -6023,6 +6191,90 @@ internal sealed class NativeCoreRegistrationTests
             result = invoke(receiver, source, fallback);
             Assert.That(result.X, Is.EqualTo(fallback.X));
             Assert.That(result.Y, Is.EqualTo(fallback.Y));
+            GC.KeepAlive(callback);
+        }
+        finally
+        {
+            if (module != IntPtr.Zero)
+            {
+                NativeLibrary.Free(module);
+            }
+            if (source != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(source);
+            }
+            if (vtable != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(vtable);
+            }
+            if (receiver != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(receiver);
+            }
+            await TestFileCleanup.DeleteWithRetryAsync(path)
+                .ConfigureAwait(true);
+        }
+    }
+
+    private static async Task AssertNestedAggregatePayloadOutputAsync(
+        byte[] image, string functionName)
+    {
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"native-fni-nested-aggregate-output-{Guid.NewGuid():N}.dll");
+        var module = IntPtr.Zero;
+        var receiver = IntPtr.Zero;
+        var vtable = IntPtr.Zero;
+        var source = IntPtr.Zero;
+        NativeOutputPointFunction? callback = null;
+        try
+        {
+            await File.WriteAllBytesAsync(path, image).ConfigureAwait(true);
+            module = NativeLibrary.Load(path);
+            receiver = Marshal.AllocHGlobal(IntPtr.Size);
+            vtable = Marshal.AllocHGlobal(IntPtr.Size);
+            source = Marshal.AllocHGlobal(sizeof(int));
+            callback = (actualReceiver, actualSource, value) => {
+                if (actualReceiver != receiver)
+                {
+                    return 0;
+                }
+
+                if (Marshal.ReadInt32(actualSource) == 0)
+                {
+                    Marshal.WriteInt64(value, -1);
+                    return 0;
+                }
+
+                Marshal.WriteInt64(value, 11);
+                Marshal.WriteInt64(value, sizeof(long), 22);
+                Marshal.WriteInt64(value, 2 * sizeof(long), 33);
+                return 1;
+            };
+            Marshal.WriteIntPtr(vtable,
+                Marshal.GetFunctionPointerForDelegate(callback));
+            Marshal.WriteIntPtr(receiver, vtable);
+            Marshal.WriteInt32(source, 1);
+
+            var invoke = Marshal.GetDelegateForFunctionPointer<
+                NativeAggregateNestedPayloadFunction>(
+                    NativeLibrary.GetExport(module, functionName));
+            var fallback = new NativeAggregateNestedPayload {
+                Inner = new NativeAggregateNestedInner {
+                    X = 4,
+                    Y = 5,
+                },
+                Z = 6,
+            };
+            var result = invoke(receiver, source, fallback);
+            Assert.That(result.Inner.X, Is.EqualTo(11));
+            Assert.That(result.Inner.Y, Is.EqualTo(22));
+            Assert.That(result.Z, Is.EqualTo(33));
+
+            Marshal.WriteInt32(source, 0);
+            result = invoke(receiver, source, fallback);
+            Assert.That(result.Inner.X, Is.EqualTo(fallback.Inner.X));
+            Assert.That(result.Inner.Y, Is.EqualTo(fallback.Inner.Y));
+            Assert.That(result.Z, Is.EqualTo(fallback.Z));
             GC.KeepAlive(callback);
         }
         finally
