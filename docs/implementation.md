@@ -1505,13 +1505,14 @@ TypeSpec/D5 Body path, including non-first output-formal and named-input
 remapping; producer, source-free consumer, re-emission and Windows x64
 success/failure execution coverage, including NonNegative's zero-success
 boundary, is added but unverified under the hold. Fallback conditional-output
-Bodies now preserve a prefix of zero-parameter unit FNI calls before output
-reservation, within the shared 13-CallSite invocation limit; source-free
-loading and re-emission preserve that order. A Touch-before-output regression
-is added but remains unverified. Other side-effecting argument expressions
+Bodies now preserve a prefix of no-output unit FNI calls with direct
+scalar/pointer Home inputs before output reservation, within the shared
+13-CallSite invocation limit; source-free loading and re-emission preserve
+that order. A TouchPair-before-output regression is added but remains
+unverified. Other side-effecting argument expressions
 beyond the bounded nested-call forms, combinations of nested-call and
 ConstantMap inputs, declared FNI defaults and constant domains beyond scalar
-literals, outer FNI call shapes beyond zero-parameter unit prelude calls,
+literals, outer FNI call shapes beyond direct-Home unit prelude calls,
 condition selectors beyond NonZero/NonNegative, other Body control-flow
 shapes, nonreturning-call forms beyond the terminal subset and reservation
 cancellation remain open.

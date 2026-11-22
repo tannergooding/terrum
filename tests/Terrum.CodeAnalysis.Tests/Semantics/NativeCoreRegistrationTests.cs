@@ -1640,6 +1640,7 @@ internal sealed class NativeCoreRegistrationTests
                 public unsafe int32 GetIndex(int32 index);
                 public unsafe int32 Pair(int32 first, int32 second);
                 public unsafe void Touch();
+                public unsafe void TouchPair(int32 first, int32 second);
             }
             """;
         var providerCompilation = Compilation.CreateLibrary(
@@ -1694,7 +1695,8 @@ internal sealed class NativeCoreRegistrationTests
                 int32 InvokeConditionalSequence(ptr<void> receiver,
                     int32 first, int32 second, int32 fallback) {
                     unsafe {
-                        IProbe.Touch(receiver);
+                        IProbe.TouchPair(receiver,
+                            second: second, first: first);
                         init int32 value;
                         int32 status = IProbe.TryReadPair(receiver,
                             first, second, &init value);
@@ -1806,6 +1808,19 @@ internal sealed class NativeCoreRegistrationTests
             Is.EqualTo(((byte)0x90, (byte)2)));
         Assert.That(conditionalSequenceBody.GetRecord(1)[5],
             Is.EqualTo((byte)0));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                conditionalSequenceBody.GetRecord(1)[12..]),
+            Is.EqualTo(3u));
+        Assert.That((conditionalSequenceBody.GetRecord(1)[24],
+                conditionalSequenceBody.GetRecord(1)[25],
+                BinaryPrimitives.ReadUInt16LittleEndian(
+                    conditionalSequenceBody.GetRecord(1)[26..])),
+            Is.EqualTo(((byte)2, (byte)1, (ushort)1)));
+        Assert.That((conditionalSequenceBody.GetRecord(1)[28],
+                conditionalSequenceBody.GetRecord(1)[29],
+                BinaryPrimitives.ReadUInt16LittleEndian(
+                    conditionalSequenceBody.GetRecord(1)[30..])),
+            Is.EqualTo(((byte)2, (byte)1, (ushort)2)));
         Assert.That(conditionalSequenceBody.GetRecord(2)[5],
             Is.EqualTo((byte)1));
         Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
@@ -1963,7 +1978,7 @@ internal sealed class NativeCoreRegistrationTests
             var function = program.Functions.Single(
                 static candidate => candidate.Name
                     == "InvokeConditionalSequence");
-            var memberNames = new List<string>();
+            var calls = new List<BoundCall>();
             Assert.That(BoundTreeTraversal.VisitExpressions(function.Body,
                 expression =>
                 {
@@ -1971,12 +1986,21 @@ internal sealed class NativeCoreRegistrationTests
                         ForeignInterfaceCall: not null,
                     } call)
                     {
-                        memberNames.Add(call.ForeignInterfaceCall!
-                            .Member.Name);
+                        calls.Add(call);
                     }
                 }), Is.True);
-            Assert.That(memberNames,
-                Is.EqualTo(new[] { "Touch", "TryReadPair" }));
+            Assert.That(calls.Select(static call =>
+                    call.ForeignInterfaceCall!.Member.Name),
+                Is.EqualTo(new[] { "TouchPair", "TryReadPair" }));
+            Assert.That(calls[0].Arguments.Length, Is.EqualTo(2));
+            Assert.That(calls[0].Arguments[0], Is.TypeOf<BoundRead>());
+            Assert.That(((BoundRead)calls[0].Arguments[0]).Variable,
+                Is.EqualTo(1));
+            Assert.That(calls[0].ParameterIndex(0), Is.EqualTo(0));
+            Assert.That(calls[0].Arguments[1], Is.TypeOf<BoundRead>());
+            Assert.That(((BoundRead)calls[0].Arguments[1]).Variable,
+                Is.EqualTo(2));
+            Assert.That(calls[0].ParameterIndex(1), Is.EqualTo(1));
         }
 
         static void AssertCheckedInputs(BoundProgram program)

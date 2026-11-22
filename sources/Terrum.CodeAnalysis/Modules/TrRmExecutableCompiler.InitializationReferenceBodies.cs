@@ -1822,6 +1822,7 @@ public static partial class TrRmExecutableCompiler
             statements = statementBuilder.ToImmutable();
         }
 
+        var inputHomeVariables = new HashSet<int>();
         var preludeCallBuilder
             = ImmutableArray.CreateBuilder<BoundCall>();
         var conditionalStatement = 0;
@@ -1844,14 +1845,46 @@ public static partial class TrRmExecutableCompiler
                 || !ForeignNativeInterfaceContract.TryCreateCallTarget(
                     preludeForeignCall, program, out var preludeTarget)
                 || preludeTarget.ReturnType != PrimitiveType.Void
-                || preludeTarget.ParameterCount != 0
+                || preludeTarget.ParameterCount
+                    != preludeCall.Arguments.Length
                 || !preludeTarget.NativeOutputContracts.IsEmpty
                 || preludeCall.Arguments.IsDefault
-                || preludeCall.Arguments.Length != 0
                 || preludeForeignCall.Receiver is not BoundRead {
                     Variable: 0,
                     Type: PrimitiveType.NativeRawPointer,
                 })
+            {
+                return false;
+            }
+
+            var preludeSeenParameters
+                = new bool[preludeTarget.ParameterCount];
+            for (var argumentIndex = 0;
+                argumentIndex < preludeCall.Arguments.Length;
+                argumentIndex++)
+            {
+                var formal = preludeCall.ParameterIndex(argumentIndex);
+                var argument = preludeCall.Arguments[argumentIndex];
+                if ((uint)formal >= (uint)preludeTarget.ParameterCount
+                    || preludeSeenParameters[formal]
+                    || argument is not BoundRead read
+                    || read.Variable <= 0
+                    || read.Variable >= fallbackLocal
+                    || read.Type != preludeTarget.Variables[formal].Type
+                    || function.Variables[read.Variable].Type != read.Type
+                    || function.Variables[read.Variable].IsOut
+                    || function.Variables[read.Variable].IsInit
+                    || !(DirectNativeImportContract.IsScalar(read.Type)
+                        || read.Type == PrimitiveType.NativeRawPointer))
+                {
+                    return false;
+                }
+
+                preludeSeenParameters[formal] = true;
+                _ = inputHomeVariables.Add(read.Variable);
+            }
+
+            if (preludeSeenParameters.Any(static seen => !seen))
             {
                 return false;
             }
@@ -1931,7 +1964,6 @@ public static partial class TrRmExecutableCompiler
         var constantInputs
             = new HashSet<(PrimitiveType Type, ScalarBits Bits)>();
         var nestedInputCalls = new List<BoundCall>();
-        var inputHomeVariables = new HashSet<int>();
         for (var sourceArgument = 0;
             sourceArgument < boundCall.Arguments.Length;
             sourceArgument++)
@@ -5355,17 +5387,17 @@ public static partial class TrRmExecutableCompiler
                 || !ForeignNativeInterfaceContract.TryCreateCallTarget(
                     preludeForeignCall, program, out var preludeTarget)
                 || preludeTarget.ReturnType != PrimitiveType.Void
-                || preludeTarget.ParameterCount != 0
+                || preludeTarget.ParameterCount
+                    != preludeCall.Arguments.Length
                 || !preludeTarget.NativeOutputContracts.IsEmpty
                 || preludeCall.Arguments.IsDefault
-                || !preludeCall.Arguments.IsEmpty
                 || preludeForeignCall.Receiver is not BoundRead {
                     Variable: 0,
                     Type: PrimitiveType.NativeRawPointer,
                 })
             {
                 throw Invalid(
-                    "A Standard F+I conditional-output prelude call is outside the zero-parameter unit subset.");
+                    "A Standard F+I conditional-output prelude call is outside the direct-parameter unit subset.");
             }
 
             preludeMethodMapTokens.Add(methodMapTokenForForeignInterface(
@@ -5662,14 +5694,68 @@ public static partial class TrRmExecutableCompiler
         for (var preludeIndex = 0;
             preludeIndex < preludeCalls.Length; preludeIndex++)
         {
-            var receiver = (BoundRead)preludeCalls[preludeIndex]
-                .ForeignInterfaceCall!.Receiver;
+            var preludeCall = preludeCalls[preludeIndex];
+            var preludeForeignCall
+                = preludeCall.ForeignInterfaceCall
+                    ?? throw Invalid(
+                        "A Standard F+I conditional-output prelude call has no InterfaceMethod identity.");
+            if (!ForeignNativeInterfaceContract.TryCreateCallTarget(
+                    preludeForeignCall, program, out var preludeTarget)
+                || preludeTarget.ParameterCount
+                    != preludeCall.Arguments.Length)
+            {
+                throw Invalid(
+                    "A Standard F+I conditional-output prelude call has an invalid signature.");
+            }
+
+            var receiver = (BoundRead)preludeForeignCall.Receiver;
+            var preludeInputs = new TrRmRegisterBodyCallInput[
+                preludeTarget.ParameterCount + 1];
+            preludeInputs[0] = new TrRmRegisterBodyCallInput(2, 1,
+                checked((ushort)receiver.Variable));
+            var preludeArgumentsByFormal
+                = new BoundRead?[preludeTarget.ParameterCount];
+            for (var argumentIndex = 0;
+                argumentIndex < preludeCall.Arguments.Length;
+                argumentIndex++)
+            {
+                var formal = preludeCall.ParameterIndex(argumentIndex);
+                var argument = preludeCall.Arguments[argumentIndex];
+                if ((uint)formal >= (uint)preludeTarget.ParameterCount
+                    || preludeArgumentsByFormal[formal] is not null
+                    || argument is not BoundRead read
+                    || read.Variable <= 0
+                    || read.Variable >= function.ParameterCount - 1
+                    || read.Type != preludeTarget.Variables[formal].Type
+                    || function.Variables[read.Variable].Type != read.Type
+                    || function.Variables[read.Variable].IsOut
+                    || function.Variables[read.Variable].IsInit
+                    || !(DirectNativeImportContract.IsScalar(read.Type)
+                        || read.Type == PrimitiveType.NativeRawPointer))
+                {
+                    throw Invalid(
+                        "A Standard F+I conditional-output prelude input is not a direct scalar or pointer Home.");
+                }
+
+                preludeArgumentsByFormal[formal] = read;
+            }
+
+            for (var formal = 0;
+                formal < preludeArgumentsByFormal.Length;
+                formal++)
+            {
+                var argument = preludeArgumentsByFormal[formal]
+                    ?? throw Invalid(
+                        "A Standard F+I conditional-output prelude omits a formal input.");
+                preludeInputs[formal + 1]
+                    = new TrRmRegisterBodyCallInput(2, 1,
+                        checked((ushort)argument.Variable));
+            }
+
             records.Add(TrRmRegisterBodyRecordWriter.EncodeCallSite(1, 0,
                 maps.GetMethodMapIndex(
                     preludeMethodMapTokens[preludeIndex]), 0,
-                [new TrRmRegisterBodyCallInput(2, 1,
-                    checked((ushort)receiver.Variable))], [],
-                schema: schema));
+                preludeInputs, [], schema: schema));
         }
 
         foreach (var nestedCallSite in nestedCallSites)
@@ -11452,6 +11538,7 @@ public static partial class TrRmExecutableCompiler
 
         var inputVariableLimit = hasFallback
             ? fallbackVariable : function.ParameterCount;
+        var inputHomeVariables = new HashSet<int>();
         var preludeCallsBuilder
             = ImmutableArray.CreateBuilder<BoundCall>(preludeCallCount);
         for (var preludeIndex = 0;
@@ -11466,11 +11553,16 @@ public static partial class TrRmExecutableCompiler
             }
 
             var preludePayload = preludeRecord[4..];
+            if (preludePayload.Length < 20)
+            {
+                throw Invalid(
+                    "The Standard F+I conditional-output prelude CallSite is truncated.");
+            }
+
             var preludeMethodMapIndex
                 = BinaryPrimitives.ReadUInt16LittleEndian(
                     preludePayload[4..]);
             if (preludeRecord[0] != 0x02
-                || preludePayload.Length != 20
                 || preludePayload[0] != 1
                 || preludePayload[1] != 0
                 || BinaryPrimitives.ReadUInt16LittleEndian(
@@ -11478,7 +11570,7 @@ public static partial class TrRmExecutableCompiler
                 || BinaryPrimitives.ReadUInt16LittleEndian(
                     preludePayload[6..]) != 0
                 || BinaryPrimitives.ReadUInt32LittleEndian(
-                    preludePayload[8..]) != 1
+                    preludePayload[8..]) < 1
                 || BinaryPrimitives.ReadUInt32LittleEndian(
                     preludePayload[12..]) != 0
                 || preludeMethodMapIndex >= body.MethodCount)
@@ -11520,8 +11612,12 @@ public static partial class TrRmExecutableCompiler
                 || preludeMember.ResultType.PrimitiveType
                     != PrimitiveType.Void
                 || preludeMember.DoesNotReturn
-                || !preludeMember.Parameters.IsEmpty
                 || !preludeMember.NativeOutputContracts.IsEmpty
+                || BinaryPrimitives.ReadUInt32LittleEndian(
+                    preludePayload[8..])
+                    != (uint)(preludeMember.Parameters.Length + 1)
+                || preludePayload.Length
+                    != 16 + ((preludeMember.Parameters.Length + 1) * 4)
                 || preludeMember.NativeCallableConvention is not
                     NativeCallingConvention preludeConvention
                 || preludeForeignTarget.Definition.ForeignNativeInterface
@@ -11529,7 +11625,7 @@ public static partial class TrRmExecutableCompiler
                         preludeLayout)
             {
                 throw Invalid(
-                    "The Standard F+I conditional-output prelude target is not a zero-parameter unit MethodDef without NativeOutput.");
+                    "The Standard F+I conditional-output prelude target is not a supported unit MethodDef without NativeOutput.");
             }
 
             var preludeReceiverInput = preludePayload[16..];
@@ -11540,6 +11636,47 @@ public static partial class TrRmExecutableCompiler
             {
                 throw Invalid(
                     "The Standard F+I conditional-output prelude CallSite has no direct receiver Home.");
+            }
+
+            var preludeArguments
+                = ImmutableArray.CreateBuilder<BoundExpression>(
+                    preludeMember.Parameters.Length);
+            var preludeParameterIndices
+                = ImmutableArray.CreateBuilder<int>(
+                    preludeMember.Parameters.Length);
+            var preludeInputOffset = 20;
+            for (var formal = 0;
+                formal < preludeMember.Parameters.Length;
+                formal++)
+            {
+                var parameter = preludeMember.Parameters[formal];
+                var formalType = parameter.Type.PrimitiveType;
+                var input = preludePayload.Slice(preludeInputOffset, 4);
+                var homeIndex = BinaryPrimitives
+                    .ReadUInt16LittleEndian(input[2..]);
+                if (parameter.Type.Kind
+                        != BoundInterfaceTypeKind.Primitive
+                    || !(DirectNativeImportContract.IsScalar(formalType)
+                        || formalType
+                            == PrimitiveType.NativeRawPointer)
+                    || input[0] != 2 || input[1] != 1
+                    || homeIndex == 0
+                    || homeIndex >= inputVariableLimit
+                    || homeRoles[homeIndex] != 2
+                    || homeVariables[homeIndex] != homeIndex
+                    || homeTypes[homeIndex] != formalType
+                    || variables[homeIndex].IsOut
+                    || variables[homeIndex].IsInit)
+                {
+                    throw Invalid(
+                        "A Standard F+I conditional-output prelude input does not match a direct scalar or pointer formal.");
+                }
+
+                _ = inputHomeVariables.Add(homeIndex);
+                preludeArguments.Add(new BoundRead(
+                    homeVariables[homeIndex], formalType, default));
+                preludeParameterIndices.Add(formal);
+                preludeInputOffset += 4;
             }
 
             var preludeDeclarationKey = preludeMember.DeclarationKey;
@@ -11570,8 +11707,8 @@ public static partial class TrRmExecutableCompiler
                 preludeForeignTarget.MemberOrdinal,
                 preludeDeclarationKey);
             preludeCallsBuilder.Add(new BoundCall(
-                BoundCall.ForeignInterfaceFunction, [], PrimitiveType.Void,
-                default) {
+                BoundCall.ForeignInterfaceFunction,
+                preludeArguments.MoveToImmutable(), PrimitiveType.Void, default) {
                 IsUnsafeAuthorized = true,
                 ForeignInterfaceCall = new BoundForeignInterfaceCall(
                     new BoundRead(homeVariables[0],
@@ -11581,12 +11718,12 @@ public static partial class TrRmExecutableCompiler
                     preludeMember.RequiresMutableReceiver,
                     preludeMember.DoesNotReturn,
                     preludeMember.NativeOutputContracts),
-                ArgumentParameterIndices = [],
+                ArgumentParameterIndices
+                    = preludeParameterIndices.MoveToImmutable(),
             });
         }
 
         var registerInputs = new Dictionary<ushort, BoundExpression>();
-        var inputHomeVariables = new HashSet<int>();
         var constantOffset = 0;
         while (constantOffset < preparationPrefixLength)
         {
