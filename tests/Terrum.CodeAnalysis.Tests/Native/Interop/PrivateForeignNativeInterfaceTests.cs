@@ -39,12 +39,14 @@ internal sealed class PrivateForeignNativeInterfaceTests
         var providerSource = SyntaxTree.Parse("""
             using Terrum.Interop;
             public int32 Identity(int32 value) { return value; }
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Payload { public int32 Value; }
             [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
             [ForeignNativeInterface(VTableByteOffset: uint32(0))]
             public interface IProbe {
                 [param(value): NativeOutput(
                     When: NativeOutputCondition.NonZero)]
-                public unsafe int32 TryRead(write ptr<int32> value);
+                public unsafe int32 TryRead(write ptr<Payload> value);
             }
             """);
         var (sourceNativeRegistration, sourceOutputRegistration)
@@ -88,8 +90,12 @@ internal sealed class PrivateForeignNativeInterfaceTests
                 providerCompilation.Diagnostics));
         var providerProgram = providerCompilation.Program!;
         var providerInputs = PrivateModuleIdentityInputs
-            .CreateFromSelectors(providerProgram, providerIdentity, [], [],
-                [], [], [
+            .CreateFromSelectors(providerProgram, providerIdentity, [
+                new PrivateNominalDefinitionSelection(
+                    new PrivateNominalDeclarationSelector(
+                        PrivateNominalDeclarationKind.Struct, "Payload"),
+                    "abi.payload", true),
+            ], [], [], [], [
                     new PrivateForeignInterfaceDefinitionAssignment(0,
                         ownerKey, true, [
                             new PrivateForeignInterfaceMemberDefinitionAssignment(
@@ -103,10 +109,10 @@ internal sealed class PrivateForeignNativeInterfaceTests
         var consumerSource = SyntaxTree.Parse("""
             int32 Main() { return 0; }
             public unsafe int32 Dispatch(ptr<void> receiver) {
-                init int32 value;
+                init Payload value;
                 unsafe {
                     int32 status = IProbe.TryRead(receiver, &init value);
-                    if (status != 0) { return value; }
+                    if (status != 0) { return value.Value; }
                 }
                 return 0;
             }
@@ -121,7 +127,14 @@ internal sealed class PrivateForeignNativeInterfaceTests
         var consumerProgram = consumerCompilation.Program!;
         var consumerInputs = PrivateModuleIdentityInputs
             .CreateFromSelectors(consumerProgram,
-                "PrivateFniRuntimeConsumer", [], [], [], [], [], [
+                "PrivateFniRuntimeConsumer", [], [
+                    new PrivateNominalImportSelection(
+                        new PrivateNominalDeclarationSelector(
+                            PrivateNominalDeclarationKind.Struct,
+                            "Payload"),
+                        "consumer.payload", providerIdentity,
+                        "abi.payload"),
+                ], [], [], [], [
                     new PrivateForeignInterfaceImportAssignment(0,
                         "consumer.iprobe", providerIdentity, ownerKey, [
                             new PrivateForeignInterfaceMemberImportAssignment(
