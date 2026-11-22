@@ -584,10 +584,16 @@ Replacement, construction rollback, iterative retirement and reentrant
 call-plan cleanup preserve typed holds under both runtime policies, including
 source-slot rebinding, source-handle retirement, checked unwind and inline
 call-result reads.
+Under normal-backing FailFast, final class retirement now invokes the selected
+Cleanup body before reverse-declaration field retirement; a JIT/PE regression
+checks one Cleanup effect on final release but remains unverified under the
+active hold. Checked
+exception retirement admission, incomplete-retirement records and
+Cleanup-bearing construction rollback remain gated.
 The [normal-backing inventory](implementation/conformance-gaps.md#normal-backing-agreement)
 retains the detailed runtime, provenance and qualification boundaries.
 Foreign/native-callable boundaries, reference output parameters, by-value
-handle arguments/results, optional GC/init references, Cleanup and
+handle arguments/results, optional GC/init references, and
 source-independent persistence remain gated. Private module/graph and TRRM
 routes reject candidate-bound programs. The
 [CLI reference](implementation/cli-protocol.md#provisional-normal-backing-agreement-selection)

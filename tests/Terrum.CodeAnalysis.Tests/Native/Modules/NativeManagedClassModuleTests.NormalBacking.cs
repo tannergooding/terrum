@@ -10,6 +10,68 @@ namespace Terrum.CodeAnalysis.Tests.Native.Modules;
 
 internal sealed partial class NativeManagedClassModuleTests
 {
+    [Test]
+    public async Task NormalBackingClassCleanupRunsOnFinalFailFastRetirementAsync()
+    {
+        const string agreement
+            = CompilationOptions.WindowsX64NormalBackingAgreement;
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            mut class Owner {
+                public mut write ref<int32> Item;
+                public Owner(write ref<int32> item) { Item = item; }
+                [Cleanup] private void Close() {
+                    *Item = *Item + int32(1);
+                }
+            }
+            public int32 Main() {
+                mut int32 value = int32(42);
+                {
+                    require Owner.TryCreate(ref value, out var owner);
+                }
+                return value;
+            }
+            """), new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            NativeLoweringAgreement = agreement,
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        _ = NativeEmitter.EmitCode(program, NativeRuntimePolicy.FailFast,
+            agreement);
+        Assert.That(NativeJit.ExecuteWithData(program,
+            NativeRuntimePolicy.FailFast,
+            nativeLoweringAgreement: agreement).ExitCode, Is.EqualTo(43));
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(program,
+                NativeRuntimePolicy.FailFast, agreement))
+            .ConfigureAwait(true), Is.EqualTo(43));
+    }
+
+    [Test]
+    public void NormalBackingClassCleanupFailsClosedUnderCheckedExceptions()
+    {
+        const string agreement
+            = CompilationOptions.WindowsX64NormalBackingAgreement;
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            class Owner {
+                public Owner() {}
+                [Cleanup] private void Close() {}
+            }
+            public int32 Main() {
+                require Owner.TryCreate(out var owner);
+                return 42;
+            }
+            """), new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.CheckedExceptions,
+            NativeLoweringAgreement = agreement,
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.Throws<NotSupportedException>(() =>
+            NativeEmitter.EmitCode(compilation.Program!,
+                NativeRuntimePolicy.CheckedExceptions, agreement));
+    }
+
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task NormalBackingClassHandlesRetainAndRetireWithinSelectedRuntimeAsync(

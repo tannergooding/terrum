@@ -74,6 +74,71 @@ internal sealed partial class PeCompiler
             }
         }
 
+        var classCleanupFunctionIndexes = new HashSet<int>();
+        for (var classIndex = 0; classIndex < program.Classes.Length;
+            classIndex++)
+        {
+            var @class = program.Classes[classIndex];
+            if (@class.HasCleanup is null
+                || @class.HasCleanup
+                    != (@class.CleanupMethod is not null))
+            {
+                throw new NotSupportedException(
+                    $"The selected normal-backing runtime requires an exact Cleanup selection for class '{@class.Name}'.");
+            }
+
+            if (@class.HasCleanup != true)
+            {
+                continue;
+            }
+
+            if (program.RuntimePolicy != BoundRuntimePolicy.FailFast)
+            {
+                throw new NotSupportedException(
+                    $"The selected normal-backing runtime does not admit checked-exception retirement for Cleanup-bearing class '{@class.Name}'.");
+            }
+
+            var cleanupFunctionIndex = -1;
+            for (var functionIndex = 0;
+                functionIndex < program.Functions.Length;
+                functionIndex++)
+            {
+                var function = program.Functions[functionIndex];
+                if (!StringComparer.Ordinal.Equals(function.Name,
+                        @class.CleanupMethod))
+                {
+                    continue;
+                }
+
+                if (cleanupFunctionIndex >= 0)
+                {
+                    throw new NotSupportedException(
+                        $"The selected normal-backing runtime found duplicate Cleanup bodies for class '{@class.Name}'.");
+                }
+
+                cleanupFunctionIndex = functionIndex;
+            }
+
+            if (cleanupFunctionIndex < 0
+                || !classCleanupFunctionIndexes.Add(cleanupFunctionIndex))
+            {
+                throw new NotSupportedException(
+                    $"The selected normal-backing runtime does not support the Cleanup selection for class '{@class.Name}'.");
+            }
+
+            var cleanupFunction = program.Functions[cleanupFunctionIndex];
+            if (!cleanupFunction.IsCleanup || cleanupFunction.IsStatic
+                || cleanupFunction.ReturnType != PrimitiveType.Void
+                || !StringComparer.Ordinal.Equals(
+                    cleanupFunction.DeclaringStruct, @class.Name)
+                || cleanupFunction.ParameterCount == 0
+                || cleanupFunction.Variables.IsEmpty)
+            {
+                throw new NotSupportedException(
+                    $"The selected normal-backing runtime does not support the Cleanup selection for class '{@class.Name}'.");
+            }
+        }
+
         for (var functionIndex = 0; functionIndex < program.Functions.Length; functionIndex++)
         {
             var function = program.Functions[functionIndex];
@@ -86,10 +151,11 @@ internal sealed partial class PeCompiler
                 }
                 continue;
             }
-            if (function.IsCleanup)
+            if (function.IsCleanup
+                && !classCleanupFunctionIndexes.Contains(functionIndex))
             {
                 throw new NotSupportedException(
-                    $"The selected normal-backing runtime does not support cleanup function '{function.Name}'.");
+                    $"The selected normal-backing runtime does not support non-class cleanup function '{function.Name}'.");
             }
             if (function.IsExternal || function.DirectNativeImport is not null
                 || function.NativeCallableConvention is not null
@@ -1432,7 +1498,37 @@ internal sealed partial class PeCompiler
         var skipPublishedFields = _code.Jump();
         var publishedFields = _code.Position;
         _code.PatchRelative(published, publishedFields);
-        for (var fieldIndex = @class.Fields.Length - 1; fieldIndex >= 0; fieldIndex--)
+        if (@class.CleanupMethod is string cleanupName)
+        {
+            var cleanupFunction = -1;
+            for (var functionIndex = 0;
+                functionIndex < _program.Functions.Length;
+                functionIndex++)
+            {
+                var function = _program.Functions[functionIndex];
+                if (function.IsCleanup
+                    && StringComparer.Ordinal.Equals(function.Name,
+                        cleanupName))
+                {
+                    cleanupFunction = functionIndex;
+                    break;
+                }
+            }
+
+            if (cleanupFunction < 0)
+            {
+                throw new InvalidOperationException(
+                    "The validated normal-backed class Cleanup method is missing.");
+            }
+
+            _code.Load64(NormalBackingHelperCurrentControlSlot);
+            _code.MoveArgument(0, true);
+            EmitTargetCall(cleanupFunction);
+        }
+
+        // The retirement worklist is LIFO, so enqueue declaration order.
+        for (var fieldIndex = 0; fieldIndex < @class.Fields.Length;
+            fieldIndex++)
         {
             var field = @class.Fields[fieldIndex];
             EmitNormalBackingQueueFieldSupportAtOffset(
@@ -1494,7 +1590,8 @@ internal sealed partial class PeCompiler
                 else
                 {
                     var leaves = NormalBackingReferenceLeaves(field.Type, _program);
-                    for (var leafIndex = leaves.Count - 1; leafIndex >= 0; leafIndex--)
+                    for (var leafIndex = leaves.Count - 1; leafIndex >= 0;
+                        leafIndex--)
                     {
                         var leaf = leaves[leafIndex];
                         _code.Load64(provisionalSlot);
@@ -1551,7 +1648,8 @@ internal sealed partial class PeCompiler
         }
 
         var leaves = NormalBackingReferenceLeaves(fieldType, _program);
-        for (var leafIndex = leaves.Count - 1; leafIndex >= 0; leafIndex--)
+        // The retirement worklist is LIFO; enqueue leaf order to reverse it.
+        for (var leafIndex = 0; leafIndex < leaves.Count; leafIndex++)
         {
             var leaf = leaves[leafIndex];
             EmitNormalBackingQueueReferenceSupportAtOffset(

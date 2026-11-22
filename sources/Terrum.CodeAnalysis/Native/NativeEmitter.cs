@@ -1540,11 +1540,15 @@ internal sealed partial class PeCompiler
     }
     internal NativeCode Compile()
     {
-        if (_program.Classes.Any(static @class =>
-                @class is { HasCleanup: not false }))
+        if (_program.Classes.Any(@class =>
+                @class.HasCleanup is null
+                || @class.HasCleanup
+                    != (@class.CleanupMethod is not null)
+                || (@class.HasCleanup == true
+                    && (!_normalBacking || _checkedExceptions))))
         {
             throw new NotSupportedException(
-                "The selected native runtime requires a known, supported managed-class Cleanup selection.");
+                "The selected native runtime requires a known class Cleanup selection supported by normal-backing fail-fast retirement.");
         }
 
         if (!_normalBacking && _program.Classes.Any(static @class =>
