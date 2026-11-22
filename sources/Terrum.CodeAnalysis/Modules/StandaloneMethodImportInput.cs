@@ -325,6 +325,11 @@ internal readonly record struct CapturedStandaloneMethodImportInput(
         var bodyOwnerCapacity = checked(methodCapacity + 1);
         var importCapacity = checked((artifactByteLength / 12) + 1);
         var moduleCapacity = checked((artifactByteLength / 48) + 2);
+        var homeMapCapacity = checked((artifactByteLength / 8) + 1);
+        var typeMapCapacity = checked((artifactByteLength / 4) + 1);
+        var methodMapCapacity = checked((artifactByteLength / 4) + 1);
+        var constantMapCapacity = checked((artifactByteLength / 8) + 1);
+        var formalCapacity = checked((artifactByteLength / 16) + 1);
         return CreateHostBuffers().AddRange([
             new HostBuffer("StandaloneModuleDirectoryMode",
                 PrimitiveType.Int32, [1], false),
@@ -341,10 +346,32 @@ internal readonly record struct CapturedStandaloneMethodImportInput(
                 PrimitiveType.Int32, [0], true),
             new HostBuffer("StandaloneDecoderBodies",
                 PrimitiveType.Int32,
-                [.. new int[checked(methodCapacity * 28)]], true),
+                [.. new int[checked(methodCapacity * 32)]], true),
             new HostBuffer("StandaloneDecoderBodyOwners",
                 PrimitiveType.Int32,
                 [.. new int[bodyOwnerCapacity]], true),
+            new HostBuffer("StandaloneDecoderHomeCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneDecoderHomes",
+                PrimitiveType.Int32,
+                [.. new int[checked(homeMapCapacity * 3)]], true),
+            new HostBuffer("StandaloneDecoderFormalHomeBodies",
+                PrimitiveType.Int32,
+                [.. new int[formalCapacity]], true),
+            new HostBuffer("StandaloneDecoderTypeMapCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneDecoderTypeMapTypeIds",
+                PrimitiveType.Int32, [.. new int[typeMapCapacity]], true),
+            new HostBuffer("StandaloneDecoderMethodMapCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneDecoderMethodMapTargets",
+                PrimitiveType.Int32,
+                [.. new int[checked(methodMapCapacity * 3)]], true),
+            new HostBuffer("StandaloneDecoderConstantMapCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneDecoderConstantMapEntries",
+                PrimitiveType.Int32,
+                [.. new int[checked(constantMapCapacity * 3)]], true),
             new HostBuffer("StandaloneDecoderLocalCallableCount",
                 PrimitiveType.Int32, [0], true),
             new HostBuffer("StandaloneDecoderLocalCallables",
@@ -354,7 +381,7 @@ internal readonly record struct CapturedStandaloneMethodImportInput(
                 PrimitiveType.Int32, [0], true),
             new HostBuffer("StandaloneDecoderImportedCallables",
                 PrimitiveType.Int32,
-                [.. new int[checked(importCapacity * 12)]], true),
+                [.. new int[checked(importCapacity * 16)]], true),
             new HostBuffer("StandaloneDecoderImportMapCount",
                 PrimitiveType.Int32, [0], true),
             new HostBuffer("StandaloneDecoderImportMap",

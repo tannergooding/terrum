@@ -756,6 +756,20 @@ internal sealed class StandaloneMethodImportInputTests
                     || Host.StandaloneDecoderBodyOwners[1] != 1
                     || Host.StandaloneDecoderBodies[7] != 7
                     || Host.StandaloneDecoderBodies[8] != 2
+                    || Host.StandaloneDecoderHomeCount[0] != 2
+                    || Host.StandaloneDecoderHomes[0] != 2
+                    || Host.StandaloneDecoderHomes[1] <= 0
+                    || Host.StandaloneDecoderHomes[2] != 0
+                    || Host.StandaloneDecoderHomes[3] != 2
+                    || Host.StandaloneDecoderHomes[4] <= 0
+                    || Host.StandaloneDecoderHomes[5] != 1
+                    || Host.StandaloneDecoderTypeMapCount[0] <= 0
+                    || Host.StandaloneDecoderTypeMapTypeIds[0] <= 0
+                    || Host.StandaloneDecoderMethodMapCount[0] != 1
+                    || Host.StandaloneDecoderMethodMapTargets[0] != 2
+                    || Host.StandaloneDecoderMethodMapTargets[1] != 0
+                    || Host.StandaloneDecoderMethodMapTargets[2] != 0
+                    || Host.StandaloneDecoderConstantMapCount[0] != 0
                     || Host.StandaloneDecoderBodies[19] != 1
                     || Host.StandaloneDecoderBodies[21] != 2
                     || Host.StandaloneDecoderBodies[26] <= 0
@@ -806,6 +820,133 @@ internal sealed class StandaloneMethodImportInputTests
         var decoderExecution = NativeJit.ExecuteWithData(decoderProgram,
             (NativeRuntimePolicy)policy);
         Assert.That(decoderExecution.ExitCode, Is.EqualTo(0));
+
+        var constantDecoderInput = new StandaloneMethodImportArtifactInput(
+            Agreement, "consumer/module",
+            new TrRmStandardArtifactInput(SchemaIdentity, artifact),
+            input.Artifacts);
+        var constantDecoderBuffers = constantDecoderInput.Capture()
+            .CreateSourceFreeReaderHostBuffers();
+        const string constantDecoderVerificationSource = """
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                int32 status = DecodeStandaloneModuleMetadata();
+                if (status != 0) { return status; }
+                if (Host.StandaloneDecoderBodyCount[0] != 1
+                    || Host.StandaloneDecoderMethodMapCount[0] != 1
+                    || Host.StandaloneDecoderConstantMapCount[0] != 1
+                    || Host.StandaloneDecoderConstantMapEntries[0] <= 0
+                    || Host.StandaloneDecoderConstantMapEntries[1] <= 0
+                    || Host.StandaloneDecoderConstantMapEntries[2] <= 0) {
+                    return 71;
+                }
+                return 0;
+            }
+            """;
+        var constantDecoderComponents
+            = new List<SyntaxTree>(decoderComponents);
+        constantDecoderComponents[^1] = SyntaxTree.Parse(
+            constantDecoderVerificationSource,
+            "standalone-source-free-constant-map-tests.terrum");
+        var constantDecoderCompilation = Compilation.Create(
+            constantDecoderComponents, constantDecoderBuffers, policy);
+        Assert.That(constantDecoderCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                constantDecoderCompilation.Diagnostics));
+        var constantDecoderProgram = constantDecoderCompilation.Program
+            ?? throw new AssertionException(
+                "Expected a constant-map decoder validator.");
+        var constantDecoderExecution = NativeJit.ExecuteWithData(
+            constantDecoderProgram, (NativeRuntimePolicy)policy);
+        Assert.That(constantDecoderExecution.ExitCode, Is.EqualTo(0));
+
+        var malformedConstantArtifact = artifact.ToArray();
+        var constantSectionCount = checked((int)BinaryPrimitives
+            .ReadUInt32LittleEndian(malformedConstantArtifact.AsSpan(12)));
+        var bodySectionStart = -1;
+        var bodyTableCount = 0;
+        for (var section = 0; section < constantSectionCount; section++)
+        {
+            var entryOffset = checked(32 + (section * 16));
+            if (BinaryPrimitives.ReadUInt16LittleEndian(
+                    malformedConstantArtifact.AsSpan(entryOffset)) == 0x0020)
+            {
+                bodyTableCount = checked((int)BinaryPrimitives
+                    .ReadUInt32LittleEndian(
+                        malformedConstantArtifact.AsSpan(entryOffset + 4)));
+                bodySectionStart = checked((int)BinaryPrimitives
+                    .ReadUInt32LittleEndian(
+                        malformedConstantArtifact.AsSpan(entryOffset + 8)));
+                break;
+            }
+        }
+        Assert.That(bodyTableCount, Is.GreaterThan(0));
+        var bodyIndexLength = checked((bodyTableCount + 1) * 4);
+        var bodyDataOffset = checked((int)BinaryPrimitives
+            .ReadUInt32LittleEndian(
+                malformedConstantArtifact.AsSpan(bodySectionStart)));
+        var bodyStart = checked(bodySectionStart + bodyIndexLength
+            + bodyDataOffset);
+        var mapMask = malformedConstantArtifact[bodyStart + 2];
+        Assert.That(mapMask & 16, Is.Not.EqualTo(0));
+        var bodyCursor = bodyStart + 5;
+        var homeMapCount = 0;
+        var typeMapCount = 0;
+        var methodMapCount = 0;
+        var fieldMapCount = 0;
+        if ((mapMask & 1) != 0)
+        {
+            homeMapCount = checked((int)BinaryPrimitives
+                .ReadUInt32LittleEndian(
+                    malformedConstantArtifact.AsSpan(bodyCursor)));
+            bodyCursor += 4;
+        }
+        if ((mapMask & 2) != 0)
+        {
+            typeMapCount = checked((int)BinaryPrimitives
+                .ReadUInt32LittleEndian(
+                    malformedConstantArtifact.AsSpan(bodyCursor)));
+            bodyCursor += 4;
+        }
+        if ((mapMask & 4) != 0)
+        {
+            methodMapCount = checked((int)BinaryPrimitives
+                .ReadUInt32LittleEndian(
+                    malformedConstantArtifact.AsSpan(bodyCursor)));
+            bodyCursor += 4;
+        }
+        if ((mapMask & 8) != 0)
+        {
+            fieldMapCount = checked((int)BinaryPrimitives
+                .ReadUInt32LittleEndian(
+                    malformedConstantArtifact.AsSpan(bodyCursor)));
+            bodyCursor += 4;
+        }
+        var constantMapTypeOffset = checked(bodyCursor + 12
+            + (homeMapCount * 8) + (typeMapCount * 4)
+            + (methodMapCount * 4) + (fieldMapCount * 4));
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            malformedConstantArtifact.AsSpan(constantMapTypeOffset),
+            0xF200_0001);
+        var malformedConstantInput
+            = new StandaloneMethodImportArtifactInput(Agreement,
+                "consumer/module",
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    malformedConstantArtifact),
+                input.Artifacts);
+        var malformedConstantBuffers = malformedConstantInput.Capture()
+            .CreateSourceFreeReaderHostBuffers();
+        var malformedConstantCompilation = Compilation.Create(
+            constantDecoderComponents, malformedConstantBuffers, policy);
+        Assert.That(malformedConstantCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                malformedConstantCompilation.Diagnostics));
+        var malformedConstantProgram = malformedConstantCompilation.Program
+            ?? throw new AssertionException(
+                "Expected a mismatched-constant decoder validator.");
+        var malformedConstantExecution = NativeJit.ExecuteWithData(
+            malformedConstantProgram, (NativeRuntimePolicy)policy);
+        Assert.That(malformedConstantExecution.ExitCode, Is.EqualTo(3));
 
         var malformedBodyArtifact = contractArtifact.ToArray();
         var sectionCount = checked((int)BinaryPrimitives
