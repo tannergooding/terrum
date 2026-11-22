@@ -75,6 +75,8 @@ internal sealed class StandaloneMethodImportInputTests
             if (Host.Expected[2] == 1) {
                 if (rootStatus != 0
                     || Host.StandaloneResolvedRootCount[0] != 2
+                    || Host.StandaloneResolvedEffects[0] != 0
+                    || Host.StandaloneResolvedEffects[1] != 0
                     || Host.StandaloneResolvedRootTypeIds[0] != 1
                     || Host.StandaloneResolvedRootTypeIds[1] != 1
                     || Host.StandaloneTypeFactCount[0] != 3
@@ -100,8 +102,19 @@ internal sealed class StandaloneMethodImportInputTests
                 }
                 return 0;
             }
+            if (Host.Expected[2] == 2) {
+                if (rootStatus != 0
+                    || Host.StandaloneResolvedEffects[0]
+                        != Host.Expected[3]
+                    || Host.StandaloneResolvedEffects[1] != 0) {
+                    return 27;
+                }
+                return 0;
+            }
             if (rootStatus == 0
                 && (Host.StandaloneResolvedRootCount[0] != 2
+                    || Host.StandaloneResolvedEffects[0] != 0
+                    || Host.StandaloneResolvedEffects[1] != 0
                     || Host.StandaloneResolvedRoots[0] != 1
                     || Host.StandaloneResolvedRoots[1] != 0
                     || Host.StandaloneResolvedRoots[2] != 0
@@ -229,6 +242,7 @@ internal sealed class StandaloneMethodImportInputTests
                 "StandaloneResolvedRootCount",
                 "StandaloneResolvedRoots",
                 "StandaloneResolvedRootTypeIds",
+                "StandaloneResolvedEffects",
             }));
         Assert.That(hostBuffers[2].Values,
             Is.EqualTo(new[] { 1, 2, 3, 4, 5 }));
@@ -265,6 +279,7 @@ internal sealed class StandaloneMethodImportInputTests
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneStringTable.terrum",
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneModuleDirectory.terrum",
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneCallableTypes.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodEffects.terrum",
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodRoots.terrum",
         };
         var root = RepositoryRoot();
@@ -458,6 +473,55 @@ internal sealed class StandaloneMethodImportInputTests
                 3, 3),
             Is.EqualTo(0));
 
+        var callerUnsafeAndNoReturn = input with {
+            Artifacts = [
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateEffectArtifact("provider/b", 6)),
+                input.Artifacts[1],
+            ],
+        };
+        var effectsProgram = Compile(callerUnsafeAndNoReturn, 3, 0,
+            verificationMode: 2, expectedEffectMask: 6);
+        Assert.That(Run(effectsProgram, callerUnsafeAndNoReturn, 3, 0,
+                verificationMode: 2, expectedEffectMask: 6),
+            Is.EqualTo(0));
+
+        var explicitZeroEffects = input with {
+            Artifacts = [
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateEffectArtifact("provider/b", 0)),
+                input.Artifacts[1],
+            ],
+        };
+        var explicitZeroEffectsProgram
+            = Compile(explicitZeroEffects, 3, 0, verificationMode: 2);
+        Assert.That(Run(explicitZeroEffectsProgram, explicitZeroEffects,
+                3, 0, verificationMode: 2),
+            Is.EqualTo(0));
+
+        var invalidEffectsMask = input with {
+            Artifacts = [
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateEffectArtifact("provider/b", 1)),
+                input.Artifacts[1],
+            ],
+        };
+        var invalidEffectsProgram = Compile(invalidEffectsMask, 3, 3);
+        Assert.That(Run(invalidEffectsProgram, invalidEffectsMask, 3, 3),
+            Is.EqualTo(0));
+
+        var duplicateEffects = input with {
+            Artifacts = [
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateEffectArtifact("provider/b", 2,
+                        effectRowCount: 2)),
+                input.Artifacts[1],
+            ],
+        };
+        var duplicateEffectsProgram = Compile(duplicateEffects, 3, 3);
+        Assert.That(Run(duplicateEffectsProgram, duplicateEffects, 3, 3),
+            Is.EqualTo(0));
+
         var repeatedFeature = input with {
             Artifacts = [
                 new TrRmStandardArtifactInput(SchemaIdentity,
@@ -547,11 +611,12 @@ internal sealed class StandaloneMethodImportInputTests
 
         BoundProgram Compile(StandaloneMethodImportInput request,
             int expectedModuleCount, int expectedRootStatus,
-            int verificationMode = 0)
+            int verificationMode = 0, int expectedEffectMask = 0)
         {
             var compilation = Compilation.Create(components,
                 Buffers(request, expectedModuleCount,
-                    expectedRootStatus, verificationMode), policy);
+                    expectedRootStatus, verificationMode,
+                    expectedEffectMask), policy);
             Assert.That(compilation.HasErrors, Is.False,
                 string.Join(Environment.NewLine, compilation.Diagnostics));
             return compilation.Program
@@ -561,19 +626,22 @@ internal sealed class StandaloneMethodImportInputTests
 
         int Run(BoundProgram boundProgram,
             StandaloneMethodImportInput request, int expectedModuleCount,
-            int expectedRootStatus, int verificationMode = 0)
+            int expectedRootStatus, int verificationMode = 0,
+            int expectedEffectMask = 0)
             => NativeJit.Execute(boundProgram with {
                 Buffers = Buffers(request, expectedModuleCount,
-                    expectedRootStatus, verificationMode),
+                    expectedRootStatus, verificationMode,
+                    expectedEffectMask),
             }, (NativeRuntimePolicy)policy);
 
         ImmutableArray<HostBuffer> Buffers(
             StandaloneMethodImportInput request, int expectedModuleCount,
-            int expectedRootStatus, int verificationMode)
+            int expectedRootStatus, int verificationMode,
+            int expectedEffectMask)
             => request.Capture().CreateHostBuffers().Add(new HostBuffer(
                 "Expected", PrimitiveType.Int32,
                 [expectedModuleCount, expectedRootStatus,
-                    verificationMode], false));
+                    verificationMode, expectedEffectMask], false));
     }
 
     private static string RepositoryRoot() =>
@@ -756,6 +824,62 @@ internal sealed class StandaloneMethodImportInputTests
         sections.Add(new TrRmSection(0x0018, 0, 1, paramSection));
         sections.Add(new TrRmSection(0x001D, 0, 1, exportSection));
         return TrRmArtifactWriter.Encode(sections);
+    }
+
+    private static byte[] CreateEffectArtifact(string moduleIdentity,
+        uint effectsMask, int effectRowCount = 1)
+    {
+        var stringSection = TrRmStringTableWriter.EncodeNames([
+            (moduleIdentity, 0),
+            ("Implementation", 0),
+            ("api/Run", 0),
+        ]);
+        var strings = new TrRmStringTableReader(stringSection, 3);
+        var moduleSection = TrRmModuleTableWriter.Encode([
+            new TrRmModuleRow(1, 1, 0, 0, 1, 1, 1, 1),
+        ], strings, 0, 0, 1, 0);
+        var methodDefSection = new byte[28];
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            methodDefSection.AsSpan(4), 2);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            methodDefSection.AsSpan(8), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            methodDefSection.AsSpan(12), 2);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            methodDefSection.AsSpan(16), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            methodDefSection.AsSpan(20), (uint)effectRowCount);
+        var methodSigSection = new byte[24];
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            methodSigSection, 0xF200_0008);
+        var contractRows = new ReadOnlyMemory<byte>[effectRowCount];
+        for (var index = 0; index < effectRowCount; index++)
+        {
+            var contractRow = new byte[12];
+            BinaryPrimitives.WriteUInt32LittleEndian(contractRow,
+                0x1600_0001);
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                contractRow.AsSpan(4), 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                contractRow.AsSpan(8), effectsMask);
+            contractRows[index] = contractRow;
+        }
+        var contractSection
+            = TrRmVariableTableWriter.EncodeBlobs(contractRows);
+        var exportSection = new byte[8];
+        BinaryPrimitives.WriteUInt32LittleEndian(exportSection,
+            0x1600_0001);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            exportSection.AsSpan(4), 3);
+        return TrRmArtifactWriter.Encode([
+            new TrRmSection(0x0001, 0, 1, moduleSection),
+            new TrRmSection(0x0002, 0, 3, stringSection),
+            new TrRmSection(0x0016, 0, 1, methodDefSection),
+            new TrRmSection(0x0017, 0, 1, methodSigSection),
+            new TrRmSection(0x001B, 0, (uint)effectRowCount,
+                contractSection),
+            new TrRmSection(0x001D, 0, 1, exportSection),
+        ]);
     }
 
     private static byte[] CreateOutOfOrderArtifact()

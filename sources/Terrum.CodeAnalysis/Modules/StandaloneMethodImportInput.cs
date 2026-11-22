@@ -208,6 +208,9 @@ internal readonly record struct CapturedStandaloneMethodImportInput(
             new HostBuffer("StandaloneResolvedRootTypeIds",
                 PrimitiveType.Int32,
                 [.. new int[MethodRoots.Length]], true),
+            new HostBuffer("StandaloneResolvedEffects",
+                PrimitiveType.Int32,
+                [.. new int[MethodRoots.Length]], true),
         ];
 
         int AppendText(string value)

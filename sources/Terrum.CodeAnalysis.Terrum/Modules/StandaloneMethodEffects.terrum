@@ -1,0 +1,95 @@
+namespace Terrum.CodeAnalysis;
+
+int32 ValidateStandaloneMethodEffects(int32 rootOrdinal,
+    int32 artifactStart, int32 artifactLength,
+    int32 methodDefRow, uint32 contractFirst, uint32 contractCount)
+{
+    int32 tableCount = GetStandaloneArtifactSectionCount(0x001B);
+    if (!IsStandaloneMetadataRange(contractFirst, contractCount,
+            tableCount))
+    {
+        return 3;
+    }
+    if (contractCount == 0)
+    {
+        Host.StandaloneResolvedEffects[rootOrdinal] = 0;
+        return 0;
+    }
+
+    int32 contractEntry = FindStandaloneArtifactSection(0x001B);
+    if (contractEntry == 0)
+    {
+        return 3;
+    }
+    int32 contractSectionStart
+        = Host.StandaloneSectionStarts[contractEntry];
+    int32 contractSectionLength
+        = Host.StandaloneSectionLengths[contractEntry];
+    if (!TryValidateStandaloneVariableTableIndex(artifactStart,
+            artifactLength, contractSectionStart,
+            contractSectionLength, tableCount, 8, 1))
+    {
+        return 3;
+    }
+
+    uint32 expectedOwner = 0x1600_0000
+        | uint32(methodDefRow);
+    mut bool effectsFound = false;
+    mut uint32 effectsMask = 0;
+    uint32 allowedEffects = 6;
+    for (mut int32 offset = 0;
+        offset < int32(contractCount);
+        offset = offset + 1)
+    {
+        int32 row = int32(contractFirst) + offset;
+        init int32 rowStart;
+        init int32 rowLength;
+        if (!TryGetStandaloneVariableTableRowExtent(
+                artifactStart, artifactLength,
+                contractSectionStart, contractSectionLength,
+                tableCount, 8, 1, row,
+                ref init rowStart, ref init rowLength))
+        {
+            return 3;
+        }
+
+        init uint32 owner;
+        init uint32 clauseKind;
+        init uint32 flags;
+        if (rowLength < 8
+            || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, rowStart, ref init owner)
+            || !TryReadStandaloneArtifactAbsoluteHalfWord(
+                artifactStart, artifactLength, rowStart + 4,
+                ref init clauseKind)
+            || !TryReadStandaloneArtifactAbsoluteHalfWord(
+                artifactStart, artifactLength, rowStart + 6,
+                ref init flags)
+            || owner != expectedOwner || flags != 0)
+        {
+            return 3;
+        }
+
+        if (clauseKind != 1)
+        {
+            return 2;
+        }
+        if (rowLength != 12 || effectsFound)
+        {
+            return 3;
+        }
+
+        init uint32 mask;
+        if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, rowStart + 8, ref init mask)
+            || (mask & ~allowedEffects) != 0)
+        {
+            return 3;
+        }
+        effectsFound = true;
+        effectsMask = mask;
+    }
+
+    Host.StandaloneResolvedEffects[rootOrdinal] = int32(effectsMask);
+    return 0;
+}

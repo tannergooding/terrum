@@ -170,6 +170,12 @@ void ClearStandaloneResolvedRoots()
         Host.StandaloneResolvedRootTypeIds[index] = 0;
     }
     for (mut int32 index = 0;
+        index < Host.StandaloneResolvedEffects.Length;
+        index = index + 1)
+    {
+        Host.StandaloneResolvedEffects[index] = 0;
+    }
+    for (mut int32 index = 0;
         index < Host.StandaloneParameterTypeIds.Length;
         index = index + 1)
     {
@@ -441,23 +447,29 @@ int32 FindStandaloneMethodRootExport(int32 artifactOrdinal,
             || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
                 artifactLength, methodOffset + 24, ref init bodyRow)
             || ownerType != definitionOwnerType
-            || ownerType != 0 || methodFlags != 2
-            || definitionVisibility != 2
             || methodNameStringRow == 0
             || methodNameStringRow > uint32(stringCount)
             || signatureRow == 0
             || signatureRow > uint32(signatureCount)
             || bodyRow > uint32(bodyCount)
-            || !IsStandaloneMetadataRange(contractFirst,
-                methodContractCount, contractCount)
             || !TryValidateStandaloneStringName(artifactOrdinal,
                 artifactStart, artifactLength, stringSectionStart,
                 stringSectionLength, stringCount,
-                int32(methodNameStringRow))
+                int32(methodNameStringRow)))
+        {
+            return 3;
+        }
+        if (ownerType != 0 || methodFlags != 2
+            || definitionVisibility != 2
             || IsStandaloneMethodExpectedImport(artifactStart,
                 artifactLength, int32(row)))
         {
             return 2;
+        }
+        if (!IsStandaloneMetadataRange(contractFirst,
+                methodContractCount, contractCount))
+        {
+            return 3;
         }
 
         int32 signatureOffset = signatureSectionStart
@@ -510,6 +522,14 @@ int32 FindStandaloneMethodRootExport(int32 artifactOrdinal,
         if (signatureTypeStatus != 0)
         {
             return signatureTypeStatus;
+        }
+
+        int32 effectsStatus = ValidateStandaloneMethodEffects(
+            rootOrdinal, artifactStart, artifactLength,
+            int32(row), contractFirst, methodContractCount);
+        if (effectsStatus != 0)
+        {
+            return effectsStatus;
         }
 
         init bool nativePointerAnchor;

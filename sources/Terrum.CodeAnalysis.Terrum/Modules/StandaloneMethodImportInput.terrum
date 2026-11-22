@@ -21,6 +21,8 @@ public static int32 ValidateStandaloneMethodImportInput()
         || Host.StandaloneTypeFacts.Length != 159
         || Host.StandaloneResolvedRootTypeIds.Length
             != Host.StandaloneMethodRoots.Length / 5
+        || Host.StandaloneResolvedEffects.Length
+            != Host.StandaloneMethodRoots.Length / 5
         || Host.StandaloneSectionKinds.Length
             != Host.StandaloneArtifacts.Length / 16 + 1
         || Host.StandaloneSectionFlags.Length
