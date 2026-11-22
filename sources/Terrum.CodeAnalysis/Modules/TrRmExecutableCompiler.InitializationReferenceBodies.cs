@@ -1885,6 +1885,7 @@ public static partial class TrRmExecutableCompiler
         var outputContract = target.NativeOutputContracts[0];
         var seenParameters = new bool[target.ParameterCount];
         var scalarExpressionRegisterCount = 0;
+        var hasThrowingScalarExpression = false;
         var constantInputs
             = new HashSet<(PrimitiveType Type, ScalarBits Bits)>();
         var nestedInputCalls = new List<BoundCall>();
@@ -1954,6 +1955,8 @@ public static partial class TrRmExecutableCompiler
                 scalarExpressionRegisterCount = checked(
                     scalarExpressionRegisterCount
                     + expressionRegisterCount);
+                hasThrowingScalarExpression |=
+                    ForeignInterfaceScalarInputExpressionMayThrow(argument);
                 CollectForeignInterfaceScalarInputHomeVariables(argument,
                     inputHomeVariables);
                 constantInputs.UnionWith(expressionConstants);
@@ -1984,6 +1987,8 @@ public static partial class TrRmExecutableCompiler
         }
 
         if (seenParameters.Any(static seen => !seen)
+            || (hasThrowingScalarExpression
+                && nestedInputCalls.Count != 0)
             || inputHomeVariables.Count != fallbackLocal - 1)
         {
             return false;
@@ -2396,6 +2401,33 @@ public static partial class TrRmExecutableCompiler
         }
     }
 
+    private static bool ForeignInterfaceScalarInputExpressionMayThrow(
+        BoundExpression expression)
+    {
+        while (expression is BoundUnsafeExpression unsafeExpression)
+        {
+            expression = unsafeExpression.Expression;
+        }
+
+        return expression switch {
+            BoundUnary unary =>
+                (PrimitiveTypeFacts.IsIntegerOrWide(unary.Type)
+                    && unary.OverflowBehavior
+                        == BoundIntegerOverflowBehavior.Checked)
+                || ForeignInterfaceScalarInputExpressionMayThrow(
+                    unary.Operand),
+            BoundBinary binary =>
+                (PrimitiveTypeFacts.IsIntegerOrWide(binary.Type)
+                    && binary.OverflowBehavior
+                        == BoundIntegerOverflowBehavior.Checked)
+                || ForeignInterfaceScalarInputExpressionMayThrow(
+                    binary.Left)
+                || ForeignInterfaceScalarInputExpressionMayThrow(
+                    binary.Right),
+            _ => false,
+        };
+    }
+
     private static int EmitForeignInterfaceScalarInputExpression(
         BoundExpression expression, PrimitiveType expectedType,
         Func<int> allocateRegister,
@@ -2707,6 +2739,7 @@ public static partial class TrRmExecutableCompiler
         var constantInputs
             = new HashSet<(PrimitiveType Type, ScalarBits Bits)>();
         var scalarExpressionRegisterCount = 0;
+        var hasThrowingScalarExpression = false;
         var availableInputRegisters
             = 13 - (stagedLocalVariables.Count == 0 ? 0 : 1);
         for (var sourceArgument = 0;
@@ -2783,6 +2816,8 @@ public static partial class TrRmExecutableCompiler
                 scalarExpressionRegisterCount = checked(
                     scalarExpressionRegisterCount
                     + expressionRegisterCount);
+                hasThrowingScalarExpression |=
+                    ForeignInterfaceScalarInputExpressionMayThrow(argument);
                 constantInputs.UnionWith(expressionConstants);
                 if (constantInputs.Count
                         + nestedForeignInterfaceCalls.Count
@@ -2817,7 +2852,7 @@ public static partial class TrRmExecutableCompiler
             || !outputVariables.SetEquals(vacantLocals)
             || !stagedLocalVariables.SetEquals(
                 stagedLocalBuilder.Select(static local => local.Variable))
-            || (scalarExpressionRegisterCount != 0
+            || (hasThrowingScalarExpression
                 && nestedForeignInterfaceCalls.Count != 0)
             || function.Variables.Length != function.ParameterCount
                 + outputVariables.Count + stagedLocalVariables.Count)
@@ -3077,9 +3112,7 @@ public static partial class TrRmExecutableCompiler
         if (callBuilder.Count is < 2 or > 13
             || callBuilder.Count + nestedInputBuilder.Count > 13
             || constantInputs.Count + nestedInputBuilder.Count
-                + scalarExpressionRegisterCount > 13
-            || (scalarExpressionRegisterCount != 0
-                && nestedInputBuilder.Count != 0))
+                + scalarExpressionRegisterCount > 13)
         {
             return false;
         }
@@ -3126,6 +3159,7 @@ public static partial class TrRmExecutableCompiler
             }
 
             var seenParameters = new bool[target.ParameterCount];
+            var hasThrowingScalarExpression = false;
             for (var argumentIndex = 0;
                 argumentIndex < boundCall.Arguments.Length;
                 argumentIndex++)
@@ -3180,6 +3214,9 @@ public static partial class TrRmExecutableCompiler
                     scalarExpressionRegisterCount = checked(
                         scalarExpressionRegisterCount
                         + expressionRegisterCount);
+                    hasThrowingScalarExpression |=
+                        ForeignInterfaceScalarInputExpressionMayThrow(
+                            argument);
                     constantInputs.UnionWith(expressionConstants);
                     if (constantInputs.Count
                             + nestedInputBuilder.Count
@@ -3213,7 +3250,9 @@ public static partial class TrRmExecutableCompiler
                 seenParameters[formal] = true;
             }
 
-            return seenParameters.All(static seen => seen);
+            return seenParameters.All(static seen => seen)
+                && !(hasThrowingScalarExpression
+                    && nestedInputBuilder.Count != 0);
         }
 
         bool TryValidateLocalVoidCall(BoundCall boundCall)
@@ -4278,7 +4317,9 @@ public static partial class TrRmExecutableCompiler
         var constantRegisterByValue
             = new Dictionary<(PrimitiveType Type, ScalarBits Bits), byte>();
         var constantLoads = new List<(ushort MapIndex, byte Register)>();
-        var argumentExpressionCode = new List<byte>();
+        var argumentPreparationCode = new List<byte>();
+        var nestedRecordPatches = new List<(int Offset, BoundCall Call)>();
+        var expressionRegisterByFormal = new Dictionary<int, byte>();
         var methodMapToken
             = methodMapTokenForForeignInterface(foreignCall.Member);
         var nestedCalls = new List<BoundCall>();
@@ -4431,6 +4472,37 @@ public static partial class TrRmExecutableCompiler
             return nextExpressionRegister++;
         }
 
+        for (var sourceArgument = 0;
+            sourceArgument < call.Arguments.Length;
+            sourceArgument++)
+        {
+            var argument = call.Arguments[sourceArgument];
+            var formal = call.ParameterIndex(sourceArgument);
+            if (GetNestedForeignInterfaceCall(argument) is
+                BoundCall nestedInputCall)
+            {
+                argumentPreparationCode.Add(0x90);
+                var operandOffset = argumentPreparationCode.Count;
+                argumentPreparationCode.Add(0);
+                nestedRecordPatches.Add((operandOffset, nestedInputCall));
+            }
+            else if (argument is BoundUnary or BoundBinary
+                or BoundUnsafeExpression)
+            {
+                var resultRegister
+                    = EmitForeignNativeInterfaceScalarInputExpression(
+                        argument, target.Variables[formal].Type,
+                        AllocateExpressionRegister, GetConstantRegister,
+                        argumentPreparationCode);
+                if (!expressionRegisterByFormal.TryAdd(formal,
+                        checked((byte)resultRegister)))
+                {
+                    throw Invalid(
+                        "A Standard F+I scalar expression maps one formal more than once.");
+                }
+            }
+        }
+
         methodMapTokens.Add(methodMapToken);
         var maps = TrRmRegisterBodyMapBuilder.Create(typeTokens,
             methodMapTokens);
@@ -4492,6 +4564,12 @@ public static partial class TrRmExecutableCompiler
                 inputs[formal + 1] = new TrRmRegisterBodyCallInput(2, 6,
                     checked((ushort)reservation.Variable));
             }
+            else if (expressionRegisterByFormal.TryGetValue(formal,
+                    out var expressionRegister))
+            {
+                inputs[formal + 1] = new TrRmRegisterBodyCallInput(1, 1,
+                    expressionRegister);
+            }
             else if (argumentsByFormal[formal] is BoundConstant constant
                 && constant.Type == target.Variables[formal].Type
                 && DirectNativeImportContract.IsScalar(constant.Type)
@@ -4515,8 +4593,7 @@ public static partial class TrRmExecutableCompiler
             {
                 inputs[formal + 1] = CreateInput(
                     argumentsByFormal[formal],
-                    target.Variables[formal].Type,
-                    allowScalarExpression: true);
+                    target.Variables[formal].Type);
             }
         }
 
@@ -4545,12 +4622,16 @@ public static partial class TrRmExecutableCompiler
         var records = new List<ReadOnlyMemory<byte>> {
             new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 },
         };
-        var nestedCallSiteRecordIndexes = new List<ushort>(
-            nestedCallSites.Count);
-        foreach (var nestedCallSite in nestedCallSites)
+        var nestedRecordIndexByCall = new Dictionary<BoundCall, ushort>(
+            ReferenceEqualityComparer.Instance);
+        for (var nestedIndex = 0;
+            nestedIndex < nestedCallSites.Count;
+            nestedIndex++)
         {
-            nestedCallSiteRecordIndexes.Add(checked((ushort)records.Count));
-            records.Add(new(nestedCallSite));
+            var nestedRecordIndex = checked((ushort)records.Count);
+            records.Add(new(nestedCallSites[nestedIndex]));
+            nestedRecordIndexByCall.Add(nestedCalls[nestedIndex],
+                nestedRecordIndex);
         }
 
         var callSiteRecordIndex = checked((ushort)records.Count);
@@ -4558,8 +4639,7 @@ public static partial class TrRmExecutableCompiler
         var code = new List<byte>(checked(
             (stagedLocals.Length * 6)
             + (constantLoads.Count * 2)
-            + (nestedCallSiteRecordIndexes.Count * 2)
-            + argumentExpressionCode.Count
+            + argumentPreparationCode.Count
             + (outputReservations.Count * 4) + 4));
         foreach (var local in stagedLocals)
         {
@@ -4593,13 +4673,21 @@ public static partial class TrRmExecutableCompiler
             code.Add(checked((byte)((constantMapIndex << 4) | register)));
         }
 
-        foreach (var nestedRecord in nestedCallSiteRecordIndexes)
+        foreach (var (operandOffset, nestedInputCall) in nestedRecordPatches)
         {
-            code.Add(0x90);
-            code.Add(checked((byte)nestedRecord));
+            if (!nestedRecordIndexByCall.TryGetValue(nestedInputCall,
+                    out var nestedRecordIndex)
+                || nestedRecordIndex >= 256)
+            {
+                throw Unsupported(
+                    "The Standard F+I caller Body requires short nested CallSite indexes.");
+            }
+
+            argumentPreparationCode[operandOffset]
+                = checked((byte)nestedRecordIndex);
         }
 
-        code.AddRange(argumentExpressionCode);
+        code.AddRange(argumentPreparationCode);
 
         foreach (var (homeIndex, formalOrdinal) in outputReservations)
         {
@@ -4744,7 +4832,7 @@ public static partial class TrRmExecutableCompiler
                 var resultRegister
                     = EmitForeignInterfaceScalarInputExpression(expression,
                         expectedType, AllocateExpressionRegister,
-                        GetConstantRegister, argumentExpressionCode);
+                        GetConstantRegister, argumentPreparationCode);
                 return new TrRmRegisterBodyCallInput(1, 1,
                     checked((ushort)resultRegister));
             }
@@ -8450,7 +8538,7 @@ public static partial class TrRmExecutableCompiler
                                 = new Dictionary<ushort, int>(
                                     callSiteValueResultRegisters.Count);
                             var nestedFormalIndices = new HashSet<int>();
-                            var hasScalarExpressionInput = false;
+                            var hasThrowingScalarExpressionInput = false;
                             var inputOffset = 24;
                             for (var formal = 0;
                                 formal < member.Parameters.Length; formal++)
@@ -8547,7 +8635,9 @@ public static partial class TrRmExecutableCompiler
                                                 "A ForeignNativeInterface CallSite contains an unsupported scalar expression input.");
                                         }
 
-                                        hasScalarExpressionInput = true;
+                                        hasThrowingScalarExpressionInput |=
+                                            ForeignInterfaceScalarInputExpressionMayThrow(
+                                                registerArgument);
                                     }
                                     else if (registerArgument
                                         is not BoundConstant)
@@ -8600,12 +8690,11 @@ public static partial class TrRmExecutableCompiler
                                     "A ForeignNativeInterface CallSite does not consume each earlier nested result exactly once.");
                             }
 
-                            if (foreignInterfaceDirectCallBody
-                                && hasScalarExpressionInput
+                            if (hasThrowingScalarExpressionInput
                                 && nestedFormalByRegister.Count != 0)
                             {
                                 throw Invalid(
-                                    "A Standard F+I direct-return or mixed-sequence CallSite cannot combine scalar expressions with nested CallSites.");
+                                    "A Standard F+I direct-return or mixed-sequence CallSite cannot reorder checked arithmetic around nested CallSites.");
                             }
 
                             var arguments
@@ -9684,13 +9773,6 @@ public static partial class TrRmExecutableCompiler
         }
 
         var nestedInputCalls = nestedInputCallsBuilder.ToArray();
-        if (nestedInputCalls.Length != 0
-            && nestedInputOuterCall is BoundCall outerCall
-            && outerCall.Arguments.Any(IsForeignInterfaceScalarExpression))
-        {
-            throw Invalid(
-                "A Standard F+I direct-return or mixed-sequence CallSite cannot combine scalar expressions with nested CallSites.");
-        }
 
         BoundCall? GetNestedSequenceInputCall(BoundExpression expression)
         {
@@ -9699,17 +9781,6 @@ public static partial class TrRmExecutableCompiler
                 && (call.ForeignInterfaceCall is not null
                     || IsValidLocalScalarInputCall(call))
                 ? call : null;
-        }
-
-        static bool IsForeignInterfaceScalarExpression(
-            BoundExpression expression)
-        {
-            while (expression is BoundUnsafeExpression unsafeExpression)
-            {
-                expression = unsafeExpression.Expression;
-            }
-
-            return expression is BoundUnary or BoundBinary;
         }
 
         void AddNestedSequenceInputCalls(BoundExpression expression)
@@ -11147,6 +11218,7 @@ public static partial class TrRmExecutableCompiler
         var inputOffset = 20;
         var nestedInputCount = 0;
         var scalarExpressionInputRegisterCount = 0;
+        var hasThrowingScalarExpressionInput = false;
         for (var formal = 0; formal < member.Parameters.Length; formal++)
         {
             var input = callPayload.Slice(inputOffset, 4);
@@ -11203,6 +11275,9 @@ public static partial class TrRmExecutableCompiler
                         scalarExpressionInputRegisterCount = checked(
                             scalarExpressionInputRegisterCount
                             + expressionRegisterCount);
+                        hasThrowingScalarExpressionInput |=
+                            ForeignInterfaceScalarInputExpressionMayThrow(
+                                registerInput);
                         CollectForeignInterfaceScalarInputHomeVariables(
                             registerInput, inputHomeVariables);
                     }
@@ -11256,6 +11331,8 @@ public static partial class TrRmExecutableCompiler
             || scalarExpressionInputRegisterCount
                 != scalarExpressionHomeLoadCount
             || scalarExpressionResultRegisters.Count != 0
+            || (hasThrowingScalarExpressionInput
+                && nestedInputCount != 0)
             || inputHomeVariables.Count != inputVariableLimit - 1)
         {
             throw Invalid(

@@ -819,7 +819,7 @@ internal sealed class NativeCoreRegistrationTests
             NativeCoreRegistration = native,
             LayoutCoreRegistration = CreateLayoutRegistration(native),
             NativeOutputCoreRegistration = output,
-            SourceArithmeticProfile = SourceArithmeticProfile.Development,
+            SourceArithmeticProfile = SourceArithmeticProfile.Release,
         };
         const string providerSource = """
             [Terrum.Interop.NativeCallable(
@@ -832,6 +832,8 @@ internal sealed class NativeCoreRegistrationTests
                 public unsafe int32 TryReadPair(int32 first, int32 second,
                     write ptr<int32> value);
                 public unsafe int32 GetIndex(int32 index);
+                public unsafe int32 Pair(int32 first, int32 second);
+                public unsafe void Touch();
             }
             """;
         var providerCompilation = Compilation.CreateLibrary(
@@ -882,6 +884,23 @@ internal sealed class NativeCoreRegistrationTests
                         return fallback;
                     }
                 }
+
+                int32 InvokeMixedDirect(ptr<void> receiver, int32 first,
+                    int32 second) {
+                    unsafe {
+                        return IProbe.Pair(receiver,
+                            IProbe.GetIndex(receiver, first), second * 2);
+                    }
+                }
+
+                int32 InvokeMixedSequence(ptr<void> receiver, int32 first,
+                    int32 second) {
+                    unsafe {
+                        IProbe.Touch(receiver);
+                        return IProbe.Pair(receiver,
+                            IProbe.GetIndex(receiver, first), second * 2);
+                    }
+                }
                 """), reference, options);
         Assert.That(consumerCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine,
@@ -903,7 +922,8 @@ internal sealed class NativeCoreRegistrationTests
             consumerTables.Contracts.Count);
         var entryCode = body.GetBlockCode(0).ToArray();
         Assert.That(entryCode, Does.Contain((byte)0x11));
-        Assert.That(entryCode, Does.Contain((byte)0xC0));
+        Assert.That(entryCode, Does.Contain((byte)0x21));
+        Assert.That(entryCode, Does.Contain((byte)0x23));
         var callSite = body.GetRecord(1);
         Assert.That((callSite[24], callSite[25],
                 BinaryPrimitives.ReadUInt16LittleEndian(callSite[26..])),
@@ -917,10 +937,10 @@ internal sealed class NativeCoreRegistrationTests
         var mixedBody = consumerTables.Bodies.GetRegisterBody(
             consumerTables.Methods.GetBodyRow(mixedInvokeRow),
             consumerTables.Contracts.Count);
-        Assert.That(mixedBody.GetBlockCode(0).ToArray().Take(10),
+        Assert.That(mixedBody.GetBlockCode(0).ToArray().Take(8),
             Is.EqualTo(new byte[] {
                 0x90, 1, 0x11, 0x22, 0x11, 0x13,
-                0xC0, 0x01, 0xF2, 0x32,
+                0x21, 0x32,
             }));
         var mixedCallSite = mixedBody.GetRecord(2);
         Assert.That((mixedCallSite[24], mixedCallSite[25],
@@ -931,12 +951,29 @@ internal sealed class NativeCoreRegistrationTests
                 BinaryPrimitives.ReadUInt16LittleEndian(
                     mixedCallSite[30..])),
             Is.EqualTo(((byte)1, (byte)1, (ushort)2)));
+        var mixedDirectRow = Enumerable.Range(1, consumerTables.Methods.Count)
+            .Single(row =>
+                consumerTables.Methods.GetName(row) == "InvokeMixedDirect");
+        var mixedDirectBody = consumerTables.Bodies.GetRegisterBody(
+            consumerTables.Methods.GetBodyRow(mixedDirectRow),
+            consumerTables.Contracts.Count);
+        AssertMixedReturnCallSite(mixedDirectBody.GetRecord(2));
+        var mixedSequenceRow = Enumerable.Range(1, consumerTables.Methods.Count)
+            .Single(row =>
+                consumerTables.Methods.GetName(row)
+                    == "InvokeMixedSequence");
+        var mixedSequenceBody = consumerTables.Bodies.GetRegisterBody(
+            consumerTables.Methods.GetBodyRow(mixedSequenceRow),
+            consumerTables.Contracts.Count);
+        AssertMixedReturnCallSite(mixedSequenceBody.GetRecord(3));
 
         var loaded = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(schemaIdentity, consumerArtifact),
             "consumer.module", [providerInput]);
         AssertComputedInputs(loaded);
         AssertMixedInputs(loaded);
+        AssertMixedReturnInputs(loaded, "InvokeMixedDirect");
+        AssertMixedReturnInputs(loaded, "InvokeMixedSequence");
         var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(loaded,
             "consumer.module", schemaIdentity, 1, []);
         var reloaded = TrRmExecutableCompiler.LoadStandard(
@@ -944,6 +981,56 @@ internal sealed class NativeCoreRegistrationTests
                 reemittedArtifact), "consumer.module", [providerInput]);
         AssertComputedInputs(reloaded);
         AssertMixedInputs(reloaded);
+        AssertMixedReturnInputs(reloaded, "InvokeMixedDirect");
+        AssertMixedReturnInputs(reloaded, "InvokeMixedSequence");
+
+        var checkedOptions = new CompilationOptions {
+            NativeCoreRegistration = native,
+            LayoutCoreRegistration = CreateLayoutRegistration(native),
+            NativeOutputCoreRegistration = output,
+            SourceArithmeticProfile = SourceArithmeticProfile.Development,
+        };
+        var checkedCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                int32 InvokeChecked(ptr<void> receiver, int32 first,
+                    int32 second, int32 fallback) {
+                    init int32 value;
+                    unsafe {
+                        int32 status = IProbe.TryReadPair(receiver,
+                            first + second, second * 2, &init value);
+                        if (status >= 0) { return value; }
+                        return fallback;
+                    }
+                }
+                """), reference, checkedOptions);
+        Assert.That(checkedCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                checkedCompilation.Diagnostics));
+        var checkedProgram = checkedCompilation.Program
+            ?? throw new AssertionException("Expected a checked consumer.");
+        var checkedArtifact = TrRmExecutableCompiler.EmitStandard(
+            checkedProgram, "checked-consumer.module", schemaIdentity, 1, []);
+        var checkedTables = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
+                checkedArtifact, schema));
+        var checkedInvokeRow = Enumerable.Range(1, checkedTables.Methods.Count)
+            .Single(row =>
+                checkedTables.Methods.GetName(row) == "InvokeChecked");
+        var checkedBody = checkedTables.Bodies.GetRegisterBody(
+            checkedTables.Methods.GetBodyRow(checkedInvokeRow),
+            checkedTables.Contracts.Count);
+        Assert.That(checkedBody.GetBlockCode(0).ToArray(),
+            Does.Contain((byte)0xC0));
+        var loadedChecked = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, checkedArtifact),
+            "checked-consumer.module", [providerInput]);
+        AssertCheckedInputs(loadedChecked);
+        var reemittedChecked = TrRmExecutableCompiler.EmitStandard(
+            loadedChecked, "checked-consumer.module", schemaIdentity, 1, []);
+        var reloadedChecked = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, reemittedChecked),
+            "checked-consumer.module", [providerInput]);
+        AssertCheckedInputs(reloadedChecked);
 
         static void AssertComputedInputs(BoundProgram program)
         {
@@ -969,19 +1056,93 @@ internal sealed class NativeCoreRegistrationTests
             var second = (BoundBinary)selectedCall.Arguments[1];
             Assert.That(first.Operator, Is.EqualTo(TokenKind.Plus));
             Assert.That(first.OverflowBehavior,
-                Is.EqualTo(BoundIntegerOverflowBehavior.Checked));
+                Is.EqualTo(BoundIntegerOverflowBehavior.Wrapping));
             Assert.That(first.Left, Is.TypeOf<BoundRead>());
             Assert.That(((BoundRead)first.Left).Variable, Is.EqualTo(1));
             Assert.That(first.Right, Is.TypeOf<BoundRead>());
             Assert.That(((BoundRead)first.Right).Variable, Is.EqualTo(2));
             Assert.That(second.Operator, Is.EqualTo(TokenKind.Star));
             Assert.That(second.OverflowBehavior,
-                Is.EqualTo(BoundIntegerOverflowBehavior.Checked));
+                Is.EqualTo(BoundIntegerOverflowBehavior.Wrapping));
             Assert.That(second.Left, Is.TypeOf<BoundRead>());
             Assert.That(((BoundRead)second.Left).Variable, Is.EqualTo(2));
             Assert.That(second.Right, Is.TypeOf<BoundConstant>());
             Assert.That(selectedCall.Arguments[2],
                 Is.TypeOf<BoundNativeOutputReservation>());
+        }
+
+        static void AssertCheckedInputs(BoundProgram program)
+        {
+            var function = program.Functions.Single(
+                static candidate => candidate.Name == "InvokeChecked");
+            BoundCall? foreignCall = null;
+            Assert.That(BoundTreeTraversal.VisitExpressions(function.Body,
+                expression =>
+                {
+                    if (expression is BoundCall call
+                        && call.ForeignInterfaceCall?.Member.Name
+                            == "TryReadPair")
+                    {
+                        foreignCall = call;
+                    }
+                }), Is.True);
+            var selectedCall = foreignCall
+                ?? throw new AssertionException("Expected an FNI call.");
+            var first = (BoundBinary)selectedCall.Arguments[0];
+            var second = (BoundBinary)selectedCall.Arguments[1];
+            Assert.That(first.Operator, Is.EqualTo(TokenKind.Plus));
+            Assert.That(first.OverflowBehavior,
+                Is.EqualTo(BoundIntegerOverflowBehavior.Checked));
+            Assert.That(second.Operator, Is.EqualTo(TokenKind.Star));
+            Assert.That(second.OverflowBehavior,
+                Is.EqualTo(BoundIntegerOverflowBehavior.Checked));
+        }
+
+        static void AssertMixedReturnCallSite(ReadOnlySpan<byte> callSite)
+        {
+            Assert.That((callSite[24], callSite[25],
+                    BinaryPrimitives.ReadUInt16LittleEndian(callSite[26..])),
+                Is.EqualTo(((byte)1, (byte)1, (ushort)2)));
+            Assert.That((callSite[28], callSite[29],
+                    BinaryPrimitives.ReadUInt16LittleEndian(callSite[30..])),
+                Is.EqualTo(((byte)1, (byte)1, (ushort)3)));
+        }
+
+        static void AssertMixedReturnInputs(
+            BoundProgram program, string functionName)
+        {
+            var function = program.Functions.Single(
+                candidate => candidate.Name == functionName);
+            BoundCall? foreignCall = null;
+            Assert.That(BoundTreeTraversal.VisitExpressions(function.Body,
+                expression =>
+                {
+                    if (expression is BoundCall call
+                        && call.ForeignInterfaceCall?.Member.Name == "Pair")
+                    {
+                        foreignCall = call;
+                    }
+                }), Is.True);
+            var selectedCall = foreignCall
+                ?? throw new AssertionException("Expected an FNI call.");
+            Assert.That(selectedCall.Arguments.Length, Is.EqualTo(2));
+            Assert.That(selectedCall.ParameterIndex(0), Is.EqualTo(0));
+            Assert.That(selectedCall.Arguments[0],
+                Is.TypeOf<BoundUnsafeExpression>());
+            var nestedCall = (BoundCall)((BoundUnsafeExpression)
+                selectedCall.Arguments[0]).Expression;
+            Assert.That(nestedCall.ForeignInterfaceCall?.Member.Name,
+                Is.EqualTo("GetIndex"));
+            Assert.That(((BoundRead)nestedCall.Arguments.Single()).Variable,
+                Is.EqualTo(1));
+            Assert.That(selectedCall.ParameterIndex(1), Is.EqualTo(1));
+            Assert.That(selectedCall.Arguments[1], Is.TypeOf<BoundBinary>());
+            var expression = (BoundBinary)selectedCall.Arguments[1];
+            Assert.That(expression.Operator, Is.EqualTo(TokenKind.Star));
+            Assert.That(expression.OverflowBehavior,
+                Is.EqualTo(BoundIntegerOverflowBehavior.Wrapping));
+            Assert.That(((BoundRead)expression.Left).Variable, Is.EqualTo(2));
+            Assert.That(expression.Right, Is.TypeOf<BoundConstant>());
         }
 
         static void AssertMixedInputs(BoundProgram program)
@@ -1018,7 +1179,7 @@ internal sealed class NativeCoreRegistrationTests
             var expression = (BoundBinary)selectedCall.Arguments[1];
             Assert.That(expression.Operator, Is.EqualTo(TokenKind.Plus));
             Assert.That(expression.OverflowBehavior,
-                Is.EqualTo(BoundIntegerOverflowBehavior.Checked));
+                Is.EqualTo(BoundIntegerOverflowBehavior.Wrapping));
             Assert.That(expression.Left, Is.TypeOf<BoundRead>());
             Assert.That(((BoundRead)expression.Left).Variable,
                 Is.EqualTo(2));
