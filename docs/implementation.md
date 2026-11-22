@@ -1333,10 +1333,11 @@ invalid ModuleRef owners, requirement mismatches, incompatible-layout
 replacement and source-free re-emission regressions are added but unverified
 under the active hold. Source emission retains the exact selected provider
 ExportKey and refuses ambiguous aliases; a regression selects the non-first
-A2 key. The nested chain is also rebound with provider order reversed and a
-compatible Middle TypeDef/FieldDef/Layout row shift, then source-free
-re-emitted and reloaded. Co-located Module and broader raw-row/dependency
-composition permutations remain open.
+A2 key from a non-first co-located Module. The nested chain is also rebound
+with provider order reversed and a compatible Middle TypeDef/FieldDef/Layout
+row shift, then source-free
+re-emitted and reloaded. Co-located FNI Module root combinations and broader
+raw-row and dependency-composition permutations remain open.
 Typed-pointer/function-pointer aggregate fields and full
 Import/Export/PS1/Contract/graph row remapping remain open. FNI call
 lowering now stages the receiver before source-order arguments, maps explicit
@@ -1399,9 +1400,10 @@ validates captured source paths, UTF-16 snapshots and FNI member spans before
 binding, dispatches to the existing reference factories, preserves selected
 PS1/A2 aggregate origins and their exact selected TypeDef ExportKeys during
 source emission, and publishes A2 aggregate TypeDefs with Features 2/1 and
-13/1. Public regressions cover AC1 source FNI
-publication with an A2 type root, malformed source spans and provider
-pairings, output-preservation failures, and A2's type-only export map. These
+13/1. Public regressions cover AC1 source FNI publication with an A2 type root,
+provider v4's non-first root ordinal, a non-first co-located A2 Module/key,
+malformed source spans/provider pairings, output-preservation failures, and
+A2's type-only export map. These
 changes and regressions remain unverified under the hold; formal proposal
 review and qualification remain open.
 Pointer output reads, other side-effecting argument expressions,

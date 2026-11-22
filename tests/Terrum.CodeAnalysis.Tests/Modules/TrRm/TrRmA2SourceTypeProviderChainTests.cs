@@ -620,7 +620,7 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
         const string schemaIdentity
             = "trrm/1-draft-foreign-native-interface-parameter-surface-1";
         const string moduleIdentity = "fni.a2.import";
-        var leafArtifact = CreateLeafProviderArtifact();
+        var leafArtifact = CreateProviderArtifact(coLocateLeafProvider: true);
         var leafReference = TrRmExecutableCompiler.CreateStandardReference(
             new TrRmStandardArtifactInput(SchemaIdentity, leafArtifact),
             "LeafProvider", [], ["ProviderLeafKey"]);

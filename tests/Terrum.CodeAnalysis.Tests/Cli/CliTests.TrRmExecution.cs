@@ -2997,6 +2997,8 @@ internal sealed partial class CliTests
                         },
                     },
                 })).ConfigureAwait(true);
+            await File.WriteAllBytesAsync(invalidConsumerPath, retained)
+                .ConfigureAwait(true);
             var (invalidSourceSelection, invalidSourceOutput,
                 invalidSourceError) = await RunAsync([], "compile-trrm",
                 prefix + "-missing-source.terrum", "--identity",
@@ -3014,7 +3016,8 @@ internal sealed partial class CliTests
                     .GetProperty("diagnostics")[0]
                     .GetProperty("code").GetString(), Is.EqualTo("TRM2000"));
             }
-            Assert.That(File.Exists(invalidConsumerPath), Is.False);
+            Assert.That(await File.ReadAllBytesAsync(invalidConsumerPath)
+                .ConfigureAwait(true), Is.EqualTo(retained));
 
             await File.WriteAllTextAsync(sourceProvidersPath,
                 JsonSerializer.Serialize(new {
@@ -3172,6 +3175,28 @@ internal sealed partial class CliTests
             a2SchemaIdentity, 1, [
                 new TrRmSourceTypeExport("", "Point", "provider/Point"),
             ]);
+        const string unusedProviderIdentity = "cli-ac1-unused-a2";
+        const string unusedProviderSource = """
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Unused {
+                public uint32 Marker;
+            }
+            """;
+        var unusedProviderCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(unusedProviderSource), new CompilationOptions {
+                NativeCoreRegistration = pointNativeRegistration,
+                LayoutCoreRegistration =
+                    NativeCoreRegistrationTests.CreateLayoutRegistration(
+                        pointNativeRegistration),
+            });
+        Assert.That(unusedProviderCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                unusedProviderCompilation.Diagnostics));
+        var unusedProviderArtifact = TrRmExecutableCompiler.EmitStandard(
+            unusedProviderCompilation.Program!, unusedProviderIdentity,
+            a2SchemaIdentity, 1, [
+                new TrRmSourceTypeExport("", "Unused", "unused/Unused"),
+            ]);
         var pointReference = TrRmExecutableCompiler.CreateStandardReference(
             new TrRmStandardArtifactInput(a2SchemaIdentity, pointArtifact),
             pointProviderIdentity, [], ["provider/Point"]);
@@ -3256,6 +3281,7 @@ internal sealed partial class CliTests
         var invalidExportManifest = Path.Combine(directory,
             "invalid-types.json");
         var pointProviderPath = Path.Combine(directory, "point.trrm");
+        var unusedProviderPath = Path.Combine(directory, "unused.trrm");
         var sourceProvidersPath = Path.Combine(directory,
             "source-providers.json");
         var artifact = Path.Combine(directory, "provider.trrm");
@@ -3270,10 +3296,16 @@ internal sealed partial class CliTests
                 .ConfigureAwait(true);
             await File.WriteAllBytesAsync(pointProviderPath, pointArtifact)
                 .ConfigureAwait(true);
+            await File.WriteAllBytesAsync(unusedProviderPath,
+                unusedProviderArtifact).ConfigureAwait(true);
             await File.WriteAllTextAsync(sourceProvidersPath,
                 JsonSerializer.Serialize(new {
                     schemaVersion = 4,
                     providers = new[] {
+                        new {
+                            schemaIdentity = a2SchemaIdentity,
+                            path = unusedProviderPath,
+                        },
                         new {
                             schemaIdentity = a2SchemaIdentity,
                             path = pointProviderPath,
@@ -3282,7 +3314,7 @@ internal sealed partial class CliTests
                     references = new[] {
                         new {
                             kind = "aggregate-types",
-                            providerInputOrdinal = 0,
+                            providerInputOrdinal = 1,
                             moduleIdentity = pointProviderIdentity,
                             typeExportKeys = new[] { "provider/Point" },
                         },
@@ -3326,6 +3358,8 @@ internal sealed partial class CliTests
                 new TrRmStandardArtifactInput(schemaIdentity, artifactBytes),
                 providerIdentity, [
                     new TrRmStandardArtifactInput(a2SchemaIdentity,
+                        unusedProviderArtifact),
+                    new TrRmStandardArtifactInput(a2SchemaIdentity,
                         pointArtifact),
                 ]);
             Assert.That(reference.Interfaces.Select(static definition =>
@@ -3337,6 +3371,10 @@ internal sealed partial class CliTests
             Assert.That(reference.Structures.Single(static structure =>
                 structure.Name == "Point").DeclaredCopyEvidence,
                 Is.True);
+            Assert.That(reference.Structures.Single(
+                static structure => structure.Name == "Point")
+                .StandardTypeOrigin!.Provider.ModuleIdentity,
+                Is.EqualTo(pointProviderIdentity));
 
             await File.WriteAllBytesAsync(preservedOutput, retained)
                 .ConfigureAwait(true);
