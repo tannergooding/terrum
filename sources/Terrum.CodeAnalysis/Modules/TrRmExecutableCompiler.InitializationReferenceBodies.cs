@@ -1344,7 +1344,7 @@ public static partial class TrRmExecutableCompiler
                 foreignInterfaceMethodMapTokenForCall
                     ?? throw Unsupported(
                         "A Standard F+I caller Body has no InterfaceMethod MethodMap selection."),
-                schema);
+                scalarValues, schema);
         }
 
         if (TryGetStandardInitializationReferenceConditionalStore(
@@ -2228,6 +2228,10 @@ public static partial class TrRmExecutableCompiler
         var outputVariables = new HashSet<int>();
         var seenParameters = new bool[target.ParameterCount];
         var nestedForeignInterfaceCalls = new List<BoundCall>();
+        var constantInputs
+            = new HashSet<(PrimitiveType Type, ScalarBits Bits)>();
+        var availableInputRegisters
+            = 13 - (stagedLocalVariables.Count == 0 ? 0 : 1);
         for (var sourceArgument = 0;
             sourceArgument < boundCall.Arguments.Length;
             sourceArgument++)
@@ -2271,8 +2275,21 @@ public static partial class TrRmExecutableCompiler
                     return false;
                 }
             }
+            else if (argument is BoundConstant constant
+                && DirectNativeImportContract.IsScalar(constant.Type)
+                && constant.Type == target.Variables[formal].Type
+                && constant.RepresentationType == constant.Type
+                && constant.Bits.IsCanonicalFor(constant.Type))
+            {
+                constantInputs.Add((constant.Type, constant.Bits));
+                if (constantInputs.Count + nestedForeignInterfaceCalls.Count
+                    > availableInputRegisters)
+                {
+                    return false;
+                }
+            }
             else if (nestedForeignInterfaceCalls.Count
-                    < (stagedLocalVariables.Count == 0 ? 13 : 12)
+                    + constantInputs.Count < availableInputRegisters
                 && GetNestedForeignInterfaceCall(argument)
                     is BoundCall nestedCall
                 && !nestedForeignInterfaceCalls.Any(candidate =>
@@ -2379,6 +2396,7 @@ public static partial class TrRmExecutableCompiler
         Func<PrimitiveType, int> typeSpecRowFor,
         Func<BoundInterfaceMemberIdentity, uint>
             methodMapTokenForForeignInterface,
+        TrRmFrozenScalarValueBuilder scalarValues,
         TrRmArtifactSchema schema)
     {
         var foreignCall = call.ForeignInterfaceCall
@@ -2397,6 +2415,13 @@ public static partial class TrRmExecutableCompiler
         var stagedLocalVariables = stagedLocals.Select(
                 static local => local.Variable)
             .ToHashSet();
+        var bodyConstantMapValues
+            = new List<TrRmFrozenScalarValueReference>();
+        var bodyConstantMapIndexByValue
+            = new Dictionary<(PrimitiveType Type, ScalarBits Bits), ushort>();
+        var constantRegisterByValue
+            = new Dictionary<(PrimitiveType Type, ScalarBits Bits), byte>();
+        var constantLoads = new List<(ushort MapIndex, byte Register)>();
         var methodMapToken
             = methodMapTokenForForeignInterface(foreignCall.Member);
         var nestedCalls = new List<BoundCall>();
@@ -2417,6 +2442,21 @@ public static partial class TrRmExecutableCompiler
             }
 
             nestedCalls.Add(candidate);
+        }
+
+        foreach (var argument in call.Arguments)
+        {
+            if (argument is BoundConstant constant)
+            {
+                _ = GetConstantRegister(constant);
+            }
+        }
+
+        if (nestedCalls.Count + constantLoads.Count
+            > 13 - (stagedLocals.IsEmpty ? 0 : 1))
+        {
+            throw Unsupported(
+                $"Function '{function.Name}' has too many direct F+I register inputs.");
         }
 
         var nestedMethodMapTokens = new List<uint>(nestedCalls.Count);
@@ -2487,7 +2527,8 @@ public static partial class TrRmExecutableCompiler
             }
 
             var resultRegister = checked((byte)(nestedIndex
-                + (stagedLocals.IsEmpty ? 1 : 2)));
+                + (stagedLocals.IsEmpty ? 1 : 2)
+                + constantLoads.Count));
             if (!nestedRegisterByCall.TryAdd(nestedCall, resultRegister))
             {
                 throw Invalid(
@@ -2559,6 +2600,17 @@ public static partial class TrRmExecutableCompiler
                 inputs[formal + 1] = new TrRmRegisterBodyCallInput(2, 6,
                     checked((ushort)reservation.Variable));
             }
+            else if (argumentsByFormal[formal] is BoundConstant constant
+                && constant.Type == target.Variables[formal].Type
+                && DirectNativeImportContract.IsScalar(constant.Type)
+                && constant.RepresentationType == constant.Type
+                && constant.Bits.IsCanonicalFor(constant.Type)
+                && constantRegisterByValue.TryGetValue(
+                    (constant.Type, constant.Bits), out var constantRegister))
+            {
+                inputs[formal + 1] = new TrRmRegisterBodyCallInput(1, 1,
+                    constantRegister);
+            }
             else if (GetNestedForeignInterfaceCall(
                     argumentsByFormal[formal]) is BoundCall nestedInputCall
                 && nestedRegisterByCall.TryGetValue(nestedInputCall,
@@ -2611,6 +2663,7 @@ public static partial class TrRmExecutableCompiler
         records.Add(new(callSite));
         var code = new List<byte>(checked(
             (stagedLocals.Length * 6)
+            + (constantLoads.Count * 2)
             + (nestedCallSiteRecordIndexes.Count * 2)
             + (outputReservations.Count * 4) + 4));
         foreach (var local in stagedLocals)
@@ -2631,6 +2684,18 @@ public static partial class TrRmExecutableCompiler
             code.Add((byte)(0x10 | stagedInputRegister));
             code.Add((byte)homeIndex);
             code.Add((byte)(homeIndex >> 8));
+        }
+
+        foreach (var (constantMapIndex, register) in constantLoads)
+        {
+            if (constantMapIndex >= 16)
+            {
+                throw Unsupported(
+                    "The Standard F+I caller Body requires short ConstantMap loads.");
+            }
+
+            code.Add(0x16);
+            code.Add(checked((byte)((constantMapIndex << 4) | register)));
         }
 
         foreach (var nestedRecord in nestedCallSiteRecordIndexes)
@@ -2658,12 +2723,93 @@ public static partial class TrRmExecutableCompiler
             code.Add(hasResult ? (byte)0x17 : (byte)0x18);
             code.Add(0);
         }
+        var constantMap = EncodeConstantMap();
         return TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
-            maps.MethodMap, default, default,
+            maps.MethodMap, default, constantMap,
             [new TrRmRegisterBodyBlock(0, (uint)code.Count, 0)],
             records, [.. code], schema: schema,
             generalPredicateGraphsInitializationReferenceBodies
                 : schema.UsesGeneralPredicateGraphs());
+
+        ushort GetConstantMapIndex(BoundConstant constant)
+        {
+            if (!DirectNativeImportContract.IsScalar(constant.Type)
+                || constant.RepresentationType != constant.Type
+                || !constant.Bits.IsCanonicalFor(constant.Type))
+            {
+                throw Unsupported(
+                    $"Function '{function.Name}' has a direct F+I constant outside the typed scalar ConstantMap subset.");
+            }
+
+            var key = (constant.Type, constant.Bits);
+            if (bodyConstantMapIndexByValue.TryGetValue(key,
+                    out var existingIndex))
+            {
+                return existingIndex;
+            }
+
+            if (bodyConstantMapValues.Count == 65_536)
+            {
+                throw Unsupported(
+                    "The Standard F+I caller Body ConstantMap exceeds its index domain.");
+            }
+
+            var valueReference = scalarValues.Add(constant);
+            var index = checked((ushort)bodyConstantMapValues.Count);
+            bodyConstantMapValues.Add(valueReference);
+            bodyConstantMapIndexByValue.Add(key, index);
+            return index;
+        }
+
+        byte GetConstantRegister(BoundConstant constant)
+        {
+            var key = (constant.Type, constant.Bits);
+            if (constantRegisterByValue.TryGetValue(key,
+                    out var existingRegister))
+            {
+                return existingRegister;
+            }
+
+            var availableInputRegisters
+                = 13 - (stagedLocals.IsEmpty ? 0 : 1);
+            if (constantLoads.Count + nestedCalls.Count
+                >= availableInputRegisters)
+            {
+                throw Unsupported(
+                    $"Function '{function.Name}' has too many direct F+I register inputs.");
+            }
+
+            var firstInputRegister = stagedLocals.IsEmpty ? 1 : 2;
+            var register = checked((byte)(
+                firstInputRegister + constantLoads.Count));
+            var mapIndex = GetConstantMapIndex(constant);
+            constantLoads.Add((mapIndex, register));
+            constantRegisterByValue.Add(key, register);
+            return register;
+        }
+
+        byte[] EncodeConstantMap()
+        {
+            if (bodyConstantMapValues.Count == 0)
+            {
+                return [];
+            }
+
+            var result = new byte[bodyConstantMapValues.Count * 8];
+            for (var index = 0; index < bodyConstantMapValues.Count;
+                index++)
+            {
+                var valueReference = bodyConstantMapValues[index];
+                var offset = index * 8;
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    result.AsSpan(offset), valueReference.TypeSpecRef);
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    result.AsSpan(offset + sizeof(uint)),
+                    valueReference.ConstantSourceRow);
+            }
+
+            return result;
+        }
 
         TrRmRegisterBodyCallInput CreateInput(BoundExpression expression)
         {
@@ -5356,11 +5502,16 @@ public static partial class TrRmExecutableCompiler
                 && body.BlockCount == 3
                 && IsStandardForeignInterfaceConditionalOutputEntry(
                     body.GetBlockCode(0));
+        var foreignInterfaceDirectCallBody
+            = body.Schema.UsesForeignNativeInterface()
+                && !body.UsesNativePointerLoads
+                && body.BlockCount == 1;
         if (body.BlockCount is not (1 or 3) || body.HasExceptionDirectory
             || body.FieldCount != 0
             || (body.ConstantCount != 0
                 && !construction2MethodLinking
-                && !foreignInterfaceConditionalOutputBody)
+                && !foreignInterfaceConditionalOutputBody
+                && !foreignInterfaceDirectCallBody)
             || (body.ConstantCount != 0
                 && (scalarConstants.IsDefault
                     || scalarConstants.Length != body.ConstantCount))
@@ -5553,6 +5704,29 @@ public static partial class TrRmExecutableCompiler
 
                     valueByRegister[destinationRegister] = new BoundRead(
                         formalOrdinal, variables[formalOrdinal].Type, default);
+                    break;
+                }
+                case 0x16:
+                {
+                    if (!foreignInterfaceDirectCallBody)
+                    {
+                        throw Unsupported(
+                            "A Standard initialization-reference Body does not use direct ConstantMap loads.");
+                    }
+
+                    var destinationRegister = instruction[1] & 0x0F;
+                    var constantIndex = instruction[1] >> 4;
+                    if (destinationRegister is 0 or >= 14
+                        || constantIndex >= scalarConstants.Length
+                        || !DirectNativeImportContract.IsScalar(
+                            scalarConstants[constantIndex].Type)
+                        || !valueByRegister.TryAdd(destinationRegister,
+                            scalarConstants[constantIndex]))
+                    {
+                        throw Invalid(
+                            "A Standard F+I ConstantMap load has an invalid register or typed scalar entry.");
+                    }
+
                     break;
                 }
                 case 0xD4:

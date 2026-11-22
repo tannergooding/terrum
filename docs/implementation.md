@@ -1355,9 +1355,10 @@ calls and direct void calls followed by void returns. Ordinary inputs may be
 read from caller parameters or scalar locals initialized from a direct
 parameter read; direct non-void and void-call Bodies can also nest up to 13
 scalar-returning, no-output FNI CallSites as explicit inputs (12 when staged
-locals reserve register 1). The fallback conditional-output form separately
-supports up to 13 such nested CallSites, or scalar literal inputs through typed
-ConstantMap/TypedFrozenValues loads. For conditional-output Bodies, nested
+locals reserve register 1), plus scalar literal inputs through typed
+ConstantMap/TypedFrozenValues loads, including mixed nested/literal inputs.
+The fallback conditional-output form separately supports up to 13 such nested
+CallSites or scalar literal inputs. For conditional-output Bodies, nested
 calls execute in source argument order before output reservation, and
 source-free re-emission preserves that order across formal remapping. The two
 conditional-output input forms cannot be mixed. Imported-provider source-free
