@@ -959,6 +959,152 @@ internal sealed class NativeCoreRegistrationTests
                 schemaIdentity, 1, []));
     }
 
+    [TestCase("&&", (byte)0x30, TokenKind.Ampersand)]
+    [TestCase("||", (byte)0x31, TokenKind.Pipe)]
+    public void StandardForeignNativeInterfacePreservesLogicalCheckedAndNestedOrder(
+        string logicalOperator, byte expectedOpcode,
+        TokenKind decodedOperator)
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-native-interface-parameter-surface-1";
+        var registration = CreateRegistration(
+            includeForeignNativeInterface: true);
+        var options = new CompilationOptions {
+            NativeCoreRegistration = registration,
+            LayoutCoreRegistration = CreateLayoutRegistration(registration),
+            SourceArithmeticProfile = SourceArithmeticProfile.Development,
+        };
+        var providerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Terrum.Interop;
+                [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+                [ForeignNativeInterface(VTableByteOffset: uint32(0))]
+                public interface IProbe {
+                    public unsafe bool ReadBoolean(bool first, bool second);
+                    public unsafe bool NestedBoolean(bool value);
+                }
+                """), options);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+        var providerProgram = providerCompilation.Program
+            ?? throw new AssertionException("Expected a bound provider.");
+        var providerInterface = providerProgram.Interfaces.Single();
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerProgram, "provider.module", schemaIdentity, 1, [
+                new TrRmSourceTypeExport("", "IProbe", "provider/IProbe") {
+                    GenericArity = 0,
+                    InterfaceMethodExports = [.. providerInterface.Members
+                        .Select(member =>
+                            new TrRmSourceInterfaceMethodExport(
+                                member.SourceInputOrdinal,
+                                member.SourceDeclarationSpan,
+                                $"provider/IProbe.{member.Name}"))],
+                },
+            ]);
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            providerArtifact);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            providerInput, "provider.module", []);
+        var functionName = logicalOperator == "&&"
+            ? "LogicalAnd" : "LogicalOr";
+        var consumerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse($$"""
+                bool {{functionName}}(ptr<void> receiver, int32 numerator,
+                    int32 divisor, bool flag, bool value) {
+                    unsafe {
+                        return IProbe.ReadBoolean(receiver,
+                            first: (numerator / divisor != 0)
+                                {{logicalOperator}} flag,
+                            second: IProbe.NestedBoolean(receiver, value));
+                    }
+                }
+                """), reference, options);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumerProgram = consumerCompilation.Program
+            ?? throw new AssertionException("Expected a bound consumer.");
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            consumerProgram, "consumer.module", schemaIdentity, 1, []);
+        AssertInstructionOrder(consumerArtifact);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, consumerArtifact),
+            "consumer.module", [providerInput]);
+        AssertArgumentOrder(loaded);
+        var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(loaded,
+            "consumer.module", schemaIdentity, 1, []);
+        AssertInstructionOrder(reemittedArtifact);
+        var reloaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, reemittedArtifact),
+            "consumer.module", [providerInput]);
+        AssertArgumentOrder(reloaded);
+
+        void AssertInstructionOrder(byte[] artifact)
+        {
+            var tables = TrRmStructuralMetadataValidator
+                .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
+                    artifact,
+                    TrRmArtifactSchema
+                        .ForeignNativeInterfaceParameterSurfaceDraft));
+            var row = Enumerable.Range(1, tables.Methods.Count)
+                .Single(candidate => tables.Methods.GetName(candidate)
+                    == functionName);
+            var body = tables.Bodies.GetRegisterBody(
+                tables.Methods.GetBodyRow(row), tables.Contracts.Count);
+            var code = body.GetBlockCode(0).ToArray();
+            var checkedArithmeticOffset = Array.IndexOf(code, (byte)0xC0);
+            var logicalOffset = Array.IndexOf(code, expectedOpcode);
+            var nestedCallOffset = Array.IndexOf(code, (byte)0x90);
+            Assert.That(checkedArithmeticOffset,
+                Is.GreaterThanOrEqualTo(0), functionName);
+            Assert.That(logicalOffset, Is.GreaterThan(checkedArithmeticOffset),
+                functionName);
+            Assert.That(nestedCallOffset, Is.GreaterThan(logicalOffset),
+                functionName);
+        }
+
+        void AssertArgumentOrder(BoundProgram program)
+        {
+            var function = program.Functions.Single(
+                candidate => candidate.Name == functionName);
+            BoundCall? foreignCall = null;
+            _ = BoundTreeTraversal.VisitExpressions(function.Body,
+                expression =>
+                {
+                    if (expression is BoundCall call
+                        && call.ForeignInterfaceCall?.Member.Name
+                            == "ReadBoolean")
+                    {
+                        foreignCall = call;
+                    }
+                });
+            var selectedCall = foreignCall
+                ?? throw new AssertionException(
+                    "Expected the FNI ReadBoolean call.");
+            Assert.That(selectedCall.ParameterIndex(0), Is.EqualTo(0));
+            Assert.That(selectedCall.ParameterIndex(1), Is.EqualTo(1));
+            var logicalInput = selectedCall.Arguments[0];
+            Assert.That(logicalInput, Is.TypeOf<BoundBinary>());
+            var logical = (BoundBinary)logicalInput;
+            Assert.That(logical.Operator, Is.EqualTo(decodedOperator));
+            Assert.That(logical.OverflowBehavior,
+                Is.EqualTo(BoundIntegerOverflowBehavior.Checked));
+            Assert.That(logical.Left, Is.TypeOf<BoundBinary>());
+            var checkedDivision = (BoundBinary)logical.Left;
+            Assert.That(checkedDivision.Operator,
+                Is.EqualTo(TokenKind.BangEquals));
+            Assert.That(checkedDivision.Left, Is.TypeOf<BoundBinary>());
+            Assert.That(((BoundBinary)checkedDivision.Left).Operator,
+                Is.EqualTo(TokenKind.Slash));
+            Assert.That(selectedCall.Arguments[1],
+                Is.TypeOf<BoundCall>());
+            Assert.That(((BoundCall)selectedCall.Arguments[1])
+                    .ForeignInterfaceCall?.Member.Name,
+                Is.EqualTo("NestedBoolean"));
+        }
+    }
+
     [Test]
     public void StandardForeignNativeInterfaceCallsRoundTripTotalScalarConversions()
     {
