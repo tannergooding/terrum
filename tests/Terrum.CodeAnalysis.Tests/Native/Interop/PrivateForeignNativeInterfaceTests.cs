@@ -490,6 +490,12 @@ internal sealed class PrivateForeignNativeInterfaceTests
         _ = Assert.Throws<ModuleFormatException>(() =>
             ModuleCompiler.CreateReferenceWithSchema(malformed,
                 schemaIdentity));
+        malformed = (byte[])producer.Clone();
+        BinaryPrimitives.WriteUInt32LittleEndian(malformed.AsSpan(
+            memberKeyOffset + memberKeyBytes.Length), uint.MaxValue);
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReferenceWithSchema(malformed,
+                schemaIdentity));
     }
 
     [Test]
@@ -535,6 +541,11 @@ internal sealed class PrivateForeignNativeInterfaceTests
         var malformed = (byte[])consumer.Clone();
         BinaryPrimitives.WriteUInt32LittleEndian(
             malformed.AsSpan(callOffset + 14), 0);
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.Link(malformed, producer));
+        malformed = (byte[])consumer.Clone();
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            malformed.AsSpan(callOffset + 14), uint.MaxValue);
         _ = Assert.Throws<ModuleFormatException>(() =>
             ModuleCompiler.Link(malformed, producer));
     }
@@ -585,6 +596,11 @@ internal sealed class PrivateForeignNativeInterfaceTests
         var malformed = (byte[])consumer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(
             malformed.AsSpan(callOffset + 27, sizeof(int)), firstFormal);
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.Link(malformed, producer));
+        malformed = (byte[])consumer.Clone();
+        BinaryPrimitives.WriteInt32LittleEndian(
+            malformed.AsSpan(callOffset + 27, sizeof(int)), int.MaxValue);
         _ = Assert.Throws<ModuleFormatException>(() =>
             ModuleCompiler.Link(malformed, producer));
     }
