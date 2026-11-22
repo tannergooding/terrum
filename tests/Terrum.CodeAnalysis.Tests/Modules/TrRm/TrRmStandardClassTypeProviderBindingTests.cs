@@ -3015,7 +3015,7 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
     }
 
     [Test]
-    public void ReemitsImportedStructFieldMapBodiesWithoutSource()
+    public void ReemitsImportedStructFieldPathBodiesWithTransformedOutput()
     {
         var schemaIdentity
             = C1M1Construction2ClassParameterDefaultsSchemaIdentity;
@@ -3211,15 +3211,44 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
                 new TrRmStandardArtifactInput(schemaIdentity,
                     fieldPathArtifact),
                 "StructFieldConsumer", [providerInput], ["ContainerKey"]);
+        var fieldPathTree = SyntaxTree.Parse("""
+            public class ExtraContainer {
+                public int32 Read(Leaf leaf) { return leaf.Value; }
+            }
+            """);
         var fieldPathCompilation = Compilation.CreateLibrary(
-            SyntaxTree.Parse(string.Empty), fieldPathReference);
+            fieldPathTree, fieldPathReference);
         Assert.That(fieldPathCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine,
                 fieldPathCompilation.Diagnostics));
+        var fieldPathProgram = (BoundProgram)fieldPathCompilation.Program!;
+        var extraContainerDeclaration = fieldPathTree.Root.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var extraReadDeclaration = extraContainerDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.FunctionDeclaration);
+        var extraContainerClassIndex = Enumerable.Range(0,
+                fieldPathProgram.Classes.Length)
+            .Single(index =>
+                fieldPathProgram.Classes[index].Name == "ExtraContainer");
         var fieldPathReemitted = TrRmExecutableCompiler.EmitStandard(
-            (BoundProgram)fieldPathCompilation.Program!,
+            fieldPathProgram,
             "StructFieldPathConsumerReemitted", schemaIdentity,
-            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [
+                new TrRmSourceClassExport(fieldPathProgram,
+                    extraContainerClassIndex,
+                    extraContainerDeclaration.Span,
+                    "ExtraContainerKey", [
+                        new TrRmSourceClassMemberExport(
+                            extraContainerClassIndex,
+                            extraReadDeclaration.Span,
+                            "ExtraContainer.Read"),
+                    ]),
+            ]);
         var fieldPathReemittedTables = TrRmStructuralMetadataValidator
             .ValidateC1AndGetExecutionTables(
                 TrRmArtifactIndex
@@ -3266,9 +3295,21 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
         Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
                 fieldPathReemittedBody.FieldMap),
             Is.EqualTo(0x1D00_0001u));
+        var extraReadDefinition = fieldPathReemittedTables.Exports
+            .GetExportsForModule(1)
+            .Single(static export =>
+                export.ExportKey == "ExtraContainer.Read").Definition;
+        var extraReadBody = fieldPathReemittedTables.Bodies
+            .GetRegisterBody(
+                fieldPathReemittedTables.Methods.GetBodyRow(checked((int)(
+                    extraReadDefinition & 0x00FF_FFFF))),
+                fieldPathReemittedTables.Contracts.Count);
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                extraReadBody.FieldMap),
+            Is.EqualTo(0x1D00_0001u));
 
         var relocatedProvider = CreateRelocatedClassProvider(
-            "StructProvider", schemaIdentity);
+            "StructProvider", schemaIdentity, includePrefixField: true);
         SetTypeDefFlags(relocatedProvider, 0x06, typeDefRow: 2);
         var relocatedProviderTables = TrRmStructuralMetadataValidator
             .ValidateC1AndGetExecutionTables(
@@ -3280,6 +3321,11 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
             .Single(row =>
                 relocatedProviderTables.TypeDefs.GetName(row) == "Leaf");
         Assert.That(relocatedLeafRow, Is.Not.EqualTo(1));
+        var relocatedLeafFieldRow = Enumerable.Range(1,
+                relocatedProviderTables.Fields.Count)
+            .Single(row => relocatedProviderTables.Fields
+                .GetOwnerTypeDef(row) == relocatedLeafRow);
+        Assert.That(relocatedLeafFieldRow, Is.EqualTo(2));
         var reloadedReference
             = TrRmExecutableCompiler.CreateStandardReference(
                 new TrRmStandardArtifactInput(schemaIdentity,
@@ -5760,10 +5806,13 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
     private static byte[] CreateRelocatedClassProvider(
         string moduleIdentity, string schemaIdentity,
         string? leafAliasKey = null, bool includeReadMethod = false,
-        int? readDefaultValue = null, bool includePrefix = true)
+        int? readDefaultValue = null, bool includePrefix = true,
+        bool includePrefixField = false)
     {
         var prefixText = includePrefix
-            ? "public class Prefix { public Prefix() { } }"
+            ? includePrefixField
+                ? "public class Prefix { public int32 Noise; public Prefix() { } }"
+                : "public class Prefix { public Prefix() { } }"
             : string.Empty;
         var methodDefault = readDefaultValue is int defaultValue
             ? $" = {defaultValue}" : string.Empty;
