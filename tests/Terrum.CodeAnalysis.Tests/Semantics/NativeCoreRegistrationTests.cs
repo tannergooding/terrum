@@ -1672,6 +1672,24 @@ internal sealed class NativeCoreRegistrationTests
             new TrRmStandardArtifactInput(schemaIdentity, reemitted),
             "consumer.module", [providerInput]);
         AssertComparisons(reloaded);
+        var lessMethodRow = Enumerable.Range(1, consumerTables.Methods.Count)
+            .Single(candidate =>
+                consumerTables.Methods.GetName(candidate) == "LessI32");
+        var lessBodyRow
+            = consumerTables.Methods.GetBodyRow(lessMethodRow);
+        var malformedPredicate = RewriteBodyCode(consumerArtifact,
+            lessBodyRow, static code => {
+                var comparisonOffset = Array.IndexOf(code, (byte)0xC2);
+                Assert.That(comparisonOffset,
+                    Is.GreaterThanOrEqualTo(0));
+                code[comparisonOffset + 5] = 0;
+                return code;
+            });
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    malformedPredicate),
+                "consumer.module", [providerInput]));
 
         void AssertComparisons(BoundProgram program)
         {
@@ -1704,6 +1722,53 @@ internal sealed class NativeCoreRegistrationTests
                 Assert.That(comparison.Right.Type,
                     Is.EqualTo(operandType), name);
             }
+        }
+
+        static byte[] RewriteBodyCode(byte[] artifact, int bodyRow,
+            Func<byte[], byte[]> rewrite)
+        {
+            var index = new TrRmArtifactIndex(artifact,
+                TrRmArtifactSchema
+                    .ForeignNativeInterfaceParameterSurfaceDraft);
+            Assert.That(index.TryGetSection(0x0020, out var bodySection,
+                out var bodyCount), Is.True);
+            var bodies = new TrRmBodyTableReader(bodySection.ToArray(),
+                bodyCount);
+            var bodyRows = new ReadOnlyMemory<byte>[bodies.Count];
+            for (var row = 1; row <= bodies.Count; row++)
+            {
+                var rawBody = bodies.GetRow(row).ToArray();
+                if (row == bodyRow)
+                {
+                    var body = new TrRmRegisterBodyReader(rawBody);
+                    var code = rewrite(body.Code.ToArray());
+                    Assert.That(code.Length,
+                        Is.EqualTo(body.CodeByteLength));
+                    code.CopyTo(rawBody,
+                        rawBody.Length - body.CodeByteLength);
+                }
+
+                bodyRows[row - 1] = rawBody;
+            }
+
+            var rewrittenBodySection
+                = TrRmVariableTableWriter.EncodeBodies(bodyRows);
+            var sections = new TrRmSection[index.SectionCount];
+            for (var sectionIndex = 0;
+                sectionIndex < index.SectionCount;
+                sectionIndex++)
+            {
+                index.GetSection(sectionIndex, out var kind, out var flags,
+                    out var bytes, out var recordCount);
+                sections[sectionIndex] = new TrRmSection(kind, flags,
+                    checked((uint)recordCount),
+                    kind == 0x0020
+                        ? rewrittenBodySection : bytes.ToArray());
+            }
+
+            return TrRmArtifactWriter.Encode(sections,
+                TrRmArtifactSchema
+                    .ForeignNativeInterfaceParameterSurfaceDraft);
         }
     }
 

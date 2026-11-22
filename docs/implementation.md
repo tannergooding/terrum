@@ -1387,8 +1387,9 @@ They also support integer/Boolean AND, OR and XOR, type-directed integer
 bitwise and Boolean logical NOT, plus Boolean equality and inequality through
 C2. Integer and float32/float64 comparisons use C2 relation results followed
 by C3 predicate selection; inequality uses the relation mask that includes
-unordered floating results. Shift expressions use the registered short Body
-opcodes and retain any fixed/native integer type on a Home-rooted count.
+unordered floating results, and source-free loading rejects unsupported
+predicate masks. Shift expressions use the registered short Body opcodes and
+retain any fixed/native integer type on a Home-rooted count.
 Source-free decoding retains the count type so lowering validates its exact
 source domain before the `uint32` scalar Body bridge; other integer
 expression operators remain open.
