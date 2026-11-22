@@ -1409,11 +1409,11 @@ expressions;
 nested-call order is preserved, and conditional-output input preparation
 precedes output reservation. Source-free decoding restores the
 operation trees. Checked integer and shift expressions may also combine with
-nested CallSites in direct-return and conditional-output Bodies when every
-non-nested formal input is scalar; the emitted preparation and source-free
-argument mapping preserve their order. The mixed multi-call sequence route
-still rejects checked-expression/nested-CallSite combinations. Regressions are
-added but remain unverified under the active hold.
+nested CallSites in direct-return, conditional-output and mixed multi-call
+sequence Bodies when every non-nested formal input is scalar. The sequence
+writer emits nested Calls at their source argument positions, and source-free
+decoding/re-emission preserves the ordered arguments. Regressions are added
+but remain unverified under the active hold.
 For conditional-output Bodies, nested calls execute in source argument order
 before output reservation, and source-free re-emission preserves that order
 across formal remapping. Imported-provider source-free

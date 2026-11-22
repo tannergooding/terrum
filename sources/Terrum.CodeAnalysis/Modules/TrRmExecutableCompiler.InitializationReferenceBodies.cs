@@ -3463,6 +3463,7 @@ public static partial class TrRmExecutableCompiler
             }
 
             var seenParameters = new bool[target.ParameterCount];
+            var nestedInputFormals = new HashSet<int>();
             var hasThrowingScalarExpression = false;
             for (var argumentIndex = 0;
                 argumentIndex < boundCall.Arguments.Length;
@@ -3539,6 +3540,7 @@ public static partial class TrRmExecutableCompiler
                         foreignCall.Member))
                 {
                     nestedInputBuilder.Add(nestedCall);
+                    nestedInputFormals.Add(formal);
                     if (constantInputs.Count
                             + nestedInputBuilder.Count
                             + scalarExpressionRegisterCount > 13)
@@ -3556,7 +3558,11 @@ public static partial class TrRmExecutableCompiler
 
             return seenParameters.All(static seen => seen)
                 && !(hasThrowingScalarExpression
-                    && nestedInputBuilder.Count != 0);
+                    && nestedInputBuilder.Count != 0
+                    && Enumerable.Range(0, target.ParameterCount).Any(
+                        formal => !nestedInputFormals.Contains(formal)
+                            && !DirectNativeImportContract.IsScalar(
+                                target.Variables[formal].Type)));
         }
 
         bool TryValidateLocalVoidCall(BoundCall boundCall)
@@ -3877,7 +3883,8 @@ public static partial class TrRmExecutableCompiler
         var constantRegisterByValue
             = new Dictionary<(PrimitiveType Type, ScalarBits Bits), byte>();
         var constantLoads = new List<(ushort MapIndex, byte Register)>();
-        var argumentExpressionCode = new List<byte>();
+        var finalInputPreparations
+            = new List<(BoundCall? NestedCall, byte[] ExpressionCode)>();
         var hasFinalCall = hasValueResult || isTerminal;
         var prefixCallCount = calls.Length - (hasFinalCall ? 1 : 0);
         var prefixMethodMapTokens = new List<uint>(prefixCallCount);
@@ -4116,14 +4123,21 @@ public static partial class TrRmExecutableCompiler
             records.Add(new(callSite));
         }
 
-        var nestedRecordIndexes = new List<ushort>(nestedCalls.Length);
+        var nestedRecordIndexByCall
+            = new Dictionary<BoundCall, ushort>(
+                ReferenceEqualityComparer.Instance);
         for (var nestedIndex = 0; nestedIndex < nestedCalls.Length;
             nestedIndex++)
         {
             var callSite = EncodeCallSite(nestedCalls[nestedIndex],
                 nestedMethodMapTokens[nestedIndex], 1,
                 nestedRegisterByCall[nestedCalls[nestedIndex]]);
-            nestedRecordIndexes.Add(checked((ushort)records.Count));
+            if (!nestedRecordIndexByCall.TryAdd(nestedCalls[nestedIndex],
+                    checked((ushort)records.Count)))
+            {
+                throw Invalid(
+                    "A nested F+I call sequence input has duplicate CallSite records.");
+            }
             records.Add(new(callSite));
         }
 
@@ -4136,10 +4150,12 @@ public static partial class TrRmExecutableCompiler
             records.Add(new(outerCallSite));
         }
 
+        var expressionCodeLength = finalInputPreparations.Sum(
+            static preparation => preparation.ExpressionCode.Length);
         var code = new List<byte>(checked(
             (constantLoads.Count * 2)
             + ((calls.Length + nestedCalls.Length) * 2)
-            + argumentExpressionCode.Count
+            + expressionCodeLength
             + (isTerminal ? 0 : 2)));
         foreach (var (constantMapIndex, register) in constantLoads)
         {
@@ -4165,19 +4181,25 @@ public static partial class TrRmExecutableCompiler
             code.Add(checked((byte)recordIndex));
         }
 
-        foreach (var recordIndex in nestedRecordIndexes)
+        var emittedNestedCalls
+            = new HashSet<BoundCall>(ReferenceEqualityComparer.Instance);
+        foreach (var preparation in finalInputPreparations)
         {
-            if (recordIndex >= 256)
+            if (preparation.NestedCall is BoundCall nestedCall)
             {
-                throw Unsupported(
-                    "The Standard F+I call sequence requires short CallSite indexes.");
+                EmitNestedCallInstructions(nestedCall);
             }
-
-            code.Add(0x90);
-            code.Add(checked((byte)recordIndex));
+            else
+            {
+                code.AddRange(preparation.ExpressionCode);
+            }
         }
 
-        code.AddRange(argumentExpressionCode);
+        if (emittedNestedCalls.Count != nestedCalls.Length)
+        {
+            throw Invalid(
+                "A Standard F+I call sequence leaves a nested CallSite unordered.");
+        }
 
         if (outerRecordIndex is ushort valueRecordIndex)
         {
@@ -4214,6 +4236,11 @@ public static partial class TrRmExecutableCompiler
                 && nestedRegisterByCall.TryGetValue(nestedCall,
                     out var nestedRegister))
             {
+                if (allowScalarExpression)
+                {
+                    finalInputPreparations.Add((nestedCall, []));
+                }
+
                 return new TrRmRegisterBodyCallInput(1, 1,
                     nestedRegister);
             }
@@ -4241,6 +4268,7 @@ public static partial class TrRmExecutableCompiler
 
             if (allowScalarExpression)
             {
+                var expressionCode = new List<byte>();
                 var resultRegister
                     = EmitForeignInterfaceScalarInputExpression(
                         expression, expectedType,
@@ -4248,7 +4276,9 @@ public static partial class TrRmExecutableCompiler
                         type => maps.GetTypeMapIndex(
                             GetStandardBodyTypeMapToken(type,
                                 typeSpecRowFor)),
-                        argumentExpressionCode);
+                        expressionCode);
+                finalInputPreparations.Add((null,
+                    expressionCode.ToArray()));
                 return new TrRmRegisterBodyCallInput(1, 1,
                     checked((ushort)resultRegister));
             }
@@ -4327,37 +4357,79 @@ public static partial class TrRmExecutableCompiler
                 target.ParameterCount + 1];
             inputs[0] = CreateInput(foreignCall.Receiver,
                 PrimitiveType.NativeRawPointer);
-            var argumentsByFormal = new BoundExpression?[
-                target.ParameterCount];
+            var seenParameters = new bool[target.ParameterCount];
+            var allowScalarExpression = hasFinalCall
+                && ReferenceEquals(call, calls[^1]);
             for (var argumentIndex = 0;
                 argumentIndex < call.Arguments.Length;
                 argumentIndex++)
             {
                 var formal = call.ParameterIndex(argumentIndex);
                 if ((uint)formal >= (uint)target.ParameterCount
-                    || argumentsByFormal[formal] is not null)
+                    || seenParameters[formal])
                 {
                     throw Invalid(
                         "A Standard F+I call sequence CallSite does not map each formal exactly once.");
                 }
 
-                argumentsByFormal[formal] = call.Arguments[argumentIndex];
+                inputs[formal + 1] = CreateInput(
+                    call.Arguments[argumentIndex],
+                    target.Variables[formal].Type,
+                    allowScalarExpression);
+                seenParameters[formal] = true;
             }
 
-            for (var formal = 0; formal < target.ParameterCount; formal++)
+            if (!seenParameters.All(static seen => seen))
             {
-                inputs[formal + 1] = CreateInput(
-                    argumentsByFormal[formal]
-                    ?? throw Invalid(
-                        "A Standard F+I call sequence CallSite omits a formal input."),
-                    target.Variables[formal].Type,
-                    allowScalarExpression: hasFinalCall
-                        && ReferenceEquals(call, calls[^1]));
+                throw Invalid(
+                    "A Standard F+I call sequence CallSite omits a formal input.");
             }
 
             return TrRmRegisterBodyRecordWriter.EncodeCallSite(1, resultKind,
                 maps.GetMethodMapIndex(methodMapToken), resultIndex, inputs,
                 [], schema: schema);
+        }
+
+        void EmitNestedCallInstructions(BoundCall nestedCall)
+        {
+            if (emittedNestedCalls.Contains(nestedCall))
+            {
+                return;
+            }
+
+            if (!nestedRecordIndexByCall.TryGetValue(nestedCall,
+                    out var recordIndex))
+            {
+                throw Invalid(
+                    "A Standard F+I call sequence omits a nested input CallSite.");
+            }
+
+            foreach (var argument in nestedCall.Arguments)
+            {
+                if (GetNestedForeignInterfaceCall(argument)
+                        is not BoundCall childCall)
+                {
+                    continue;
+                }
+
+                if (!nestedRegisterByCall.ContainsKey(childCall))
+                {
+                    throw Invalid(
+                        "A Standard F+I call sequence nested input has no result register.");
+                }
+
+                EmitNestedCallInstructions(childCall);
+            }
+
+            _ = emittedNestedCalls.Add(nestedCall);
+            if (recordIndex >= 256)
+            {
+                throw Unsupported(
+                    "The Standard F+I call sequence requires short CallSite indexes.");
+            }
+
+            code.Add(0x90);
+            code.Add(checked((byte)recordIndex));
         }
 
         BoundFunction? GetLocalVoidCallTarget(BoundCall call)

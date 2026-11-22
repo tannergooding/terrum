@@ -2,6 +2,7 @@
 
 using System;
 using System.Buffers.Binary;
+using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
@@ -1003,6 +1004,7 @@ internal sealed class NativeCoreRegistrationTests
                 [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
                 [ForeignNativeInterface(VTableByteOffset: uint32(0))]
                 public interface IProbe {
+                    public unsafe void Ping(int32 value);
                     public unsafe int32 Read(int32 first, int32 second);
                     public unsafe int32 Nested(int32 value);
                     public unsafe int32 ReadPointer(int32 first,
@@ -1049,6 +1051,24 @@ internal sealed class NativeCoreRegistrationTests
                             second: IProbe.Nested(receiver, value));
                     }
                 }
+                int32 SequenceNestedThenChecked(ptr<void> receiver,
+                    int32 first, int32 divisor, int32 value) {
+                    unsafe {
+                        IProbe.Ping(receiver, value);
+                        return IProbe.Read(receiver,
+                            second: IProbe.Nested(receiver, value),
+                            first: first / divisor);
+                    }
+                }
+                int32 SequenceCheckedThenNested(ptr<void> receiver,
+                    int32 first, int32 divisor, int32 value) {
+                    unsafe {
+                        IProbe.Ping(receiver, value);
+                        return IProbe.Read(receiver,
+                            first: first / divisor,
+                            second: IProbe.Nested(receiver, value));
+                    }
+                }
                 """), reference, options);
         Assert.That(consumerCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine,
@@ -1063,12 +1083,18 @@ internal sealed class NativeCoreRegistrationTests
                 TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft));
         AssertInstructionOrder("NestedThenChecked", nestedFirst: true);
         AssertInstructionOrder("CheckedThenNested", nestedFirst: false);
+        AssertSequenceInstructionOrder(consumerArtifact,
+            "SequenceNestedThenChecked", nestedFirst: true);
+        AssertSequenceInstructionOrder(consumerArtifact,
+            "SequenceCheckedThenNested", nestedFirst: false);
 
         var loaded = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(schemaIdentity, consumerArtifact),
             "consumer.module", [providerInput]);
         AssertArgumentOrder(loaded, "NestedThenChecked", 1, 0);
         AssertArgumentOrder(loaded, "CheckedThenNested", 0, 1);
+        AssertArgumentOrder(loaded, "SequenceNestedThenChecked", 1, 0);
+        AssertArgumentOrder(loaded, "SequenceCheckedThenNested", 0, 1);
         var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
             "consumer.module", schemaIdentity, 1, []);
         var reloaded = TrRmExecutableCompiler.LoadStandard(
@@ -1076,6 +1102,12 @@ internal sealed class NativeCoreRegistrationTests
             "consumer.module", [providerInput]);
         AssertArgumentOrder(reloaded, "NestedThenChecked", 1, 0);
         AssertArgumentOrder(reloaded, "CheckedThenNested", 0, 1);
+        AssertArgumentOrder(reloaded, "SequenceNestedThenChecked", 1, 0);
+        AssertArgumentOrder(reloaded, "SequenceCheckedThenNested", 0, 1);
+        AssertSequenceInstructionOrder(reemitted,
+            "SequenceNestedThenChecked", nestedFirst: true);
+        AssertSequenceInstructionOrder(reemitted,
+            "SequenceCheckedThenNested", nestedFirst: false);
         var pointerInputCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse("""
                 int32 RejectPointerMix(ptr<void> receiver, int32 first,
@@ -1092,6 +1124,27 @@ internal sealed class NativeCoreRegistrationTests
         Assert.Throws<NotSupportedException>(() =>
             TrRmExecutableCompiler.EmitStandard(
                 pointerInputCompilation.Program!, "pointer-consumer.module",
+                schemaIdentity, 1, []));
+        var pointerSequenceCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                int32 RejectPointerSequenceMix(ptr<void> receiver,
+                    int32 first, int32 divisor, int32 nestedValue,
+                    ptr<int32> target) {
+                    unsafe {
+                        IProbe.Ping(receiver, nestedValue);
+                        return IProbe.ReadPointer(receiver,
+                            first / divisor, target,
+                            IProbe.Nested(receiver, nestedValue));
+                    }
+                }
+                """), reference, options);
+        Assert.That(pointerSequenceCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                pointerSequenceCompilation.Diagnostics));
+        Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.EmitStandard(
+                pointerSequenceCompilation.Program!,
+                "pointer-sequence.module",
                 schemaIdentity, 1, []));
 
         void AssertInstructionOrder(string name, bool nestedFirst)
@@ -1113,6 +1166,46 @@ internal sealed class NativeCoreRegistrationTests
                     ? nestedCallOffset < checkedArithmeticOffset
                     : checkedArithmeticOffset < nestedCallOffset,
                 Is.True, name);
+        }
+
+        static void AssertSequenceInstructionOrder(byte[] artifact,
+            string name, bool nestedFirst)
+        {
+            var tables = TrRmStructuralMetadataValidator
+                .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
+                    artifact,
+                    TrRmArtifactSchema
+                        .ForeignNativeInterfaceParameterSurfaceDraft));
+            var row = Enumerable.Range(1, tables.Methods.Count)
+                .Single(candidate => tables.Methods.GetName(candidate)
+                    == name);
+            var body = tables.Bodies.GetRegisterBody(
+                tables.Methods.GetBodyRow(row), tables.Contracts.Count);
+            var code = body.GetBlockCode(0).ToArray();
+            var callOffsets = new List<int>();
+            for (var index = 0; index < code.Length - 1; index++)
+            {
+                if (code[index] == 0x90)
+                {
+                    callOffsets.Add(index);
+                    index++;
+                }
+            }
+
+            var checkedArithmeticOffset = Array.IndexOf(code, (byte)0xC0);
+            Assert.That(callOffsets, Has.Count.EqualTo(3), name);
+            Assert.That(checkedArithmeticOffset,
+                Is.GreaterThanOrEqualTo(0), name);
+            Assert.That(callOffsets[0],
+                Is.LessThan(Math.Min(callOffsets[1],
+                    checkedArithmeticOffset)), name);
+            Assert.That(nestedFirst
+                    ? callOffsets[1] < checkedArithmeticOffset
+                    : checkedArithmeticOffset < callOffsets[1],
+                Is.True, name);
+            Assert.That(callOffsets[2],
+                Is.GreaterThan(Math.Max(callOffsets[1],
+                    checkedArithmeticOffset)), name);
         }
 
         static void AssertArgumentOrder(BoundProgram program, string name,
