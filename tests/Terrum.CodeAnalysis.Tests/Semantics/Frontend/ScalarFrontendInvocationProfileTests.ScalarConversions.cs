@@ -17,6 +17,48 @@ internal sealed partial class ScalarFrontendInvocationProfileTests
 {
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task ScalarFrontendProgramReaderMatchesConversionPairMatrixAsync(
+        BoundRuntimePolicy policy)
+    {
+        var trees = await ReadComponentsAsync(
+            ["Semantics/ScalarFrontendProgramReader"], """
+                namespace Terrum.CodeAnalysis;
+                int32 Main() {
+                    for (mut int32 sourceType = 1; sourceType <= 8;
+                        sourceType = sourceType + 1) {
+                        for (mut int32 targetType = 1; targetType <= 8;
+                            targetType = targetType + 1) {
+                            // Bit n represents target type code n.
+                            int32 targetMask = 0;
+                            if (sourceType == 1 || sourceType == 2
+                                || sourceType == 3 || sourceType == 4
+                                || sourceType == 6) {
+                                targetMask = 0x1DE;
+                            } else if (sourceType == 7 || sourceType == 8) {
+                                targetMask = 0x19E;
+                            }
+                            bool expected
+                                = (targetMask & (1 << targetType)) != 0;
+                            if (ScalarProgramReaderSupportedConversion(
+                                    sourceType, targetType) != expected) {
+                                return 2;
+                            }
+                        }
+                    }
+                    return 42;
+                }
+                """).ConfigureAwait(true);
+        var source = SourceText.From("int32 Main() => 42;");
+        var compilation = CreateWithLayoutCore(trees,
+            ScalarFrontendHost.CreateBuffers(source), policy);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.ExecuteWithData(compilation.Program!,
+            (NativeRuntimePolicy)policy).ExitCode, Is.EqualTo(42));
+    }
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task ScalarFrontendRejectsUnsupportedFloatToChar16ConversionAsync(
         BoundRuntimePolicy policy)
     {
