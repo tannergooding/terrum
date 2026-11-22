@@ -214,11 +214,111 @@ int32 ValidateStandaloneMethodContracts(int32 artifactOrdinal,
 
         if (clauseKind == 4)
         {
-            return 2;
+            if (rowLength != 20)
+            {
+                return 3;
+            }
+            init int32 destinationKind;
+            init int32 sourceKind;
+            init int32 relationship;
+            init int32 phase;
+            init uint32 destinationOrdinal;
+            init uint32 sourceOrdinal;
+            if (!TryReadStandaloneArtifactAbsoluteByte(artifactStart,
+                    artifactLength, rowStart + 8,
+                    ref init destinationKind)
+                || !TryReadStandaloneArtifactAbsoluteByte(artifactStart,
+                    artifactLength, rowStart + 9,
+                    ref init sourceKind)
+                || !TryReadStandaloneArtifactAbsoluteByte(artifactStart,
+                    artifactLength, rowStart + 10,
+                    ref init relationship)
+                || !TryReadStandaloneArtifactAbsoluteByte(artifactStart,
+                    artifactLength, rowStart + 11, ref init phase)
+                || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                    artifactLength, rowStart + 12,
+                    ref init destinationOrdinal)
+                || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                    artifactLength, rowStart + 16,
+                    ref init sourceOrdinal)
+                || phase < 1 || phase > 3)
+            {
+                return 3;
+            }
+
+            if ((destinationKind == 1 && destinationOrdinal != 0)
+                || ((destinationKind == 2 || destinationKind == 3)
+                    && destinationOrdinal >= paramCount)
+                || (destinationKind == 4 && destinationOrdinal != 0)
+                || destinationKind < 1 || destinationKind > 4)
+            {
+                return 3;
+            }
+            if ((sourceKind == 0
+                    && (relationship != 0 || sourceOrdinal != 0))
+                || (sourceKind == 1
+                    && (relationship < 1 || relationship > 3
+                        || sourceOrdinal >= paramCount))
+                || (sourceKind == 2
+                    && (relationship < 1 || relationship > 3
+                        || sourceOrdinal != 0))
+                || sourceKind < 0 || sourceKind > 2)
+            {
+                return 3;
+            }
+            if (destinationKind == 4 || sourceKind == 2)
+            {
+                return 3;
+            }
+
+            if (destinationKind != 2 || phase != 1)
+            {
+                return 2;
+            }
+            init int32 parameterTypeKind;
+            if (!TryGetStandaloneParameterTypeKind(artifactOrdinal,
+                    paramFirst, int32(destinationOrdinal),
+                    ref init parameterTypeKind))
+            {
+                return 3;
+            }
+            if (parameterTypeKind != 1)
+            {
+                return 2;
+            }
+            if (sourceKind == 1)
+            {
+                init int32 sourceParameterTypeKind;
+                if (!TryGetStandaloneParameterTypeKind(artifactOrdinal,
+                        paramFirst, int32(sourceOrdinal),
+                        ref init sourceParameterTypeKind))
+                {
+                    return 3;
+                }
+                if (sourceParameterTypeKind != 1)
+                {
+                    return 2;
+                }
+            }
+
+            int32 appendStatus = AppendStandaloneContractFact(4,
+                destinationKind, sourceKind, relationship, phase,
+                int32(destinationOrdinal), int32(sourceOrdinal));
+            if (appendStatus != 0)
+            {
+                return appendStatus;
+            }
+            continue;
         }
         return 2;
     }
 
     Host.StandaloneResolvedEffects[rootOrdinal] = int32(effectsMask);
-    return ValidateStandaloneOutputStateFacts(rootOrdinal);
+    int32 outputStateStatus
+        = ValidateStandaloneOutputStateFacts(rootOrdinal);
+    if (outputStateStatus != 0)
+    {
+        return outputStateStatus;
+    }
+    return ValidateStandaloneDependencyFacts();
 }

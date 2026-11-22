@@ -28,6 +28,37 @@ int32 AppendStandaloneContractFact(int32 kind, int32 first,
     return 0;
 }
 
+bool TryGetStandaloneParameterTypeKind(int32 artifactOrdinal,
+    uint32 paramFirst, int32 parameterOrdinal,
+    ref<init int32> typeKindResult)
+    ensure return ? *typeKindResult is init : true
+{
+    if (artifactOrdinal < 0
+        || artifactOrdinal >= Host.StandaloneRequest[4]
+        || paramFirst == 0 || parameterOrdinal < 0)
+    {
+        return false;
+    }
+
+    int32 parameterRow = int32(paramFirst) + parameterOrdinal;
+    int32 globalParameterRow
+        = Host.StandaloneArtifactParameterStarts[artifactOrdinal]
+            + parameterRow;
+    if (globalParameterRow <= 0
+        || globalParameterRow >= Host.StandaloneParameterTypeIds.Length)
+    {
+        return false;
+    }
+
+    int32 typeId = Host.StandaloneParameterTypeIds[globalParameterRow];
+    if (typeId <= 0 || typeId > Host.StandaloneTypeFactCount[0])
+    {
+        return false;
+    }
+    *typeKindResult = Host.StandaloneTypeFacts[typeId * 3];
+    return true;
+}
+
 int32 TryValidateStandalonePublishedPredicateGraph(int32 artifactStart,
     int32 artifactLength, int32 moduleRow, int32 rootOrdinal,
     uint32 predicateGraphRow, ref<init int32> nodeKindResult)
@@ -446,6 +477,57 @@ int32 ValidateStandaloneOutputStateFacts(int32 rootOrdinal)
     return 0;
 }
 
+int32 ValidateStandaloneDependencyFacts()
+{
+    init int32 dependencyCount;
+    if (!BuildStandaloneContractFactOrder(4,
+            ref init dependencyCount))
+    {
+        return 3;
+    }
+    if (dependencyCount == 0)
+    {
+        return 0;
+    }
+    if (!SortStandaloneContractFactOrder(dependencyCount, 4))
+    {
+        return 3;
+    }
+
+    for (mut int32 index = 2;
+        index <= dependencyCount;
+        index = index + 1)
+    {
+        int32 previousRow = Host.StandaloneContractFactOrder[index - 1];
+        int32 currentRow = Host.StandaloneContractFactOrder[index];
+        int32 previousOffset = previousRow * 7;
+        int32 currentOffset = currentRow * 7;
+        bool sameDestination
+            = Host.StandaloneContractFacts[previousOffset + 1]
+                == Host.StandaloneContractFacts[currentOffset + 1]
+            && Host.StandaloneContractFacts[previousOffset + 5]
+                == Host.StandaloneContractFacts[currentOffset + 5]
+            && Host.StandaloneContractFacts[previousOffset + 4]
+                == Host.StandaloneContractFacts[currentOffset + 4];
+        bool sameSource
+            = Host.StandaloneContractFacts[previousOffset + 2]
+                == Host.StandaloneContractFacts[currentOffset + 2]
+            && Host.StandaloneContractFacts[previousOffset + 6]
+                == Host.StandaloneContractFacts[currentOffset + 6];
+        if (sameDestination && sameSource)
+        {
+            return 3;
+        }
+        if (sameDestination
+            && (Host.StandaloneContractFacts[previousOffset + 2] == 0
+                || Host.StandaloneContractFacts[currentOffset + 2] == 0))
+        {
+            return 3;
+        }
+    }
+    return 0;
+}
+
 bool BuildStandaloneContractFactOrder(int32 kind,
     ref<init int32> countResult)
     ensure return ? *countResult is init : true
@@ -557,6 +639,85 @@ bool CompareStandaloneContractFacts(int32 firstRow,
 
     int32 firstOffset = firstRow * 7;
     int32 secondOffset = secondRow * 7;
+    if (mode == 4)
+    {
+        if (Host.StandaloneContractFacts[firstOffset + 1]
+            < Host.StandaloneContractFacts[secondOffset + 1])
+        {
+            *comparison = -1;
+            return true;
+        }
+        if (Host.StandaloneContractFacts[firstOffset + 1]
+            > Host.StandaloneContractFacts[secondOffset + 1])
+        {
+            *comparison = 1;
+            return true;
+        }
+        if (Host.StandaloneContractFacts[firstOffset + 5]
+            < Host.StandaloneContractFacts[secondOffset + 5])
+        {
+            *comparison = -1;
+            return true;
+        }
+        if (Host.StandaloneContractFacts[firstOffset + 5]
+            > Host.StandaloneContractFacts[secondOffset + 5])
+        {
+            *comparison = 1;
+            return true;
+        }
+        if (Host.StandaloneContractFacts[firstOffset + 4]
+            < Host.StandaloneContractFacts[secondOffset + 4])
+        {
+            *comparison = -1;
+            return true;
+        }
+        if (Host.StandaloneContractFacts[firstOffset + 4]
+            > Host.StandaloneContractFacts[secondOffset + 4])
+        {
+            *comparison = 1;
+            return true;
+        }
+        if (Host.StandaloneContractFacts[firstOffset + 2]
+            < Host.StandaloneContractFacts[secondOffset + 2])
+        {
+            *comparison = -1;
+            return true;
+        }
+        if (Host.StandaloneContractFacts[firstOffset + 2]
+            > Host.StandaloneContractFacts[secondOffset + 2])
+        {
+            *comparison = 1;
+            return true;
+        }
+        if (Host.StandaloneContractFacts[firstOffset + 6]
+            < Host.StandaloneContractFacts[secondOffset + 6])
+        {
+            *comparison = -1;
+            return true;
+        }
+        if (Host.StandaloneContractFacts[firstOffset + 6]
+            > Host.StandaloneContractFacts[secondOffset + 6])
+        {
+            *comparison = 1;
+            return true;
+        }
+        if (Host.StandaloneContractFacts[firstOffset + 3]
+            < Host.StandaloneContractFacts[secondOffset + 3])
+        {
+            *comparison = -1;
+        }
+        else if (Host.StandaloneContractFacts[firstOffset + 3]
+            > Host.StandaloneContractFacts[secondOffset + 3])
+        {
+            *comparison = 1;
+        }
+        else
+        {
+            *comparison = 0;
+        }
+        return true;
+    }
+
     int32 firstPrimary = mode == 3
         ? Host.StandaloneContractFacts[firstOffset + 3]
         : Host.StandaloneContractFacts[firstOffset + 1];

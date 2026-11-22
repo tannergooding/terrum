@@ -114,12 +114,13 @@ internal sealed class StandaloneMethodImportInputTests
             if (Host.Expected[2] == 3) {
                 if (rootStatus != 0
                     || Host.StandaloneResolvedRootCount[0] != 2
-                    || Host.StandaloneContractFactCount[0] != 2
+                    || Host.StandaloneContractFactCount[0] != 3
                     || Host.StandaloneContractFacts[7] != 11
                     || Host.StandaloneContractFacts[8] != 3
                     || Host.StandaloneContractFacts[9] != 0
                     || Host.StandaloneContractFacts[10] != 1
-                    || Host.StandaloneContractFacts[11] != 1
+                    || Host.StandaloneContractFacts[11]
+                        != Host.Expected[4]
                     || Host.StandaloneContractFacts[12] != 1
                     || Host.StandaloneContractFacts[14] != 2
                     || Host.StandaloneContractFacts[15] != 0
@@ -127,7 +128,14 @@ internal sealed class StandaloneMethodImportInputTests
                     || Host.StandaloneContractFacts[17] != 1
                     || Host.StandaloneContractFacts[18] != 0
                     || Host.StandaloneContractFacts[19] != 0
-                    || Host.StandaloneContractFacts[20] != 0) {
+                    || Host.StandaloneContractFacts[20] != 0
+                    || Host.StandaloneContractFacts[21] != 4
+                    || Host.StandaloneContractFacts[22] != 2
+                    || Host.StandaloneContractFacts[23] != 0
+                    || Host.StandaloneContractFacts[24] != 0
+                    || Host.StandaloneContractFacts[25] != 1
+                    || Host.StandaloneContractFacts[26] != 0
+                    || Host.StandaloneContractFacts[27] != 0) {
                     return 28;
                 }
                 return 0;
@@ -528,13 +536,61 @@ internal sealed class StandaloneMethodImportInputTests
             Artifacts = [
                 input.Artifacts[0],
                 new TrRmStandardArtifactInput(SchemaIdentity,
-                    CreateOutputStateArtifact("provider/a")),
+                    CreateOutputStateArtifact("provider/a",
+                        includeDependency: true)),
             ],
         };
         var publishedOutputStateProgram
             = Compile(publishedOutputState, 3, 0, verificationMode: 3);
         Assert.That(Run(publishedOutputStateProgram, publishedOutputState,
                 3, 0, verificationMode: 3),
+            Is.EqualTo(0));
+
+        var integerOutputState = input with {
+            Artifacts = [
+                input.Artifacts[0],
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateOutputStateArtifact("provider/a",
+                        includeDependency: true, nodeKind: 3,
+                        methodResultTypeSpecRef: 0xF200_0008)),
+            ],
+        };
+        var integerOutputStateProgram
+            = Compile(integerOutputState, 3, 0, verificationMode: 3,
+                expectedPredicateNodeKind: 3);
+        Assert.That(Run(integerOutputStateProgram, integerOutputState,
+                3, 0, verificationMode: 3,
+                expectedPredicateNodeKind: 3),
+            Is.EqualTo(0));
+
+        var duplicateDependency = input with {
+            Artifacts = [
+                input.Artifacts[0],
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateOutputStateArtifact("provider/a",
+                        includeDependency: true,
+                        duplicateDependency: true)),
+            ],
+        };
+        var duplicateDependencyProgram
+            = Compile(duplicateDependency, 3, 3);
+        Assert.That(Run(duplicateDependencyProgram, duplicateDependency,
+                3, 3),
+            Is.EqualTo(0));
+
+        var conflictingDependencySources = input with {
+            Artifacts = [
+                input.Artifacts[0],
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateOutputStateArtifact("provider/a",
+                        includeDependency: true,
+                        conflictEmptyAndSourcedDependency: true)),
+            ],
+        };
+        var conflictingDependencyProgram
+            = Compile(conflictingDependencySources, 3, 3);
+        Assert.That(Run(conflictingDependencyProgram,
+                conflictingDependencySources, 3, 3),
             Is.EqualTo(0));
 
         var outputStateWithoutFeature = input with {
@@ -677,12 +733,13 @@ internal sealed class StandaloneMethodImportInputTests
 
         BoundProgram Compile(StandaloneMethodImportInput request,
             int expectedModuleCount, int expectedRootStatus,
-            int verificationMode = 0, int expectedEffectMask = 0)
+            int verificationMode = 0, int expectedEffectMask = 0,
+            int expectedPredicateNodeKind = 1)
         {
             var compilation = Compilation.Create(components,
                 Buffers(request, expectedModuleCount,
                     expectedRootStatus, verificationMode,
-                    expectedEffectMask), policy);
+                    expectedEffectMask, expectedPredicateNodeKind), policy);
             Assert.That(compilation.HasErrors, Is.False,
                 string.Join(Environment.NewLine, compilation.Diagnostics));
             return compilation.Program
@@ -693,21 +750,22 @@ internal sealed class StandaloneMethodImportInputTests
         int Run(BoundProgram boundProgram,
             StandaloneMethodImportInput request, int expectedModuleCount,
             int expectedRootStatus, int verificationMode = 0,
-            int expectedEffectMask = 0)
+            int expectedEffectMask = 0, int expectedPredicateNodeKind = 1)
             => NativeJit.Execute(boundProgram with {
                 Buffers = Buffers(request, expectedModuleCount,
                     expectedRootStatus, verificationMode,
-                    expectedEffectMask),
+                    expectedEffectMask, expectedPredicateNodeKind),
             }, (NativeRuntimePolicy)policy);
 
         ImmutableArray<HostBuffer> Buffers(
             StandaloneMethodImportInput request, int expectedModuleCount,
             int expectedRootStatus, int verificationMode,
-            int expectedEffectMask)
+            int expectedEffectMask, int expectedPredicateNodeKind)
             => request.Capture().CreateHostBuffers().Add(new HostBuffer(
                 "Expected", PrimitiveType.Int32,
                 [expectedModuleCount, expectedRootStatus,
-                    verificationMode, expectedEffectMask], false));
+                    verificationMode, expectedEffectMask,
+                    expectedPredicateNodeKind], false));
     }
 
     private static string RepositoryRoot() =>
@@ -950,7 +1008,10 @@ internal sealed class StandaloneMethodImportInputTests
 
     private static byte[] CreateOutputStateArtifact(string moduleIdentity,
         uint featureId = 10, bool includeOutputState = true,
-        byte outputState = 1)
+        byte outputState = 1, bool includeDependency = false,
+        bool duplicateDependency = false,
+        bool conflictEmptyAndSourcedDependency = false,
+        uint nodeKind = 1, uint methodResultTypeSpecRef = 0xF200_0001)
     {
         var typeSpecRows = new ReadOnlyMemory<byte>[] {
             TrRmTypeSpecTableWriter.InitializationReference(
@@ -961,7 +1022,7 @@ internal sealed class StandaloneMethodImportInputTests
         var typeSpecs = new TrRmTypeSpecTableReader(typeSpecSection,
             1, 0, 0, 0);
         var methodSigSection = TrRmMethodSigTableWriter.Encode([
-            new TrRmMethodSigRow(0xF200_0001, 0, 1, 1, 0, 0),
+            new TrRmMethodSigRow(methodResultTypeSpecRef, 0, 1, 1, 0, 0),
         ], typeSpecs, 1, 0);
         var signatures = new TrRmMethodSigTableReader(
             methodSigSection, 1, typeSpecs, 1, 0);
@@ -989,7 +1050,10 @@ internal sealed class StandaloneMethodImportInputTests
             methodDefSection.AsSpan(12), 2);
         BinaryPrimitives.WriteUInt32LittleEndian(
             methodDefSection.AsSpan(16), 1);
-        var contractRowCount = includeOutputState ? 2 : 1;
+        var dependencyRowCount = !includeDependency ? 0
+            : duplicateDependency || conflictEmptyAndSourcedDependency ? 2 : 1;
+        var contractRowCount = (includeOutputState ? 2 : 1)
+            + dependencyRowCount;
         BinaryPrimitives.WriteUInt32LittleEndian(
             methodDefSection.AsSpan(20), (uint)contractRowCount);
 
@@ -1007,7 +1071,7 @@ internal sealed class StandaloneMethodImportInputTests
         readRootSection[0] = 5;
         var predicateNodeSection = new byte[16];
         BinaryPrimitives.WriteUInt32LittleEndian(
-            predicateNodeSection, 1);
+            predicateNodeSection, nodeKind);
         BinaryPrimitives.WriteUInt32LittleEndian(
             predicateNodeSection.AsSpan(4), 0xF200_0001);
         BinaryPrimitives.WriteUInt32LittleEndian(
@@ -1029,6 +1093,7 @@ internal sealed class StandaloneMethodImportInputTests
         BinaryPrimitives.WriteUInt32LittleEndian(
             predicateAttachment.AsSpan(16), 1);
         contractRows[0] = predicateAttachment;
+        var nextContractRow = 1;
         if (includeOutputState)
         {
             var outputStateRow = new byte[20];
@@ -1039,7 +1104,33 @@ internal sealed class StandaloneMethodImportInputTests
             BinaryPrimitives.WriteUInt32LittleEndian(
                 outputStateRow.AsSpan(12), 1);
             outputStateRow[16] = outputState;
-            contractRows[1] = outputStateRow;
+            contractRows[nextContractRow] = outputStateRow;
+            nextContractRow = nextContractRow + 1;
+        }
+        if (includeDependency)
+        {
+            for (var dependencyIndex = 0;
+                dependencyIndex < dependencyRowCount;
+                dependencyIndex++)
+            {
+                var dependencyRow = new byte[20];
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    dependencyRow, owner);
+                BinaryPrimitives.WriteUInt16LittleEndian(
+                    dependencyRow.AsSpan(4), 0x0004);
+                dependencyRow[8] = 2;
+                dependencyRow[9]
+                    = conflictEmptyAndSourcedDependency
+                        && dependencyIndex == 1 ? (byte)1 : (byte)0;
+                dependencyRow[10] = dependencyRow[9];
+                dependencyRow[11] = 1;
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    dependencyRow.AsSpan(12), 0);
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    dependencyRow.AsSpan(16), 0);
+                contractRows[nextContractRow] = dependencyRow;
+                nextContractRow = nextContractRow + 1;
+            }
         }
         var contractSection
             = TrRmVariableTableWriter.EncodeBlobs(contractRows);
