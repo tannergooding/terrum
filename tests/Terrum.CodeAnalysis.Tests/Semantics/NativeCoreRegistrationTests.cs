@@ -39,6 +39,11 @@ internal sealed class NativeCoreRegistrationTests
             IntPtr tagSource, NativeAggregateNestedPayload fallback);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate NativeAggregateNestedPayload
+        NativeAggregateLiteralPayloadFunction(IntPtr receiver,
+            IntPtr source, NativeAggregateNestedPayload fallback);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int NativeTagFunction(IntPtr receiver, IntPtr source);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
@@ -2339,6 +2344,17 @@ internal sealed class NativeCoreRegistrationTests
             }
             """;
         const string consumerSource = """
+            Payload InvokeLiteralPayload(ptr<void> receiver,
+                ptr<int32> source, Payload fallback) {
+                init Payload value;
+                unsafe {
+                    int32 status = IProbe.TryReadPayload(
+                        receiver, source, 7, &init value);
+                    if (status != 0) { return value; }
+                    return fallback;
+                }
+            }
+
             Payload InvokePayload(ptr<void> receiver, ptr<int32> source,
                 ptr<int32> tagSource, Payload fallback) {
                 init Payload value;
@@ -2498,6 +2514,26 @@ internal sealed class NativeCoreRegistrationTests
         Assert.That(body.GetBlockCode(2).ToArray(),
             Is.EqualTo(new byte[] { 0xD5, 0, 3, 0, 0x17, 0 }));
 
+        var literalMethod = Enumerable.Range(1, consumerTables.Methods.Count)
+            .Single(row =>
+                consumerTables.Methods.GetName(row) == "InvokeLiteralPayload");
+        var literalBody = consumerTables.Bodies.GetRegisterBody(
+            consumerTables.Methods.GetBodyRow(literalMethod),
+            consumerTables.Contracts.Count);
+        Assert.That(literalBody.BlockCount, Is.EqualTo(3));
+        Assert.That(literalBody.RecordCount, Is.EqualTo(4));
+        Assert.That(literalBody.MethodCount, Is.EqualTo(1));
+        Assert.That(literalBody.HomeCount, Is.EqualTo(5));
+        Assert.That(literalBody.ConstantCount, Is.EqualTo(1));
+        Assert.That(literalBody.ConstantMap.Length, Is.EqualTo(8));
+        Assert.That(literalBody.GetBlockCode(0)[..3].ToArray(),
+            Is.EqualTo(new byte[] { 0x16, 1, 0xDF }));
+        var literalCallPayload = literalBody.GetRecord(1)[4..];
+        Assert.That(literalCallPayload[24], Is.EqualTo(1));
+        Assert.That(literalCallPayload[25], Is.EqualTo(1));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+            literalCallPayload[26..]), Is.EqualTo((ushort)1));
+
         var consumerInput = new TrRmStandardArtifactInput(schemaIdentity,
             consumerArtifact);
         var providers = new[] { providerInput };
@@ -2514,7 +2550,16 @@ internal sealed class NativeCoreRegistrationTests
             Is.EqualTo(function.ParameterCount));
         Assert.That(((BoundRead)fallbackReturn.Value).Variable,
             Is.EqualTo(3));
-        var image = NativeEmitter.EmitLibrary(loaded, ["InvokePayload"],
+        var literalFunction = loaded.Functions.Single(
+            function => function.Name == "InvokeLiteralPayload");
+        var literalStatus = (BoundLocal)literalFunction.Body.Statements[1];
+        var literalCall = (BoundCall)((BoundUnsafeExpression)
+            literalStatus.Initializer).Expression;
+        Assert.That(literalCall.Arguments[1], Is.TypeOf<BoundConstant>());
+        Assert.That(((BoundConstant)literalCall.Arguments[1]).Value,
+            Is.EqualTo(7));
+        var image = NativeEmitter.EmitLibrary(loaded,
+            ["InvokePayload", "InvokeLiteralPayload"],
             NativeRuntimePolicy.FailFast);
         Assert.That(image[..2], Is.EqualTo(new byte[] {
             (byte)'M', (byte)'Z',
@@ -2523,15 +2568,20 @@ internal sealed class NativeCoreRegistrationTests
             Is.EqualTo(24));
         await AssertNestedAggregatePayloadOutputAsync(image, "InvokePayload")
             .ConfigureAwait(true);
+        await AssertLiteralAggregatePayloadOutputAsync(image,
+            "InvokeLiteralPayload").ConfigureAwait(true);
         var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(loaded,
             "consumer.module", schemaIdentity, 1, []);
         var reloaded = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(schemaIdentity,
                 reemittedArtifact), "consumer.module", providers);
         var reloadedImage = NativeEmitter.EmitLibrary(reloaded,
-            ["InvokePayload"], NativeRuntimePolicy.FailFast);
+            ["InvokePayload", "InvokeLiteralPayload"],
+            NativeRuntimePolicy.FailFast);
         await AssertNestedAggregatePayloadOutputAsync(reloadedImage,
             "InvokePayload").ConfigureAwait(true);
+        await AssertLiteralAggregatePayloadOutputAsync(reloadedImage,
+            "InvokeLiteralPayload").ConfigureAwait(true);
     }
 
     [Test]
@@ -6404,6 +6454,92 @@ internal sealed class NativeCoreRegistrationTests
             if (tagSource != IntPtr.Zero)
             {
                 Marshal.FreeHGlobal(tagSource);
+            }
+            if (vtable != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(vtable);
+            }
+            if (receiver != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(receiver);
+            }
+            await TestFileCleanup.DeleteWithRetryAsync(path)
+                .ConfigureAwait(true);
+        }
+    }
+
+    private static async Task AssertLiteralAggregatePayloadOutputAsync(
+        byte[] image, string functionName)
+    {
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"native-fni-literal-aggregate-output-{Guid.NewGuid():N}.dll");
+        var module = IntPtr.Zero;
+        var receiver = IntPtr.Zero;
+        var vtable = IntPtr.Zero;
+        var source = IntPtr.Zero;
+        NativeOutputTaggedPayloadFunction? callback = null;
+        try
+        {
+            await File.WriteAllBytesAsync(path, image).ConfigureAwait(true);
+            module = NativeLibrary.Load(path);
+            receiver = Marshal.AllocHGlobal(IntPtr.Size);
+            vtable = Marshal.AllocHGlobal(2 * IntPtr.Size);
+            source = Marshal.AllocHGlobal(sizeof(int));
+            callback = (actualReceiver, actualSource, tag, value) => {
+                if (actualReceiver != receiver || actualSource != source
+                    || tag != 7)
+                {
+                    return 0;
+                }
+
+                if (Marshal.ReadInt32(actualSource) == 0)
+                {
+                    Marshal.WriteInt64(value, -1);
+                    return 0;
+                }
+
+                Marshal.WriteInt64(value, 11);
+                Marshal.WriteInt64(value, sizeof(long), 22);
+                Marshal.WriteInt64(value, 2 * sizeof(long), 33);
+                return 1;
+            };
+            Marshal.WriteIntPtr(vtable, IntPtr.Zero);
+            Marshal.WriteIntPtr(vtable, IntPtr.Size,
+                Marshal.GetFunctionPointerForDelegate(callback));
+            Marshal.WriteIntPtr(receiver, vtable);
+            Marshal.WriteInt32(source, 1);
+
+            var invoke = Marshal.GetDelegateForFunctionPointer<
+                NativeAggregateLiteralPayloadFunction>(
+                    NativeLibrary.GetExport(module, functionName));
+            var fallback = new NativeAggregateNestedPayload {
+                Inner = new NativeAggregateNestedInner {
+                    X = 4,
+                    Y = 5,
+                },
+                Z = 6,
+            };
+            var result = invoke(receiver, source, fallback);
+            Assert.That(result.Inner.X, Is.EqualTo(11));
+            Assert.That(result.Inner.Y, Is.EqualTo(22));
+            Assert.That(result.Z, Is.EqualTo(33));
+
+            Marshal.WriteInt32(source, 0);
+            result = invoke(receiver, source, fallback);
+            Assert.That(result.Inner.X, Is.EqualTo(fallback.Inner.X));
+            Assert.That(result.Inner.Y, Is.EqualTo(fallback.Inner.Y));
+            Assert.That(result.Z, Is.EqualTo(fallback.Z));
+            GC.KeepAlive(callback);
+        }
+        finally
+        {
+            if (module != IntPtr.Zero)
+            {
+                NativeLibrary.Free(module);
+            }
+            if (source != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(source);
             }
             if (vtable != IntPtr.Zero)
             {

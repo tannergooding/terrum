@@ -6281,7 +6281,7 @@ public static partial class TrRmExecutableCompiler
                         foreignInterfaceMethodMapTokenForCall
                             ?? throw Unsupported(
                                 "The F+I Body writer requires exact InterfaceMethod MethodMap selection."),
-                        schema));
+                        predicateFrozenScalarValues, schema));
                 }
                 else if (outputFeatures[index])
                 {
@@ -6291,6 +6291,7 @@ public static partial class TrRmExecutableCompiler
                             MethodMapTokenForFunction, FieldDefRowFor,
                             FieldPathRowFor,
                             foreignInterfaceMethodMapTokenForCall,
+                            predicateFrozenScalarValues,
                             schema)
                         : EncodeOutputBody(function, program, typeRowsList,
                             nativeParameterTypeRows, nativeOutputTypeRows,
@@ -8836,8 +8837,10 @@ public static partial class TrRmExecutableCompiler
                         generalPredicateGraphsInitializationReferenceBodies);
                     var scalarConstants
                         = ImmutableArray<BoundConstant>.Empty;
-                    if (standardConstruction2MethodLinkingProfile
-                        && registerBody.ConstantCount != 0)
+                    if (registerBody.ConstantCount != 0
+                        && (standardConstruction2MethodLinkingProfile
+                            || registerBody.Schema
+                                .UsesForeignNativeInterface()))
                     {
                         var constants
                             = ImmutableArray.CreateBuilder<BoundConstant>(
