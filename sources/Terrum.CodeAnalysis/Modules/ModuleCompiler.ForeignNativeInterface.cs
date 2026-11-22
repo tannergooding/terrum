@@ -7,11 +7,38 @@ using System.Linq;
 using System.Text;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Semantics;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Modules;
 
 public static partial class ModuleCompiler
 {
+    private sealed record PendingPrivateForeignInterfaceCall(
+        int ModuleFunctionIndex, BoundExpression Receiver,
+        ImmutableArray<BoundExpression> Arguments,
+        ImmutableArray<int> ArgumentParameterIndices,
+        PrimitiveType Type, TextSpan Span)
+        : BoundExpression(Type, Span)
+    {
+        internal override bool HasValidNestedExpressions
+            => Receiver is not null && !Arguments.IsDefault
+                && Arguments.All(static argument => argument is not null)
+                && (ArgumentParameterIndices.IsDefault
+                    || ArgumentParameterIndices.Length
+                        == Arguments.Length);
+
+        internal override ImmutableArray<BoundExpression> NestedExpressions
+            => Arguments.IsDefault ? [Receiver] : [Receiver, .. Arguments];
+
+        internal override BoundExpression RewriteNestedExpressions(
+            Func<BoundExpression, BoundExpression> rewrite)
+            => this with {
+                Receiver = rewrite(Receiver),
+                Arguments = Arguments.IsDefault
+                    ? default : [.. Arguments.Select(rewrite)],
+            };
+    }
+
     private static void WritePrivateForeignInterfaceMemberSurface(
         BinaryWriter writer,
         PrivateForeignInterfaceMemberSurface? surface)
@@ -1534,6 +1561,102 @@ public static partial class ModuleCompiler
         return "|NativeCallable:" + conventionName;
     }
 
+    private static int GetPrivateForeignInterfaceModuleFunctionIndex(
+        BoundInterfaceMemberIdentity identity, ModuleWriter writer)
+    {
+        var program = writer.SourceProgram
+            ?? throw new ModuleContractException(
+                "PF111 foreign call has no checked source-program snapshot.");
+        if (writer.FormatVersion != ForeignInterfacePrivateVersion
+            || !BoundInterfaceContract.TryGetInterfaceMemberDefinition(
+                identity, program.Interfaces, static _ => true,
+                out var selectedMember,
+                genericNominalTypeDefinitions:
+                    program.GenericNominalTypeDefinitions,
+                sourceGenericTypeDefinitions:
+                    program.SourceGenericTypeDefinitions)
+            || selectedMember is null)
+        {
+            throw new ModuleContractException(
+                "PF111 foreign call does not identify one checked member.");
+        }
+
+        var sourceOwners = program.Interfaces.Select(
+                (definition, index) => (definition, index))
+            .Where(item => !item.definition.Members.IsDefault
+                && (uint)identity.MemberOrdinal
+                    < (uint)item.definition.Members.Length
+                && ReferenceEquals(
+                    item.definition.Members[identity.MemberOrdinal],
+                    selectedMember))
+            .ToArray();
+        if (sourceOwners.Length != 1)
+        {
+            throw new ModuleContractException(
+                "PF111 foreign call member lost its checked owner association.");
+        }
+
+        var (sourceDefinition, interfaceOrdinal) = sourceOwners[0];
+        var origin = writer.IdentityInputs is PrivateModuleIdentityInputs
+            identityInputs
+            ? identityInputs.IsFor(program)
+                && (uint)interfaceOrdinal
+                    < (uint)identityInputs.ForeignInterfaceOrigins.Length
+                    ? identityInputs.ForeignInterfaceOrigins[
+                        interfaceOrdinal]
+                    : null
+            : sourceDefinition.PrivateForeignInterfaceOrigin;
+        if (origin is null
+            || (uint)identity.MemberOrdinal
+                >= (uint)origin.Members.Length)
+        {
+            throw new ModuleContractException(
+                "PF111 foreign call has no complete captured owner/member Binding.");
+        }
+
+        var directoryRows = writer.ForeignInterfaces.Select(
+                (foreignInterface, index) => (foreignInterface, index))
+            .Where(item => item.foreignInterface.Binding == origin.Owner
+                && StringComparer.Ordinal.Equals(
+                    item.foreignInterface.LookupName,
+                    sourceDefinition.QualifiedName)
+                && (uint)identity.MemberOrdinal
+                    < (uint)item.foreignInterface.Members.Length
+                && item.foreignInterface.Members[
+                    identity.MemberOrdinal].Binding
+                    == origin.Members[identity.MemberOrdinal])
+            .ToArray();
+        if (directoryRows.Length != 1)
+        {
+            throw new ModuleContractException(
+                "PF111 foreign call has no unique persisted owner/member Binding.");
+        }
+
+        var (persistedInterface, persistedInterfaceIndex)
+            = directoryRows[0];
+        var moduleFunctionIndex = persistedInterface.Members[
+            identity.MemberOrdinal].ModuleFunctionIndex;
+        if ((uint)moduleFunctionIndex
+                >= (uint)writer.ModuleFunctions.Length
+            || writer.ModuleFunctions[moduleFunctionIndex]
+                .ForeignInterfaceMember
+                is not PrivateForeignInterfaceMemberSurface surface
+            || surface.ForeignInterfaceIndex
+                != persistedInterfaceIndex
+            || surface.DeclaredMethodOrdinal
+                != identity.MemberOrdinal
+            || writer.ModuleFunctions[moduleFunctionIndex].Import
+                != (origin.Owner.Kind
+                    == BoundPrivateForeignInterfaceBindingKind
+                        .ImportedExpectation))
+        {
+            throw new ModuleContractException(
+                "PF111 foreign call target does not resolve to its exact ModuleFunction row.");
+        }
+
+        return moduleFunctionIndex;
+    }
+
     private static ImmutableArray<BoundInterfaceDefinition>
         CreatePrivateForeignInterfaceReferenceDefinitions(Module module)
     {
@@ -1697,6 +1820,118 @@ public static partial class ModuleCompiler
                         "Selected foreign-interface provider changed an expected member ABI, effect, output or dependency contract.");
                 }
             }
+        }
+    }
+
+    private static Module ResolvePrivateForeignInterfaceCallReferences(
+        Module module)
+    {
+        if (module.FormatVersion != ForeignInterfacePrivateVersion)
+        {
+            return module;
+        }
+
+        var interfaces = ReconstructPrivateForeignInterfaces(module);
+        var functions = ImmutableArray.CreateBuilder<ModuleFunction>(
+            module.Functions.Length);
+        foreach (var item in module.Functions)
+        {
+            if (item.Function is not BoundFunction function)
+            {
+                functions.Add(item);
+                continue;
+            }
+
+            var rewritten = BoundTreeTraversal.RewriteExpressions(function,
+                expression =>
+                    expression is PendingPrivateForeignInterfaceCall pending
+                        ? ResolveCallTarget(pending)
+                        : expression);
+            functions.Add(item with { Function = rewritten });
+        }
+        return module with { Functions = functions.MoveToImmutable() };
+
+        BoundCall ResolveCallTarget(
+            PendingPrivateForeignInterfaceCall pending)
+        {
+            if ((uint)pending.ModuleFunctionIndex
+                    >= (uint)module.Functions.Length
+                || module.Functions[pending.ModuleFunctionIndex]
+                    .ForeignInterfaceMember
+                    is not PrivateForeignInterfaceMemberSurface surface
+                || (uint)surface.ForeignInterfaceIndex
+                    >= (uint)interfaces.Length)
+            {
+                throw new ModuleFormatException(
+                    "PF111 foreign call target does not resolve to a complete member surface.");
+            }
+
+            var definition = interfaces[surface.ForeignInterfaceIndex];
+            var memberOrdinal = surface.DeclaredMethodOrdinal;
+            if (definition.ForeignNativeInterface is not
+                    BoundForeignNativeInterfaceLayout layout
+                || (uint)memberOrdinal >= (uint)definition.Members.Length
+                || definition.Members[memberOrdinal] is not
+                    BoundInterfaceMemberDefinition member
+                || member.Ordinal != memberOrdinal
+                || pending.Type != surface.ResultType
+                || pending.Arguments.Length != member.Parameters.Length
+                || (!pending.ArgumentParameterIndices.IsDefault
+                    && pending.ArgumentParameterIndices.Length
+                        != pending.Arguments.Length))
+            {
+                throw new ModuleFormatException(
+                    "PF111 foreign call target does not match its member signature.");
+            }
+
+            if (!pending.ArgumentParameterIndices.IsDefault)
+            {
+                var mappedFormals = new bool[member.Parameters.Length];
+                foreach (var parameter in
+                    pending.ArgumentParameterIndices)
+                {
+                    if ((uint)parameter >= (uint)mappedFormals.Length
+                        || mappedFormals[parameter])
+                    {
+                        throw new ModuleFormatException(
+                            "PF111 foreign call formal mapping is not a permutation.");
+                    }
+                    mappedFormals[parameter] = true;
+                }
+                if (mappedFormals.Any(static mapped => !mapped))
+                {
+                    throw new ModuleFormatException(
+                        "PF111 foreign call formal mapping is incomplete.");
+                }
+            }
+
+            var origin = definition.PrivateForeignInterfaceOrigin
+                ?? throw new ModuleFormatException(
+                    "PF111 foreign call owner has no private Binding.");
+            var declaringInterface = new BoundInterfaceType(
+                BoundInterfaceTypeKind.Nominal, PrimitiveType.Void,
+                definition.QualifiedName, -1, [], false, false, false,
+                false)
+            {
+                ModuleImport = definition.ModuleImport,
+                PrivateForeignInterfaceBinding = origin.Owner,
+            };
+            var memberIdentity = new BoundInterfaceMemberIdentity(
+                declaringInterface, memberOrdinal, member.DeclarationKey);
+            var convention = member.NativeCallableConvention
+                ?? throw new ModuleFormatException(
+                    "PF111 foreign call member has no calling convention.");
+            return new BoundCall(BoundCall.ForeignInterfaceFunction,
+                pending.Arguments, pending.Type, pending.Span)
+            {
+                ForeignInterfaceCall = new BoundForeignInterfaceCall(
+                    pending.Receiver, memberIdentity,
+                    layout.VTableByteOffset, convention,
+                    member.RequiresMutableReceiver, member.DoesNotReturn,
+                    member.NativeOutputContracts),
+                ArgumentParameterIndices =
+                    pending.ArgumentParameterIndices,
+            };
         }
     }
 

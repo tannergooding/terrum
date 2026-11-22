@@ -30,6 +30,7 @@ public static partial class ModuleCompiler
         internal ImmutableArray<HostBuffer> InvocationBuffers { get; init; } = [];
         internal ImmutableArray<BoundFunction> SourceFunctions { get; init; } = [];
         internal BoundProgram? SourceProgram { get; init; }
+        internal PrivateModuleIdentityInputs? IdentityInputs { get; init; }
         internal ImmutableArray<ModuleFunction> ModuleFunctions { get; init; } = [];
         internal BoundFunction? CurrentSourceFunction { get; set; }
         internal ImmutableArray<BoundVariable> CurrentVariables { get; set; } = [];

@@ -1371,7 +1371,11 @@ public static partial class ModuleCompiler
             nativeFunctionPointerSignatures: program.NativeFunctionPointerSignatures,
             nativeFixedArrayTypes: program.NativeFixedArrayTypes,
             checkedReferenceTypes: program.CheckedReferenceTypes,
-            additionalTypes: privateNominalRoots);
+            additionalTypes: privateNominalRoots.Concat(
+                PrivateForeignInterfaceTypeRoots(program.Interfaces
+                    .Where(static definition =>
+                        definition.ForeignNativeInterface is not null)
+                    .ToImmutableArray(), program.NativePointerTypes));
         var structures = SelectStructures(program.Structures, required);
         var checkedReferenceTypes = RemapCheckedReferenceTypeDefinitions(
             program.CheckedReferenceTypes, program.Structures, structures,
@@ -1423,8 +1427,16 @@ public static partial class ModuleCompiler
         {
             classes.Add(RemapClass(@class, program.Structures, structures));
         }
+        var foreignInterfaceRecords
+            = CreatePrivateForeignInterfaceModuleRecords(program,
+                identityInputs, selectedFormatVersion, isConsumer: true,
+                firstModuleFunctionIndex: functions.Count,
+                remapType: type => RemapType(type, program.Structures,
+                    structures));
+        functions.AddRange(foreignInterfaceRecords.Functions);
         var module = new Module(true, program.EntryPoint, structures, functions.MoveToImmutable()) {
             Classes = classes.MoveToImmutable(),
+            ForeignInterfaces = foreignInterfaceRecords.Interfaces,
             ImportedStructures = imported.ToImmutable(),
             NativeFunctionPointerSignatures = nativeFunctionPointerSignatures,
             NativePointerTypes = nativePointerTypes,
@@ -1436,7 +1448,8 @@ public static partial class ModuleCompiler
             NominalTypeOrigins = BuildPrivateNominalTypeOrigins(sourceProgram,
                 module, identityInputs),
         };
-        var result = Write(module, program, selectedFormatVersion);
+        var result = Write(module, program, selectedFormatVersion,
+            identityInputs);
         ValidateConsumerAgainstReference(result, reference);
         return result;
     }

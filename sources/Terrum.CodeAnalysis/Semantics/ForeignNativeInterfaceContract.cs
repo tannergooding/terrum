@@ -119,6 +119,8 @@ internal static class ForeignNativeInterfaceContract
             || !call.DefaultedArguments.IsDefaultOrEmpty
             || !call.IsUnsafeAuthorized
             || call.Arguments.IsDefault
+            || call.Arguments.Length
+                >= SemanticVerifier.MaximumArguments
             || (!call.ArgumentParameterIndices.IsDefault
                 && call.ArgumentParameterIndices.Length
                     != call.Arguments.Length)
@@ -167,8 +169,9 @@ internal static class ForeignNativeInterfaceContract
         }
 
         var owners = program.Interfaces.Where(definition =>
-                StringComparer.Ordinal.Equals(definition.QualifiedName,
-                    foreignCall.Member.DeclaringInterface.NominalName))
+                !definition.Members.IsDefault
+                && definition.Members.Any(candidate =>
+                    ReferenceEquals(candidate, member)))
             .ToArray();
         if (owners is not [{ } owner]
             || owner.ForeignNativeInterface is not
@@ -176,7 +179,8 @@ internal static class ForeignNativeInterfaceContract
             || layout.VTableByteOffset != foreignCall.VTableByteOffset
             || (program.NativeCoreRegistration?.ForeignNativeInterface
                     is null
-                && owner.ModuleImport is null))
+                && owner.ModuleImport is null
+                && owner.PrivateForeignInterfaceOrigin is null))
         {
             return false;
         }

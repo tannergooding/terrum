@@ -49,6 +49,23 @@ public static partial class ModuleCompiler
             return;
         }
 
+        if (call.ForeignInterfaceCall is not null)
+        {
+            if (moduleWriter.FormatVersion
+                    != ForeignInterfacePrivateVersion
+                || call.Function != BoundCall.ForeignInterfaceFunction
+                || !call.ArgumentImplicitReferenceTemporaries.IsDefault
+                || !call.DefaultedArguments.IsDefaultOrEmpty)
+            {
+                throw new ModuleContractException(
+                    "PF111 foreign calls cannot retain ordinary function-index, implicit-reference or default-expression metadata.");
+            }
+
+            PutExpression(writer, argument, names, ref remaining, depth,
+                inUnsafe);
+            return;
+        }
+
         if ((uint)call.Function >= (uint)moduleWriter.SourceFunctions.Length
             || (!call.ArgumentParameterIndices.IsDefault
                 && call.ArgumentParameterIndices.Length

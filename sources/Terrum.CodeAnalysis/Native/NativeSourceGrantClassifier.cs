@@ -55,7 +55,15 @@ internal static class NativeSourceGrantClassifier
                             expressions.Push(unsafeExpression.Expression);
                             break;
                         case BoundCall call:
-                            AddCall(call.Function);
+                            if (call.ForeignInterfaceCall is
+                                BoundForeignInterfaceCall foreignCall)
+                            {
+                                expressions.Push(foreignCall.Receiver);
+                            }
+                            else
+                            {
+                                AddCall(call.Function);
+                            }
                             foreach (var argument in call.Arguments)
                             {
                                 if (argument is BoundOutArgument output)
@@ -561,6 +569,10 @@ internal static class NativeSourceGrantClassifier
                             expressions.Push(conditional.WhenTrue);
                             expressions.Push(conditional.WhenFalse);
                             break;
+                        case BoundCall {
+                            ForeignInterfaceCall: not null,
+                        }:
+                            throw Unsupported();
                         case BoundCall call:
                             ValidateWorkspaceCall(call);
                             PushExpressions(call.Arguments);

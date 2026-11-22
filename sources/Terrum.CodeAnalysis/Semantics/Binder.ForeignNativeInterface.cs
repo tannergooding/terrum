@@ -59,7 +59,7 @@ internal sealed partial class Binder
 
         var argumentNodes = arguments.Children.OfType<SyntaxNode>()
             .ToArray();
-        if (argumentNodes.Length - 1
+        if (argumentNodes.Length
             > SemanticVerifier.MaximumArguments)
         {
             Report("TRM3005",
@@ -306,6 +306,15 @@ internal sealed partial class Binder
                 arguments.Span);
             boundArguments.Add(ErrorExpression(arguments.Span));
             argumentParameterIndices.Add(formalOrdinal);
+        }
+
+        if (boundArguments.Count + 1
+            > SemanticVerifier.MaximumArguments)
+        {
+            Report("TRM3005",
+                "A foreign-interface call exceeds the argument limit including its receiver.",
+                arguments.Span);
+            return true;
         }
 
         if (_unsafeDepth == 0)

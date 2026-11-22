@@ -873,7 +873,8 @@ public static partial class NativeModuleCompiler
         foreach (var expectation in expectations)
         {
             var declaration = module.Functions.SingleOrDefault(function =>
-                function.Name == expectation.LocalFunctionName);
+                function.ForeignInterfaceMember is null
+                && function.Name == expectation.LocalFunctionName);
             if (declaration is null || !declaration.Import || declaration.Function is not null
                 || declaration.NativeOutputContracts.IsDefault
                 || (!declaration.NativeOutputContracts.IsEmpty

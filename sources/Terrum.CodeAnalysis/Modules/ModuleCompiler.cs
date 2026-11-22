@@ -534,10 +534,17 @@ public static partial class ModuleCompiler
 
         Dictionary<string, int> CreateFunctionIndexes()
         {
-            var result = new Dictionary<string, int>(consumer.Functions.Length, StringComparer.Ordinal);
+            var ordinaryFunctionCount = consumer.Functions.Count(
+                static item => item.ForeignInterfaceMember is null);
+            var result = new Dictionary<string, int>(ordinaryFunctionCount,
+                StringComparer.Ordinal);
             for (var index = 0; index < consumer.Functions.Length; index++)
             {
-                result.Add(consumer.Functions[index].Name, index);
+                var function = consumer.Functions[index];
+                if (function.ForeignInterfaceMember is null)
+                {
+                    result.Add(function.Name, index);
+                }
             }
             return result;
         }
@@ -592,10 +599,17 @@ public static partial class ModuleCompiler
     private static Dictionary<string, IReadOnlyList<string>> GetDirectNativeImports(Module producer,
         HashSet<string>? directNativeExports = null)
     {
-        var indexes = new Dictionary<string, int>(producer.Functions.Length, StringComparer.Ordinal);
+        var ordinaryFunctionCount = producer.Functions.Count(
+            static item => item.ForeignInterfaceMember is null);
+        var indexes = new Dictionary<string, int>(ordinaryFunctionCount,
+            StringComparer.Ordinal);
         for (var index = 0; index < producer.Functions.Length; index++)
         {
-            indexes.Add(producer.Functions[index].Name, index);
+            var function = producer.Functions[index];
+            if (function.ForeignInterfaceMember is null)
+            {
+                indexes.Add(function.Name, index);
+            }
         }
         var imports = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
         foreach (var item in producer.Functions)
@@ -2122,7 +2136,8 @@ public static partial class ModuleCompiler
                 sourceProgram, module, identityInputs),
         };
         module = ProjectPrivateEnumDefinitions(module, identityInputs);
-        return Write(module, program, selectedFormatVersion);
+        return Write(module, program, selectedFormatVersion,
+            identityInputs);
 
         int FindStructureIndex(string name)
         {
@@ -2647,7 +2662,8 @@ public static partial class ModuleCompiler
         module = ProjectPrivateEnumDefinitions(module, identityInputs);
         ValidateSelectedPrivateNominalImports(module, producer,
             identityInputs);
-        return Write(module, program, selectedFormatVersion);
+        return Write(module, program, selectedFormatVersion,
+            identityInputs);
     }
 
     /// <summary>Resolves symbolic calls against a separately supplied producer, checks contracts and verifies the complete linked IR.</summary>
@@ -3347,7 +3363,15 @@ public static partial class ModuleCompiler
                     VisitExpression(unsafeExpression.Expression);
                     break;
                 case BoundCall call:
-                    calls.Add(call.Function);
+                    if (call.ForeignInterfaceCall
+                        is BoundForeignInterfaceCall foreignCall)
+                    {
+                        VisitExpression(foreignCall.Receiver);
+                    }
+                    else
+                    {
+                        calls.Add(call.Function);
+                    }
                     foreach (var argument in call.Arguments)
                     {
                         VisitExpression(argument);
@@ -3479,10 +3503,25 @@ public static partial class ModuleCompiler
         }
     }
 
-    internal static bool ContainsCallerUnsafeCalls(BoundProgram program) =>
-        program.Functions.Any(function => Calls(function.Body).Any(index =>
-            index >= 0 && index < program.Functions.Length
-            && program.Functions[index].RequiresUnsafeCaller));
+    internal static bool ContainsCallerUnsafeCalls(BoundProgram program)
+    {
+        foreach (var function in program.Functions)
+        {
+            var hasForeignInterfaceCall = false;
+            var calls = Calls(function.Body, visitExpression: expression =>
+                hasForeignInterfaceCall |= expression is BoundCall {
+                    ForeignInterfaceCall: not null,
+                });
+            if (hasForeignInterfaceCall
+                || calls.Any(index => index >= 0
+                    && index < program.Functions.Length
+                    && program.Functions[index].RequiresUnsafeCaller))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
 
     internal static bool ContainsCallerUnsafeContracts(BoundProgram program) =>
         program.Functions.Any(static function => function.RequiresUnsafeCaller)
@@ -8479,7 +8518,8 @@ public static partial class ModuleCompiler
     }
 
     private static byte[] Write(Module module, BoundProgram program,
-        int? selectedFormatVersion = null)
+        int? selectedFormatVersion = null,
+        PrivateModuleIdentityInputs? identityInputs = null)
     {
         RejectDeclarationContractClauses(program);
         RejectStaticInitializationFacts(program);
@@ -8903,6 +8943,7 @@ public static partial class ModuleCompiler
             InvocationBuffers = module.InvocationBuffers,
             SourceFunctions = program.Functions,
             SourceProgram = program,
+            IdentityInputs = identityInputs,
             ModuleFunctions = module.Functions,
         };
         writer.Write(Magic);
@@ -9302,6 +9343,7 @@ public static partial class ModuleCompiler
                 requireCompleteClosure: true);
             ValidatePrivateForeignInterfaceDirectory(module,
                 reading: true);
+            module = ResolvePrivateForeignInterfaceCallReferences(module);
             ValidateAddressOnlyNestedBacking(module);
             if (module.FormatVersion is DirectNativeImportVersion or DirectNativeParameterVersion
                 && !module.Functions.Any(static item =>
@@ -12232,7 +12274,9 @@ public static partial class ModuleCompiler
                 break;
             case BoundNativeOutputReservation reservation:
                 if (reservation.Type != PrimitiveType.Void
-                    || reservation.Variable < 0)
+                    || writer is not ModuleWriter reservationWriter
+                    || (uint)reservation.Variable
+                        >= (uint)reservationWriter.CurrentVariables.Length)
                 {
                     throw new ModuleContractException("Native output reservation is invalid.");
                 }
@@ -12518,7 +12562,80 @@ public static partial class ModuleCompiler
                 writer.Write(output.DeclaresVariable);
                 break;
             case BoundCall call:
-                if (call.Function < 0 || call.Function >= names.Length)
+                var foreignCall = call.ForeignInterfaceCall;
+                if (writer is ModuleWriter {
+                        FormatVersion: ForeignInterfacePrivateVersion,
+                    } moduleWriter)
+                {
+                    if (foreignCall is null)
+                    {
+                        writer.Write((byte)0);
+                    }
+                    else
+                    {
+                        if (call.Function
+                                != BoundCall.ForeignInterfaceFunction
+                            || !call.IsUnsafeAuthorized || !inUnsafe
+                                || !call.ArgumentImplicitReferenceTemporaries
+                                    .IsDefault
+                                || !call.DefaultedArguments.IsDefaultOrEmpty
+                            || call.Arguments.Length + 1 > 64)
+                        {
+                            throw new ModuleContractException(
+                                "PF111 foreign call has an invalid target, unsafe scope or argument count.");
+                        }
+
+                        var moduleFunctionIndex
+                            = GetPrivateForeignInterfaceModuleFunctionIndex(
+                                foreignCall.Member, moduleWriter);
+                        var surface = moduleWriter.ModuleFunctions[
+                            moduleFunctionIndex].ForeignInterfaceMember
+                            ?? throw new ModuleContractException(
+                                "PF111 foreign call target has no declaration surface.");
+                        if (call.Arguments.Length != surface.Formals.Length
+                            || (!call.ArgumentParameterIndices.IsDefault
+                                && call.ArgumentParameterIndices.Length
+                                    != call.Arguments.Length))
+                        {
+                            throw new ModuleContractException(
+                                "PF111 foreign call does not supply every explicit formal.");
+                        }
+                        if (!call.ArgumentParameterIndices.IsDefault)
+                        {
+                            var mappedFormals = new bool[
+                                surface.Formals.Length];
+                            foreach (var parameter in
+                                call.ArgumentParameterIndices)
+                            {
+                                if ((uint)parameter
+                                        >= (uint)mappedFormals.Length
+                                    || mappedFormals[parameter])
+                                {
+                                    throw new ModuleContractException(
+                                        "PF111 foreign call formal mapping is not a permutation.");
+                                }
+                                mappedFormals[parameter] = true;
+                            }
+                            if (mappedFormals.Any(
+                                    static mapped => !mapped))
+                            {
+                                throw new ModuleContractException(
+                                    "PF111 foreign call formal mapping is incomplete.");
+                            }
+                        }
+
+                        writer.Write((byte)1);
+                        writer.Write(checked((uint)moduleFunctionIndex));
+                    }
+                }
+                else if (foreignCall is not null)
+                {
+                    throw new ModuleContractException(
+                        "Foreign-interface calls require PF111.");
+                }
+
+                if (foreignCall is null
+                    && (call.Function < 0 || call.Function >= names.Length))
                 {
                     throw new ModuleFormatException("Invalid call target.");
                 }
@@ -12526,7 +12643,10 @@ public static partial class ModuleCompiler
                 {
                     throw new ModuleContractException("Caller-unsafe call authorization requires an unsafe block.");
                 }
-                PutString(writer, names[call.Function]);
+                if (foreignCall is null)
+                {
+                    PutString(writer, names[call.Function]);
+                }
                 writer.Write(call.Arguments.Length);
                 writer.Write(!call.ArgumentParameterIndices.IsDefault);
                 if (!call.ArgumentParameterIndices.IsDefault)
@@ -12540,6 +12660,11 @@ public static partial class ModuleCompiler
                         Step(ref remaining, depth + 1);
                         writer.Write(parameter);
                     }
+                }
+                if (foreignCall is not null)
+                {
+                    PutExpression(writer, foreignCall.Receiver, names,
+                        ref remaining, depth + 1, inUnsafe);
                 }
                 if (!call.ArgumentImplicitReferenceTemporaries.IsDefault
                     && call.ArgumentImplicitReferenceTemporaries.Length
@@ -12704,6 +12829,79 @@ public static partial class ModuleCompiler
                 return new BoundCoalesce(optional, GetExpression(reader, ref remaining, depth + 1),
                     type, span);
             case 5:
+                var targetKind
+                    = reader is ModuleReader {
+                        FormatVersion: ForeignInterfacePrivateVersion,
+                    } ? reader.ReadByte() : (byte)0;
+                if (targetKind == 1)
+                {
+                    if (reader is not ModuleReader foreignCallReader)
+                    {
+                        throw new ModuleFormatException(
+                            "Foreign-interface calls require PF111.");
+                    }
+
+                    var targetIndex = reader.ReadUInt32();
+                    if (targetIndex > int.MaxValue
+                        || targetIndex >= MaximumFunctions)
+                    {
+                        throw new ModuleFormatException(
+                            "PF111 foreign call target index is invalid.");
+                    }
+                    var targetReferenceCount = 0;
+                    foreach (var foreignInterface
+                        in foreignCallReader.ForeignInterfaces)
+                    {
+                        targetReferenceCount += foreignInterface.Members
+                            .Count(member => member.ModuleFunctionIndex
+                                == (int)targetIndex);
+                    }
+                    if (targetReferenceCount != 1)
+                    {
+                        throw new ModuleFormatException(
+                            "PF111 foreign call target is not one directory-owned member.");
+                    }
+
+                    var foreignArgumentCount = Count(reader, 63);
+                    var hasForeignParameterMapping = GetBool(reader);
+                    var foreignParameterIndices
+                        = hasForeignParameterMapping
+                            ? ImmutableArray.CreateBuilder<int>(
+                                foreignArgumentCount)
+                            : null;
+                    if (foreignParameterIndices is not null)
+                    {
+                        for (var index = 0;
+                            index < foreignArgumentCount; index++)
+                        {
+                            Step(ref remaining, depth + 1);
+                            foreignParameterIndices.Add(
+                                reader.ReadInt32());
+                        }
+                    }
+
+                    var receiver = GetExpression(reader, ref remaining,
+                        depth + 1);
+                    var foreignArguments
+                        = ImmutableArray.CreateBuilder<BoundExpression>(
+                            foreignArgumentCount);
+                    for (var index = 0;
+                        index < foreignArgumentCount; index++)
+                    {
+                        foreignArguments.Add(GetExpression(reader,
+                            ref remaining, depth + 1));
+                    }
+                    return new PendingPrivateForeignInterfaceCall(
+                        (int)targetIndex, receiver,
+                        foreignArguments.MoveToImmutable(),
+                        foreignParameterIndices?.MoveToImmutable()
+                            ?? default, type, span);
+                }
+                if (targetKind != 0)
+                {
+                    throw new ModuleFormatException(
+                        "Unknown private call target kind.");
+                }
                 // Names are resolved after the complete module graph is read.
                 var name = GetString(reader);
                 var count = Count(reader, 64);
@@ -13408,13 +13606,15 @@ public static partial class ModuleCompiler
             case 41:
                 if (reader is not ModuleReader {
                     FormatVersion: >= NativeOutputContractVersion,
-                } || type != PrimitiveType.Void)
+                } reservationReader
+                    || type != PrimitiveType.Void)
                 {
                     throw new ModuleFormatException("Native output reservation expression is invalid.");
                 }
                 var reservationVariable = reader.ReadInt32();
                 var reservationPointeeType = GetType(reader);
-                if (reservationVariable < 0)
+                if ((uint)reservationVariable
+                    >= (uint)reservationReader.CurrentVariables.Length)
                 {
                     throw new ModuleFormatException("Native output reservation local is invalid.");
                 }
@@ -13528,6 +13728,20 @@ public static partial class ModuleCompiler
         IReadOnlyList<BoundFunction> functions, ImmutableArray<BoundStruct> structures,
         ModuleUnsafeValueTypeCache valueTypes, bool inUnsafe, bool inUnsafeExpression = false,
         bool allowExpressionScopedMutableFieldLoan = false) => expression switch {
+            BoundCall {
+                ForeignInterfaceCall: BoundForeignInterfaceCall foreignCall,
+            } call => call with {
+                Arguments = [.. call.Arguments.Select(argument =>
+                    ResolveExpression(argument, names, functions,
+                        structures, valueTypes, inUnsafe,
+                        inUnsafeExpression))],
+                ForeignInterfaceCall = foreignCall with {
+                    Receiver = ResolveExpression(foreignCall.Receiver,
+                        names, functions, structures, valueTypes, inUnsafe,
+                        inUnsafeExpression),
+                },
+                IsUnsafeAuthorized = inUnsafe || inUnsafeExpression,
+            },
             SymbolicCall call when names.TryGetValue(call.Name, out var index)
                 && functions[index].RequiresUnsafeCaller && HasMutableStructReceiver(functions[index])
                 && !inUnsafeExpression =>

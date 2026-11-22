@@ -26,7 +26,8 @@ public static partial class ModuleCompiler
             var importCount = 0;
             foreach (var item in module.Functions)
             {
-                if (item.Import)
+                if (item.Import
+                    && item.ForeignInterfaceMember is null)
                 {
                     importCount++;
                 }
@@ -34,7 +35,8 @@ public static partial class ModuleCompiler
             var imports = ImmutableArray.CreateBuilder<string>(importCount);
             foreach (var item in module.Functions)
             {
-                if (item.Import)
+                if (item.Import
+                    && item.ForeignInterfaceMember is null)
                 {
                     imports.Add(item.Name);
                 }
@@ -909,6 +911,11 @@ public static partial class ModuleCompiler
         {
             throw new ModuleContractException("Graph library must export owned functions.");
         }
+        var foreignInterfaceTypeRoots
+            = PrivateForeignInterfaceTypeRoots(program.Interfaces
+                .Where(static definition =>
+                    definition.ForeignNativeInterface is not null)
+                .ToImmutableArray(), program.NativePointerTypes);
         var required = RequiredStructures(program.Functions.Select(static item =>
             item.IsExternal ? Declaration(item) : item), program.Structures,
             classes: program.Classes,
@@ -917,7 +924,8 @@ public static partial class ModuleCompiler
             nativeFixedArrayTypes: program.NativeFixedArrayTypes,
             checkedReferenceTypes: program.CheckedReferenceTypes,
             additionalTypes: PrivateNominalInputRoots(program,
-                identityInputs));
+                    identityInputs)
+                .Concat(foreignInterfaceTypeRoots));
         var structures = SelectStructures(program.Structures, required);
         var checkedReferenceTypes = RemapCheckedReferenceTypeDefinitions(
             program.CheckedReferenceTypes, program.Structures, structures,
@@ -963,7 +971,8 @@ public static partial class ModuleCompiler
             nativeFixedArrayTypes: program.NativeFixedArrayTypes,
             checkedReferenceTypes: program.CheckedReferenceTypes,
             additionalTypes: PrivateNominalInputRoots(program,
-                identityInputs));
+                    identityInputs)
+                .Concat(foreignInterfaceTypeRoots));
         foreach (var structure in structures)
         {
             if (publicTypes.Contains(structure.Name) && structure.CleanupMethod is string cleanup
@@ -1023,8 +1032,21 @@ public static partial class ModuleCompiler
         {
             classes.Add(RemapClass(@class, program.Structures, structures));
         }
-        var module = new Module(true, -1, structures, immutableFunctions) {
+        var foreignInterfaceRecords
+            = CreatePrivateForeignInterfaceModuleRecords(program,
+                identityInputs, selectedFormatVersion, isConsumer: true,
+                firstModuleFunctionIndex: immutableFunctions.Length,
+                remapType: type => RemapType(type, program.Structures,
+                    structures));
+        var moduleFunctions = ImmutableArray.CreateBuilder<ModuleFunction>(
+            immutableFunctions.Length + foreignInterfaceRecords.Functions
+                .Length);
+        moduleFunctions.AddRange(immutableFunctions);
+        moduleFunctions.AddRange(foreignInterfaceRecords.Functions);
+        var module = new Module(true, -1, structures,
+            moduleFunctions.MoveToImmutable()) {
             Classes = classes.MoveToImmutable(),
+            ForeignInterfaces = foreignInterfaceRecords.Interfaces,
             ImportedStructures = importedTypes.ToImmutable(),
             NativeFunctionPointerSignatures = nativeFunctionPointerSignatures,
             NativePointerTypes = nativePointerTypes,
@@ -1038,7 +1060,8 @@ public static partial class ModuleCompiler
         };
         ValidatePrivateNominalImportsAgainstReference(module,
             dependencies);
-        var contract = Write(module, program, selectedFormatVersion);
+        var contract = Write(module, program, selectedFormatVersion,
+            identityInputs);
         ValidateGraphLibrary(contract, exports, dependencies, allowImportedCleanup: true);
         return contract;
     }
@@ -1070,6 +1093,10 @@ public static partial class ModuleCompiler
         var declarations = ImmutableArray.CreateBuilder<BoundFunction>(names.Count);
         foreach (var item in module.Functions)
         {
+            if (item.ForeignInterfaceMember is not null)
+            {
+                continue;
+            }
             if (names.Contains(item.Name))
             {
                 if (item.Import || item.Function is not BoundFunction function
@@ -1090,14 +1117,20 @@ public static partial class ModuleCompiler
         {
             throw new ModuleFormatException("Graph export is missing from its semantic library.");
         }
+        var foreignInterfaces
+            = CreatePrivateForeignInterfaceReferenceDefinitions(module);
         var additionalTypes = PublicStructureNominalRoots(
                 module.NominalTypeOrigins, module.Structures)
             .Concat(PublicEnumNominalRoots(module.NominalTypeOrigins,
                 module.EnumDefinitions))
             .Concat(Private105NativeAddressContractRoots(
-                module.Functions.Where(item => !item.Import
+                module.Functions.Where(item =>
+                    item.ForeignInterfaceMember is null
+                    && !item.Import
                     && names.Contains(item.Name, StringComparer.Ordinal)),
-                module.NativeFunctionPointerSignatures));
+                module.NativeFunctionPointerSignatures))
+            .Concat(PrivateForeignInterfaceTypeRoots(foreignInterfaces,
+                module.NativePointerTypes));
         var classes = ProjectPrivateClassDefinitions(module.Classes,
             module.NominalTypeOrigins, out var classMapping);
         var projection = ProjectNativeContracts(declarations, module.Structures,
@@ -1163,6 +1196,10 @@ public static partial class ModuleCompiler
             module.NominalTypeOrigins, module.Structures, structures,
             classMapping, module.EnumDefinitions,
             projection.EnumDefinitions, projection.EnumMapping);
+        foreignInterfaces = [.. foreignInterfaces.Select(@interface =>
+            RemapPrivateForeignInterfaceDefinition(@interface,
+                module.Structures, structures, projection,
+                classMapping.ToArray()))];
         var privateClassReferences = CreatePrivateClassReferences(
             module.Structures, module.Classes, module.CheckedReferenceTypes,
             module.NativeFunctionPointerSignatures,
@@ -1183,7 +1220,8 @@ public static partial class ModuleCompiler
             projection.FixedArrayTypes,
             projection.CheckedReferenceTypes,
             nominalTypeOrigins, classes, privateClassReferences,
-            enumDefinitions: projection.EnumDefinitions);
+            enumDefinitions: projection.EnumDefinitions,
+            interfaces: foreignInterfaces);
     }
 
     /// <summary>Validates a graph library against current dependency declarations, without emitting code.</summary>
@@ -1219,20 +1257,43 @@ public static partial class ModuleCompiler
             dependencies.CheckedReferenceTypes,
             module.EnumDefinitions,
             dependencies.EnumDefinitions);
+        var dependencyCheckedReferenceMapping
+            = UsesCheckedReferenceBaseline(module.FormatVersion)
+                ? MapCheckedReferenceTypeRows(module, dependencies)
+                    .ToArray()
+                : [];
+        ValidatePrivateForeignInterfacesAgainstReference(module,
+            dependencies, dependencyFunctionPointerMapping,
+            dependencyNativePointerMapping,
+            dependencyCheckedReferenceMapping,
+            CreatePrivateEnumTypeMapping(dependencies.EnumDefinitions,
+                module.EnumDefinitions));
         if (ValidateGraphImports(module, dependencies, hasPrivateManagedState,
             dependencyFunctionPointerMapping, out var dependencyFunctions))
         {
             throw new ModuleContractException("Managed graph import crosses a non-Copy boundary.");
         }
-        var indexes = new Dictionary<string, int>(module.Functions.Length, StringComparer.Ordinal);
-        for (var index = 0; index < module.Functions.Length; index++)
-        {
-            indexes.Add(module.Functions[index].Name, index);
-        }
-        var functions = ImmutableArray.CreateBuilder<BoundFunction>(module.Functions.Length);
+        var ordinaryFunctionCount = module.Functions.Count(
+            static item => item.ForeignInterfaceMember is null);
+        var indexes = new Dictionary<string, int>(ordinaryFunctionCount,
+            StringComparer.Ordinal);
         for (var index = 0; index < module.Functions.Length; index++)
         {
             var item = module.Functions[index];
+            if (item.ForeignInterfaceMember is null)
+            {
+                indexes.Add(item.Name, index);
+            }
+        }
+        var functions = ImmutableArray.CreateBuilder<BoundFunction>(
+            ordinaryFunctionCount);
+        for (var index = 0; index < module.Functions.Length; index++)
+        {
+            var item = module.Functions[index];
+            if (item.ForeignInterfaceMember is not null)
+            {
+                continue;
+            }
             functions.Add(item.Import
                 ? RemapNativePointerTypes(
                     RemapNativeFunctionPointerTypes(
@@ -1250,6 +1311,7 @@ public static partial class ModuleCompiler
             NativeFixedArrayTypes = module.NativeFixedArrayTypes,
             CheckedReferenceTypes = module.CheckedReferenceTypes,
             EnumDefinitions = module.EnumDefinitions,
+            Interfaces = ReconstructPrivateForeignInterfaces(module),
             PrivateNominalTypeOrigins = module.NominalTypeOrigins,
             PrivateClassReferences = CreatePrivateClassReferences(
                 module.Structures, module.Classes,
@@ -1351,6 +1413,10 @@ public static partial class ModuleCompiler
         var hasUnsupportedManagedImport = false;
         foreach (var item in module.Functions)
         {
+            if (item.ForeignInterfaceMember is not null)
+            {
+                continue;
+            }
             if (!item.Import)
             {
                 continue;

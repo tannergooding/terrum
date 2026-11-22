@@ -3838,6 +3838,11 @@ internal sealed partial class PeCompiler
                     VisitExpression(unsafeExpression.Expression);
                     break;
                 case BoundCall call:
+                    if (call.ForeignInterfaceCall
+                        is BoundForeignInterfaceCall foreignCall)
+                    {
+                        VisitExpression(foreignCall.Receiver);
+                    }
                     foreach (var argument in call.Arguments)
                     {
                         VisitExpression(argument);
