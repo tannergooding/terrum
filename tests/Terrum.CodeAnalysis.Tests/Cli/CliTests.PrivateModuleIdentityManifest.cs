@@ -608,12 +608,34 @@ internal sealed partial class CliTests
             ]).ConfigureAwait(false);
             Assert.That(exit, Is.Zero, output + error);
             Assert.That(error, Is.Empty);
+            var artifactBytes = await File.ReadAllBytesAsync(artifact)
+                .ConfigureAwait(false);
             var reference = ModuleCompiler.CreateReferenceWithSchema(
-                await File.ReadAllBytesAsync(artifact).ConfigureAwait(false),
-                privateSchema);
+                artifactBytes, privateSchema);
             Assert.That(reference.Structures.Single(static structure =>
                 structure.Name == "Payload").DeclaredCopyEvidence,
                 Is.True);
+            var malformed = (byte[])artifactBytes.Clone();
+            var lookupName = Encoding.UTF8.GetBytes("IProbe");
+            var lookupOffset = -1;
+            for (var index = 0;
+                index <= malformed.Length - lookupName.Length;
+                index++)
+            {
+                if (!malformed.AsSpan(index, lookupName.Length)
+                    .SequenceEqual(lookupName))
+                {
+                    continue;
+                }
+                Assert.That(lookupOffset, Is.EqualTo(-1),
+                    "The private lookup name should have one wire occurrence.");
+                lookupOffset = index;
+            }
+            Assert.That(lookupOffset, Is.GreaterThanOrEqualTo(0));
+            malformed[lookupOffset] = 0;
+            _ = Assert.Throws<ModuleFormatException>(() =>
+                ModuleCompiler.CreateReferenceWithSchema(malformed,
+                    privateSchema));
         }
         finally
         {
