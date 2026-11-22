@@ -278,6 +278,52 @@ internal sealed class TrRmExecutableCompilerTests
         Assert.That(reemittedTables.Contracts.HasNativeAbi(
             reemittedAnchorMethod), Is.False);
 
+        var precedingProgram = Compile(
+            "internal int32 Precede(fnptr<int64, int64> callback) { return 1; }",
+            library: true);
+        var loadedAccept = loaded.Functions.Single();
+        var shiftedAcceptVariables = loadedAccept.Variables.ToBuilder();
+        shiftedAcceptVariables[0] = shiftedAcceptVariables[0] with {
+            Type = NativeFunctionPointerTypes.Type(1),
+        };
+        var shiftedProgram = loaded with {
+            Functions = [.. precedingProgram.Functions,
+                loadedAccept with {
+                    Variables = shiftedAcceptVariables.ToImmutable(),
+                }],
+            NativeFunctionPointerSignatures = [
+                .. precedingProgram.NativeFunctionPointerSignatures,
+                .. loaded.NativeFunctionPointerSignatures,
+            ],
+        };
+        var shiftedArtifact = TrRmExecutableCompiler.EmitStandard(
+            shiftedProgram, "terrum-fnptr-shifted", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var shiftedTables
+            = TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
+                TrRmExecutableCompiler.CreateForeignInvocationIndex(
+                    shiftedArtifact, schemaIdentity));
+        var shiftedAcceptMethod = Enumerable.Range(1,
+                shiftedTables.Methods.Count)
+            .Single(row => shiftedTables.Methods.GetName(row) == "Accept");
+        var shiftedAcceptSignature
+            = shiftedTables.Methods.GetSignature(shiftedAcceptMethod);
+        var (shiftedParameterFirst, shiftedParameterCount)
+            = shiftedTables.Signatures.GetParamRange(shiftedAcceptSignature);
+        Assert.That(shiftedParameterCount, Is.EqualTo(1));
+        var shiftedAcceptTypeSpecRef
+            = shiftedTables.Parameters.GetTypeSpec(shiftedParameterFirst);
+        Assert.That(shiftedAcceptTypeSpecRef, Is.Not.EqualTo(typeSpecRef));
+        Assert.That(shiftedTables.TypeSpecs.TryGetNativeFunctionPointerAnchor(
+            checked((int)shiftedAcceptTypeSpecRef),
+            out var shiftedConvention, out var shiftedAnchorMethod), Is.True);
+        Assert.That(shiftedConvention, Is.EqualTo(convention));
+        Assert.That(shiftedAnchorMethod, Is.Not.EqualTo(anchorMethod));
+        Assert.That(shiftedTables.Methods.GetBodyRow(shiftedAnchorMethod),
+            Is.Zero);
+        Assert.That(shiftedTables.Contracts.HasNativeAbi(
+            shiftedAnchorMethod), Is.False);
+
         _ = Assert.Throws<NotSupportedException>(() =>
             TrRmExecutableCompiler.EmitStandard(program, "terrum-fnptr-old",
                 "trrm/1-draft-layout-queries-1",
