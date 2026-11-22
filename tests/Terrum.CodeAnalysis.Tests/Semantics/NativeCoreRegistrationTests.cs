@@ -7088,16 +7088,142 @@ internal sealed class NativeCoreRegistrationTests
                 new TrRmStandardArtifactInput(schemaIdentity,
                     malformedAnchorArtifact), "provider.module", []));
 
-        var caller = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        const string callerSource = """
             using Terrum.Interop;
             int32 Invoke(ptr<void> receiver,
                 [NativeCallConv(NativeCallingConvention.Cdecl)]
                 fnptr<int32, int32> callback) {
                 unsafe { return IProbe.Apply(receiver, callback); }
             }
-            """), reference);
+            """;
+        var caller = Compilation.CreateLibrary(SyntaxTree.Parse(
+            callerSource), reference);
         Assert.That(caller.HasErrors, Is.False,
             string.Join(Environment.NewLine, caller.Diagnostics));
+        var shiftedProviderCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Terrum.Interop;
+                [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+                [ForeignNativeInterface(VTableByteOffset: uint32(0))]
+                public interface IExtra {
+                    public unsafe int32 ApplyWide(
+                        [NativeCallConv(NativeCallingConvention.Cdecl)]
+                        fnptr<float64, float64> callback);
+                }
+                [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+                [ForeignNativeInterface(VTableByteOffset: uint32(0))]
+                public interface IProbe {
+                    public unsafe int32 Apply(
+                        [NativeCallConv(NativeCallingConvention.Cdecl)]
+                        fnptr<int32, int32> callback);
+                }
+                """), new CompilationOptions {
+                NativeCoreRegistration = CreateRegistration(
+                    includeForeignNativeInterface: true),
+            });
+        Assert.That(shiftedProviderCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                shiftedProviderCompilation.Diagnostics));
+        var shiftedProviderProgram = shiftedProviderCompilation.Program
+            ?? throw new AssertionException(
+                "Expected a provider with a leading FNI owner.");
+        var shiftedProviderExports
+            = shiftedProviderProgram.Interfaces.Select(
+                shiftedDefinition =>
+                    new TrRmSourceTypeExport("", shiftedDefinition.QualifiedName,
+                        $"provider/{shiftedDefinition.QualifiedName}") {
+                        GenericArity = 0,
+                        InterfaceMethodExports = [
+                            .. shiftedDefinition.Members.Select(
+                                shiftedMember =>
+                                    new TrRmSourceInterfaceMethodExport(
+                                        shiftedMember.SourceInputOrdinal,
+                                        shiftedMember.SourceDeclarationSpan,
+                                        $"provider/{shiftedDefinition.QualifiedName}."
+                                            + shiftedMember.Name)),
+                        ],
+                    }).ToArray();
+        var shiftedProviderArtifact
+            = TrRmExecutableCompiler.EmitStandard(
+                shiftedProviderProgram, "provider.module", schemaIdentity, 1,
+                shiftedProviderExports);
+        var shiftedProviderIndex = new TrRmArtifactIndex(
+            shiftedProviderArtifact, schema);
+        var shiftedProviderTables = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(shiftedProviderIndex);
+        var shiftedAnchorTypeSpecRows = new List<int>();
+        for (var typeSpecRow = 1;
+            typeSpecRow <= shiftedProviderTables.TypeSpecs.Count;
+            typeSpecRow++)
+        {
+            if (shiftedProviderTables.NativeFunctionPointerAnchors
+                .HasAnchorForTypeSpec(typeSpecRow))
+            {
+                shiftedAnchorTypeSpecRows.Add(typeSpecRow);
+            }
+        }
+        Assert.That(shiftedAnchorTypeSpecRows, Has.Count.EqualTo(2));
+        var shiftedApplyRow = Enumerable.Range(1,
+                shiftedProviderTables.Methods.Count)
+            .Single(row =>
+                shiftedProviderTables.Methods.GetName(row) == "Apply");
+        var baseApplyRow = Enumerable.Range(1, tables.Methods.Count)
+            .Single(row => tables.Methods.GetName(row) == "Apply");
+        Assert.That(shiftedApplyRow, Is.GreaterThan(baseApplyRow));
+
+        var callerArtifact = TrRmExecutableCompiler.EmitStandard(
+            caller.Program
+                ?? throw new AssertionException(
+                    "Expected a bound FNI callback caller."),
+            "consumer.module", schemaIdentity, 1, []);
+        var shiftedProviderInput = new TrRmStandardArtifactInput(
+            schemaIdentity, shiftedProviderArtifact);
+        var shiftedReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, callerArtifact),
+            "consumer.module", [shiftedProviderInput]);
+        var shiftedCaller = Compilation.CreateLibrary(
+            SyntaxTree.Parse(callerSource), shiftedReference);
+        Assert.That(shiftedCaller.HasErrors, Is.False,
+            string.Join(Environment.NewLine, shiftedCaller.Diagnostics));
+        AssertCallbackSignature(shiftedCaller.Program
+            ?? throw new AssertionException(
+                "Expected a caller bound to the shifted FNI provider."));
+        var reemissionCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(""), shiftedReference);
+        Assert.That(reemissionCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                reemissionCompilation.Diagnostics));
+        var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(
+            reemissionCompilation.Program
+                ?? throw new AssertionException(
+                    "Expected a source-free FNI callback forwarder."),
+            "forwarder.module", schemaIdentity, 1, []);
+        var reloaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                reemittedArtifact), "forwarder.module",
+            [shiftedProviderInput]);
+        AssertCallbackSignature(reloaded);
+
+        static void AssertCallbackSignature(BoundProgram program)
+        {
+            var interfaceDefinition = program.Interfaces.Single(
+                definition => definition.QualifiedName == "IProbe");
+            var callbackType = interfaceDefinition.Members.Single(
+                    member => member.Name == "Apply")
+                .Parameters.Single().Type.PrimitiveType;
+            Assert.That(NativeFunctionPointerTypes.IsType(callbackType),
+                Is.True);
+            var signature = program.NativeFunctionPointerSignatures.Single(
+                candidate => candidate.ReturnType == PrimitiveType.Int32
+                    && candidate.ParameterTypes
+                        .SequenceEqual(new[] { PrimitiveType.Int32 }));
+            Assert.That(signature.CallingConvention,
+                Is.EqualTo(NativeCallingConvention.Cdecl));
+            Assert.That(signature.ReturnType,
+                Is.EqualTo(PrimitiveType.Int32));
+            Assert.That(signature.ParameterTypes,
+                Is.EqualTo(new[] { PrimitiveType.Int32 }));
+        }
     }
 
     [Test]
