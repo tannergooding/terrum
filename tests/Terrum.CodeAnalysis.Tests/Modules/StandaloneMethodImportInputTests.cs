@@ -889,6 +889,20 @@ internal sealed class StandaloneMethodImportInputTests
                     CreateWitnessProjectionArtifact(
                         "provider/witness-duplicate-member",
                         duplicateProjectionMember: true)),
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateWitnessProjectionArtifact(
+                        "provider/witness-inherited",
+                        includeInheritedInterface: true)),
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateWitnessProjectionArtifact(
+                        "provider/witness-inherited-missing-view",
+                        includeInheritedInterface: true,
+                        omitInheritedView: true)),
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateWitnessProjectionArtifact(
+                        "provider/witness-inherited-cycle",
+                        includeInheritedInterface: true,
+                        invalidInterfaceCycle: true)),
             ], []);
         var witnessProjectionSource = SourceText.From(
             "bool Main() { return false; }");
@@ -918,6 +932,15 @@ internal sealed class StandaloneMethodImportInputTests
                 }
                 if (TryValidateStandaloneArtifactDirectory(6)) {
                     return 57;
+                }
+                if (!TryValidateStandaloneArtifactDirectory(7)) {
+                    return 58;
+                }
+                if (TryValidateStandaloneArtifactDirectory(8)) {
+                    return 59;
+                }
+                if (TryValidateStandaloneArtifactDirectory(9)) {
+                    return 60;
                 }
                 return 0;
             }
@@ -3556,8 +3579,17 @@ internal sealed class StandaloneMethodImportInputTests
         bool invalidModuleLevelOwner = false,
         bool invalidConstructedTypeArgument = false,
         bool omitProjectionMember = false,
-        bool duplicateProjectionMember = false)
+        bool duplicateProjectionMember = false,
+        bool includeInheritedInterface = false,
+        bool omitInheritedView = false,
+        bool invalidInterfaceCycle = false)
     {
+        if (includeInheritedInterface)
+        {
+            return CreateInheritedWitnessProjectionArtifact(
+                moduleIdentity, omitInheritedView, invalidInterfaceCycle);
+        }
+
         var stringSection = TrRmStringTableWriter.EncodeNames([
             ("", 0),
             (moduleIdentity, 0),
@@ -3696,6 +3728,137 @@ internal sealed class StandaloneMethodImportInputTests
                     .GeneralPredicateGraphsWitnessProjectionsSchemaIdentity);
     }
 
+    private static byte[] CreateInheritedWitnessProjectionArtifact(
+        string moduleIdentity, bool omitInheritedView,
+        bool invalidInterfaceCycle)
+    {
+        var stringSection = TrRmStringTableWriter.EncodeNames([
+            ("", 0),
+            (moduleIdentity, 0),
+            ("Implementer", 0),
+            ("IDerived", 0),
+            ("Requirement", 0),
+            ("Implementation", 0),
+            ("Requirement2", 0),
+            ("Implementation2", 0),
+            ("IBase", 0),
+            ("BaseRequirement", 0),
+            ("BaseImplementation", 0),
+        ]);
+        var strings = new TrRmStringTableReader(stringSection, 11);
+        var moduleSection = TrRmModuleTableWriter.Encode([
+            new TrRmModuleRow(2, 1, 0, 0, 0, 1, 1, 0, 1, 2),
+        ], strings, 0, 3, 6, 0, 2);
+        var modules = new TrRmModuleTableReader(moduleSection, 1, strings,
+            0, 3, 6, 0, 2);
+        var featureSection = new byte[16];
+        BinaryPrimitives.WriteUInt32LittleEndian(featureSection, 10);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            featureSection.AsSpan(4), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            featureSection.AsSpan(8), 17);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            featureSection.AsSpan(12), 1);
+        var typeSpecRows = new ReadOnlyMemory<byte>[] {
+            TrRmTypeSpecTableWriter.Reference(0x02, 1),
+            TrRmTypeSpecTableWriter.Reference(0x02, 2),
+            TrRmTypeSpecTableWriter.Reference(0x02, 3),
+        };
+        var typeSpecSection = TrRmTypeSpecTableWriter.Encode(
+            typeSpecRows, 3, 0, 0);
+        var typeSpecs = new TrRmTypeSpecTableReader(typeSpecSection,
+            3, 3, 0, 0);
+        var typeDefRows = new[] {
+            new TrRmTypeDefRow(1, 3, 6, 0, 0, 0, 0, 1, 1, 0, 0),
+            new TrRmTypeDefRow(1, 4, 14, 0, 0, 0, 0, 2, 1, 0, 0),
+            new TrRmTypeDefRow(1, 9, 14, 0, 0, 0, 0, 3, 1, 0, 0),
+        };
+        var typeDefSection = TrRmTypeDefTableWriter.Encode(typeDefRows,
+            strings, modules, 0, 0, 3, 0);
+        var typeDefs = new TrRmTypeDefTableReader(typeDefSection, 3,
+            strings, modules, 0, 0, 3, 0);
+        var targetProfiles = new TrRmTargetProfileTableReader([], 0);
+        var layoutSection = TrRmLayoutTableWriter.Encode([
+            new TrRmLayoutRow(1, 0, 0, 0, 0, 0, 0, 0),
+            new TrRmLayoutRow(2, 0, 0, 0, 0, 0, 0, 0),
+            new TrRmLayoutRow(3, 0, 0, 0, 0, 0, 0, 0),
+        ], typeDefs, targetProfiles, 0);
+        var methodSigSection = TrRmMethodSigTableWriter.Encode([
+            new TrRmMethodSigRow(0xF200_0001, 2, 0, 0, 0, 0),
+            new TrRmMethodSigRow(0xF200_0001, 1, 0, 0, 0, 0),
+            new TrRmMethodSigRow(0xF200_0001, 2, 0, 0, 0, 0),
+            new TrRmMethodSigRow(0xF200_0001, 1, 0, 0, 0, 0),
+            new TrRmMethodSigRow(0xF200_0001, 3, 0, 0, 0, 0),
+            new TrRmMethodSigRow(0xF200_0001, 1, 0, 0, 0, 0),
+        ], typeSpecs, 0, 0);
+        var signatures = new TrRmMethodSigTableReader(
+            methodSigSection, 6, typeSpecs, 0, 0);
+        var methodDefSection = TrRmMethodDefTableWriter.Encode([
+            new TrRmMethodDefRow(2, 5, 1, 2, 0, 0, 0),
+            new TrRmMethodDefRow(1, 6, 2, 2, 0, 0, 0),
+            new TrRmMethodDefRow(2, 7, 3, 2, 0, 0, 0),
+            new TrRmMethodDefRow(1, 8, 4, 2, 0, 0, 0),
+            new TrRmMethodDefRow(3, 10, 5, 2, 0, 0, 0),
+            new TrRmMethodDefRow(1, 11, 6, 2, 0, 0, 0),
+        ], strings, modules, typeDefs, signatures, 0, 0);
+        var methods = new TrRmMethodDefTableReader(methodDefSection, 6,
+            strings, modules, typeDefs, signatures, 0, 0);
+        var genericParams = new TrRmGenericParamTableReader([], 0,
+            strings, typeDefs, methods, signatures, typeSpecs, 0);
+        var interfaceDefSection = TrRmInterfaceDefTableWriter.Encode([
+            new TrRmInterfaceDefRow(2, 0, 1, 1, 1, 2,
+                0, 0, 0, 0, 0, 0),
+            new TrRmInterfaceDefRow(3, 0, 0, 0, 3, 1,
+                0, 0, 0, 0, 0, 0),
+        ], typeDefs, genericParams, 1, 3, 0, 0, 0);
+        var interfaces = new TrRmInterfaceDefTableReader(
+            interfaceDefSection, 2, typeDefs, genericParams, 1, 3,
+            0, 0, 0);
+        var interfaceBaseSection = TrRmInterfaceBaseTableWriter.Encode([
+            new TrRmInterfaceBaseRow(1, 0,
+                invalidInterfaceCycle ? 2u : 3u),
+        ], typeSpecs, interfaces);
+        var interfaceMethodSection = TrRmInterfaceMethodTableWriter.Encode([
+            new TrRmInterfaceMethodRow(1, 0, 1),
+            new TrRmInterfaceMethodRow(1, 1, 3),
+            new TrRmInterfaceMethodRow(2, 0, 5),
+        ], interfaces, methods, signatures);
+        var witnessSection = TrRmInterfaceWitnessTableWriter.Encode([
+            new TrRmInterfaceWitnessRow(1, 2, 1, 3, 0, 0, 0, 0),
+        ], typeSpecs, 3, 0, 0);
+        var witnesses = new TrRmInterfaceWitnessTableReader(
+            witnessSection, 1, typeSpecs, 3, 0, 0);
+        var witnessMemberSection = TrRmWitnessMemberTableWriter.Encode([
+            new TrRmWitnessMemberRow(1, 2, 1, 1, 2),
+            new TrRmWitnessMemberRow(1, 2, 3, 1, 4),
+            new TrRmWitnessMemberRow(1, 3, 5, 1, 6),
+        ], witnesses, typeSpecs, methods);
+        var projectionRow = CreateInheritedStandaloneWitnessProjectionRow(
+            omitInheritedView);
+        var projectionSection = TrRmVariableTableWriter.EncodeBlobs([
+            new ReadOnlyMemory<byte>(projectionRow),
+        ]);
+        return TrRmArtifactWriter.Encode([
+            new TrRmSection(0x0001, 0, 1, moduleSection),
+            new TrRmSection(0x0002, 0, 11, stringSection),
+            new TrRmSection(0x0003, 0, 3, typeSpecSection),
+            new TrRmSection(0x0004, 0, 2, featureSection),
+            new TrRmSection(0x0013, 0, 3, typeDefSection),
+            new TrRmSection(0x0015, 0, 3, layoutSection),
+            new TrRmSection(0x0016, 0, 6, methodDefSection),
+            new TrRmSection(0x0017, 0, 6, methodSigSection),
+            new TrRmSection(0x0023, 0, 1, interfaceBaseSection),
+            new TrRmSection(0x0024, 0, 3, interfaceMethodSection),
+            new TrRmSection(0x0025, 0, 2, interfaceDefSection),
+            new TrRmSection(0x0028, 0, 1, witnessSection),
+            new TrRmSection(0x0029, 0, 3, witnessMemberSection),
+            new TrRmSection(0x0068, 0, 1, projectionSection),
+        ], TrRmArtifactSchema.GeneralPredicateGraphsDraft,
+            standardSchemaIdentity:
+                StandaloneMethodImportOutputFramer
+                    .GeneralPredicateGraphsWitnessProjectionsSchemaIdentity);
+    }
+
     private static byte[] CreateStandaloneWitnessProjectionRow(
         bool omitProjectionMember, bool duplicateProjectionMember)
     {
@@ -3723,6 +3886,41 @@ internal sealed class StandaloneMethodImportInputTests
                 row.AsSpan(52), duplicateProjectionMember ? 1u : 2u);
             BinaryPrimitives.WriteUInt32LittleEndian(row.AsSpan(60), 1);
             row[64] = 1;
+        }
+        return row;
+    }
+
+    private static byte[] CreateInheritedStandaloneWitnessProjectionRow(
+        bool omitInheritedView)
+    {
+        var viewCount = omitInheritedView ? 1 : 2;
+        var memberCount = omitInheritedView ? 2 : 3;
+        var row = new byte[28 + (viewCount * 8) + (memberCount * 16)];
+        BinaryPrimitives.WriteUInt32LittleEndian(row, 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(row.AsSpan(4), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(row.AsSpan(8), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(row.AsSpan(12), 2);
+        BinaryPrimitives.WriteUInt32LittleEndian(row.AsSpan(16), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(row.AsSpan(20), (uint)viewCount);
+        BinaryPrimitives.WriteUInt32LittleEndian(row.AsSpan(24), (uint)memberCount);
+        BinaryPrimitives.WriteUInt32LittleEndian(row.AsSpan(28), 2);
+        BinaryPrimitives.WriteUInt32LittleEndian(row.AsSpan(32), 2);
+        if (viewCount == 2)
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(row.AsSpan(36), 3);
+            BinaryPrimitives.WriteUInt32LittleEndian(row.AsSpan(40), 3);
+        }
+
+        var memberStart = 28 + (viewCount * 8);
+        for (var member = 0; member < memberCount; member++)
+        {
+            var offset = memberStart + (member * 16);
+            BinaryPrimitives.WriteUInt32LittleEndian(row.AsSpan(offset),
+                (uint)(member + 1));
+            BinaryPrimitives.WriteUInt32LittleEndian(row.AsSpan(offset + 4),
+                member == 2 ? 1u : 0u);
+            BinaryPrimitives.WriteUInt32LittleEndian(row.AsSpan(offset + 8), 1);
+            row[offset + 12] = 1;
         }
         return row;
     }

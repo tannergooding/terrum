@@ -165,6 +165,8 @@ internal readonly record struct CapturedStandaloneMethodImportInput(
         var parameterTypeCapacity = checked((artifactByteLength / 16) + 1);
         var projectionInterfaceCapacity = checked((artifactByteLength / 44) + 1);
         var projectionMemberSeenCapacity = checked((artifactByteLength / 16) + 1);
+        var projectionInterfaceStackCapacity
+            = checked((artifactByteLength / 24) + 2);
         var contractFactCapacity = checked((artifactByteLength / 20) + 1);
         var contractFactStorage = checked(contractFactCapacity * 7);
         var importCapacity = checked((artifactByteLength / 12) + 1);
@@ -253,6 +255,12 @@ internal readonly record struct CapturedStandaloneMethodImportInput(
             new HostBuffer("StandaloneProjectionMemberSeen",
                 PrimitiveType.Int32,
                 [.. new int[projectionMemberSeenCapacity]], true),
+            new HostBuffer("StandaloneProjectionViewSeen",
+                PrimitiveType.Int32,
+                [.. new int[projectionMemberSeenCapacity]], true),
+            new HostBuffer("StandaloneProjectionInterfaceStack",
+                PrimitiveType.Int32,
+                [.. new int[projectionInterfaceStackCapacity]], true),
             new HostBuffer("StandaloneTypeFactCount",
                 PrimitiveType.Int32, [0], true),
             new HostBuffer("StandaloneTypeFacts", PrimitiveType.Int32,
