@@ -239,6 +239,41 @@ internal sealed partial class NativeManagedClassModuleTests
                 NativeRuntimePolicy.CheckedExceptions, agreement));
     }
 
+    [Test]
+    public void NormalBackingCleanupRejectsFallibleTransitiveClassResidence()
+    {
+        const string agreement
+            = CompilationOptions.WindowsX64NormalBackingAgreement;
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            mut class CleanupOwner {
+                public mut int32 Value;
+                [NoThrow] public CleanupOwner() { Value = 1; }
+                [NoThrow] [Cleanup] private void Close() {}
+            }
+            mut class Wrapper {
+                public mut CleanupOwner? Child;
+                [NoThrow] public Wrapper() { Child = null; }
+            }
+            int32 FallibleWrapper(Wrapper wrapper) {
+                require false;
+                return 0;
+            }
+            public int32 Main() { return 42; }
+            """), new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.CheckedExceptions,
+            NativeLoweringAgreement = agreement,
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        Assert.That(program.Functions.Single(function =>
+            StringComparer.Ordinal.Equals(function.Name,
+                "FallibleWrapper")).NoFailureProof, Is.False);
+        Assert.Throws<NotSupportedException>(() =>
+            NativeEmitter.EmitCode(program,
+                NativeRuntimePolicy.CheckedExceptions, agreement));
+    }
+
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task NormalBackingClassHandlesRetainAndRetireWithinSelectedRuntimeAsync(
