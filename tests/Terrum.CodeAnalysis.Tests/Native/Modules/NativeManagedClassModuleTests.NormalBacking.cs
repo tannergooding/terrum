@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Threading.Tasks;
 using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
@@ -71,6 +72,47 @@ internal sealed partial class NativeManagedClassModuleTests
         Assert.Throws<NotSupportedException>(() =>
             NativeEmitter.EmitCode(compilation.Program!,
                 NativeRuntimePolicy.CheckedExceptions, agreement));
+    }
+
+    [Test]
+    public async Task NormalBackingClassCleanupRunsUnderCheckedExceptionsWithNoFailureProofAsync()
+    {
+        const string agreement
+            = CompilationOptions.WindowsX64NormalBackingAgreement;
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            mut class Owner {
+                public mut write ref<int32> Item;
+                [NoThrow] public Owner(write ref<int32> item) {
+                    Item = item;
+                }
+                [NoThrow] [Cleanup] private void Close() {
+                    *Item = int32(43);
+                }
+            }
+            [NoThrow] public int32 Main() {
+                mut int32 value = int32(42);
+                {
+                    if (Owner.TryCreate(ref value, out var owner)) {
+                        var duplicate = owner;
+                    }
+                }
+                return value;
+            }
+            """), new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.CheckedExceptions,
+            NativeLoweringAgreement = agreement,
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        Assert.That(program.Functions.All(
+            static function => function.NoFailureProof), Is.True);
+        Assert.That(NativeJit.ExecuteWithData(program,
+            NativeRuntimePolicy.CheckedExceptions,
+            nativeLoweringAgreement: agreement).ExitCode, Is.EqualTo(43));
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(program,
+                NativeRuntimePolicy.CheckedExceptions, agreement))
+            .ConfigureAwait(true), Is.EqualTo(43));
     }
 
     [TestCase(NativeRuntimePolicy.FailFast)]

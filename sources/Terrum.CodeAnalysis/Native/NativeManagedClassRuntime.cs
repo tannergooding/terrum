@@ -38,6 +38,11 @@ internal sealed partial class PeCompiler
     private static int NormalBackingConstructionMetadataOffset(int payloadSize) =>
         (NormalBackingControlSize + payloadSize + 7) & ~7;
 
+    internal static bool AllowsCheckedNormalBackingCleanup(
+        BoundProgram program) =>
+        program.RuntimePolicy == BoundRuntimePolicy.CheckedExceptions
+        && program.Functions.All(static function => function.NoFailureProof);
+
     internal static void ValidateNormalBackingProgram(BoundProgram program)
     {
         if (program.NativeLoweringAgreement
@@ -92,12 +97,6 @@ internal sealed partial class PeCompiler
                 continue;
             }
 
-            if (program.RuntimePolicy != BoundRuntimePolicy.FailFast)
-            {
-                throw new NotSupportedException(
-                    $"The selected normal-backing runtime does not admit checked-exception retirement for Cleanup-bearing class '{@class.Name}'.");
-            }
-
             var cleanupFunctionIndex = -1;
             for (var functionIndex = 0;
                 functionIndex < program.Functions.Length;
@@ -137,6 +136,14 @@ internal sealed partial class PeCompiler
                 throw new NotSupportedException(
                     $"The selected normal-backing runtime does not support the Cleanup selection for class '{@class.Name}'.");
             }
+        }
+
+        if (classCleanupFunctionIndexes.Count != 0
+            && program.RuntimePolicy == BoundRuntimePolicy.CheckedExceptions
+            && !AllowsCheckedNormalBackingCleanup(program))
+        {
+            throw new NotSupportedException(
+                "The selected normal-backing runtime admits checked-exception Cleanup retirement only when every function has a verified no-failure proof.");
         }
 
         for (var functionIndex = 0; functionIndex < program.Functions.Length; functionIndex++)

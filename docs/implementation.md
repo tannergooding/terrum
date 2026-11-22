@@ -587,9 +587,11 @@ call-result reads.
 Under normal-backing FailFast, final class retirement now invokes the selected
 Cleanup body before reverse-declaration field retirement; a JIT/PE regression
 checks one Cleanup effect across an aliasable handle copy but remains
-unverified under the active hold. Checked
-exception retirement admission, incomplete-retirement records and
-Cleanup-bearing construction rollback remain gated.
+unverified under the active hold. CheckedExceptions also admits a restricted
+closure only when every function has a verified NoFailureProof, making
+generated checked-unwind cleanup unreachable. General cause-aware checked
+retirement, incomplete-retirement records and Cleanup-bearing construction
+rollback remain gated.
 The [normal-backing inventory](implementation/conformance-gaps.md#normal-backing-agreement)
 retains the detailed runtime, provenance and qualification boundaries.
 Foreign/native-callable boundaries, reference output parameters, by-value
