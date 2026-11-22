@@ -1391,8 +1391,9 @@ pairings for AC1, PS1 and A2, plus provider v4 for AC1 with an AC1/PS1 FNI
 Module root and AC1/PS1/A2 dependencies, or an A2 aggregate-type root. It
 validates captured source paths, UTF-16 snapshots and FNI member spans before
 binding, dispatches to the existing reference factories, preserves selected
-PS1/A2 aggregate origins during source emission, and publishes A2 aggregate
-TypeDefs with Features 2/1 and 13/1. Public regressions cover AC1 source FNI
+PS1/A2 aggregate origins and their exact selected TypeDef ExportKeys during
+source emission, and publishes A2 aggregate TypeDefs with Features 2/1 and
+13/1. Public regressions cover AC1 source FNI
 publication with an A2 type root, malformed source spans and provider
 pairings, output-preservation failures, and A2's type-only export map. These
 changes and regressions remain unverified under the hold; formal proposal

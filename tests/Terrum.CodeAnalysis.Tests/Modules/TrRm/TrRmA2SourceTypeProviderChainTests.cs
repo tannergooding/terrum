@@ -615,6 +615,74 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
     }
 
     [Test]
+    public void StandardFniSourceWriterPreservesSelectedA2TypeExportKey()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-native-interface-parameter-surface-1";
+        const string moduleIdentity = "fni.a2.import";
+        var leafArtifact = CreateLeafProviderArtifact();
+        var leafReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(SchemaIdentity, leafArtifact),
+            "LeafProvider", [], ["ProviderLeafKey"]);
+        var registration = NativeCoreRegistrationTests
+            .CreateRegistration(includeForeignNativeInterface: true);
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            using Terrum.Interop;
+            [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+            [ForeignNativeInterface(VTableByteOffset: uint32(0))]
+            public interface IProbe {
+                public unsafe int32 Read(ptr<Leaf> leaf);
+            }
+            """), leafReference, new CompilationOptions {
+                NativeCoreRegistration = registration,
+                LayoutCoreRegistration =
+                    NativeCoreRegistrationTests.CreateLayoutRegistration(
+                        registration),
+            });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program
+            ?? throw new AssertionException("Expected a bound FNI source.");
+        var member = program.Interfaces.Single().Members.Single();
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            moduleIdentity, schemaIdentity, 1, [
+                new TrRmSourceTypeExport("", "IProbe",
+                    "consumer/IProbe") {
+                    GenericArity = 0,
+                    InterfaceMethodExports = [
+                        new TrRmSourceInterfaceMethodExport(
+                            member.SourceInputOrdinal,
+                            member.SourceDeclarationSpan,
+                            "consumer/IProbe.Read"),
+                    ],
+                },
+            ]);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(new TrRmArtifactIndex(artifact,
+                TrRmArtifactSchema
+                    .ForeignNativeInterfaceParameterSurfaceDraft));
+        var importRows = Enumerable.Range(1, tables.Imports.Count)
+            .Where(importRow => (tables.Imports
+                .GetExpectedDefinitionForImportRow(importRow) >> 24)
+                    == 0x13)
+            .ToArray();
+        Assert.That(importRows, Has.Length.EqualTo(1));
+        var binding = tables.Imports.GetBindingForImportRow(importRows[0]);
+        Assert.That(binding.ProducerIdentity, Is.EqualTo("LeafProvider"));
+        Assert.That(binding.ExportKey, Is.EqualTo("ProviderLeafKey"));
+
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            moduleIdentity, [
+                new TrRmStandardArtifactInput(SchemaIdentity, leafArtifact),
+            ]);
+        Assert.That(reference.Structures.Single(
+            static structure => structure.Name == "Leaf")
+            .StandardTypeOrigin!.SelectedExportKeys,
+            Is.EqualTo(["ProviderLeafKey"]));
+    }
+
+    [Test]
     public void StandardA2R1NativeParameterRetainsImportedProviderTypeMap()
     {
         const string schemaIdentity

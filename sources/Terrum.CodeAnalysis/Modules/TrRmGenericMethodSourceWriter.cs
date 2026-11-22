@@ -6727,7 +6727,8 @@ public static partial class TrRmExecutableCompiler
                     origin.Provider.RuntimePolicy);
                 var expectedDefinitionId = 0x1300_0000u
                     | checked((uint)typeDefRow);
-                var exportKey = origin.ExportKeys[0];
+                var exportKey = GetSelectedFniAggregateOriginExportKey(
+                    origin);
                 if (string.IsNullOrEmpty(exportKey)
                     || exportKey.Contains('\0', StringComparison.Ordinal)
                     || !importTriples.Add((moduleRefRow, exportKey,

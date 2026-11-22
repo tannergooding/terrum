@@ -416,6 +416,32 @@ public static partial class TrRmExecutableCompiler
             originSchemaIdentity);
     }
 
+    internal static string GetSelectedFniAggregateOriginExportKey(
+        BoundStandardTypeOrigin origin)
+    {
+        var selectedExportKeys = origin.SelectedExportKeys;
+        if (selectedExportKeys.IsDefaultOrEmpty)
+        {
+            if (origin.ExportKeys.Length != 1)
+            {
+                throw Unsupported(
+                    "An FNI aggregate TypeDef has no unique selected provider ExportKey.");
+            }
+
+            return origin.ExportKeys[0];
+        }
+
+        if (selectedExportKeys.Length != 1
+            || !origin.ExportKeys.Contains(selectedExportKeys[0],
+                StringComparer.Ordinal))
+        {
+            throw Unsupported(
+                "An FNI aggregate TypeDef does not retain one exact provider ExportKey.");
+        }
+
+        return selectedExportKeys[0];
+    }
+
     private static bool
         IsSelectedInitializationReferenceLocalFieldLayoutSchemaIdentity(
             string schemaIdentity)
