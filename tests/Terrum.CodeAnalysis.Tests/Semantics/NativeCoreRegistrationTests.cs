@@ -3372,6 +3372,62 @@ internal sealed class NativeCoreRegistrationTests
                 new TrRmStandardArtifactInput(schemaIdentity,
                     wrongFormalArtifact), "provider.module", []);
         });
+
+        uint successGraphRow = 0;
+        uint complementGraphRow = 0;
+        for (var row = 1; row <= tables.Contracts.Count; row++)
+        {
+            var data = tables.Contracts.GetRow(row);
+            if (BinaryPrimitives.ReadUInt32LittleEndian(data)
+                    != 0x1600_0001
+                || BinaryPrimitives.ReadUInt16LittleEndian(data[4..]) != 2)
+            {
+                continue;
+            }
+
+            var payload = data[8..];
+            var graphRow = BinaryPrimitives.ReadUInt32LittleEndian(
+                payload[4..]);
+            if (payload[8] == 1)
+            {
+                successGraphRow = graphRow;
+            }
+            else
+            {
+                complementGraphRow = graphRow;
+            }
+        }
+        Assert.That(successGraphRow, Is.Not.Zero);
+        Assert.That(complementGraphRow, Is.Not.Zero);
+        Assert.That(successGraphRow, Is.Not.EqualTo(complementGraphRow));
+        var swappedSelectorRows = new TrRmContractRow[tables.Contracts.Count];
+        for (var row = 1; row <= tables.Contracts.Count; row++)
+        {
+            var data = tables.Contracts.GetRow(row);
+            var owner = BinaryPrimitives.ReadUInt32LittleEndian(data);
+            var kind = BinaryPrimitives.ReadUInt16LittleEndian(data[4..]);
+            var payload = data[8..].ToArray();
+            if (owner == 0x1600_0001 && kind == 2)
+            {
+                var swappedGraphRow
+                    = payload[8] == 1
+                        ? complementGraphRow : successGraphRow;
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    payload.AsSpan(4, 4), swappedGraphRow);
+            }
+
+            swappedSelectorRows[row - 1] = new TrRmContractRow(owner, kind,
+                payload);
+        }
+        var swappedSelectorArtifact = RewriteContracts(
+            swappedSelectorRows);
+        _ = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
+                swappedSelectorArtifact, schema));
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    swappedSelectorArtifact), "provider.module", []));
     }
 
     [Test]
