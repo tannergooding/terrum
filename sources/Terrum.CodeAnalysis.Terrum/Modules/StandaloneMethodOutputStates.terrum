@@ -193,8 +193,8 @@ int32 TryValidateStandalonePublishedPredicateGraph(int32 artifactStart,
         return 3;
     }
 
-    int32 typeSpecEntry = FindStandaloneArtifactSection(0x0003);
-    int32 typeSpecCount = GetStandaloneArtifactSectionCount(0x0003);
+    int32 typeSpecEntry = FindStandaloneArtifactSection(0x0011);
+    int32 typeSpecCount = GetStandaloneArtifactSectionCount(0x0011);
     int32 typeSpecStart = typeSpecEntry == 0 ? 0
         : Host.StandaloneSectionStarts[typeSpecEntry];
     int32 typeSpecLength = typeSpecEntry == 0 ? 0

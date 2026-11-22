@@ -1933,7 +1933,7 @@ internal sealed class StandaloneMethodImportInputTests
         }
         if (typeSpecSection is not null)
         {
-            sections.Add(new TrRmSection(0x0003, 0, 1,
+            sections.Add(new TrRmSection(0x0011, 0, 1,
                 typeSpecSection));
         }
         if (effectsMask != 0)

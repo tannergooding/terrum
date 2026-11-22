@@ -331,7 +331,7 @@ int32 FindStandaloneMethodRootExport(int32 artifactOrdinal,
     int32 exportEntry = FindStandaloneArtifactSection(0x001D);
     int32 methodEntry = FindStandaloneArtifactSection(0x0016);
     int32 signatureEntry = FindStandaloneArtifactSection(0x0017);
-    int32 typeSpecEntry = FindStandaloneArtifactSection(0x0003);
+    int32 typeSpecEntry = FindStandaloneArtifactSection(0x0011);
     if (moduleEntry == 0 || exportEntry == 0
         || methodEntry == 0 || signatureEntry == 0)
     {

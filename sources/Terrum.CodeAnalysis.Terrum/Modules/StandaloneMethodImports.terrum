@@ -626,8 +626,8 @@ int32 ValidateStandaloneCallableMethod(int32 artifactOrdinal,
     {
         return 2;
     }
-    int32 typeSpecEntry = FindStandaloneArtifactSection(0x0003);
-    int32 typeSpecCount = GetStandaloneArtifactSectionCount(0x0003);
+    int32 typeSpecEntry = FindStandaloneArtifactSection(0x0011);
+    int32 typeSpecCount = GetStandaloneArtifactSectionCount(0x0011);
     init bool hasNativePointerAnchor;
     int32 anchorStatus = TryGetStandaloneMethodNativePointerAnchor(
         artifactStart, artifactLength, typeSpecEntry, typeSpecCount,
