@@ -2121,19 +2121,38 @@ internal sealed class NativeCoreRegistrationTests
             .ConfigureAwait(true);
     }
 
-    private static BoundProgram CreatePointerOutputConsumerProgram()
+    [Test]
+    public async Task StandardForeignNativeInterfacePointerOutputUsesNonNegativeResultAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+
+        var program = CreatePointerOutputConsumerProgram("NonNegative",
+            "status >= 0");
+        var image = NativeEmitter.EmitLibrary(program, ["InvokePointer"],
+            NativeRuntimePolicy.FailFast);
+        Assert.That(image[..2], Is.EqualTo(new byte[] {
+            (byte)'M', (byte)'Z',
+        }));
+        await AssertPointerOutputAsync(image, "InvokePointer",
+            successResult: 0, failureResult: -1).ConfigureAwait(true);
+    }
+
+    private static BoundProgram CreatePointerOutputConsumerProgram(
+        string outputCondition = "NonZero",
+        string successPredicate = "status != 0")
     {
         const string schemaIdentity
             = "trrm/1-draft-foreign-native-interface-parameter-surface-1";
         const string providerIdentity = "pointer-output-provider";
         const string consumerIdentity = "pointer-output-consumer";
-        const string providerSource = """
+        var providerSource = $$"""
             using Terrum.Interop;
             [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
             [ForeignNativeInterface(VTableByteOffset: uint32(0))]
             public interface IPointerProbe {
                 [param(value): NativeOutput(
-                    When: NativeOutputCondition.NonZero)]
+                    When: NativeOutputCondition.{{outputCondition}})]
                 public unsafe int32 TryGetPointer(ptr<int32> source,
                     int32 tag,
                     [Terrum.CodeAnalysis.DependsOn(nameof(source))]
@@ -2141,7 +2160,7 @@ internal sealed class NativeCoreRegistrationTests
                     write ptr<ptr<int32>> value);
             }
             """;
-        const string consumerSource = """
+        var consumerSource = $$"""
             [return: Terrum.CodeAnalysis.DependsOn(
                 nameof(source), nameof(fallback))]
             [return: Terrum.CodeAnalysis.ForwardsBacking(
@@ -2153,7 +2172,7 @@ internal sealed class NativeCoreRegistrationTests
                     int32 status = IPointerProbe.TryGetPointer(
                         receiver, value: &init value, tag: tag,
                         source: source);
-                    if (status != 0) { return value; }
+                    if ({{successPredicate}}) { return value; }
                     return fallback;
                 }
             }
@@ -6030,7 +6049,7 @@ internal sealed class NativeCoreRegistrationTests
     }
 
     private static async Task AssertPointerOutputAsync(byte[] image,
-        string functionName)
+        string functionName, int successResult = 1, int failureResult = 0)
     {
         var path = Path.Combine(TestArtifactPaths.DirectoryPath,
             $"native-fni-pointer-output-{Guid.NewGuid():N}.dll");
@@ -6059,7 +6078,7 @@ internal sealed class NativeCoreRegistrationTests
                 }
 
                 value = source;
-                return succeed ? 1 : 0;
+                return succeed ? successResult : failureResult;
             };
             Marshal.WriteIntPtr(vtable,
                 Marshal.GetFunctionPointerForDelegate(callback));

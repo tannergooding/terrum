@@ -1418,7 +1418,8 @@ Formal proposal review and qualification remain open.
 PS1 now admits pointer-valued FNI NativeOutput reads through the existing
 TypeSpec/D5 Body path, including non-first output-formal and named-input
 remapping; producer, source-free consumer, re-emission and Windows x64
-success/failure execution coverage is added but unverified under the hold.
+success/failure execution coverage, including NonNegative's zero-success
+boundary, is added but unverified under the hold.
 Other side-effecting argument
 expressions, defaults/constants, multiple calls, other condition expressions
 and Body control-flow shapes, nonreturning-call shapes beyond the terminal
