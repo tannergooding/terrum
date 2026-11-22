@@ -499,6 +499,39 @@ internal sealed class PrivateForeignNativeInterfaceTests
     }
 
     [Test]
+    public void PrivateFniDirectoryRejectsReversedMemberFunctionReferences()
+    {
+        const string schemaIdentity
+            = "terrum/private-semantic-111-foreign-native-interfaces-1";
+        const string moduleIdentity = "PrivateFniReverseDirectory";
+        var producer = CreateTwoMemberFniProvider(moduleIdentity);
+        _ = ModuleCompiler.CreateReferenceWithSchema(producer,
+            schemaIdentity);
+        var firstKey = Encoding.UTF8.GetBytes(moduleIdentity + ".get");
+        var secondKey = Encoding.UTF8.GetBytes(moduleIdentity + ".read");
+        var firstKeyOffset = producer.AsSpan().IndexOf(firstKey);
+        var secondKeyOffset = producer.AsSpan().IndexOf(secondKey);
+        Assert.That(firstKeyOffset, Is.GreaterThanOrEqualTo(0));
+        Assert.That(secondKeyOffset, Is.GreaterThanOrEqualTo(0));
+        var firstTargetOffset = firstKeyOffset + firstKey.Length;
+        var secondTargetOffset = secondKeyOffset + secondKey.Length;
+        var firstTarget = BinaryPrimitives.ReadUInt32LittleEndian(
+            producer.AsSpan(firstTargetOffset, sizeof(uint)));
+        var secondTarget = BinaryPrimitives.ReadUInt32LittleEndian(
+            producer.AsSpan(secondTargetOffset, sizeof(uint)));
+        Assert.That(firstTarget, Is.Not.EqualTo(secondTarget));
+
+        var malformed = (byte[])producer.Clone();
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            malformed.AsSpan(firstTargetOffset, sizeof(uint)), secondTarget);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            malformed.AsSpan(secondTargetOffset, sizeof(uint)), firstTarget);
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReferenceWithSchema(malformed,
+                schemaIdentity));
+    }
+
+    [Test]
     public void PrivateFniCallRejectsTargetOutsideTheOwnerDirectory()
     {
         const string schemaIdentity
@@ -788,6 +821,43 @@ internal sealed class PrivateForeignNativeInterfaceTests
             source.ResolutionPolicies, source.NativeImport,
             source.NativeCallable, source.NativeCallConv,
             source.NativeExport, source.ForeignNativeInterface);
+    }
+
+    private static byte[] CreateTwoMemberFniProvider(
+        string moduleIdentity)
+    {
+        const string schemaIdentity
+            = "terrum/private-semantic-111-foreign-native-interfaces-1";
+        var source = SyntaxTree.Parse("""
+            using Terrum.Interop;
+            public int32 Identity(int32 value) { return value; }
+            [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+            [ForeignNativeInterface(VTableByteOffset: uint32(0))]
+            public interface IProbe {
+                public unsafe int32 Get(int32 value);
+                public unsafe int32 Read(int64 value);
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(source,
+            new CompilationOptions {
+                NativeCoreRegistration =
+                    CreateFniNativeCoreRegistration(moduleIdentity),
+            });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        var identities = PrivateModuleIdentityInputs.CreateFromSelectors(
+            program, moduleIdentity, [], [], [], [], [
+                new PrivateForeignInterfaceDefinitionAssignment(0,
+                    moduleIdentity + ".owner", true, [
+                        new PrivateForeignInterfaceMemberDefinitionAssignment(
+                            0, moduleIdentity + ".get"),
+                        new PrivateForeignInterfaceMemberDefinitionAssignment(
+                            1, moduleIdentity + ".read"),
+                    ]),
+            ], []);
+        return ModuleCompiler.CreateProducerWithSchema(program,
+            ["Identity"], schemaIdentity, identities);
     }
 
     private static int FindExpressionOffset(byte[] module, byte kind,
