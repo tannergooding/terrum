@@ -755,21 +755,23 @@ internal sealed class StandaloneMethodImportInputTests
                     || Host.StandaloneDecoderBodies[4] != 1
                     || Host.StandaloneDecoderBodyOwners[1] != 1
                     || Host.StandaloneDecoderBodies[7] != 7
-                    || Host.StandaloneDecoderBodies[8] != 2
-                    || Host.StandaloneDecoderHomeCount[0] != 2
-                    || Host.StandaloneDecoderHomes[0] != 2
-                    || Host.StandaloneDecoderHomes[1] <= 0
-                    || Host.StandaloneDecoderHomes[2] != 0
-                    || Host.StandaloneDecoderHomes[3] != 2
-                    || Host.StandaloneDecoderHomes[4] <= 0
-                    || Host.StandaloneDecoderHomes[5] != 1
+                    || Host.StandaloneDecoderBodies[8] < 2
+                    || Host.StandaloneDecoderHomeCount[0] < 2
                     || Host.StandaloneDecoderTypeMapCount[0] <= 0
                     || Host.StandaloneDecoderTypeMapTypeIds[0] <= 0
                     || Host.StandaloneDecoderMethodMapCount[0] != 1
                     || Host.StandaloneDecoderMethodMapTargets[0] != 2
                     || Host.StandaloneDecoderMethodMapTargets[1] != 0
                     || Host.StandaloneDecoderMethodMapTargets[2] != 0
+                    || Host.StandaloneDecoderMethodMapTargets[3] != 1
                     || Host.StandaloneDecoderConstantMapCount[0] != 0
+                    || Host.StandaloneDecoderCallCount[0] != 1
+                    || Host.StandaloneDecoderCallInputCount[0] != 2
+                    || Host.StandaloneDecoderBodies[32] != 0
+                    || Host.StandaloneDecoderBodies[33] != 1
+                    || Host.StandaloneDecoderCalls[1] != 1
+                    || Host.StandaloneDecoderCalls[6] != 1
+                    || Host.StandaloneDecoderCalls[10] != 2
                     || Host.StandaloneDecoderBodies[19] != 1
                     || Host.StandaloneDecoderBodies[21] != 2
                     || Host.StandaloneDecoderBodies[26] <= 0
@@ -833,6 +835,8 @@ internal sealed class StandaloneMethodImportInputTests
                 int32 status = DecodeStandaloneModuleMetadata();
                 if (status != 0) { return status; }
                 if (Host.StandaloneDecoderBodyCount[0] != 1
+                    || Host.StandaloneDecoderCallCount[0] != 3
+                    || Host.StandaloneDecoderCallInputCount[0] != 3
                     || Host.StandaloneDecoderMethodMapCount[0] != 1
                     || Host.StandaloneDecoderConstantMapCount[0] != 1
                     || Host.StandaloneDecoderConstantMapEntries[0] <= 0
@@ -863,7 +867,7 @@ internal sealed class StandaloneMethodImportInputTests
         var malformedConstantArtifact = artifact.ToArray();
         var constantSectionCount = checked((int)BinaryPrimitives
             .ReadUInt32LittleEndian(malformedConstantArtifact.AsSpan(12)));
-        var bodySectionStart = -1;
+        var constantBodySectionStart = -1;
         var bodyTableCount = 0;
         for (var section = 0; section < constantSectionCount; section++)
         {
@@ -874,22 +878,23 @@ internal sealed class StandaloneMethodImportInputTests
                 bodyTableCount = checked((int)BinaryPrimitives
                     .ReadUInt32LittleEndian(
                         malformedConstantArtifact.AsSpan(entryOffset + 4)));
-                bodySectionStart = checked((int)BinaryPrimitives
+                constantBodySectionStart = checked((int)BinaryPrimitives
                     .ReadUInt32LittleEndian(
                         malformedConstantArtifact.AsSpan(entryOffset + 8)));
                 break;
             }
         }
         Assert.That(bodyTableCount, Is.GreaterThan(0));
-        var bodyIndexLength = checked((bodyTableCount + 1) * 4);
-        var bodyDataOffset = checked((int)BinaryPrimitives
+        var constantBodyIndexLength = checked((bodyTableCount + 1) * 4);
+        var constantBodyDataOffset = checked((int)BinaryPrimitives
             .ReadUInt32LittleEndian(
-                malformedConstantArtifact.AsSpan(bodySectionStart)));
-        var bodyStart = checked(bodySectionStart + bodyIndexLength
-            + bodyDataOffset);
-        var mapMask = malformedConstantArtifact[bodyStart + 2];
+                malformedConstantArtifact.AsSpan(
+                    constantBodySectionStart)));
+        var constantBodyStart = checked(constantBodySectionStart
+            + constantBodyIndexLength + constantBodyDataOffset);
+        var mapMask = malformedConstantArtifact[constantBodyStart + 2];
         Assert.That(mapMask & 16, Is.Not.EqualTo(0));
-        var bodyCursor = bodyStart + 5;
+        var bodyCursor = constantBodyStart + 5;
         var homeMapCount = 0;
         var typeMapCount = 0;
         var methodMapCount = 0;

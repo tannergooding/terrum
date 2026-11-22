@@ -5,7 +5,7 @@ bool ValidateStandaloneDecoderBuffers()
     int32 methodCapacity
         = Host.StandaloneDecoderMethods.Length / 16;
     int32 bodyCapacity
-        = Host.StandaloneDecoderBodies.Length / 32;
+        = Host.StandaloneDecoderBodies.Length / 34;
     int32 importCapacity
         = Host.StandaloneDecoderImportedCallables.Length / 16;
     return Host.StandaloneDecoderStatus.Length == 1
@@ -15,7 +15,7 @@ bool ValidateStandaloneDecoderBuffers()
         && Host.StandaloneDecoderMethodCount.Length == 1
         && Host.StandaloneDecoderMethods.Length % 16 == 0
         && Host.StandaloneDecoderBodyCount.Length == 1
-        && Host.StandaloneDecoderBodies.Length % 32 == 0
+        && Host.StandaloneDecoderBodies.Length % 34 == 0
         && bodyCapacity <= methodCapacity
         && Host.StandaloneDecoderBodyOwners.Length > 0
         && Host.StandaloneDecoderHomeCount.Length == 1
@@ -24,9 +24,13 @@ bool ValidateStandaloneDecoderBuffers()
         && Host.StandaloneDecoderTypeMapCount.Length == 1
         && Host.StandaloneDecoderTypeMapTypeIds.Length > 0
         && Host.StandaloneDecoderMethodMapCount.Length == 1
-        && Host.StandaloneDecoderMethodMapTargets.Length % 3 == 0
+        && Host.StandaloneDecoderMethodMapTargets.Length % 4 == 0
         && Host.StandaloneDecoderConstantMapCount.Length == 1
         && Host.StandaloneDecoderConstantMapEntries.Length % 3 == 0
+        && Host.StandaloneDecoderCallCount.Length == 1
+        && Host.StandaloneDecoderCalls.Length % 14 == 0
+        && Host.StandaloneDecoderCallInputCount.Length == 1
+        && Host.StandaloneDecoderCallInputs.Length % 4 == 0
         && Host.StandaloneDecoderLocalCallableCount.Length == 1
         && Host.StandaloneDecoderLocalCallables.Length % 4 == 0
         && Host.StandaloneDecoderImportedCallableCount.Length == 1
@@ -57,6 +61,8 @@ void ClearStandaloneDecoderOutputs()
     Host.StandaloneDecoderTypeMapCount[0] = 0;
     Host.StandaloneDecoderMethodMapCount[0] = 0;
     Host.StandaloneDecoderConstantMapCount[0] = 0;
+    Host.StandaloneDecoderCallCount[0] = 0;
+    Host.StandaloneDecoderCallInputCount[0] = 0;
     Host.StandaloneDecoderLocalCallableCount[0] = 0;
     Host.StandaloneDecoderImportedCallableCount[0] = 0;
     Host.StandaloneDecoderImportMapCount[0] = 0;
@@ -108,6 +114,18 @@ void ClearStandaloneDecoderOutputs()
         index = index + 1)
     {
         Host.StandaloneDecoderConstantMapEntries[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneDecoderCalls.Length;
+        index = index + 1)
+    {
+        Host.StandaloneDecoderCalls[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneDecoderCallInputs.Length;
+        index = index + 1)
+    {
+        Host.StandaloneDecoderCallInputs[index] = 0;
     }
     for (mut int32 index = 0;
         index < Host.StandaloneDecoderLocalCallables.Length;
@@ -1106,7 +1124,9 @@ int32 BuildStandaloneDecoderModuleCatalog()
         int32 methodRecordOffset = methodRecordCount * 16;
         Host.StandaloneDecoderMethods[methodRecordOffset]
             = selectedModuleId;
-        Host.StandaloneDecoderMethods[methodRecordOffset + 1] = 0;
+        Host.StandaloneDecoderMethods[methodRecordOffset + 1]
+            = Host.StandaloneModuleDirectory[
+                (selectedModuleId + 1) * 8];
         Host.StandaloneDecoderMethods[methodRecordOffset + 2]
             = selectedModuleRow;
         Host.StandaloneDecoderMethods[methodRecordOffset + 3]
@@ -1174,6 +1194,13 @@ int32 BuildStandaloneDecoderModuleCatalog()
         ClearStandaloneDecoderOutputs();
         Host.StandaloneDecoderStatus[0] = bodyMapStatus;
         return bodyMapStatus;
+    }
+    int32 bodyRecordStatus = DecodeStandaloneBodyRecords();
+    if (bodyRecordStatus != 0)
+    {
+        ClearStandaloneDecoderOutputs();
+        Host.StandaloneDecoderStatus[0] = bodyRecordStatus;
+        return bodyRecordStatus;
     }
     return 0;
 }
@@ -1562,11 +1589,11 @@ int32 DecodeStandaloneBodyLayouts()
         }
 
         if (decodedBodyCount
-                >= Host.StandaloneDecoderBodies.Length / 32)
+                >= Host.StandaloneDecoderBodies.Length / 34)
         {
             return 3;
         }
-        int32 bodyOutputOffset = decodedBodyCount * 32;
+        int32 bodyOutputOffset = decodedBodyCount * 34;
         Host.StandaloneDecoderBodies[bodyOutputOffset]
             = methodRecordId;
         Host.StandaloneDecoderBodies[bodyOutputOffset + 1]
@@ -1890,7 +1917,7 @@ int32 DecodeStandaloneBodyMaps()
 {
     int32 bodyCount = Host.StandaloneDecoderBodyCount[0];
     if (bodyCount < 0
-        || bodyCount > Host.StandaloneDecoderBodies.Length / 32)
+        || bodyCount > Host.StandaloneDecoderBodies.Length / 34)
     {
         return 3;
     }
@@ -1904,7 +1931,7 @@ int32 DecodeStandaloneBodyMaps()
         bodyId < bodyCount;
         bodyId = bodyId + 1)
     {
-        if (Host.StandaloneDecoderBodies[bodyId * 32 + 16] != 0)
+        if (Host.StandaloneDecoderBodies[bodyId * 34 + 16] != 0)
         {
             hasConstants = true;
             break;
@@ -1990,7 +2017,7 @@ int32 DecodeStandaloneBodyMaps()
         bodyId < bodyCount;
         bodyId = bodyId + 1)
     {
-        int32 bodyOffset = bodyId * 32;
+        int32 bodyOffset = bodyId * 34;
         if (Host.StandaloneDecoderBodies[bodyOffset + 1]
                 != artifactOrdinal
             || Host.StandaloneDecoderBodies[bodyOffset + 2]
@@ -2034,7 +2061,7 @@ int32 DecodeStandaloneBodyMaps()
                     - typeMapCount
             || methodFirst < 0
             || methodFirst
-                > Host.StandaloneDecoderMethodMapTargets.Length / 3
+                > Host.StandaloneDecoderMethodMapTargets.Length / 4
                     - methodMapCount
             || constantFirst < 0
             || constantFirst
@@ -2087,10 +2114,16 @@ int32 DecodeStandaloneBodyMaps()
             return 3;
         }
         int32 methodRecordOffset = methodRecordId * 16;
+        int32 methodArtifactOrdinal
+            = Host.StandaloneDecoderMethods[methodRecordOffset + 1];
         int32 methodParamFirst
             = Host.StandaloneDecoderMethods[methodRecordOffset + 6];
         int32 methodParamCount
             = Host.StandaloneDecoderMethods[methodRecordOffset + 7];
+        if (methodArtifactOrdinal != artifactOrdinal)
+        {
+            return 3;
+        }
         int32 homeMapStart
             = Host.StandaloneDecoderBodies[bodyOffset + 9];
         for (mut int32 homeIndex = 0;
@@ -2157,7 +2190,7 @@ int32 DecodeStandaloneBodyMaps()
                     + int32(formalOrdinal);
                 int32 globalParameterRow
                     = Host.StandaloneArtifactParameterStarts[
-                        artifactOrdinal] + parameterRow;
+                        methodArtifactOrdinal] + parameterRow;
                 if (globalParameterRow <= 0
                     || globalParameterRow
                         >= Host.StandaloneParameterTypeIds.Length
@@ -2209,6 +2242,7 @@ int32 DecodeStandaloneBodyMaps()
             int32 targetKind;
             int32 targetId;
             int32 targetViewId;
+            int32 targetMethodRecordId;
             if (tokenKind == 0x1600_0000)
             {
                 if (tokenRow > uint32(artifactMethodCount))
@@ -2224,6 +2258,7 @@ int32 DecodeStandaloneBodyMaps()
                 }
                 int32 targetMethodOffset = targetMethodRecord * 16;
                 targetViewId = targetMethodRecord;
+                targetMethodRecordId = targetMethodRecord;
                 int32 targetCallableKind
                     = Host.StandaloneDecoderMethods[
                         targetMethodOffset + 13];
@@ -2279,6 +2314,20 @@ int32 DecodeStandaloneBodyMaps()
                 targetId = Host.StandaloneDecoderImportedCallables[
                     importedOffset + 3];
                 targetViewId = importId;
+                targetMethodRecordId
+                    = FindStandaloneDecoderMethodRecord(
+                        Host.StandaloneDecoderImportedCallables[
+                            importedOffset + 1],
+                        Host.StandaloneDecoderImportedCallables[
+                            importedOffset + 7]);
+                if (targetMethodRecordId < 0
+                    || Host.StandaloneDecoderMethods[
+                        targetMethodRecordId * 16 + 13] != 2
+                    || Host.StandaloneDecoderMethods[
+                        targetMethodRecordId * 16 + 14] != targetId + 1)
+                {
+                    return 3;
+                }
             }
             else
             {
@@ -2297,13 +2346,15 @@ int32 DecodeStandaloneBodyMaps()
             }
 
             int32 targetOffset
-                = (methodFirst + methodMapIndex) * 3;
+                = (methodFirst + methodMapIndex) * 4;
             Host.StandaloneDecoderMethodMapTargets[targetOffset]
                 = targetKind;
             Host.StandaloneDecoderMethodMapTargets[targetOffset + 1]
                 = targetId;
             Host.StandaloneDecoderMethodMapTargets[targetOffset + 2]
                 = targetViewId;
+            Host.StandaloneDecoderMethodMapTargets[targetOffset + 3]
+                = targetMethodRecordId;
         }
         Host.StandaloneDecoderMethodMapCount[0]
             = methodFirst + methodMapCount;
@@ -2354,6 +2405,513 @@ int32 DecodeStandaloneBodyMaps()
         }
         Host.StandaloneDecoderConstantMapCount[0]
             = constantFirst + constantMapCount;
+    }
+    return 0;
+}
+
+int32 GetStandaloneDecoderMethodParameterTypeId(int32 methodRecordId,
+    int32 parameterOrdinal, ref<init int32> typeIdResult)
+    ensure return == 0 ? *typeIdResult is init : true
+{
+    if (methodRecordId < 0
+        || methodRecordId >= Host.StandaloneDecoderMethodCount[0])
+    {
+        return 3;
+    }
+
+    int32 methodOffset = methodRecordId * 16;
+    int32 parameterFirst
+        = Host.StandaloneDecoderMethods[methodOffset + 6];
+    int32 parameterCount
+        = Host.StandaloneDecoderMethods[methodOffset + 7];
+    int32 artifactOrdinal
+        = Host.StandaloneDecoderMethods[methodOffset + 1];
+    if (parameterOrdinal < 0 || parameterOrdinal >= parameterCount
+        || parameterFirst <= 0 || artifactOrdinal < 0
+        || artifactOrdinal >= Host.StandaloneRequest[4])
+    {
+        return 3;
+    }
+
+    int32 globalParameterRow
+        = Host.StandaloneArtifactParameterStarts[artifactOrdinal]
+            + parameterFirst + parameterOrdinal;
+    if (globalParameterRow <= 0
+        || globalParameterRow >= Host.StandaloneParameterTypeIds.Length)
+    {
+        return 3;
+    }
+    int32 typeId
+        = Host.StandaloneParameterTypeIds[globalParameterRow];
+    if (typeId <= 0 || typeId > Host.StandaloneTypeFactCount[0])
+    {
+        return 3;
+    }
+    *typeIdResult = typeId;
+    return 0;
+}
+
+int32 DecodeStandaloneCallSiteRecord(int32 bodyId,
+    int32 bodyOffset, int32 recordIndex, int32 recordStart,
+    int32 recordLength, int32 artifactStart, int32 artifactLength)
+{
+    if (recordLength < 20)
+    {
+        return 3;
+    }
+
+    init int32 targetKind;
+    init int32 resultKind;
+    init uint32 flags;
+    init uint32 targetIndex;
+    init uint32 resultIndex;
+    init uint32 inputCountValue;
+    init uint32 preparationCountValue;
+    if (!TryReadStandaloneArtifactAbsoluteByte(artifactStart,
+            artifactLength, recordStart + 4, ref init targetKind)
+        || !TryReadStandaloneArtifactAbsoluteByte(artifactStart,
+            artifactLength, recordStart + 5, ref init resultKind)
+        || !TryReadStandaloneArtifactAbsoluteHalfWord(
+            artifactStart, artifactLength, recordStart + 6,
+            ref init flags)
+        || !TryReadStandaloneArtifactAbsoluteHalfWord(
+            artifactStart, artifactLength, recordStart + 8,
+            ref init targetIndex)
+        || !TryReadStandaloneArtifactAbsoluteHalfWord(
+            artifactStart, artifactLength, recordStart + 10,
+            ref init resultIndex)
+        || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+            artifactLength, recordStart + 12,
+            ref init inputCountValue)
+        || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+            artifactLength, recordStart + 16,
+            ref init preparationCountValue)
+        || flags != 0
+        || (targetKind < 1 || targetKind > 3)
+        || resultKind > 2
+        || (resultKind == 0 && resultIndex != 0))
+    {
+        return 3;
+    }
+
+    int64 expectedLength = 20 + int64(inputCountValue) * 4
+        + int64(preparationCountValue) * 2;
+    if (expectedLength != int64(recordLength))
+    {
+        return 3;
+    }
+    if (targetKind != 1 || preparationCountValue != 0)
+    {
+        return 2;
+    }
+
+    int32 methodMapCount
+        = Host.StandaloneDecoderBodies[bodyOffset + 12];
+    if (targetIndex >= uint32(methodMapCount))
+    {
+        return 3;
+    }
+    int32 methodMapGlobalFirst
+        = Host.StandaloneDecoderBodies[bodyOffset + 30];
+    int32 targetOffset
+        = (methodMapGlobalFirst + int32(targetIndex)) * 4;
+    int32 resolvedTargetKind
+        = Host.StandaloneDecoderMethodMapTargets[targetOffset];
+    int32 resolvedTargetId
+        = Host.StandaloneDecoderMethodMapTargets[targetOffset + 1];
+    int32 targetViewId
+        = Host.StandaloneDecoderMethodMapTargets[targetOffset + 2];
+    int32 targetMethodRecordId
+        = Host.StandaloneDecoderMethodMapTargets[targetOffset + 3];
+    if ((resolvedTargetKind != 1 && resolvedTargetKind != 2)
+        || resolvedTargetId < 0
+        || targetMethodRecordId < 0
+        || targetMethodRecordId
+            >= Host.StandaloneDecoderMethodCount[0])
+    {
+        return 3;
+    }
+
+    int32 targetMethodOffset = targetMethodRecordId * 16;
+    int32 callerMethodRecordId
+        = Host.StandaloneDecoderBodies[bodyOffset];
+    int32 bodyArtifactOrdinal
+        = Host.StandaloneDecoderBodies[bodyOffset + 1];
+    if (callerMethodRecordId < 0
+        || callerMethodRecordId
+            >= Host.StandaloneDecoderMethodCount[0]
+        || Host.StandaloneDecoderMethods[targetMethodRecordId * 16]
+            != Host.StandaloneDecoderBodies[bodyOffset + 27]
+        || Host.StandaloneDecoderMethods[targetMethodRecordId * 16 + 2]
+            != Host.StandaloneDecoderBodies[bodyOffset + 2]
+        || Host.StandaloneDecoderMethods[
+            targetMethodRecordId * 16 + 1] != bodyArtifactOrdinal)
+    {
+        return 3;
+    }
+    int32 callerEffectMask
+        = Host.StandaloneDecoderMethods[
+            callerMethodRecordId * 16 + 15];
+    int32 targetEffectMask
+        = Host.StandaloneDecoderMethods[targetMethodOffset + 15];
+    if ((targetEffectMask & 4) != 0
+        && (callerEffectMask & 4) == 0)
+    {
+        return 3;
+    }
+
+    int32 targetResultTypeId
+        = Host.StandaloneDecoderMethods[targetMethodOffset + 5];
+    if (targetResultTypeId <= 0
+        || targetResultTypeId > Host.StandaloneTypeFactCount[0]
+        || Host.StandaloneTypeFacts[targetResultTypeId * 3] != 0)
+    {
+        return 2;
+    }
+    int32 resultTypeCode
+        = Host.StandaloneTypeFacts[targetResultTypeId * 3 + 1];
+    int32 resultWidth
+        = GetStandaloneDecoderScalarWidth(targetResultTypeId);
+    if (resultWidth < 0)
+    {
+        return 2;
+    }
+    bool doesNotReturn = (targetEffectMask & 2) != 0;
+    bool isUnitResult = resultTypeCode == 0;
+    if ((resultKind == 0
+            && !doesNotReturn && !isUnitResult)
+        || (resultKind != 0 && doesNotReturn)
+        || (resultKind != 0 && isUnitResult))
+    {
+        return 3;
+    }
+    if (resultKind == 1
+        && (resultIndex > 15 || resultIndex == 14))
+    {
+        return 3;
+    }
+    if (resultKind == 2)
+    {
+        int32 homeCount
+            = Host.StandaloneDecoderBodies[bodyOffset + 8];
+        if (resultIndex >= uint32(homeCount))
+        {
+            return 3;
+        }
+        int32 homeGlobalFirst
+            = Host.StandaloneDecoderBodies[bodyOffset + 28];
+        if (Host.StandaloneDecoderHomes[
+                (homeGlobalFirst + int32(resultIndex)) * 3 + 1]
+            != targetResultTypeId)
+        {
+            return 3;
+        }
+    }
+
+    int32 targetParameterCount
+        = Host.StandaloneDecoderMethods[targetMethodOffset + 7];
+    if (inputCountValue != uint32(targetParameterCount)
+        || inputCountValue > 0x7FFF_FFFF)
+    {
+        return 3;
+    }
+    int32 inputCount = int32(inputCountValue);
+    int32 inputFirst = Host.StandaloneDecoderCallInputCount[0];
+    int32 inputCapacity
+        = Host.StandaloneDecoderCallInputs.Length / 4;
+    if (inputFirst < 0 || inputFirst > inputCapacity - inputCount)
+    {
+        return 3;
+    }
+
+    int32 inputStart = recordStart + 20;
+    for (mut int32 inputOrdinal = 0;
+        inputOrdinal < inputCount;
+        inputOrdinal = inputOrdinal + 1)
+    {
+        int32 inputOffset = inputStart + inputOrdinal * 4;
+        init int32 selectorKind;
+        init int32 sourceUse;
+        init uint32 selectorIndex;
+        if (!TryReadStandaloneArtifactAbsoluteByte(artifactStart,
+                artifactLength, inputOffset,
+                ref init selectorKind)
+            || !TryReadStandaloneArtifactAbsoluteByte(artifactStart,
+                artifactLength, inputOffset + 1,
+                ref init sourceUse)
+            || !TryReadStandaloneArtifactAbsoluteHalfWord(
+                artifactStart, artifactLength, inputOffset + 2,
+                ref init selectorIndex)
+            || selectorKind < 0 || selectorKind > 2)
+        {
+            return 3;
+        }
+
+        init int32 formalTypeId;
+        int32 parameterStatus
+            = GetStandaloneDecoderMethodParameterTypeId(
+                targetMethodRecordId, inputOrdinal,
+                ref init formalTypeId);
+        if (parameterStatus != 0)
+        {
+            return parameterStatus;
+        }
+        int32 formalTypeKind
+            = Host.StandaloneTypeFacts[formalTypeId * 3];
+        int32 formalTypeCode
+            = Host.StandaloneTypeFacts[formalTypeId * 3 + 1];
+        if ((formalTypeKind == 0
+                && GetStandaloneDecoderScalarWidth(formalTypeId) < 0)
+            || (formalTypeKind == 1
+                && !IsStandaloneCallableScalarCode(formalTypeCode))
+            || formalTypeKind < 0 || formalTypeKind > 1)
+        {
+            return 2;
+        }
+
+        if (selectorKind == 0)
+        {
+            if (sourceUse != 0 || selectorIndex != 0
+                || formalTypeKind != 0 || formalTypeCode != 0)
+            {
+                return 3;
+            }
+        }
+        else if (selectorKind == 1)
+        {
+            if (selectorIndex > 15 || formalTypeCode == 0
+                || (formalTypeKind == 0 && sourceUse != 1)
+                || (formalTypeKind == 1 && sourceUse != 5))
+            {
+                return 3;
+            }
+        }
+        else
+        {
+            int32 homeCount
+                = Host.StandaloneDecoderBodies[bodyOffset + 8];
+            if (selectorIndex >= uint32(homeCount))
+            {
+                return 3;
+            }
+            int32 homeGlobalFirst
+                = Host.StandaloneDecoderBodies[bodyOffset + 28];
+            int32 homeTypeId
+                = Host.StandaloneDecoderHomes[
+                    (homeGlobalFirst + int32(selectorIndex)) * 3 + 1];
+            if (homeTypeId != formalTypeId
+                || (formalTypeKind == 0 && formalTypeCode == 0)
+                || (formalTypeKind == 0 && sourceUse != 1)
+                || (formalTypeKind == 1 && sourceUse != 5))
+            {
+                return 3;
+            }
+        }
+
+        int32 decodedInputOffset = (inputFirst + inputOrdinal) * 4;
+        Host.StandaloneDecoderCallInputs[decodedInputOffset]
+            = selectorKind;
+        Host.StandaloneDecoderCallInputs[decodedInputOffset + 1]
+            = sourceUse;
+        Host.StandaloneDecoderCallInputs[decodedInputOffset + 2]
+            = int32(selectorIndex);
+        Host.StandaloneDecoderCallInputs[decodedInputOffset + 3]
+            = formalTypeId;
+    }
+
+    int32 callCount = Host.StandaloneDecoderCallCount[0];
+    int32 callCapacity = Host.StandaloneDecoderCalls.Length / 14;
+    if (callCount < 0 || callCount >= callCapacity)
+    {
+        return 3;
+    }
+    int32 callOffset = callCount * 14;
+    Host.StandaloneDecoderCalls[callOffset] = bodyId;
+    Host.StandaloneDecoderCalls[callOffset + 1] = recordIndex;
+    Host.StandaloneDecoderCalls[callOffset + 2] = int32(targetIndex);
+    Host.StandaloneDecoderCalls[callOffset + 3] = resolvedTargetKind;
+    Host.StandaloneDecoderCalls[callOffset + 4] = resolvedTargetId;
+    Host.StandaloneDecoderCalls[callOffset + 5] = targetViewId;
+    Host.StandaloneDecoderCalls[callOffset + 6] = targetMethodRecordId;
+    Host.StandaloneDecoderCalls[callOffset + 7] = resultKind;
+    Host.StandaloneDecoderCalls[callOffset + 8] = int32(resultIndex);
+    Host.StandaloneDecoderCalls[callOffset + 9] = inputFirst;
+    Host.StandaloneDecoderCalls[callOffset + 10] = inputCount;
+    Host.StandaloneDecoderCalls[callOffset + 11]
+        = int32(preparationCountValue);
+    Host.StandaloneDecoderCalls[callOffset + 12] = recordStart;
+    Host.StandaloneDecoderCalls[callOffset + 13] = recordLength;
+    Host.StandaloneDecoderCallInputCount[0] = inputFirst + inputCount;
+    Host.StandaloneDecoderCallCount[0] = callCount + 1;
+    return 0;
+}
+
+int32 DecodeStandaloneBodyRecords()
+{
+    int32 bodyCount = Host.StandaloneDecoderBodyCount[0];
+    if (bodyCount < 0
+        || bodyCount > Host.StandaloneDecoderBodies.Length / 34)
+    {
+        return 3;
+    }
+    if (bodyCount == 0)
+    {
+        return 0;
+    }
+
+    int32 firstBodyOffset = 0;
+    int32 artifactOrdinal
+        = Host.StandaloneDecoderBodies[firstBodyOffset + 1];
+    init int32 artifactStart;
+    init int32 artifactLength;
+    if (artifactOrdinal < 0
+        || !TryValidateStandaloneArtifactDirectory(artifactOrdinal)
+        || !TryGetStandaloneArtifactExtent(artifactOrdinal,
+            ref init artifactStart, ref init artifactLength))
+    {
+        return 3;
+    }
+
+    for (mut int32 bodyId = 0;
+        bodyId < bodyCount;
+        bodyId = bodyId + 1)
+    {
+        int32 bodyOffset = bodyId * 34;
+        int32 recordCount
+            = Host.StandaloneDecoderBodies[bodyOffset + 21];
+        int32 blockCount
+            = Host.StandaloneDecoderBodies[bodyOffset + 19];
+        int32 recordIndexStart
+            = Host.StandaloneDecoderBodies[bodyOffset + 22];
+        int32 recordDataStart
+            = Host.StandaloneDecoderBodies[bodyOffset + 23];
+        int32 recordDataLength
+            = Host.StandaloneDecoderBodies[bodyOffset + 24];
+        if (Host.StandaloneDecoderBodies[bodyOffset + 1]
+                != artifactOrdinal)
+        {
+            return 3;
+        }
+        if (blockCount != 1)
+        {
+            return 2;
+        }
+        if (recordCount <= 0
+            || recordIndexStart < 0 || recordDataStart < 0
+            || recordDataLength < 0)
+        {
+            return 3;
+        }
+
+        int32 blockStart
+            = Host.StandaloneDecoderBodies[bodyOffset + 20];
+        init uint32 blockEntryRecord;
+        if (!TryReadStandaloneArtifactAbsoluteHalfWord(
+                artifactStart, artifactLength, blockStart + 8,
+                ref init blockEntryRecord)
+            || blockEntryRecord >= uint32(recordCount))
+        {
+            return 3;
+        }
+
+        int32 callFirst = Host.StandaloneDecoderCallCount[0];
+        Host.StandaloneDecoderBodies[bodyOffset + 32] = callFirst;
+        mut bool entryStateFound = false;
+        for (mut int32 recordIndex = 0;
+            recordIndex < recordCount;
+            recordIndex = recordIndex + 1)
+        {
+            init uint32 recordStartOffset;
+            init uint32 recordEndOffset;
+            if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                    artifactLength, recordIndexStart + recordIndex * 4,
+                    ref init recordStartOffset)
+                || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                    artifactLength,
+                    recordIndexStart + (recordIndex + 1) * 4,
+                    ref init recordEndOffset)
+                || recordStartOffset > recordEndOffset
+                || recordEndOffset > uint32(recordDataLength))
+            {
+                return 3;
+            }
+            int32 recordStart
+                = recordDataStart + int32(recordStartOffset);
+            int32 recordLength
+                = int32(recordEndOffset - recordStartOffset);
+            if (recordLength < 4)
+            {
+                return 3;
+            }
+
+            init int32 recordKind;
+            init int32 recordFlags;
+            init uint32 recordReserved;
+            if (!TryReadStandaloneArtifactAbsoluteByte(artifactStart,
+                    artifactLength, recordStart,
+                    ref init recordKind)
+                || !TryReadStandaloneArtifactAbsoluteByte(artifactStart,
+                    artifactLength, recordStart + 1,
+                    ref init recordFlags)
+                || !TryReadStandaloneArtifactAbsoluteHalfWord(
+                    artifactStart, artifactLength, recordStart + 2,
+                    ref init recordReserved)
+                || recordFlags != 0 || recordReserved != 0)
+            {
+                return 3;
+            }
+
+            if (recordKind == 1)
+            {
+                if (recordLength < 8)
+                {
+                    return 3;
+                }
+                init uint32 registerCount;
+                if (!TryReadStandaloneArtifactAbsoluteWord(
+                        artifactStart, artifactLength, recordStart + 4,
+                        ref init registerCount)
+                    || int64(recordLength)
+                        != 8 + int64(registerCount) * 5
+                    || registerCount > 14)
+                {
+                    return 3;
+                }
+                if (registerCount != 0)
+                {
+                    return 2;
+                }
+                if (recordIndex == int32(blockEntryRecord))
+                {
+                    entryStateFound = true;
+                }
+            }
+            else if (recordKind == 2)
+            {
+                int32 callStatus = DecodeStandaloneCallSiteRecord(
+                    bodyId, bodyOffset, recordIndex, recordStart,
+                    recordLength, artifactStart, artifactLength);
+                if (callStatus != 0)
+                {
+                    return callStatus;
+                }
+            }
+            else if (recordKind >= 3 && recordKind <= 0x0B)
+            {
+                return 2;
+            }
+            else
+            {
+                return 3;
+            }
+        }
+
+        if (!entryStateFound)
+        {
+            return 3;
+        }
+        Host.StandaloneDecoderBodies[bodyOffset + 33]
+            = Host.StandaloneDecoderCallCount[0] - callFirst;
     }
     return 0;
 }

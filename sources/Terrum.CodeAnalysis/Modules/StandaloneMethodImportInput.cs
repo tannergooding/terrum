@@ -330,6 +330,8 @@ internal readonly record struct CapturedStandaloneMethodImportInput(
         var methodMapCapacity = checked((artifactByteLength / 4) + 1);
         var constantMapCapacity = checked((artifactByteLength / 8) + 1);
         var formalCapacity = checked((artifactByteLength / 16) + 1);
+        var callSiteCapacity = checked((artifactByteLength / 20) + 1);
+        var callInputCapacity = checked((artifactByteLength / 4) + 1);
         return CreateHostBuffers().AddRange([
             new HostBuffer("StandaloneModuleDirectoryMode",
                 PrimitiveType.Int32, [1], false),
@@ -346,7 +348,7 @@ internal readonly record struct CapturedStandaloneMethodImportInput(
                 PrimitiveType.Int32, [0], true),
             new HostBuffer("StandaloneDecoderBodies",
                 PrimitiveType.Int32,
-                [.. new int[checked(methodCapacity * 32)]], true),
+                [.. new int[checked(methodCapacity * 34)]], true),
             new HostBuffer("StandaloneDecoderBodyOwners",
                 PrimitiveType.Int32,
                 [.. new int[bodyOwnerCapacity]], true),
@@ -366,12 +368,22 @@ internal readonly record struct CapturedStandaloneMethodImportInput(
                 PrimitiveType.Int32, [0], true),
             new HostBuffer("StandaloneDecoderMethodMapTargets",
                 PrimitiveType.Int32,
-                [.. new int[checked(methodMapCapacity * 3)]], true),
+                [.. new int[checked(methodMapCapacity * 4)]], true),
             new HostBuffer("StandaloneDecoderConstantMapCount",
                 PrimitiveType.Int32, [0], true),
             new HostBuffer("StandaloneDecoderConstantMapEntries",
                 PrimitiveType.Int32,
                 [.. new int[checked(constantMapCapacity * 3)]], true),
+            new HostBuffer("StandaloneDecoderCallCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneDecoderCalls",
+                PrimitiveType.Int32,
+                [.. new int[checked(callSiteCapacity * 14)]], true),
+            new HostBuffer("StandaloneDecoderCallInputCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneDecoderCallInputs",
+                PrimitiveType.Int32,
+                [.. new int[checked(callInputCapacity * 4)]], true),
             new HostBuffer("StandaloneDecoderLocalCallableCount",
                 PrimitiveType.Int32, [0], true),
             new HostBuffer("StandaloneDecoderLocalCallables",
