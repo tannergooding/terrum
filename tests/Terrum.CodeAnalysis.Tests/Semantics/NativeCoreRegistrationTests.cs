@@ -3884,6 +3884,79 @@ internal sealed class NativeCoreRegistrationTests
                 ]);
         }
 
+        byte[] AddLeadingPrefixModule(byte[] source)
+        {
+            var sourceIndex = new TrRmArtifactIndex(source, schema);
+            var tables = TrRmStructuralMetadataValidator
+                .ValidateAndGetExecutionTables(sourceIndex);
+            Assert.That(sourceIndex.TryGetSection(0x0001,
+                out var moduleSection, out var moduleCount), Is.True);
+            Assert.That(moduleCount, Is.EqualTo(1));
+            Assert.That(sourceIndex.TryGetSection(0x0010,
+                out _, out var moduleRefCount), Is.True);
+            Assert.That(moduleRefCount, Is.GreaterThan(0));
+            Assert.That(sourceIndex.TryGetSection(0x0013,
+                out var typeDefSection, out _), Is.True);
+
+            var prefixTypeDefRow = Enumerable.Range(1,
+                    tables.TypeDefs.Count)
+                .Single(row => tables.TypeDefs.GetName(row) == "Prefix");
+            Assert.That(prefixTypeDefRow, Is.EqualTo(1));
+            var dummyIdentityStringRow = BinaryPrimitives
+                .ReadInt32LittleEndian(typeDefSection.Slice(
+                    ((prefixTypeDefRow - 1) * 44) + 4, 4));
+            var originalModuleBytes = moduleSection.ToArray();
+            int ReadModuleInt32(int offset)
+                => BinaryPrimitives.ReadInt32LittleEndian(
+                    originalModuleBytes.AsSpan(offset, 4));
+            uint ReadModuleUInt32(int offset)
+                => BinaryPrimitives.ReadUInt32LittleEndian(
+                    originalModuleBytes.AsSpan(offset, 4));
+            var originalModule = new TrRmModuleRow(
+                ReadModuleInt32(0), ReadModuleUInt32(8),
+                ReadModuleUInt32(12), ReadModuleInt32(16),
+                ReadModuleInt32(32), 2,
+                ReadModuleInt32(40), ReadModuleInt32(44),
+                ReadModuleInt32(24), ReadModuleInt32(28),
+                ReadModuleUInt32(4));
+            var moduleRows = new[] {
+                new TrRmModuleRow(dummyIdentityStringRow,
+                    TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+                    0, 0, 1, 1, 1, 1),
+                originalModule,
+            };
+            var moduleBytes = TrRmModuleTableWriter.Encode(moduleRows,
+                tables.Strings, tables.Modules.ModuleRefCount,
+                tables.Modules.TypeDefCount,
+                tables.Modules.MethodDefCount,
+                tables.Modules.SourceFileCount, tables.Features.Count);
+
+            var sections = new List<TrRmSection>(
+                sourceIndex.SectionCount);
+            for (var sectionIndex = 0;
+                sectionIndex < sourceIndex.SectionCount;
+                sectionIndex++)
+            {
+                sourceIndex.GetSection(sectionIndex, out var kind,
+                    out var flags, out var bytes, out var recordCount);
+                if (kind == 0x0001)
+                {
+                    sections.Add(new TrRmSection(kind, flags, 2,
+                        moduleBytes));
+                }
+                else
+                {
+                    sections.Add(new TrRmSection(kind, flags,
+                        checked((uint)recordCount), bytes.ToArray()));
+                }
+            }
+
+            var result = TrRmArtifactWriter.Encode(sections, schema);
+            _ = TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
+                new TrRmArtifactIndex(result, schema));
+            return result;
+        }
+
         var middleArtifact = EmitMiddleProvider(middleSource);
         const string relocatedMiddleSource = """
             using Terrum.Interop;
@@ -3903,6 +3976,8 @@ internal sealed class NativeCoreRegistrationTests
             """;
         var relocatedMiddleArtifact
             = EmitMiddleProvider(relocatedMiddleSource);
+        var coLocatedRelocatedMiddleArtifact
+            = AddLeadingPrefixModule(relocatedMiddleArtifact);
         var middleTables = TrRmStructuralMetadataValidator
             .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
                 middleArtifact, schema));
@@ -3915,6 +3990,13 @@ internal sealed class NativeCoreRegistrationTests
             "middle/Middle", out var relocatedMiddleDefinitionId), Is.True);
         Assert.That(relocatedMiddleDefinitionId,
             Is.Not.EqualTo(middleDefinitionId));
+        var coLocatedMiddleTables = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
+                coLocatedRelocatedMiddleArtifact, schema));
+        Assert.That(coLocatedMiddleTables.Modules.GetIdentity(1),
+            Is.EqualTo("Prefix"));
+        Assert.That(coLocatedMiddleTables.Modules.GetIdentity(2),
+            Is.EqualTo("middle.module"));
         var nestedLeafImport = Enumerable.Range(1,
                 middleTables.Imports.Count)
             .Single(importRow => {
@@ -3960,7 +4042,7 @@ internal sealed class NativeCoreRegistrationTests
                     new TrRmStandardArtifactInput(schemaIdentity,
                         leafArtifact),
                     new TrRmStandardArtifactInput(schemaIdentity,
-                        relocatedMiddleArtifact),
+                        coLocatedRelocatedMiddleArtifact),
                 ]);
         var relocatedMiddle = relocatedProviderReference.Structures.Single(
             static structure => structure.Name == "Middle");
@@ -3992,7 +4074,7 @@ internal sealed class NativeCoreRegistrationTests
                 new TrRmStandardArtifactInput(schemaIdentity,
                     relocatedReemittedArtifact), "relocated.forwarder", [
                     new TrRmStandardArtifactInput(schemaIdentity,
-                        relocatedMiddleArtifact),
+                        coLocatedRelocatedMiddleArtifact),
                     new TrRmStandardArtifactInput(schemaIdentity,
                         leafArtifact),
                 ]);

@@ -1335,9 +1335,10 @@ under the active hold. Source emission retains the exact selected provider
 ExportKey and refuses ambiguous aliases; a regression selects the non-first
 A2 key from a non-first co-located Module. The nested chain is also rebound
 with provider order reversed and a compatible Middle TypeDef/FieldDef/Layout
-row shift, then source-free
-re-emitted and reloaded. Co-located FNI Module root combinations and broader
-raw-row and dependency-composition permutations remain open.
+row shift; the FNI artifact places Prefix in Module 1 and selects Middle from
+Module 2. These paths are source-free re-emitted/reloaded and remain
+unverified. Broader multi-populated co-located FNI Module composition and
+raw-row/dependency-composition permutations remain open.
 Typed-pointer/function-pointer aggregate fields and full
 Import/Export/PS1/Contract/graph row remapping remain open. FNI call
 lowering now stages the receiver before source-order arguments, maps explicit
