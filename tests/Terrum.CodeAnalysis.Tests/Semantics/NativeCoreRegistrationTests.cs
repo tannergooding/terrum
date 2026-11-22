@@ -622,6 +622,18 @@ internal sealed class NativeCoreRegistrationTests
     [TestCase("int32", "value * 2", (byte)0x23, TokenKind.Star, false,
         SourceArithmeticProfile.Release, BoundIntegerOverflowBehavior.Wrapping,
         (ushort)2, false)]
+    [TestCase("int32", "-value", (byte)0xC0, TokenKind.Minus, true,
+        SourceArithmeticProfile.Development,
+        BoundIntegerOverflowBehavior.Checked, (ushort)1, false)]
+    [TestCase("int32", "value + 1", (byte)0xC0, TokenKind.Plus, false,
+        SourceArithmeticProfile.Development,
+        BoundIntegerOverflowBehavior.Checked, (ushort)2, false)]
+    [TestCase("int32", "value / 2", (byte)0xC0, TokenKind.Slash, false,
+        SourceArithmeticProfile.Development,
+        BoundIntegerOverflowBehavior.Checked, (ushort)2, false)]
+    [TestCase("int32", "value % 2", (byte)0xC0, TokenKind.Percent, false,
+        SourceArithmeticProfile.Development,
+        BoundIntegerOverflowBehavior.Checked, (ushort)2, false)]
     [TestCase("int32", "value + 1", (byte)0x21, TokenKind.Plus, false,
         SourceArithmeticProfile.Release, BoundIntegerOverflowBehavior.Wrapping,
         (ushort)2, true)]
@@ -807,7 +819,7 @@ internal sealed class NativeCoreRegistrationTests
             NativeCoreRegistration = native,
             LayoutCoreRegistration = CreateLayoutRegistration(native),
             NativeOutputCoreRegistration = output,
-            SourceArithmeticProfile = SourceArithmeticProfile.Release,
+            SourceArithmeticProfile = SourceArithmeticProfile.Development,
         };
         const string providerSource = """
             [Terrum.Interop.NativeCallable(
@@ -891,8 +903,7 @@ internal sealed class NativeCoreRegistrationTests
             consumerTables.Contracts.Count);
         var entryCode = body.GetBlockCode(0).ToArray();
         Assert.That(entryCode, Does.Contain((byte)0x11));
-        Assert.That(entryCode, Does.Contain((byte)0x21));
-        Assert.That(entryCode, Does.Contain((byte)0x23));
+        Assert.That(entryCode, Does.Contain((byte)0xC0));
         var callSite = body.GetRecord(1);
         Assert.That((callSite[24], callSite[25],
                 BinaryPrimitives.ReadUInt16LittleEndian(callSite[26..])),
@@ -906,9 +917,10 @@ internal sealed class NativeCoreRegistrationTests
         var mixedBody = consumerTables.Bodies.GetRegisterBody(
             consumerTables.Methods.GetBodyRow(mixedInvokeRow),
             consumerTables.Contracts.Count);
-        Assert.That(mixedBody.GetBlockCode(0).ToArray().Take(8),
+        Assert.That(mixedBody.GetBlockCode(0).ToArray().Take(10),
             Is.EqualTo(new byte[] {
-                0x90, 1, 0x11, 0x22, 0x11, 0x13, 0x21, 0x32,
+                0x90, 1, 0x11, 0x22, 0x11, 0x13,
+                0xC0, 0x01, 0xF2, 0x32,
             }));
         var mixedCallSite = mixedBody.GetRecord(2);
         Assert.That((mixedCallSite[24], mixedCallSite[25],
@@ -957,14 +969,14 @@ internal sealed class NativeCoreRegistrationTests
             var second = (BoundBinary)selectedCall.Arguments[1];
             Assert.That(first.Operator, Is.EqualTo(TokenKind.Plus));
             Assert.That(first.OverflowBehavior,
-                Is.EqualTo(BoundIntegerOverflowBehavior.Wrapping));
+                Is.EqualTo(BoundIntegerOverflowBehavior.Checked));
             Assert.That(first.Left, Is.TypeOf<BoundRead>());
             Assert.That(((BoundRead)first.Left).Variable, Is.EqualTo(1));
             Assert.That(first.Right, Is.TypeOf<BoundRead>());
             Assert.That(((BoundRead)first.Right).Variable, Is.EqualTo(2));
             Assert.That(second.Operator, Is.EqualTo(TokenKind.Star));
             Assert.That(second.OverflowBehavior,
-                Is.EqualTo(BoundIntegerOverflowBehavior.Wrapping));
+                Is.EqualTo(BoundIntegerOverflowBehavior.Checked));
             Assert.That(second.Left, Is.TypeOf<BoundRead>());
             Assert.That(((BoundRead)second.Left).Variable, Is.EqualTo(2));
             Assert.That(second.Right, Is.TypeOf<BoundConstant>());
@@ -1005,6 +1017,8 @@ internal sealed class NativeCoreRegistrationTests
             Assert.That(selectedCall.Arguments[1], Is.TypeOf<BoundBinary>());
             var expression = (BoundBinary)selectedCall.Arguments[1];
             Assert.That(expression.Operator, Is.EqualTo(TokenKind.Plus));
+            Assert.That(expression.OverflowBehavior,
+                Is.EqualTo(BoundIntegerOverflowBehavior.Checked));
             Assert.That(expression.Left, Is.TypeOf<BoundRead>());
             Assert.That(((BoundRead)expression.Left).Variable,
                 Is.EqualTo(2));

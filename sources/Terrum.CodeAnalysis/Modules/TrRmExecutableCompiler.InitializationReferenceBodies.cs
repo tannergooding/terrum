@@ -2135,10 +2135,11 @@ public static partial class TrRmExecutableCompiler
         return expression as BoundCall;
     }
 
-    private static bool TryGetForeignInterfaceScalarUnaryOpcode(
-        BoundUnary unary, out byte opcode)
+    private static bool TryGetForeignInterfaceScalarUnaryEncoding(
+        BoundUnary unary, out byte opcode, out byte control)
     {
         opcode = 0;
+        control = 0;
         if (unary.Operator != TokenKind.Minus
             || unary.Operand.Type != unary.Type
             || !DirectNativeImportContract.IsScalar(unary.Type))
@@ -2154,6 +2155,15 @@ public static partial class TrRmExecutableCompiler
             return true;
         }
 
+        if (PrimitiveTypeFacts.IsIntegerOrWide(unary.Type)
+            && unary.OverflowBehavior
+                == BoundIntegerOverflowBehavior.Checked)
+        {
+            opcode = 0xC0;
+            control = 0x04;
+            return true;
+        }
+
         if (PrimitiveTypeFacts.IsFloating(unary.Type)
             && unary.OverflowBehavior
                 == BoundIntegerOverflowBehavior.Checked)
@@ -2165,10 +2175,11 @@ public static partial class TrRmExecutableCompiler
         return false;
     }
 
-    private static bool TryGetForeignInterfaceScalarBinaryOpcode(
-        BoundBinary binary, out byte opcode)
+    private static bool TryGetForeignInterfaceScalarBinaryEncoding(
+        BoundBinary binary, out byte opcode, out byte control)
     {
         opcode = 0;
+        control = 0;
         if (binary.Left.Type != binary.Type
             || binary.Right.Type != binary.Type
             || !DirectNativeImportContract.IsScalar(binary.Type))
@@ -2187,6 +2198,25 @@ public static partial class TrRmExecutableCompiler
                 _ => 0,
             };
             return opcode != 0;
+        }
+
+        if (PrimitiveTypeFacts.IsIntegerOrWide(binary.Type)
+            && binary.OverflowBehavior
+                == BoundIntegerOverflowBehavior.Checked)
+        {
+            control = binary.Operator switch {
+                TokenKind.Plus => 0x01,
+                TokenKind.Minus => 0x02,
+                TokenKind.Star => 0x03,
+                TokenKind.Slash => 0x0C,
+                TokenKind.Percent => 0x0D,
+                _ => 0,
+            };
+            if (control != 0)
+            {
+                opcode = 0xC0;
+                return true;
+            }
         }
 
         if (PrimitiveTypeFacts.IsFloating(binary.Type)
@@ -2281,8 +2311,8 @@ public static partial class TrRmExecutableCompiler
             if (candidate is BoundUnary unary)
             {
                 if (unary.Type != type
-                    || !TryGetForeignInterfaceScalarUnaryOpcode(unary,
-                        out _))
+                    || !TryGetForeignInterfaceScalarUnaryEncoding(unary,
+                        out _, out _))
                 {
                     return (false, 0, false);
                 }
@@ -2296,8 +2326,8 @@ public static partial class TrRmExecutableCompiler
             if (candidate is BoundBinary binary)
             {
                 if (binary.Type != type
-                    || !TryGetForeignInterfaceScalarBinaryOpcode(binary,
-                        out _))
+                    || !TryGetForeignInterfaceScalarBinaryEncoding(binary,
+                        out _, out _))
                 {
                     return (false, 0, false);
                 }
@@ -2418,8 +2448,8 @@ public static partial class TrRmExecutableCompiler
 
             if (candidate is BoundUnary unary
                 && unary.Type == type
-                && TryGetForeignInterfaceScalarUnaryOpcode(unary,
-                    out var unaryOpcode))
+                && TryGetForeignInterfaceScalarUnaryEncoding(unary,
+                    out var unaryOpcode, out var unaryControl))
             {
                 var operand = Emit(unary.Operand, type);
                 if (!operand.OwnsRegister)
@@ -2428,16 +2458,29 @@ public static partial class TrRmExecutableCompiler
                         "A Standard F+I unary operation would overwrite a ConstantMap register.");
                 }
 
-                code.Add(unaryOpcode);
-                code.Add(checked((byte)((operand.Register << 4)
-                    | operand.Register)));
+                if (unaryOpcode == 0xC0)
+                {
+                    var payload = checked((ushort)(
+                        operand.Register | (0x0F << 4)
+                        | (operand.Register << 8) | (0x0F << 12)));
+                    code.Add(unaryOpcode);
+                    code.Add(unaryControl);
+                    code.Add((byte)payload);
+                    code.Add((byte)(payload >> 8));
+                }
+                else
+                {
+                    code.Add(unaryOpcode);
+                    code.Add(checked((byte)((operand.Register << 4)
+                        | operand.Register)));
+                }
                 return operand;
             }
 
             if (candidate is BoundBinary binary
                 && binary.Type == type
-                && TryGetForeignInterfaceScalarBinaryOpcode(binary,
-                    out var binaryOpcode))
+                && TryGetForeignInterfaceScalarBinaryEncoding(binary,
+                    out var binaryOpcode, out var binaryControl))
             {
                 var left = Emit(binary.Left, type);
                 var right = Emit(binary.Right, type);
@@ -2447,9 +2490,23 @@ public static partial class TrRmExecutableCompiler
                         "A Standard F+I binary operation would overwrite a ConstantMap register.");
                 }
 
-                code.Add(binaryOpcode);
-                code.Add(checked((byte)((right.Register << 4)
-                    | left.Register)));
+                if (binaryOpcode == 0xC0)
+                {
+                    var payload = checked((ushort)(
+                        left.Register | (0x0F << 4)
+                        | (left.Register << 8)
+                        | (right.Register << 12)));
+                    code.Add(binaryOpcode);
+                    code.Add(binaryControl);
+                    code.Add((byte)payload);
+                    code.Add((byte)(payload >> 8));
+                }
+                else
+                {
+                    code.Add(binaryOpcode);
+                    code.Add(checked((byte)((right.Register << 4)
+                        | left.Register)));
+                }
                 return left;
             }
 
@@ -7717,9 +7774,11 @@ public static partial class TrRmExecutableCompiler
                                 ? BoundIntegerOverflowBehavior.Wrapping
                                 : BoundIntegerOverflowBehavior.Checked,
                         };
-                        if (!TryGetForeignInterfaceScalarUnaryOpcode(unary,
-                                out var expectedOpcode)
-                            || expectedOpcode != opcode)
+                        if (!TryGetForeignInterfaceScalarUnaryEncoding(
+                                unary, out var expectedOpcode,
+                                out var expectedControl)
+                            || expectedOpcode != opcode
+                            || expectedControl != 0)
                         {
                             throw Invalid(
                                 "A Standard F+I unary operation has an unsupported type or overflow policy.");
@@ -7753,12 +7812,106 @@ public static partial class TrRmExecutableCompiler
                             ? BoundIntegerOverflowBehavior.Wrapping
                             : BoundIntegerOverflowBehavior.Checked,
                     };
-                    if (!TryGetForeignInterfaceScalarBinaryOpcode(binary,
-                            out var expectedOpcode)
-                        || expectedOpcode != opcode)
+                    if (!TryGetForeignInterfaceScalarBinaryEncoding(binary,
+                            out var expectedOpcode,
+                            out var expectedControl)
+                        || expectedOpcode != opcode
+                        || expectedControl != 0)
                     {
                         throw Invalid(
                             "A Standard F+I binary operation has incompatible types or overflow policy.");
+                    }
+
+                    valueByRegister[destinationRegister] = binary;
+                    break;
+                }
+                case 0xC0:
+                {
+                    if (!foreignInterfaceDirectCallBody)
+                    {
+                        throw Unsupported(
+                            "A Standard initialization-reference Body does not use direct scalar arithmetic operations.");
+                    }
+
+                    var control = instruction[1];
+                    var payload = BinaryPrimitives
+                        .ReadUInt16LittleEndian(instruction[2..]);
+                    var destinationRegister = payload & 0x0F;
+                    var result1 = (payload >> 4) & 0x0F;
+                    var source0Register = (payload >> 8) & 0x0F;
+                    var source1Register = payload >> 12;
+                    if (destinationRegister >= 14 || result1 != 15
+                        || source0Register >= 14
+                        || callSiteValueResultRegisters.Contains(
+                            destinationRegister)
+                        || outputPlaceByRegister.ContainsKey(
+                            destinationRegister))
+                    {
+                        throw Invalid(
+                            "A Standard F+I checked arithmetic operation has an invalid or reserved result register.");
+                    }
+
+                    if (control == 0x04)
+                    {
+                        if (source1Register != 15
+                            || !valueByRegister.TryGetValue(source0Register,
+                                out var operand))
+                        {
+                            throw Invalid(
+                                "A Standard F+I checked unary operation has an invalid input.");
+                        }
+
+                        var unary = new BoundUnary(TokenKind.Minus, operand,
+                            operand.Type, default) {
+                            OverflowBehavior
+                                = BoundIntegerOverflowBehavior.Checked,
+                        };
+                        if (!TryGetForeignInterfaceScalarUnaryEncoding(
+                                unary, out var expectedOpcode,
+                                out var expectedControl)
+                            || expectedOpcode != 0xC0
+                            || expectedControl != control)
+                        {
+                            throw Invalid(
+                                "A Standard F+I checked unary operation has an unsupported type or overflow policy.");
+                        }
+
+                        valueByRegister[destinationRegister] = unary;
+                        break;
+                    }
+
+                    var operation = control switch {
+                        0x01 => TokenKind.Plus,
+                        0x02 => TokenKind.Minus,
+                        0x03 => TokenKind.Star,
+                        0x0C => TokenKind.Slash,
+                        0x0D => TokenKind.Percent,
+                        _ => throw Unsupported(
+                            "A Standard F+I checked arithmetic operation uses an unsupported control."),
+                    };
+                    if (source1Register >= 14
+                        || !valueByRegister.TryGetValue(source0Register,
+                            out var left)
+                        || !valueByRegister.TryGetValue(source1Register,
+                            out var right))
+                    {
+                        throw Invalid(
+                            "A Standard F+I checked arithmetic operation reads an uninitialized register.");
+                    }
+
+                    var binary = new BoundBinary(operation, left, right,
+                        left.Type, default) {
+                        OverflowBehavior
+                            = BoundIntegerOverflowBehavior.Checked,
+                    };
+                    if (!TryGetForeignInterfaceScalarBinaryEncoding(binary,
+                            out var expectedBinaryOpcode,
+                            out var expectedBinaryControl)
+                        || expectedBinaryOpcode != 0xC0
+                        || expectedBinaryControl != control)
+                    {
+                        throw Invalid(
+                            "A Standard F+I checked arithmetic operation has incompatible types or overflow policy.");
                     }
 
                     valueByRegister[destinationRegister] = binary;
@@ -8297,6 +8450,7 @@ public static partial class TrRmExecutableCompiler
                                 = new Dictionary<ushort, int>(
                                     callSiteValueResultRegisters.Count);
                             var nestedFormalIndices = new HashSet<int>();
+                            var hasScalarExpressionInput = false;
                             var inputOffset = 24;
                             for (var formal = 0;
                                 formal < member.Parameters.Length; formal++)
@@ -8377,6 +8531,30 @@ public static partial class TrRmExecutableCompiler
                                         throw Invalid(
                                             "A ForeignNativeInterface CallSite reuses a nested result register.");
                                     }
+                                    else if (registerArgument is BoundUnary or
+                                        BoundBinary)
+                                    {
+                                        var expressionConstants
+                                            = new HashSet<(PrimitiveType Type,
+                                                ScalarBits Bits)>();
+                                        if (!TryAnalyzeForeignInterfaceScalarInputExpression(
+                                                registerArgument, formalType,
+                                                function,
+                                                function.ParameterCount,
+                                                expressionConstants, out _))
+                                        {
+                                            throw Invalid(
+                                                "A ForeignNativeInterface CallSite contains an unsupported scalar expression input.");
+                                        }
+
+                                        hasScalarExpressionInput = true;
+                                    }
+                                    else if (registerArgument
+                                        is not BoundConstant)
+                                    {
+                                        throw Invalid(
+                                            "A ForeignNativeInterface register input is neither a ConstantMap value, nested result nor scalar expression.");
+                                    }
 
                                     argumentsByFormal[formal]
                                         = registerArgument;
@@ -8420,6 +8598,14 @@ public static partial class TrRmExecutableCompiler
                             {
                                 throw Invalid(
                                     "A ForeignNativeInterface CallSite does not consume each earlier nested result exactly once.");
+                            }
+
+                            if (foreignInterfaceDirectCallBody
+                                && hasScalarExpressionInput
+                                && nestedFormalByRegister.Count != 0)
+                            {
+                                throw Invalid(
+                                    "A Standard F+I direct-return or mixed-sequence CallSite cannot combine scalar expressions with nested CallSites.");
                             }
 
                             var arguments
@@ -9498,6 +9684,14 @@ public static partial class TrRmExecutableCompiler
         }
 
         var nestedInputCalls = nestedInputCallsBuilder.ToArray();
+        if (nestedInputCalls.Length != 0
+            && nestedInputOuterCall is BoundCall outerCall
+            && outerCall.Arguments.Any(IsForeignInterfaceScalarExpression))
+        {
+            throw Invalid(
+                "A Standard F+I direct-return or mixed-sequence CallSite cannot combine scalar expressions with nested CallSites.");
+        }
+
         BoundCall? GetNestedSequenceInputCall(BoundExpression expression)
         {
             var call = GetUnwrappedBoundCall(expression);
@@ -9505,6 +9699,17 @@ public static partial class TrRmExecutableCompiler
                 && (call.ForeignInterfaceCall is not null
                     || IsValidLocalScalarInputCall(call))
                 ? call : null;
+        }
+
+        static bool IsForeignInterfaceScalarExpression(
+            BoundExpression expression)
+        {
+            while (expression is BoundUnsafeExpression unsafeExpression)
+            {
+                expression = unsafeExpression.Expression;
+            }
+
+            return expression is BoundUnary or BoundBinary;
         }
 
         void AddNestedSequenceInputCalls(BoundExpression expression)
@@ -10058,6 +10263,12 @@ public static partial class TrRmExecutableCompiler
                 hasConstantInputs = true;
                 offset += 4;
             }
+            else if (code[offset] == 0xC0
+                && code.Length - offset >= 4)
+            {
+                hasScalarExpressions = true;
+                offset += 4;
+            }
             else if ((code[offset] == 0x11
                     || code[offset] is >= 0x20 and <= 0x2B)
                 && code.Length - offset >= 2)
@@ -10245,6 +10456,10 @@ public static partial class TrRmExecutableCompiler
             {
                 preparationOffset += 4;
             }
+            else if (rawEntryCode[preparationOffset] == 0xC0)
+            {
+                preparationOffset += 4;
+            }
             else if (rawEntryCode[preparationOffset] == 0x11
                 || rawEntryCode[preparationOffset] is >= 0x20 and <= 0x2B)
             {
@@ -10405,6 +10620,11 @@ public static partial class TrRmExecutableCompiler
                 || opcode is >= 0x20 and <= 0x2B)
             {
                 constantOffset += 2;
+                continue;
+            }
+            if (opcode == 0xC0)
+            {
+                constantOffset += 4;
                 continue;
             }
 
@@ -10735,6 +10955,109 @@ public static partial class TrRmExecutableCompiler
                 continue;
             }
 
+            if (opcode == 0xC0)
+            {
+                var control = rawEntryCode[preparationOffset + 1];
+                var payload = BinaryPrimitives.ReadUInt16LittleEndian(
+                    rawEntryCode[(preparationOffset + 2)..]);
+                var checkedDestination
+                    = checked((ushort)(payload & 0x0F));
+                var result1 = (payload >> 4) & 0x0F;
+                var checkedSource0
+                    = checked((ushort)((payload >> 8) & 0x0F));
+                var checkedSource1
+                    = checked((ushort)(payload >> 12));
+                if (checkedDestination is 0 or >= 14 || result1 != 15
+                    || checkedSource0 is 0 or >= 14
+                    || checkedDestination != checkedSource0
+                    || !availableRegisters.Contains(checkedDestination)
+                    || !writableExpressionRegisters.Contains(
+                        checkedDestination))
+                {
+                    throw Invalid(
+                        "The Standard F+I conditional-output checked operation has an invalid register mapping.");
+                }
+
+                var checkedLeftExpression
+                    = registerInputs[checkedSource0];
+                BoundExpression checkedOperation;
+                if (control == 0x04)
+                {
+                    if (checkedSource1 != 15)
+                    {
+                        throw Invalid(
+                            "The Standard F+I conditional-output checked negation has an invalid unused input.");
+                    }
+
+                    var checkedUnary = new BoundUnary(TokenKind.Minus,
+                        checkedLeftExpression, checkedLeftExpression.Type,
+                        default) {
+                        OverflowBehavior
+                            = BoundIntegerOverflowBehavior.Checked,
+                    };
+                    if (!TryGetForeignInterfaceScalarUnaryEncoding(
+                            checkedUnary,
+                            out var expectedOpcode,
+                            out var expectedControl)
+                        || expectedOpcode != 0xC0
+                        || expectedControl != control)
+                    {
+                        throw Invalid(
+                            "The Standard F+I conditional-output checked negation has an unsupported type.");
+                    }
+
+                    checkedOperation = checkedUnary;
+                }
+                else
+                {
+                    var operationToken = control switch {
+                        0x01 => TokenKind.Plus,
+                        0x02 => TokenKind.Minus,
+                        0x03 => TokenKind.Star,
+                        0x0C => TokenKind.Slash,
+                        0x0D => TokenKind.Percent,
+                        _ => throw Unsupported(
+                            "A Standard F+I conditional-output checked operation uses an unsupported control."),
+                    };
+                    if (checkedSource1 is 0 or >= 14
+                        || !availableRegisters.Contains(checkedSource1))
+                    {
+                        throw Invalid(
+                            "The Standard F+I conditional-output checked operation reads an unavailable input.");
+                    }
+
+                    var checkedRightExpression
+                        = registerInputs[checkedSource1];
+                    var checkedBinary = new BoundBinary(operationToken,
+                        checkedLeftExpression, checkedRightExpression,
+                        checkedLeftExpression.Type, default) {
+                        OverflowBehavior
+                            = BoundIntegerOverflowBehavior.Checked,
+                    };
+                    if (!TryGetForeignInterfaceScalarBinaryEncoding(
+                            checkedBinary, out var expectedOpcode,
+                            out var expectedControl)
+                        || expectedOpcode != 0xC0
+                        || expectedControl != control)
+                    {
+                        throw Invalid(
+                            "The Standard F+I conditional-output checked operation has incompatible types.");
+                    }
+
+                    checkedOperation = checkedBinary;
+                    _ = scalarExpressionResultRegisters.Remove(
+                        checkedSource1);
+                }
+
+                _ = scalarExpressionResultRegisters.Remove(
+                    checkedDestination);
+                registerInputs[checkedDestination] = checkedOperation;
+                _ = scalarExpressionResultRegisters.Add(
+                    checkedDestination);
+                preparationOffset += 4;
+                continue;
+            }
+
             if (opcode is not (>= 0x20 and <= 0x2B)
                 || destinationRegister is 0 or >= 14
                 || sourceRegister is 0 or >= 14
@@ -10764,9 +11087,9 @@ public static partial class TrRmExecutableCompiler
                         ? BoundIntegerOverflowBehavior.Wrapping
                         : BoundIntegerOverflowBehavior.Checked,
                 };
-                if (!TryGetForeignInterfaceScalarUnaryOpcode(unary,
-                        out var expectedOpcode)
-                    || expectedOpcode != opcode)
+                if (!TryGetForeignInterfaceScalarUnaryEncoding(unary,
+                        out var expectedOpcode, out var expectedControl)
+                    || expectedOpcode != opcode || expectedControl != 0)
                 {
                     throw Invalid(
                         "The Standard F+I conditional-output unary operation has an unsupported type or overflow policy.");
@@ -10792,9 +11115,9 @@ public static partial class TrRmExecutableCompiler
                         ? BoundIntegerOverflowBehavior.Wrapping
                         : BoundIntegerOverflowBehavior.Checked,
                 };
-                if (!TryGetForeignInterfaceScalarBinaryOpcode(binary,
-                        out var expectedOpcode)
-                    || expectedOpcode != opcode)
+                if (!TryGetForeignInterfaceScalarBinaryEncoding(binary,
+                        out var expectedOpcode, out var expectedControl)
+                    || expectedOpcode != opcode || expectedControl != 0)
                 {
                     throw Invalid(
                         "The Standard F+I conditional-output binary operation has incompatible types or overflow policy.");
