@@ -2467,13 +2467,18 @@ public static partial class TrRmExecutableCompiler
 
         return expression switch {
             BoundUnary unary =>
-                (PrimitiveTypeFacts.IsIntegerOrWide(unary.Type)
+                (unary.Operator == TokenKind.Minus
+                    && PrimitiveTypeFacts.IsIntegerOrWide(unary.Type)
                     && unary.OverflowBehavior
                         == BoundIntegerOverflowBehavior.Checked)
                 || ForeignInterfaceScalarInputExpressionMayThrow(
                     unary.Operand),
             BoundBinary binary =>
-                (PrimitiveTypeFacts.IsIntegerOrWide(binary.Type)
+                ((binary.Operator is TokenKind.Plus or TokenKind.Minus
+                    or TokenKind.Star or TokenKind.Slash or TokenKind.Percent
+                    or TokenKind.ShiftLeft or TokenKind.ShiftRight
+                    or TokenKind.ShiftRightUnsigned)
+                    && PrimitiveTypeFacts.IsIntegerOrWide(binary.Type)
                     && binary.OverflowBehavior
                         == BoundIntegerOverflowBehavior.Checked)
                 || ForeignInterfaceScalarInputExpressionMayThrow(

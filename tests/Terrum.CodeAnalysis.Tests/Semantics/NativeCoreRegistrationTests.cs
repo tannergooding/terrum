@@ -941,7 +941,7 @@ internal sealed class NativeCoreRegistrationTests
                     unsafe {
                         int32 status = IProbe.TryReadPair(receiver,
                             IProbe.GetIndex(receiver, first),
-                            second + first, &init value);
+                            second | first, &init value);
                         if (status >= 0) { return value; }
                         return fallback;
                     }
@@ -1002,7 +1002,7 @@ internal sealed class NativeCoreRegistrationTests
         Assert.That(mixedBody.GetBlockCode(0).ToArray().Take(8),
             Is.EqualTo(new byte[] {
                 0x90, 1, 0x11, 0x22, 0x11, 0x13,
-                0x21, 0x32,
+                0x31, 0x32,
             }));
         var mixedCallSite = mixedBody.GetRecord(2);
         Assert.That((mixedCallSite[24], mixedCallSite[25],
@@ -1239,9 +1239,9 @@ internal sealed class NativeCoreRegistrationTests
             Assert.That(selectedCall.ParameterIndex(1), Is.EqualTo(1));
             Assert.That(selectedCall.Arguments[1], Is.TypeOf<BoundBinary>());
             var expression = (BoundBinary)selectedCall.Arguments[1];
-            Assert.That(expression.Operator, Is.EqualTo(TokenKind.Plus));
+            Assert.That(expression.Operator, Is.EqualTo(TokenKind.Pipe));
             Assert.That(expression.OverflowBehavior,
-                Is.EqualTo(BoundIntegerOverflowBehavior.Wrapping));
+                Is.EqualTo(BoundIntegerOverflowBehavior.Checked));
             Assert.That(expression.Left, Is.TypeOf<BoundRead>());
             Assert.That(((BoundRead)expression.Left).Variable,
                 Is.EqualTo(2));
