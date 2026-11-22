@@ -3306,7 +3306,8 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
                 fieldPathReemittedTables.Contracts.Count);
         Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
                 extraReadBody.FieldMap),
-            Is.EqualTo(0x1D00_0001u));
+            Is.EqualTo(0x1C00_0000u
+                | checked((uint)fieldPathReemittedFieldImportRow)));
 
         var relocatedProvider = CreateRelocatedClassProvider(
             "StructProvider", schemaIdentity, includePrefixField: true);
