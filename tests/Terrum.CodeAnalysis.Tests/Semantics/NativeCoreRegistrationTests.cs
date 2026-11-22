@@ -36,7 +36,14 @@ internal sealed class NativeCoreRegistrationTests
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate NativeAggregateNestedPayload
         NativeAggregateNestedPayloadFunction(IntPtr receiver, IntPtr source,
-            NativeAggregateNestedPayload fallback);
+            IntPtr tagSource, NativeAggregateNestedPayload fallback);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int NativeTagFunction(IntPtr receiver, IntPtr source);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int NativeOutputTaggedPayloadFunction(IntPtr receiver,
+        IntPtr source, int tag, IntPtr value);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int NativePointerOutputCallback(IntPtr receiver,
@@ -2318,20 +2325,25 @@ internal sealed class NativeCoreRegistrationTests
             [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
             [ForeignNativeInterface(VTableByteOffset: uint32(0))]
             public interface IProbe {
+                public unsafe int32 GetTag(ptr<int32> tagSource);
+
                 [param(value): NativeOutput(
                     When: NativeOutputCondition.NonZero)]
                 public unsafe int32 TryReadPayload(ptr<int32> source,
-                    [Terrum.CodeAnalysis.DependsOn(this, nameof(source))]
+                    int32 tag,
+                    [Terrum.CodeAnalysis.DependsOn(
+                        this, nameof(source), nameof(tag))]
                     [Terrum.CodeAnalysis.ForwardsBacking(
                         this, nameof(source))]
                     write ptr<Payload> value);
             }
             Payload InvokePayload(ptr<void> receiver, ptr<int32> source,
-                Payload fallback) {
+                ptr<int32> tagSource, Payload fallback) {
                 init Payload value;
                 unsafe {
                     int32 status = IProbe.TryReadPayload(
-                        receiver, source, &init value);
+                        receiver, source,
+                        IProbe.GetTag(receiver, tagSource), &init value);
                     if (status != 0) { return value; }
                     return fallback;
                 }
@@ -2350,7 +2362,11 @@ internal sealed class NativeCoreRegistrationTests
             string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = compilation.Program
             ?? throw new AssertionException("Expected a bound provider.");
-        var member = program.Interfaces.Single().Members.Single();
+        var members = program.Interfaces.Single().Members;
+        Assert.That(members.Length, Is.EqualTo(2));
+        var getTag = members.Single(member => member.Name == "GetTag");
+        var tryReadPayload = members.Single(
+            member => member.Name == "TryReadPayload");
         var artifact = TrRmExecutableCompiler.EmitStandard(program,
             "provider.module", schemaIdentity, 1, [
                 new TrRmSourceTypeExport("", "Inner", "provider/Inner") {
@@ -2372,8 +2388,12 @@ internal sealed class NativeCoreRegistrationTests
                     GenericArity = 0,
                     InterfaceMethodExports = [
                         new TrRmSourceInterfaceMethodExport(
-                            member.SourceInputOrdinal,
-                            member.SourceDeclarationSpan,
+                            getTag.SourceInputOrdinal,
+                            getTag.SourceDeclarationSpan,
+                            "provider/IProbe.GetTag"),
+                        new TrRmSourceInterfaceMethodExport(
+                            tryReadPayload.SourceInputOrdinal,
+                            tryReadPayload.SourceDeclarationSpan,
                             "provider/IProbe.TryReadPayload"),
                     ],
                 },
@@ -2407,17 +2427,29 @@ internal sealed class NativeCoreRegistrationTests
         var body = tables.Bodies.GetRegisterBody(
             tables.Methods.GetBodyRow(method), tables.Contracts.Count);
         Assert.That(body.BlockCount, Is.EqualTo(3));
-        Assert.That(body.HomeCount, Is.EqualTo(5));
-        var outputHome = body.HomeMap.Slice(3 * 8, 8);
+        Assert.That(body.RecordCount, Is.EqualTo(5));
+        Assert.That(body.MethodCount, Is.EqualTo(2));
+        Assert.That(body.HomeCount, Is.EqualTo(6));
+        Assert.That(body.GetBlockCode(0)[..2].ToArray(),
+            Is.EqualTo(new byte[] { 0x90, 1 }));
+        var nestedCallPayload = body.GetRecord(1)[4..];
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+            nestedCallPayload[6..]), Is.EqualTo((ushort)1));
+        var outerCallPayload = body.GetRecord(2)[4..];
+        Assert.That(outerCallPayload[24], Is.EqualTo(1));
+        Assert.That(outerCallPayload[25], Is.EqualTo(1));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+            outerCallPayload[26..]), Is.EqualTo((ushort)1));
+        var outputHome = body.HomeMap.Slice(4 * 8, 8);
         var outputTypeMapIndex
             = BinaryPrimitives.ReadUInt16LittleEndian(outputHome[2..]);
         var outputTypeToken = BinaryPrimitives.ReadUInt32LittleEndian(
             body.TypeMap[outputTypeMapIndex * sizeof(uint)..]);
         Assert.That(outputTypeToken >> 24, Is.EqualTo(0x13u));
         Assert.That(body.GetBlockCode(1).ToArray(),
-            Is.EqualTo(new byte[] { 0xD5, 0, 3, 0, 0x17, 0 }));
+            Is.EqualTo(new byte[] { 0xD5, 0, 4, 0, 0x17, 0 }));
         Assert.That(body.GetBlockCode(2).ToArray(),
-            Is.EqualTo(new byte[] { 0xD5, 0, 2, 0, 0x17, 0 }));
+            Is.EqualTo(new byte[] { 0xD5, 0, 3, 0, 0x17, 0 }));
 
         var loaded = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(schemaIdentity, artifact),
@@ -6225,21 +6257,37 @@ internal sealed class NativeCoreRegistrationTests
         var receiver = IntPtr.Zero;
         var vtable = IntPtr.Zero;
         var source = IntPtr.Zero;
-        NativeOutputPointFunction? callback = null;
+        var tagSource = IntPtr.Zero;
+        NativeTagFunction? tagCallback = null;
+        NativeOutputTaggedPayloadFunction? outputCallback = null;
+        var tagCalls = 0;
+        var payloadCalls = 0;
         try
         {
             await File.WriteAllBytesAsync(path, image).ConfigureAwait(true);
             module = NativeLibrary.Load(path);
             receiver = Marshal.AllocHGlobal(IntPtr.Size);
-            vtable = Marshal.AllocHGlobal(IntPtr.Size);
+            vtable = Marshal.AllocHGlobal(2 * IntPtr.Size);
             source = Marshal.AllocHGlobal(sizeof(int));
-            callback = (actualReceiver, actualSource, value) => {
-                if (actualReceiver != receiver)
+            tagSource = Marshal.AllocHGlobal(sizeof(int));
+            tagCallback = (actualReceiver, actualSource) => {
+                if (actualReceiver != receiver || actualSource != tagSource)
                 {
                     return 0;
                 }
 
-                if (Marshal.ReadInt32(actualSource) == 0)
+                tagCalls++;
+                return Marshal.ReadInt32(actualSource);
+            };
+            outputCallback = (actualReceiver, actualSource, tag, value) => {
+                payloadCalls++;
+                if (actualReceiver != receiver || actualSource != source
+                    || tagCalls != payloadCalls)
+                {
+                    return 0;
+                }
+
+                if (tag == 0)
                 {
                     Marshal.WriteInt64(value, -1);
                     return 0;
@@ -6251,9 +6299,12 @@ internal sealed class NativeCoreRegistrationTests
                 return 1;
             };
             Marshal.WriteIntPtr(vtable,
-                Marshal.GetFunctionPointerForDelegate(callback));
+                Marshal.GetFunctionPointerForDelegate(tagCallback));
+            Marshal.WriteIntPtr(vtable, IntPtr.Size,
+                Marshal.GetFunctionPointerForDelegate(outputCallback));
             Marshal.WriteIntPtr(receiver, vtable);
             Marshal.WriteInt32(source, 1);
+            Marshal.WriteInt32(tagSource, 7);
 
             var invoke = Marshal.GetDelegateForFunctionPointer<
                 NativeAggregateNestedPayloadFunction>(
@@ -6265,17 +6316,22 @@ internal sealed class NativeCoreRegistrationTests
                 },
                 Z = 6,
             };
-            var result = invoke(receiver, source, fallback);
+            var result = invoke(receiver, source, tagSource, fallback);
             Assert.That(result.Inner.X, Is.EqualTo(11));
             Assert.That(result.Inner.Y, Is.EqualTo(22));
             Assert.That(result.Z, Is.EqualTo(33));
+            Assert.That(tagCalls, Is.EqualTo(1));
+            Assert.That(payloadCalls, Is.EqualTo(1));
 
-            Marshal.WriteInt32(source, 0);
-            result = invoke(receiver, source, fallback);
+            Marshal.WriteInt32(tagSource, 0);
+            result = invoke(receiver, source, tagSource, fallback);
             Assert.That(result.Inner.X, Is.EqualTo(fallback.Inner.X));
             Assert.That(result.Inner.Y, Is.EqualTo(fallback.Inner.Y));
             Assert.That(result.Z, Is.EqualTo(fallback.Z));
-            GC.KeepAlive(callback);
+            Assert.That(tagCalls, Is.EqualTo(2));
+            Assert.That(payloadCalls, Is.EqualTo(2));
+            GC.KeepAlive(tagCallback);
+            GC.KeepAlive(outputCallback);
         }
         finally
         {
@@ -6286,6 +6342,10 @@ internal sealed class NativeCoreRegistrationTests
             if (source != IntPtr.Zero)
             {
                 Marshal.FreeHGlobal(source);
+            }
+            if (tagSource != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(tagSource);
             }
             if (vtable != IntPtr.Zero)
             {

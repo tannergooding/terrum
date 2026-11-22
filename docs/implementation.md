@@ -1355,7 +1355,11 @@ calls and direct void calls followed by void returns. Ordinary inputs may be
 read from caller parameters or scalar locals initialized from a direct
 parameter read; a single scalar-returning, no-output FNI call may also be
 nested as an outer explicit input, with both MethodMap targets and evaluation
-order preserved. The receiver is a direct parameter. One non-void call may
+order preserved. The conditional-output form now also supports one
+scalar-returning, no-output FNI call as an explicit input, using direct
+parameter inputs and executing the nested call before output reservation; its
+source-free/Windows x64 success and partial-failure regression remains
+unverified under the hold. The receiver is a direct parameter. One non-void call may
 reserve distinct local `init` Homes for each NativeOutput formal; source-use 6
 and reservation records use the receiver-first flattened ordinal
 (`formal n` maps to input `n+1`). Source-free decoding restores the
@@ -1420,10 +1424,10 @@ TypeSpec/D5 Body path, including non-first output-formal and named-input
 remapping; producer, source-free consumer, re-emission and Windows x64
 success/failure execution coverage, including NonNegative's zero-success
 boundary, is added but unverified under the hold. Other side-effecting argument
-expressions, defaults/constants, multiple calls, condition selectors beyond
-NonZero/NonNegative, other Body control-flow shapes, nonreturning-call forms
-beyond the terminal
-subset and reservation cancellation remain open.
+expressions beyond one nested scalar/no-output FNI input, defaults/constants,
+multiple calls, condition selectors beyond NonZero/NonNegative, other Body
+control-flow shapes, nonreturning-call forms beyond the terminal subset and
+reservation cancellation remain open.
 Supervised native execution, private persistence and dependent runtime work
 remain open. CLI qualification is still unverified. NativeParameter is not
 admitted on these methods or anchors, and neither FNI proposal is approved.
