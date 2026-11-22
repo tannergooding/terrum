@@ -1285,7 +1285,8 @@ public static partial class ModuleCompiler
                 {
                     if (!CanPublishCopy(output.PointeeType))
                     {
-                        continue;
+                        throw new ModuleContractException(
+                            "PF111 foreign-interface aggregate output lacks positive source or retained Copy evidence for its complete rootless layout closure.");
                     }
                 }
             }
