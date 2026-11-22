@@ -1222,6 +1222,168 @@ public static partial class ModuleCompiler
         }
     }
 
+    private static Module MaterializePrivateForeignInterfaceCopyEvidence(
+        Module module, PrivateModuleIdentityInputs? identityInputs)
+    {
+        if (module.FormatVersion != ForeignInterfacePrivateVersion
+            || module.ForeignInterfaces.IsEmpty)
+        {
+            return module;
+        }
+
+        var sourceOwnedTypes = new HashSet<PrimitiveType>();
+        if (identityInputs is not null)
+        {
+            foreach (var definition in identityInputs.Definitions)
+            {
+                var sourceIndex = (int)definition.Type - 100;
+                if (sourceIndex < 0
+                    || (uint)sourceIndex
+                        >= (uint)identityInputs.Program.Structures.Length
+                    || BoundEnumTypes.IsType(definition.Type)
+                    || ManagedClassTypes.IsManaged(definition.Type)
+                    || !PrivateModuleIdentityInputs.IsLocalSourceStructure(
+                        identityInputs.Program, sourceIndex,
+                        identityInputs.Program.Structures[sourceIndex].Name))
+                {
+                    continue;
+                }
+
+                var moduleType = RemapType(definition.Type,
+                    identityInputs.Program.Structures, module.Structures);
+                var hasOwnedOrigin = module.NominalTypeOrigins.Any(origin =>
+                    origin.PrivateType == moduleType
+                    && origin.OriginKind
+                        == BoundPrivateNominalOriginKind.OwnedDefinition
+                    && origin.UsingModuleIdentity
+                        == identityInputs.UsingModuleIdentity
+                    && origin.LocalDeclarationKey
+                        == definition.LocalDeclarationKey);
+                if (hasOwnedOrigin)
+                {
+                    _ = sourceOwnedTypes.Add(moduleType);
+                }
+            }
+        }
+
+        var structures = module.Structures.ToBuilder();
+        var state = new byte[structures.Count];
+        foreach (var @interface in module.ForeignInterfaces)
+        {
+            foreach (var memberReference in @interface.Members)
+            {
+                if ((uint)memberReference.ModuleFunctionIndex
+                        >= (uint)module.Functions.Length)
+                {
+                    throw new ModuleContractException(
+                        "PF111 Copy evidence closure has an invalid member function index.");
+                }
+
+                foreach (var output in module.Functions[
+                        memberReference.ModuleFunctionIndex]
+                    .NativeOutputContracts)
+                {
+                    if (!CanPublishCopy(output.PointeeType))
+                    {
+                        continue;
+                    }
+                }
+            }
+        }
+
+        return module with { Structures = structures.ToImmutable() };
+
+        bool CanPublishCopy(PrimitiveType type)
+        {
+            if (NativeFixedArrayTypes.IsType(type)
+                || CheckedReferenceTypes.IsType(type)
+                || ManagedClassTypes.IsManaged(type))
+            {
+                return false;
+            }
+            if (BoundEnumTypes.IsType(type))
+            {
+                return BoundEnumTypes.IsValidType(type,
+                    module.EnumDefinitions);
+            }
+            if (NativePointerTypes.IsType(type))
+            {
+                return NativePointerTypeContract.IsValidType(type,
+                    module.NativePointerTypes);
+            }
+            if (NativeFunctionPointerTypes.IsType(type))
+            {
+                return NativeFunctionPointerContract.IsValidType(type,
+                    module.NativeFunctionPointerSignatures);
+            }
+            if (type is PrimitiveType.NativeRawPointer
+                    or PrimitiveType.NativeUtf16ZPointer
+                    or PrimitiveType.NativeUtf8ZPointer
+                || PrimitiveTypeFacts.ScalarWidth(type) > 0)
+            {
+                return true;
+            }
+
+            var structureIndex = (int)type - 100;
+            if (structureIndex < 0
+                || (uint)structureIndex >= (uint)structures.Count)
+            {
+                return false;
+            }
+
+            var structure = structures[structureIndex];
+            if (structure.DeclaredCopyEvidence == false
+                || structure.IsUnique
+                || structure.CleanupMethod is not null
+                || structure.Fields.IsDefaultOrEmpty
+                || !NativeFixedArrayContract.IsRootlessCopyFieldType(type,
+                    module.Structures,
+                    module.NativeFixedArrayTypes,
+                    module.CheckedReferenceTypes))
+            {
+                return false;
+            }
+            if (state[structureIndex] == 1)
+            {
+                return false;
+            }
+            if (state[structureIndex] == 2)
+            {
+                return true;
+            }
+            if (state[structureIndex] == 3)
+            {
+                return false;
+            }
+
+            state[structureIndex] = 1;
+            foreach (var field in structure.Fields)
+            {
+                if (!CanPublishCopy(field.Type))
+                {
+                    state[structureIndex] = 3;
+                    return false;
+                }
+            }
+
+            if (structure.DeclaredCopyEvidence is null
+                && sourceOwnedTypes.Contains(type))
+            {
+                structures[structureIndex] = structure with {
+                    DeclaredCopyEvidence = true,
+                };
+            }
+            else if (structure.DeclaredCopyEvidence != true)
+            {
+                state[structureIndex] = 3;
+                return false;
+            }
+
+            state[structureIndex] = 2;
+            return true;
+        }
+    }
+
     private static ImmutableArray<BoundInterfaceDefinition>
         ReconstructPrivateForeignInterfaces(Module module)
     {
@@ -2320,6 +2482,8 @@ public static partial class ModuleCompiler
                         consumer.NativeFixedArrayTypes,
                         provider.NativeFixedArrayTypes,
                         consumer.Classes, provider.Classes)
+                    || (expectedStructure.DeclaredCopyEvidence == true
+                        && actualStructure.DeclaredCopyEvidence != true)
                     || !HasMatchingNominalOrigins(expectedType,
                         actualType)
                     || expectedStructure.Fields.Length

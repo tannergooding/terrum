@@ -525,6 +525,103 @@ internal sealed partial class CliTests
         }
     }
 
+    [Test]
+    public async Task PrivateFniAggregateOutputPublishesSourceCopyEvidenceAsync()
+    {
+        const string privateSchema
+            = "terrum/private-semantic-111-foreign-native-interfaces-1";
+        const string providerIdentity = "FniAggregateProvider";
+        const string source = """
+            using Terrum.Interop;
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Payload { public int32 Value; }
+            public int32 Add(int32 value) { return value + 1; }
+            [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+            [ForeignNativeInterface(VTableByteOffset: uint32(0))]
+            public interface IProbe {
+                [param(value): NativeOutput(
+                    When: NativeOutputCondition.NonZero)]
+                public unsafe int32 TryRead(ptr<int32> source,
+                    [Terrum.CodeAnalysis.DependsOn(this, nameof(source))]
+                    [Terrum.CodeAnalysis.ForwardsBacking(
+                        this, nameof(source))]
+                    write ptr<Payload> value);
+            }
+            """;
+        var sourceBytes = Encoding.UTF8.GetBytes(source);
+        var directory = TestArtifactPaths.CreateDirectory(
+            "terrum-private-fni-copy-evidence-");
+        var sourcePath = Path.Combine(directory, "provider.terrum");
+        var layoutManifest = Path.Combine(directory, "layout.json");
+        var nativeManifest = Path.Combine(directory, "native.json");
+        var nativeOutputManifest = Path.Combine(directory,
+            "native-output.json");
+        var identityManifest = Path.Combine(directory, "identity.json");
+        var artifact = Path.Combine(directory, "provider.trm");
+        try
+        {
+            await File.WriteAllBytesAsync(sourcePath, sourceBytes)
+                .ConfigureAwait(false);
+            await File.WriteAllTextAsync(layoutManifest,
+                CreateLayoutCoreManifest(providerIdentity))
+                .ConfigureAwait(false);
+            await File.WriteAllTextAsync(nativeManifest,
+                CreateNativeCoreManifest(usingModuleIdentity:
+                    providerIdentity, includeForeignNativeInterface: true))
+                .ConfigureAwait(false);
+            await File.WriteAllTextAsync(nativeOutputManifest,
+                CreateNativeOutputCoreManifest(
+                    usingModuleIdentity: providerIdentity))
+                .ConfigureAwait(false);
+
+            var owner = new {
+                interfaceOrdinal = 0,
+                localDeclarationKey = "contract.iprobe",
+                isExported = true,
+                members = new[] {
+                    new {
+                        memberOrdinal = 0,
+                        localDeclarationKey = "contract.iprobe.try-read",
+                    },
+                },
+            };
+            await File.WriteAllTextAsync(identityManifest,
+                CreateManifestV2(providerIdentity, [Digest(sourceBytes)],
+                    null, [owner], [],
+                    definitions: [
+                        new {
+                            kind = "struct",
+                            qualifiedName = "Payload",
+                            localDeclarationKey = "types.payload",
+                            isExported = true,
+                        },
+                    ])).ConfigureAwait(false);
+
+            var (exit, output, error) = await RunAsync([], [
+                "compile-module", "producer", sourcePath, "Add", "-o",
+                artifact, "--runtime", "fail-fast",
+                "--layout-core-manifest", layoutManifest,
+                "--native-core-manifest", nativeManifest,
+                "--native-output-core-manifest", nativeOutputManifest,
+                "--private-identity-manifest", identityManifest,
+                "--private-schema", privateSchema, "--json",
+            ]).ConfigureAwait(false);
+            Assert.That(exit, Is.Zero, output + error);
+            Assert.That(error, Is.Empty);
+            var reference = ModuleCompiler.CreateReferenceWithSchema(
+                await File.ReadAllBytesAsync(artifact).ConfigureAwait(false),
+                privateSchema);
+            Assert.That(reference.Structures.Single(static structure =>
+                structure.Name == "Payload").DeclaredCopyEvidence,
+                Is.True);
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
+                .ConfigureAwait(false);
+        }
+    }
+
     [TestCase("fail-fast")]
     [TestCase("checked-exceptions")]
     public async Task CompileModulePrivateSchemaSelectionPreservesRevisionBoundariesAsync(
@@ -1171,14 +1268,15 @@ internal sealed partial class CliTests
     private static string CreateManifestV2(string usingModuleIdentity,
         string[] sourceSha256, string? referenceProducerSha256,
         object[] foreignInterfaceDefinitions,
-        object[] foreignInterfaceImports)
+        object[] foreignInterfaceImports, object[]? definitions = null,
+        object[]? imports = null)
         => JsonSerializer.Serialize(new {
             schemaVersion = 2,
             usingModuleIdentity,
             sourceSha256,
             referenceProducerSha256,
-            definitions = Array.Empty<object>(),
-            imports = Array.Empty<object>(),
+            definitions = definitions ?? Array.Empty<object>(),
+            imports = imports ?? Array.Empty<object>(),
             enumMembers = Array.Empty<object>(),
             sourceEnumDefinitions = Array.Empty<object>(),
             foreignInterfaceDefinitions,

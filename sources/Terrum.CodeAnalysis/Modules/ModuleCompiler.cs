@@ -8949,6 +8949,8 @@ public static partial class ModuleCompiler
                 FormatVersion = requestedFormatVersion,
             };
         }
+        module = MaterializePrivateForeignInterfaceCopyEvidence(module,
+            identityInputs);
         ValidatePrivateForeignInterfaceDirectory(module, reading: false);
         module = CanonicalizePrivateForeignInterfaceModule(module);
         ValidatePrivateForeignInterfaceDirectory(module, reading: false);

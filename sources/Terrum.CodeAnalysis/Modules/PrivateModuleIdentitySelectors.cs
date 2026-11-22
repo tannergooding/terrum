@@ -378,7 +378,7 @@ public sealed partial class PrivateModuleIdentityInputs
     private static PrimitiveType ClassType(int index)
         => (PrimitiveType)checked(ManagedClassTypes.First + index);
 
-    private static bool IsLocalSourceStructure(BoundProgram program,
+    internal static bool IsLocalSourceStructure(BoundProgram program,
         int index, string qualifiedName)
     {
         if ((uint)index >= (uint)program.Structures.Length
