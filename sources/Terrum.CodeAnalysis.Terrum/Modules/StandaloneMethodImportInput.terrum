@@ -6,7 +6,24 @@ public static int32 ValidateStandaloneMethodImportInput()
 {
     if (Host.StandaloneRequest.Length != 6
         || Host.StandaloneArtifactInputs.Length % 4 != 0
-        || Host.StandaloneMethodRoots.Length % 5 != 0)
+        || Host.StandaloneMethodRoots.Length % 5 != 0
+        || Host.StandaloneSectionCount.Length != 1
+        || Host.StandaloneSectionArtifactOrdinal.Length != 1
+        || Host.StandaloneModuleCount.Length != 1
+        || Host.StandaloneSectionKinds.Length
+            != Host.StandaloneArtifacts.Length / 16 + 1
+        || Host.StandaloneSectionFlags.Length
+            != Host.StandaloneArtifacts.Length / 16 + 1
+        || Host.StandaloneSectionCounts.Length
+            != Host.StandaloneArtifacts.Length / 16 + 1
+        || Host.StandaloneSectionStarts.Length
+            != Host.StandaloneArtifacts.Length / 16 + 1
+        || Host.StandaloneSectionLengths.Length
+            != Host.StandaloneArtifacts.Length / 16 + 1
+        || Host.StandaloneSectionOrder.Length
+            != Host.StandaloneArtifacts.Length / 16 + 1
+        || Host.StandaloneModuleDirectory.Length
+            != (Host.StandaloneArtifacts.Length / 48 + 2) * 8)
     {
         return 1;
     }

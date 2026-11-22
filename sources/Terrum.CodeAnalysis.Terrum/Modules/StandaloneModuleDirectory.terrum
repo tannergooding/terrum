@@ -1,0 +1,516 @@
+namespace Terrum.CodeAnalysis;
+
+public static bool TryBuildStandaloneModuleDirectory()
+{
+    if (Host.StandaloneModuleCount.Length != 1)
+    {
+        return false;
+    }
+    Host.StandaloneModuleCount[0] = 0;
+    if (ValidateStandaloneMethodImportInput() != 0
+        || !TryValidateStandaloneArtifactDirectories()
+        || Host.StandaloneModuleDirectory.Length % 8 != 0)
+    {
+        return false;
+    }
+
+    int32 moduleCapacity = Host.StandaloneModuleDirectory.Length / 8;
+    if (moduleCapacity < 1)
+    {
+        return false;
+    }
+
+    int32 requestUsingStart = Host.StandaloneRequest[2];
+    int32 requestUsingLength = Host.StandaloneRequest[3];
+    WriteStandaloneModuleDirectoryRow(1, -1, 0, 0, 0, 0, 0,
+        requestUsingStart, requestUsingLength);
+    mut int32 moduleCount = 1;
+
+    for (mut int32 artifactOrdinal = 0;
+        artifactOrdinal < Host.StandaloneRequest[4];
+        artifactOrdinal = artifactOrdinal + 1)
+    {
+        if (!TryValidateStandaloneArtifactDirectory(artifactOrdinal))
+        {
+            return false;
+        }
+
+        int32 moduleEntry = FindStandaloneArtifactSection(0x0001);
+        int32 stringEntry = FindStandaloneArtifactSection(0x0002);
+        if (moduleEntry == 0 || stringEntry == 0)
+        {
+            return false;
+        }
+
+        int32 moduleStart = Host.StandaloneSectionStarts[moduleEntry];
+        int32 moduleSectionCount
+            = Host.StandaloneSectionCounts[moduleEntry];
+        int32 stringStart = Host.StandaloneSectionStarts[stringEntry];
+        int32 stringSectionLength
+            = Host.StandaloneSectionLengths[stringEntry];
+        int32 stringCount = Host.StandaloneSectionCounts[stringEntry];
+        init int32 artifactStart;
+        init int32 artifactLength;
+        if (!TryGetStandaloneArtifactExtent(artifactOrdinal,
+                ref init artifactStart, ref init artifactLength)
+            || moduleSectionCount <= 0
+            || !TryValidateStandaloneStringTable(artifactOrdinal,
+                stringStart, stringSectionLength, stringCount))
+        {
+            return false;
+        }
+
+        int32 moduleRefCount
+            = GetStandaloneArtifactSectionCount(0x0010);
+        int32 typeDefCount
+            = GetStandaloneArtifactSectionCount(0x0013);
+        int32 methodDefCount
+            = GetStandaloneArtifactSectionCount(0x0016);
+        int32 sourceFileCount
+            = GetStandaloneArtifactSectionCount(0x001F);
+        mut int32 previousModuleRefStart = 0;
+        mut int32 previousTypeDefStart = 0;
+        mut int32 previousMethodDefStart = 0;
+        mut int32 previousSourceFileStart = 0;
+        for (mut int32 moduleRow = 1;
+            moduleRow <= moduleSectionCount;
+            moduleRow = moduleRow + 1)
+        {
+            init uint32 identityStringRow;
+            init uint32 governingRuleEdition;
+            init uint32 targetRequirement;
+            init uint32 runtimePolicy;
+            init uint32 entryMethod;
+            init uint32 moduleFlags;
+            init uint32 featureFirst;
+            init uint32 featureCount;
+            init uint32 moduleRefStart;
+            init uint32 typeDefStart;
+            init uint32 methodDefStart;
+            init uint32 sourceFileStart;
+            int32 rowStart = moduleStart + ((moduleRow - 1) * 48);
+            if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                    artifactLength, rowStart, ref init identityStringRow)
+                || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                    artifactLength, rowStart + 4,
+                    ref init governingRuleEdition)
+                || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                    artifactLength, rowStart + 8,
+                    ref init targetRequirement)
+                || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                    artifactLength, rowStart + 12,
+                    ref init runtimePolicy)
+                || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                    artifactLength, rowStart + 16, ref init entryMethod)
+                || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                    artifactLength, rowStart + 20, ref init moduleFlags)
+                || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                    artifactLength, rowStart + 24, ref init featureFirst)
+                || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                    artifactLength, rowStart + 28,
+                    ref init featureCount)
+                || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                    artifactLength, rowStart + 32, ref init moduleRefStart)
+                || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                    artifactLength, rowStart + 36, ref init typeDefStart)
+                || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                    artifactLength, rowStart + 40,
+                    ref init methodDefStart)
+                || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                    artifactLength, rowStart + 44,
+                    ref init sourceFileStart)
+                || identityStringRow == 0
+                || identityStringRow > uint32(stringCount)
+                || governingRuleEdition != 1
+                || targetRequirement != 1 || runtimePolicy != 0
+                || entryMethod > uint32(methodDefCount)
+                || moduleFlags != 0
+                || !IsStandaloneModuleFeatureRange(
+                    featureFirst, featureCount,
+                    GetStandaloneArtifactSectionCount(0x0004))
+                || !IsStandaloneModuleCursor(moduleRefStart,
+                    moduleRefCount)
+                || !IsStandaloneModuleCursor(typeDefStart, typeDefCount)
+                || !IsStandaloneModuleCursor(methodDefStart,
+                    methodDefCount)
+                || !IsStandaloneModuleCursor(sourceFileStart,
+                    sourceFileCount)
+                || (moduleRow == 1
+                    && (moduleRefStart != 1 || typeDefStart != 1
+                        || methodDefStart != 1 || sourceFileStart != 1))
+                || (moduleRow > 1
+                    && (moduleRefStart
+                            < uint32(previousModuleRefStart)
+                        || typeDefStart < uint32(previousTypeDefStart)
+                        || methodDefStart
+                            < uint32(previousMethodDefStart)
+                        || sourceFileStart
+                            < uint32(previousSourceFileStart)))
+                || !TryValidateStandaloneStringName(artifactOrdinal,
+                    artifactStart, artifactLength, stringStart,
+                    stringSectionLength, stringCount,
+                    int32(identityStringRow)))
+            {
+                return false;
+            }
+
+            int32 methodEnd = moduleRow < moduleSectionCount
+                ? ReadStandaloneModuleCursor(artifactStart,
+                    artifactLength, moduleStart + (moduleRow * 48) + 40)
+                : methodDefCount + 1;
+            if (methodEnd < int32(methodDefStart)
+                || methodEnd > methodDefCount + 1
+                || (entryMethod != 0
+                    && (entryMethod < methodDefStart
+                        || entryMethod >= uint32(methodEnd))))
+            {
+                return false;
+            }
+
+            previousModuleRefStart = int32(moduleRefStart);
+            previousTypeDefStart = int32(typeDefStart);
+            previousMethodDefStart = int32(methodDefStart);
+            previousSourceFileStart = int32(sourceFileStart);
+            if (moduleCount + 1 >= moduleCapacity)
+            {
+                return false;
+            }
+
+            WriteStandaloneModuleDirectoryRow(moduleCount + 1,
+                artifactOrdinal, moduleRow, int32(identityStringRow),
+                stringStart, stringSectionLength, stringCount, -1, 0);
+            moduleCount = moduleCount + 1;
+        }
+    }
+
+    if (!SortStandaloneModuleDirectory(moduleCount, byName: false))
+    {
+        return false;
+    }
+    for (mut int32 row = 1; row < moduleCount; row = row + 1)
+    {
+        int32 left = row * 8;
+        int32 right = (row + 1) * 8;
+        if (Host.StandaloneModuleDirectory[left]
+                == Host.StandaloneModuleDirectory[right]
+            && Host.StandaloneModuleDirectory[left + 2]
+                == Host.StandaloneModuleDirectory[right + 2])
+        {
+            return false;
+        }
+    }
+
+    if (!SortStandaloneModuleDirectory(moduleCount, byName: true))
+    {
+        return false;
+    }
+    for (mut int32 row = 1; row < moduleCount; row = row + 1)
+    {
+        init int32 comparison;
+        if (!TryCompareStandaloneModuleDirectoryRows(row, row + 1,
+                ref init comparison)
+            || comparison == 0)
+        {
+            return false;
+        }
+    }
+
+    Host.StandaloneModuleCount[0] = moduleCount;
+    return true;
+}
+
+bool IsStandaloneModuleCursor(uint32 cursor, int32 tableCount)
+{
+    return tableCount >= 0 && tableCount <= 0xFF_FFFF
+        && cursor > 0 && cursor <= uint32(tableCount + 1);
+}
+
+bool IsStandaloneModuleFeatureRange(uint32 first, uint32 count,
+    int32 featureCount)
+{
+    if (featureCount < 0 || featureCount > 0xFF_FFFF)
+    {
+        return false;
+    }
+    if (first == 0 && count == 0)
+    {
+        return true;
+    }
+    return first > 0 && first <= 0xFF_FFFF
+        && count > 0 && count <= 0xFF_FFFF
+        && uint64(first) + uint64(count) - 1 <= 0xFF_FFFF
+        && uint64(first) + uint64(count)
+            <= uint64(featureCount) + 1;
+}
+
+int32 ReadStandaloneModuleCursor(int32 artifactStart,
+    int32 artifactLength, int32 absoluteOffset)
+{
+    init uint32 value;
+    if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+            artifactLength, absoluteOffset, ref init value)
+        || value > 0x100_0000)
+    {
+        return -1;
+    }
+    return int32(value);
+}
+
+void WriteStandaloneModuleDirectoryRow(int32 row,
+    int32 artifactOrdinal, int32 moduleRow, int32 identityStringRow,
+    int32 stringSectionStart, int32 stringSectionLength,
+    int32 stringCount, int32 directTextStart, int32 directTextLength)
+{
+    int32 offset = row * 8;
+    Host.StandaloneModuleDirectory[offset] = artifactOrdinal;
+    Host.StandaloneModuleDirectory[offset + 1] = moduleRow;
+    Host.StandaloneModuleDirectory[offset + 2] = identityStringRow;
+    Host.StandaloneModuleDirectory[offset + 3] = stringSectionStart;
+    Host.StandaloneModuleDirectory[offset + 4] = stringSectionLength;
+    Host.StandaloneModuleDirectory[offset + 5] = stringCount;
+    Host.StandaloneModuleDirectory[offset + 6] = directTextStart;
+    Host.StandaloneModuleDirectory[offset + 7] = directTextLength;
+}
+
+bool SortStandaloneModuleDirectory(int32 count, bool byName)
+{
+    mut int32 root = count / 2;
+    while (root > 0)
+    {
+        if (!SiftStandaloneModuleDirectory(root, count, byName))
+        {
+            return false;
+        }
+        root = root - 1;
+    }
+
+    mut int32 end = count;
+    while (end > 1)
+    {
+        SwapStandaloneModuleDirectoryRows(1, end);
+        end = end - 1;
+        if (!SiftStandaloneModuleDirectory(1, end, byName))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool SiftStandaloneModuleDirectory(int32 root, int32 end,
+    bool byName)
+{
+    mut int32 current = root;
+    while (current <= end / 2)
+    {
+        mut int32 child = current * 2;
+        init int32 comparison;
+        if (child < end
+            && !CompareStandaloneModuleDirectoryRows(
+                child, child + 1, byName, ref init comparison))
+        {
+            return false;
+        }
+        if (child < end && comparison < 0)
+        {
+            child = child + 1;
+        }
+
+        if (!CompareStandaloneModuleDirectoryRows(
+                current, child, byName, ref init comparison))
+        {
+            return false;
+        }
+        if (comparison >= 0)
+        {
+            return true;
+        }
+
+        SwapStandaloneModuleDirectoryRows(current, child);
+        current = child;
+    }
+    return true;
+}
+
+void SwapStandaloneModuleDirectoryRows(int32 firstRow, int32 secondRow)
+{
+    for (mut int32 field = 0; field < 8; field = field + 1)
+    {
+        mut int32 value = Host.StandaloneModuleDirectory[
+            firstRow * 8 + field];
+        Host.StandaloneModuleDirectory[firstRow * 8 + field]
+            = Host.StandaloneModuleDirectory[secondRow * 8 + field];
+        Host.StandaloneModuleDirectory[secondRow * 8 + field] = value;
+    }
+}
+
+bool CompareStandaloneModuleDirectoryRows(int32 firstRow,
+    int32 secondRow, bool byName, ref<init int32> comparison)
+    ensure return ? *comparison is init : true
+{
+    int32 firstOffset = firstRow * 8;
+    int32 secondOffset = secondRow * 8;
+    if (!byName)
+    {
+        int32 firstArtifact
+            = Host.StandaloneModuleDirectory[firstOffset];
+        int32 secondArtifact
+            = Host.StandaloneModuleDirectory[secondOffset];
+        if (firstArtifact < secondArtifact)
+        {
+            *comparison = -1;
+        }
+        else if (firstArtifact > secondArtifact)
+        {
+            *comparison = 1;
+        }
+        else if (Host.StandaloneModuleDirectory[firstOffset + 2]
+            < Host.StandaloneModuleDirectory[secondOffset + 2])
+        {
+            *comparison = -1;
+        }
+        else if (Host.StandaloneModuleDirectory[firstOffset + 2]
+            > Host.StandaloneModuleDirectory[secondOffset + 2])
+        {
+            *comparison = 1;
+        }
+        else
+        {
+            *comparison = 0;
+        }
+        return true;
+    }
+
+    int32 firstArtifact
+        = Host.StandaloneModuleDirectory[firstOffset];
+    int32 secondArtifact
+        = Host.StandaloneModuleDirectory[secondOffset];
+    if (firstArtifact < 0 && secondArtifact < 0)
+    {
+        int32 firstTextStart
+            = Host.StandaloneModuleDirectory[firstOffset + 6];
+        int32 firstTextLength
+            = Host.StandaloneModuleDirectory[firstOffset + 7];
+        int32 secondTextStart
+            = Host.StandaloneModuleDirectory[secondOffset + 6];
+        int32 secondTextLength
+            = Host.StandaloneModuleDirectory[secondOffset + 7];
+        return CompareStandaloneTextRanges(firstTextStart,
+            firstTextLength, secondTextStart, secondTextLength,
+            ref init *comparison);
+    }
+
+    if (firstArtifact < 0)
+    {
+        int32 identityRow
+            = Host.StandaloneModuleDirectory[secondOffset + 2];
+        if (!TryCompareStandaloneStringRowToText(
+            secondArtifact,
+            Host.StandaloneModuleDirectory[secondOffset + 3],
+            Host.StandaloneModuleDirectory[secondOffset + 4],
+            Host.StandaloneModuleDirectory[secondOffset + 5],
+            identityRow,
+            Host.StandaloneModuleDirectory[firstOffset + 6],
+            Host.StandaloneModuleDirectory[firstOffset + 7],
+            ref init *comparison))
+        {
+            return false;
+        }
+        *comparison = -*comparison;
+        return true;
+    }
+
+    if (secondArtifact < 0)
+    {
+        int32 identityRow
+            = Host.StandaloneModuleDirectory[firstOffset + 2];
+        if (!TryCompareStandaloneStringRowToText(
+                firstArtifact,
+                Host.StandaloneModuleDirectory[firstOffset + 3],
+                Host.StandaloneModuleDirectory[firstOffset + 4],
+                Host.StandaloneModuleDirectory[firstOffset + 5],
+                identityRow,
+                Host.StandaloneModuleDirectory[secondOffset + 6],
+                Host.StandaloneModuleDirectory[secondOffset + 7],
+                ref init *comparison))
+        {
+            return false;
+        }
+        *comparison = -*comparison;
+        return true;
+    }
+
+    return TryCompareStandaloneStringRows(
+        firstArtifact,
+        Host.StandaloneModuleDirectory[firstOffset + 3],
+        Host.StandaloneModuleDirectory[firstOffset + 4],
+        Host.StandaloneModuleDirectory[firstOffset + 5],
+        Host.StandaloneModuleDirectory[firstOffset + 2],
+        secondArtifact,
+        Host.StandaloneModuleDirectory[secondOffset + 3],
+        Host.StandaloneModuleDirectory[secondOffset + 4],
+        Host.StandaloneModuleDirectory[secondOffset + 5],
+        Host.StandaloneModuleDirectory[secondOffset + 2],
+        ref init *comparison);
+}
+
+bool CompareStandaloneTextRanges(int32 firstStart, int32 firstLength,
+    int32 secondStart, int32 secondLength, ref<init int32> comparison)
+    ensure return ? *comparison is init : true
+{
+    if (!IsWellFormedStandaloneIdentity(firstStart, firstLength)
+        || !IsWellFormedStandaloneIdentity(secondStart, secondLength))
+    {
+        return false;
+    }
+
+    mut int32 firstAt = firstStart;
+    mut int32 secondAt = secondStart;
+    int32 firstEnd = firstStart + firstLength;
+    int32 secondEnd = secondStart + secondLength;
+    while (firstAt < firstEnd && secondAt < secondEnd)
+    {
+        init int32 firstScalar;
+        init int32 secondScalar;
+        if (!TryReadStandaloneTextScalar(firstAt, firstEnd,
+                ref init firstScalar)
+            || !TryReadStandaloneTextScalar(secondAt, secondEnd,
+                ref init secondScalar))
+        {
+            return false;
+        }
+        if (firstScalar < secondScalar)
+        {
+            *comparison = -1;
+            return true;
+        }
+        if (firstScalar > secondScalar)
+        {
+            *comparison = 1;
+            return true;
+        }
+        firstAt = firstAt + Utf16ScalarWidth(firstScalar);
+        secondAt = secondAt + Utf16ScalarWidth(secondScalar);
+    }
+
+    if (firstAt == firstEnd && secondAt == secondEnd)
+    {
+        *comparison = 0;
+    }
+    else if (firstAt == firstEnd)
+    {
+        *comparison = -1;
+    }
+    else
+    {
+        *comparison = 1;
+    }
+    return true;
+}
+
+bool TryCompareStandaloneModuleDirectoryRows(int32 firstRow,
+    int32 secondRow, ref<init int32> comparison)
+{
+    return CompareStandaloneModuleDirectoryRows(firstRow,
+        secondRow, true, ref init *comparison);
+}

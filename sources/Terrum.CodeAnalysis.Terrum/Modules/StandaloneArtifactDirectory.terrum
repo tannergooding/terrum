@@ -1,0 +1,691 @@
+namespace Terrum.CodeAnalysis;
+
+public static bool TryValidateStandaloneArtifactDirectory(int32 artifactOrdinal)
+{
+    if (Host.StandaloneSectionCount.Length != 1
+        || Host.StandaloneSectionArtifactOrdinal.Length != 1
+        || Host.StandaloneRequest.Length != 6
+        || Host.StandaloneArtifactInputs.Length % 4 != 0
+        || artifactOrdinal < 0
+        || artifactOrdinal >= Host.StandaloneRequest[4]
+        || Host.StandaloneRequest[4]
+            != Host.StandaloneArtifactInputs.Length / 4)
+    {
+        return false;
+    }
+
+    Host.StandaloneSectionCount[0] = 0;
+    Host.StandaloneSectionArtifactOrdinal[0] = -1;
+    int32 inputRow = artifactOrdinal * 4;
+    int32 schemaStart = Host.StandaloneArtifactInputs[inputRow];
+    int32 schemaLength = Host.StandaloneArtifactInputs[inputRow + 1];
+    int32 artifactStart = Host.StandaloneArtifactInputs[inputRow + 2];
+    int32 artifactLength = Host.StandaloneArtifactInputs[inputRow + 3];
+    if (!IsStandaloneTextRange(schemaStart, schemaLength)
+        || !IsWellFormedStandaloneIdentity(schemaStart, schemaLength)
+        || !MatchesInitializationReferenceSchema(schemaStart,
+            schemaLength)
+        || artifactStart < 0
+        || artifactStart > Host.StandaloneArtifacts.Length
+        || artifactLength < 32
+        || artifactLength
+            > Host.StandaloneArtifacts.Length - artifactStart)
+    {
+        return false;
+    }
+
+    init uint32 magic;
+    init uint32 major;
+    init uint32 minor;
+    init uint32 headerLength;
+    init uint32 directoryCount;
+    init uint32 totalLength;
+    init uint32 directoryOffset;
+    if (!TryReadStandaloneArtifactWord(artifactStart, artifactLength,
+            0, ref init magic)
+        || magic != 0x4D52_5254
+        || !TryReadStandaloneArtifactHalfWord(artifactStart, artifactLength,
+            4, ref init major)
+        || major != 1
+        || !TryReadStandaloneArtifactHalfWord(artifactStart, artifactLength,
+            6, ref init minor)
+        || minor != 0
+        || !TryReadStandaloneArtifactWord(artifactStart, artifactLength,
+            8, ref init headerLength)
+        || headerLength != 32
+        || !TryReadStandaloneArtifactWord(artifactStart, artifactLength,
+            12, ref init directoryCount)
+        || directoryCount == 0
+        || directoryCount > uint32((artifactLength - 32) / 16)
+        || !TryReadStandaloneArtifactWord(artifactStart, artifactLength,
+            16, ref init totalLength)
+        || totalLength != uint32(artifactLength)
+        || !TryReadStandaloneArtifactWord(artifactStart, artifactLength,
+            20, ref init directoryOffset)
+        || directoryOffset != 32)
+    {
+        return false;
+    }
+
+    int32 entryCount = int32(directoryCount);
+    int32 directoryEnd = 32 + (entryCount * 16);
+    if (entryCount + 1 > Host.StandaloneSectionKinds.Length
+        || Host.StandaloneSectionFlags.Length
+            != Host.StandaloneSectionKinds.Length
+        || Host.StandaloneSectionCounts.Length
+            != Host.StandaloneSectionKinds.Length
+        || Host.StandaloneSectionStarts.Length
+            != Host.StandaloneSectionKinds.Length
+        || Host.StandaloneSectionLengths.Length
+            != Host.StandaloneSectionKinds.Length
+        || Host.StandaloneSectionOrder.Length
+            != Host.StandaloneSectionKinds.Length)
+    {
+        return false;
+    }
+
+    for (mut int32 offset = 24; offset < 32; offset = offset + 1)
+    {
+        init int32 reserved;
+        if (!TryReadStandaloneArtifactByte(artifactStart, artifactLength,
+                offset, ref init reserved)
+            || reserved != 0)
+        {
+            return false;
+        }
+    }
+
+    for (mut int32 slot = 0; slot <= entryCount; slot = slot + 1)
+    {
+        Host.StandaloneSectionKinds[slot] = 0;
+        Host.StandaloneSectionFlags[slot] = 0;
+        Host.StandaloneSectionCounts[slot] = 0;
+        Host.StandaloneSectionStarts[slot] = 0;
+        Host.StandaloneSectionLengths[slot] = 0;
+        Host.StandaloneSectionOrder[slot] = 0;
+    }
+
+    mut int32 previousKind = 0;
+    mut bool moduleFound = false;
+    for (mut int32 entry = 1;
+        entry <= entryCount;
+        entry = entry + 1)
+    {
+        init uint32 kind;
+        init uint32 flags;
+        init uint32 count;
+        init uint32 start;
+        init uint32 length;
+        int32 directoryRowStart = 32 + ((entry - 1) * 16);
+        if (!TryReadStandaloneArtifactHalfWord(artifactStart,
+                artifactLength, directoryRowStart, ref init kind)
+            || int32(kind) <= previousKind
+            || !TryReadStandaloneArtifactHalfWord(artifactStart,
+                artifactLength, directoryRowStart + 2, ref init flags)
+            || !TryReadStandaloneArtifactWord(artifactStart,
+                artifactLength, directoryRowStart + 4, ref init count)
+            || count == 0 || count > 0xFF_FFFF
+            || !TryReadStandaloneArtifactWord(artifactStart,
+                artifactLength, directoryRowStart + 8, ref init start)
+            || !TryReadStandaloneArtifactWord(artifactStart,
+                artifactLength, directoryRowStart + 12, ref init length)
+            || length == 0 || start < uint32(directoryEnd)
+            || start > uint32(artifactLength)
+            || length > uint32(artifactLength) - start)
+        {
+            return false;
+        }
+
+        int32 sectionKind = int32(kind);
+        int32 stride = GetStandaloneArtifactSectionStride(sectionKind);
+        if ((sectionKind < 0x8000 && stride < 0)
+            || (sectionKind < 0x8000
+                && int32(flags)
+                    != (sectionKind == 0x7F00 ? 2 : 0))
+            || (sectionKind >= 0x8000
+                && flags != 1 && flags != 2 && flags != 3)
+            || (stride > 0
+                && int64(length) != int64(count) * int64(stride))
+            || (sectionKind == 0x0002 && (start & 3) != 0))
+        {
+            return false;
+        }
+
+        previousKind = sectionKind;
+        Host.StandaloneSectionKinds[entry] = sectionKind;
+        Host.StandaloneSectionFlags[entry] = int32(flags);
+        Host.StandaloneSectionCounts[entry] = int32(count);
+        Host.StandaloneSectionStarts[entry]
+            = artifactStart + int32(start);
+        Host.StandaloneSectionLengths[entry] = int32(length);
+        Host.StandaloneSectionOrder[entry] = entry;
+        if (sectionKind == 0x0001)
+        {
+            moduleFound = true;
+        }
+    }
+
+    Host.StandaloneSectionCount[0] = entryCount;
+    if (!moduleFound
+        || !ValidateStandaloneArtifactPayloadExtents(
+            artifactStart, artifactLength, directoryEnd, entryCount)
+        || !ValidateStandaloneArtifactFeatures(
+            artifactStart, artifactLength)
+        || !ValidateStandaloneArtifactReferenceSlots(
+            artifactStart, artifactLength))
+    {
+        Host.StandaloneSectionCount[0] = 0;
+        return false;
+    }
+
+    Host.StandaloneSectionArtifactOrdinal[0] = artifactOrdinal;
+    return true;
+}
+
+public static bool TryValidateStandaloneArtifactDirectories()
+{
+    if (ValidateStandaloneMethodImportInput() != 0)
+    {
+        return false;
+    }
+
+    for (mut int32 artifact = 0;
+        artifact < Host.StandaloneRequest[4];
+        artifact = artifact + 1)
+    {
+        if (!TryValidateStandaloneArtifactDirectory(artifact))
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+public static bool TryGetStandaloneArtifactSection(int32 artifactOrdinal,
+    int32 queryKind, ref<init int32> found,
+    ref<init int32> sectionStart, ref<init int32> sectionLength,
+    ref<init int32> recordCount, ref<init int32> sectionFlags)
+    ensure return ? (*found is init && *sectionStart is init
+        && *sectionLength is init && *recordCount is init
+        && *sectionFlags is init) : true
+{
+    if (artifactOrdinal < 0 || queryKind < 0 || queryKind > 0xFFFF
+        || Host.StandaloneSectionArtifactOrdinal.Length != 1
+        || Host.StandaloneSectionArtifactOrdinal[0] != artifactOrdinal
+        || Host.StandaloneSectionCount.Length != 1
+        || Host.StandaloneSectionCount[0] <= 0)
+    {
+        return false;
+    }
+
+    int32 entry = FindStandaloneArtifactSection(queryKind);
+    if (entry == 0)
+    {
+        *found = 0;
+        *sectionStart = 0;
+        *sectionLength = 0;
+        *recordCount = 0;
+        *sectionFlags = 0;
+        return true;
+    }
+
+    *found = 1;
+    *sectionStart = Host.StandaloneSectionStarts[entry];
+    *sectionLength = Host.StandaloneSectionLengths[entry];
+    *recordCount = Host.StandaloneSectionCounts[entry];
+    *sectionFlags = Host.StandaloneSectionFlags[entry];
+    return true;
+}
+
+int32 GetStandaloneArtifactSectionStride(int32 kind)
+{
+    if (kind == 0x0001) { return 48; }
+    if (kind == 0x0002 || kind == 0x0003 || kind == 0x0011
+        || kind == 0x001B || kind == 0x0020 || kind == 0x004B
+        || kind == 0x7F00) { return 0; }
+    if (kind == 0x0004) { return 8; }
+    if (kind == 0x0010 || kind == 0x001C) { return 12; }
+    if (kind == 0x0013) { return 44; }
+    if (kind == 0x0014) { return 16; }
+    if (kind == 0x0015 || kind == 0x0016) { return 28; }
+    if (kind == 0x0017) { return 24; }
+    if (kind == 0x0018) { return 16; }
+    if (kind == 0x0019) { return 32; }
+    if (kind == 0x001A) { return 12; }
+    if (kind == 0x001D) { return 8; }
+    if (kind == 0x001E) { return 20; }
+    if (kind == 0x001F) { return 8; }
+    if (kind == 0x0021 || kind == 0x0022) { return 16; }
+    if (kind == 0x0023 || kind == 0x0024 || kind == 0x0026
+        || kind == 0x0027 || kind == 0x0032 || kind == 0x0036) { return 12; }
+    if (kind == 0x0025) { return 48; }
+    if (kind == 0x0028) { return 32; }
+    if (kind == 0x0029 || kind == 0x002A) { return 20; }
+    if (kind == 0x002B || kind == 0x002C) { return 12; }
+    if (kind == 0x002D) { return 20; }
+    if (kind == 0x002E) { return 16; }
+    if (kind == 0x002F) { return 40; }
+    if (kind == 0x0030) { return 8; }
+    if (kind == 0x0031 || kind == 0x0033) { return 16; }
+    if (kind == 0x0034) { return 20; }
+    if (kind == 0x0035) { return 16; }
+    if (kind == 0x0037 || kind == 0x0039 || kind == 0x003A
+        || kind == 0x003C) { return 8; }
+    if (kind == 0x0038 || kind == 0x003B) { return 16; }
+    if (kind == 0x003D) { return 12; }
+    if (kind == 0x003E) { return 16; }
+    if (kind == 0x003F) { return 24; }
+    if (kind == 0x0040 || kind == 0x0041) { return 12; }
+    if (kind == 0x0042) { return 80; }
+    if (kind == 0x0043 || kind == 0x0044) { return 8; }
+    if (kind == 0x0045 || kind == 0x0046) { return 20; }
+    if (kind == 0x0047) { return 24; }
+    if (kind == 0x0048) { return 8; }
+    if (kind == 0x0049) { return 16; }
+    if (kind == 0x004A) { return 4; }
+    return -1;
+}
+
+int32 FindStandaloneArtifactSection(int32 queryKind)
+{
+    mut int32 low = 1;
+    mut int32 high = Host.StandaloneSectionCount[0];
+    while (low <= high)
+    {
+        int32 middle = low + (high - low) / 2;
+        int32 candidate = Host.StandaloneSectionKinds[middle];
+        if (candidate == queryKind)
+        {
+            return middle;
+        }
+        if (candidate < queryKind)
+        {
+            low = middle + 1;
+        }
+        else
+        {
+            high = middle - 1;
+        }
+    }
+
+    return 0;
+}
+
+int32 GetStandaloneArtifactSectionCount(int32 queryKind)
+{
+    return Host.StandaloneSectionCounts[
+        FindStandaloneArtifactSection(queryKind)];
+}
+
+bool ValidateStandaloneArtifactPayloadExtents(int32 artifactStart,
+    int32 artifactLength, int32 directoryEnd, int32 entryCount)
+{
+    SortStandaloneArtifactSectionOrder(entryCount);
+    mut int32 cursor = directoryEnd;
+    for (mut int32 index = 1;
+        index <= entryCount;
+        index = index + 1)
+    {
+        int32 entry = Host.StandaloneSectionOrder[index];
+        int32 relativeStart
+            = Host.StandaloneSectionStarts[entry] - artifactStart;
+        int32 length = Host.StandaloneSectionLengths[entry];
+        if (relativeStart < cursor || relativeStart > artifactLength
+            || length > artifactLength - relativeStart)
+        {
+            return false;
+        }
+
+        for (mut int32 offset = cursor;
+            offset < relativeStart;
+            offset = offset + 1)
+        {
+            init int32 padding;
+            if (!TryReadStandaloneArtifactByte(artifactStart,
+                    artifactLength, offset, ref init padding)
+                || padding != 0)
+            {
+                return false;
+            }
+        }
+        cursor = relativeStart + length;
+    }
+
+    return cursor == artifactLength;
+}
+
+void SortStandaloneArtifactSectionOrder(int32 count)
+{
+    mut int32 root = count / 2;
+    while (root > 0)
+    {
+        SiftStandaloneArtifactSectionOrder(root, count);
+        root = root - 1;
+    }
+
+    mut int32 end = count;
+    while (end > 1)
+    {
+        mut int32 value = Host.StandaloneSectionOrder[1];
+        Host.StandaloneSectionOrder[1]
+            = Host.StandaloneSectionOrder[end];
+        Host.StandaloneSectionOrder[end] = value;
+        end = end - 1;
+        SiftStandaloneArtifactSectionOrder(1, end);
+    }
+}
+
+void SiftStandaloneArtifactSectionOrder(int32 root, int32 end)
+{
+    mut int32 current = root;
+    while (current <= end / 2)
+    {
+        mut int32 child = current * 2;
+        if (child < end
+            && Host.StandaloneSectionStarts[
+                Host.StandaloneSectionOrder[child]]
+                < Host.StandaloneSectionStarts[
+                    Host.StandaloneSectionOrder[child + 1]])
+        {
+            child = child + 1;
+        }
+
+        if (Host.StandaloneSectionStarts[
+                Host.StandaloneSectionOrder[current]]
+            >= Host.StandaloneSectionStarts[
+                Host.StandaloneSectionOrder[child]])
+        {
+            return;
+        }
+
+        mut int32 value = Host.StandaloneSectionOrder[current];
+        Host.StandaloneSectionOrder[current]
+            = Host.StandaloneSectionOrder[child];
+        Host.StandaloneSectionOrder[child] = value;
+        current = child;
+    }
+}
+
+bool ValidateStandaloneArtifactFeatures(int32 artifactStart,
+    int32 artifactLength)
+{
+    int32 featureCount = GetStandaloneArtifactSectionCount(0x0004);
+    int32 featureEntry = FindStandaloneArtifactSection(0x0004);
+    int32 featureStart = featureCount == 0 ? 0
+        : Host.StandaloneSectionStarts[featureEntry];
+    for (mut int32 row = 0; row < featureCount; row = row + 1)
+    {
+        init uint32 featureId;
+        init uint32 ruleRevision;
+        int32 rowStart = featureStart + row * 8;
+        if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, rowStart, ref init featureId)
+            || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, rowStart + 4, ref init ruleRevision)
+            || featureId == 0 || ruleRevision == 0)
+        {
+            return false;
+        }
+    }
+
+    int32 moduleEntry = FindStandaloneArtifactSection(0x0001);
+    if (moduleEntry == 0)
+    {
+        return false;
+    }
+    int32 moduleStart = Host.StandaloneSectionStarts[moduleEntry];
+    int32 moduleCount = Host.StandaloneSectionCounts[moduleEntry];
+    for (mut int32 row = 0; row < moduleCount; row = row + 1)
+    {
+        init uint32 featureFirst;
+        init uint32 moduleFeatureCount;
+        int32 rowStart = moduleStart + row * 48;
+        if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, rowStart + 24, ref init featureFirst)
+            || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, rowStart + 28,
+                ref init moduleFeatureCount))
+        {
+            return false;
+        }
+
+        if (featureFirst == 0 && moduleFeatureCount == 0)
+        {
+            continue;
+        }
+        if (featureFirst == 0 || moduleFeatureCount == 0
+            || featureFirst > 0xFF_FFFF
+            || moduleFeatureCount > 0xFF_FFFF
+            || uint64(featureFirst) + uint64(moduleFeatureCount) - 1
+                > 0xFF_FFFF
+            || uint64(featureFirst) + uint64(moduleFeatureCount)
+                > uint64(featureCount) + 1)
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool ValidateStandaloneArtifactReferenceSlots(int32 artifactStart,
+    int32 artifactLength)
+{
+    int32 entryCount = Host.StandaloneSectionCount[0];
+    for (mut int32 entry = 1;
+        entry <= entryCount;
+        entry = entry + 1)
+    {
+        if (Host.StandaloneSectionFlags[entry] != 2)
+        {
+            continue;
+        }
+
+        int32 sectionStart = Host.StandaloneSectionStarts[entry];
+        int32 sectionLength = Host.StandaloneSectionLengths[entry];
+        int32 sectionKind = Host.StandaloneSectionKinds[entry];
+        init uint32 slotCount;
+        if (sectionLength < 4
+            || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                artifactLength, sectionStart, ref init slotCount)
+            || slotCount > uint32((sectionLength - 4) / 16)
+            || (sectionKind == 0x7F00
+                && int64(4) + int64(slotCount) * 16
+                    + int64(Host.StandaloneSectionCounts[entry]) * 16
+                    != int64(sectionLength)))
+        {
+            return false;
+        }
+
+        for (mut int32 slot = 0;
+            slot < int32(slotCount);
+            slot = slot + 1)
+        {
+            init uint32 targetKind;
+            init uint32 selector;
+            init uint32 targetRow;
+            init uint32 block;
+            init uint32 reserved;
+            init uint32 ordinal;
+            int32 slotOffset = sectionStart + 4 + slot * 16;
+            if (!TryReadStandaloneArtifactAbsoluteHalfWord(
+                    artifactStart, artifactLength, slotOffset,
+                    ref init targetKind)
+                || !TryReadStandaloneArtifactAbsoluteHalfWord(
+                    artifactStart, artifactLength, slotOffset + 2,
+                    ref init selector)
+                || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                    artifactLength, slotOffset + 4, ref init targetRow)
+                || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                    artifactLength, slotOffset + 8, ref init block)
+                || !TryReadStandaloneArtifactAbsoluteHalfWord(
+                    artifactStart, artifactLength, slotOffset + 10,
+                    ref init reserved)
+                || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                    artifactLength, slotOffset + 12, ref init ordinal))
+            {
+                return false;
+            }
+
+            int32 targetKindValue = int32(targetKind);
+            if (targetRow == 0 || targetRow > 0xFF_FFFF
+                || reserved != 0
+                || (selector == 0 && (block != 0 || ordinal != 0))
+                || (selector == 0
+                    && (targetKindValue < 1 || targetKindValue > 0x004B
+                        || GetStandaloneArtifactSectionStride(
+                            targetKindValue) < 0
+                        || targetRow > uint32(
+                            GetStandaloneArtifactSectionCount(
+                                targetKindValue))))
+                || (selector == 1
+                    && (targetKindValue != 0
+                        || GetStandaloneArtifactSectionCount(0x0020) == 0
+                        || targetRow > uint32(
+                            GetStandaloneArtifactSectionCount(0x0020))))
+                || (sectionKind == 0x7F00
+                    && !((selector == 0 && targetKindValue == 0x001F)
+                        || (selector == 1 && targetKindValue == 0)))
+                || selector > 1)
+            {
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
+
+bool TryReadStandaloneArtifactByte(int32 artifactStart,
+    int32 artifactLength, int32 relativeOffset,
+    ref<init int32> value)
+{
+    if (artifactStart < 0 || artifactLength < 0
+        || artifactStart > Host.StandaloneArtifacts.Length
+        || artifactLength
+            > Host.StandaloneArtifacts.Length - artifactStart
+        || relativeOffset < 0 || relativeOffset >= artifactLength)
+    {
+        return false;
+    }
+
+    int32 part = Host.StandaloneArtifacts[artifactStart + relativeOffset];
+    if (part < 0 || part > 255)
+    {
+        return false;
+    }
+
+    *value = part;
+    return true;
+}
+
+bool TryReadStandaloneArtifactAbsoluteByte(int32 artifactStart,
+    int32 artifactLength, int32 absoluteOffset,
+    ref<init int32> value)
+{
+    if (absoluteOffset < artifactStart)
+    {
+        return false;
+    }
+
+    return TryReadStandaloneArtifactByte(artifactStart, artifactLength,
+        absoluteOffset - artifactStart, ref init *value);
+}
+
+bool TryReadStandaloneArtifactHalfWord(int32 artifactStart,
+    int32 artifactLength, int32 relativeOffset, ref<init uint32> value)
+{
+    init int32 first;
+    init int32 second;
+    if (!TryReadStandaloneArtifactByte(artifactStart, artifactLength,
+            relativeOffset, ref init first)
+        || !TryReadStandaloneArtifactByte(artifactStart, artifactLength,
+            relativeOffset + 1, ref init second))
+    {
+        return false;
+    }
+
+    *value = uint32(first) | (uint32(second) << 8);
+    return true;
+}
+
+bool TryReadStandaloneArtifactWord(int32 artifactStart,
+    int32 artifactLength, int32 relativeOffset, ref<init uint32> value)
+{
+    init int32 first;
+    init int32 second;
+    init int32 third;
+    init int32 fourth;
+    if (!TryReadStandaloneArtifactByte(artifactStart, artifactLength,
+            relativeOffset, ref init first)
+        || !TryReadStandaloneArtifactByte(artifactStart, artifactLength,
+            relativeOffset + 1, ref init second)
+        || !TryReadStandaloneArtifactByte(artifactStart, artifactLength,
+            relativeOffset + 2, ref init third)
+        || !TryReadStandaloneArtifactByte(artifactStart, artifactLength,
+            relativeOffset + 3, ref init fourth))
+    {
+        return false;
+    }
+
+    *value = uint32(first) | (uint32(second) << 8)
+        | (uint32(third) << 16) | (uint32(fourth) << 24);
+    return true;
+}
+
+bool TryReadStandaloneArtifactAbsoluteHalfWord(int32 artifactStart,
+    int32 artifactLength, int32 absoluteOffset, ref<init uint32> value)
+{
+    if (absoluteOffset < artifactStart)
+    {
+        return false;
+    }
+    return TryReadStandaloneArtifactHalfWord(artifactStart, artifactLength,
+        absoluteOffset - artifactStart, ref init *value);
+}
+
+bool TryReadStandaloneArtifactAbsoluteWord(int32 artifactStart,
+    int32 artifactLength, int32 absoluteOffset, ref<init uint32> value)
+{
+    if (absoluteOffset < artifactStart)
+    {
+        return false;
+    }
+    return TryReadStandaloneArtifactWord(artifactStart, artifactLength,
+        absoluteOffset - artifactStart, ref init *value);
+}
+
+bool TryGetStandaloneArtifactExtent(int32 artifactOrdinal,
+    ref<init int32> artifactStartResult,
+    ref<init int32> artifactLengthResult)
+    ensure return ? (*artifactStartResult is init
+        && *artifactLengthResult is init) : true
+{
+    if (Host.StandaloneRequest.Length != 6
+        || Host.StandaloneRequest[4] < 0
+        || artifactOrdinal < 0
+        || artifactOrdinal >= Host.StandaloneRequest[4]
+        || Host.StandaloneArtifactInputs.Length % 4 != 0
+        || Host.StandaloneArtifactInputs.Length / 4
+            != Host.StandaloneRequest[4])
+    {
+        return false;
+    }
+
+    int32 row = artifactOrdinal * 4;
+    int32 artifactStart = Host.StandaloneArtifactInputs[row + 2];
+    int32 artifactLength = Host.StandaloneArtifactInputs[row + 3];
+    if (artifactStart < 0
+        || artifactStart > Host.StandaloneArtifacts.Length
+        || artifactLength <= 0
+        || artifactLength
+            > Host.StandaloneArtifacts.Length - artifactStart)
+    {
+        return false;
+    }
+
+    *artifactStartResult = artifactStart;
+    *artifactLengthResult = artifactLength;
+    return true;
+}

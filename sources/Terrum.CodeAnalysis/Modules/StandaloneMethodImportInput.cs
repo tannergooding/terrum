@@ -115,6 +115,9 @@ internal readonly record struct CapturedStandaloneMethodImportInput(
                 checked(Artifacts.Length * 4));
         var methodRoots = ImmutableArray.CreateBuilder<int>(
             checked(MethodRoots.Length * 5));
+        var sectionCapacity = checked((artifactByteLength / 16) + 1);
+        var moduleCapacity = checked((artifactByteLength / 48) + 2);
+        var moduleDirectoryCapacity = checked(moduleCapacity * 8);
 
         var agreementStart = AppendText(Agreement);
         var usingModuleStart = AppendText(UsingModuleIdentity);
@@ -158,6 +161,27 @@ internal readonly record struct CapturedStandaloneMethodImportInput(
                 PrimitiveType.Int32, artifactInputs.MoveToImmutable(), false),
             new HostBuffer("StandaloneMethodRoots", PrimitiveType.Int32,
                 methodRoots.MoveToImmutable(), false),
+            new HostBuffer("StandaloneSectionCount", PrimitiveType.Int32,
+                [0], true),
+            new HostBuffer("StandaloneSectionArtifactOrdinal",
+                PrimitiveType.Int32, [-1], true),
+            new HostBuffer("StandaloneSectionKinds", PrimitiveType.Int32,
+                [.. new int[sectionCapacity]], true),
+            new HostBuffer("StandaloneSectionFlags", PrimitiveType.Int32,
+                [.. new int[sectionCapacity]], true),
+            new HostBuffer("StandaloneSectionCounts", PrimitiveType.Int32,
+                [.. new int[sectionCapacity]], true),
+            new HostBuffer("StandaloneSectionStarts", PrimitiveType.Int32,
+                [.. new int[sectionCapacity]], true),
+            new HostBuffer("StandaloneSectionLengths", PrimitiveType.Int32,
+                [.. new int[sectionCapacity]], true),
+            new HostBuffer("StandaloneSectionOrder", PrimitiveType.Int32,
+                [.. new int[sectionCapacity]], true),
+            new HostBuffer("StandaloneModuleCount", PrimitiveType.Int32,
+                [0], true),
+            new HostBuffer("StandaloneModuleDirectory",
+                PrimitiveType.Int32,
+                [.. new int[moduleDirectoryCapacity]], true),
         ];
 
         int AppendText(string value)
