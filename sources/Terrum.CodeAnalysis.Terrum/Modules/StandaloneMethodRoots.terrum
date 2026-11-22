@@ -205,6 +205,7 @@ void ClearStandaloneResolvedRoots()
     Host.StandaloneContractFactCount[0] = 0;
     Host.StandaloneResolvedImportCount[0] = 0;
     Host.StandaloneResolvedExpectedImportCount[0] = 0;
+    Host.StandaloneResolvedProviderGroupCount[0] = 0;
     for (mut int32 index = 0;
         index < Host.StandaloneResolvedImports.Length;
         index = index + 1)
@@ -216,6 +217,12 @@ void ClearStandaloneResolvedRoots()
         index = index + 1)
     {
         Host.StandaloneResolvedImportOrder[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneResolvedExpectedImportOrder.Length;
+        index = index + 1)
+    {
+        Host.StandaloneResolvedExpectedImportOrder[index] = 0;
     }
 }
 

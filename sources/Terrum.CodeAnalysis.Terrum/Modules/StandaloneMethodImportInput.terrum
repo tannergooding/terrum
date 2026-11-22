@@ -26,10 +26,13 @@ public static int32 ValidateStandaloneMethodImportInput()
             != Host.StandaloneArtifacts.Length / 20 + 1
         || Host.StandaloneResolvedImportCount.Length != 1
         || Host.StandaloneResolvedImports.Length
-            != (Host.StandaloneArtifacts.Length / 12 + 1) * 20
+            != (Host.StandaloneArtifacts.Length / 12 + 1) * 24
         || Host.StandaloneResolvedImportOrder.Length
             != Host.StandaloneArtifacts.Length / 12 + 1
         || Host.StandaloneResolvedExpectedImportCount.Length != 1
+        || Host.StandaloneResolvedProviderGroupCount.Length != 1
+        || Host.StandaloneResolvedExpectedImportOrder.Length
+            != Host.StandaloneArtifacts.Length / 12 + 1
         || Host.StandaloneCallableTypeIds.Length
             != Host.StandaloneMethodRoots.Length / 5
                 + Host.StandaloneArtifacts.Length / 12 + 1
