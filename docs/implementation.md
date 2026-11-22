@@ -1369,9 +1369,10 @@ before output reservation, and source-free re-emission preserves that order
 across formal remapping. Imported-provider source-free
 load/re-emission and Windows x64 success/partial-failure regressions remain
 unverified under the hold. Local/imported mixed-call-sequence regressions cover
-source order, nested final-call inputs, a defaulted scalar formal encoded
-through ConstantMap, the final value result, malformed result selectors, and
-source-free re-emission; they remain unverified under the hold. One non-void
+source order, multiple nested final-call inputs in reversed formal order, a
+defaulted scalar formal encoded through ConstantMap, the final value result,
+malformed result selectors, and source-free re-emission; they remain
+unverified under the hold. One non-void
 call may reserve distinct local `init` Homes for each NativeOutput formal;
 source-use 6
 and reservation records use the receiver-first flattened ordinal
