@@ -643,6 +643,122 @@ internal sealed class StandaloneMethodImportInputTests
             execution, buffers);
         AssertStandaloneWrittenArtifact(artifact);
 
+        var contractSource = SourceText.From(
+            "using api; void Main(ref<init int32> output) { "
+            + "Run(ref init output); Other(ref init output); }");
+        var contractInput = new StandaloneMethodImportInput(Agreement,
+            "consumer/contracts", [
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateOutputStateArtifact("provider/contracts",
+                        includeDependency: true, sourcedDependency: true,
+                        predicateGraphRow: 2)),
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateOutputStateArtifact("provider/other",
+                        includeDependency: true, exportKey: "api/Other")),
+            ], [
+                new StandaloneMethodRoot(0, "provider/contracts",
+                    "api/Run"),
+                new StandaloneMethodRoot(1, "provider/other",
+                    "api/Other"),
+            ]);
+        const string contractVerificationSource = """
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                if (Scan() < 1) { return 50; }
+                int32 status = BindStandaloneOwnedSourceProgram();
+                if (status != 0) { return status; }
+                status = NormalizeStandaloneOwnedSourceProgram();
+                if (status != 0) { return status; }
+                status = RewriteStandaloneOwnedCallNodes();
+                if (status != 0) { return status; }
+                status = WriteStandaloneScalarModule();
+                if (status != 0) { return status; }
+                if (Host.StandaloneWriterPredicateGraphMapCount[0] != 2
+                    || Host.StandaloneWriterPredicateGraphMap[1] != 2
+                    || Host.StandaloneWriterPredicateGraphMap[2] != 1
+                    || Host.StandaloneWriterPredicateGraphMap[3] != 1
+                    || Host.StandaloneWriterPredicateGraphMap[4] != 1
+                    || Host.StandaloneWriterPredicateGraphMap[5] != 1
+                    || Host.StandaloneWriterPredicateGraphMap[6] != 2
+                    || Host.StandaloneWriterPredicateGraphMap[7] != 1
+                    || Host.StandaloneWriterMethodContractCounts[0] != 0
+                    || Host.StandaloneWriterMethodContractCounts[1] != 3
+                    || Host.StandaloneWriterMethodContractCounts[2] != 3) {
+                    return 51;
+                }
+                return 0;
+            }
+            """;
+        var contractComponents = new List<SyntaxTree>(
+            components.GetRange(0, sourcePaths.Length));
+        contractComponents.Add(SyntaxTree.Parse(
+            contractVerificationSource,
+            "standalone-owned-source-contract-writer-tests.terrum"));
+        var contractBuffers = ScannerHost.CreateBuffers(contractSource)
+            .AddRange(contractInput.Capture()
+                .CreateSourceCallHostBuffers(contractSource));
+        var contractCompilation = Compilation.Create(contractComponents,
+            contractBuffers, policy);
+        Assert.That(contractCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                contractCompilation.Diagnostics));
+        var contractProgram = contractCompilation.Program
+            ?? throw new AssertionException(
+                "Expected a bound standalone contract-writer validator.");
+        var contractExecution = NativeJit.ExecuteWithData(contractProgram,
+            (NativeRuntimePolicy)policy);
+        Assert.That(contractExecution.ExitCode, Is.EqualTo(0));
+        var contractArtifact = StandaloneMethodImportOutputFramer.Frame(
+            contractExecution, contractBuffers);
+        AssertStandaloneOutputStateContractArtifact(contractArtifact);
+
+        var aliasSource = SourceText.From(
+            "using api; int32 Main() { AliasA(); return AliasB(); }");
+        var aliasInput = new StandaloneMethodImportInput(Agreement,
+            "consumer/alias", [
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateAliasedProviderArtifact("provider/alias",
+                        "api.AliasA", "api.AliasB")),
+            ], [
+                new StandaloneMethodRoot(0, "provider/alias",
+                    "api.AliasA"),
+                new StandaloneMethodRoot(0, "provider/alias",
+                    "api.AliasB"),
+            ]);
+        const string aliasVerificationSource = """
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                if (Scan() < 1) { return 50; }
+                int32 status = BindStandaloneOwnedSourceProgram();
+                if (status != 0) { return status; }
+                status = NormalizeStandaloneOwnedSourceProgram();
+                if (status != 0) { return status; }
+                status = RewriteStandaloneOwnedCallNodes();
+                if (status != 0) { return status; }
+                return WriteStandaloneScalarModule();
+            }
+            """;
+        var aliasComponents = new List<SyntaxTree>(
+            components.GetRange(0, sourcePaths.Length));
+        aliasComponents.Add(SyntaxTree.Parse(aliasVerificationSource,
+            "standalone-owned-source-alias-writer-tests.terrum"));
+        var aliasBuffers = ScannerHost.CreateBuffers(aliasSource).AddRange(
+            aliasInput.Capture().CreateSourceCallHostBuffers(aliasSource));
+        var aliasCompilation = Compilation.Create(aliasComponents,
+            aliasBuffers, policy);
+        Assert.That(aliasCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                aliasCompilation.Diagnostics));
+        var aliasProgram = aliasCompilation.Program
+            ?? throw new AssertionException(
+                "Expected a bound standalone alias-writer validator.");
+        var aliasExecution = NativeJit.ExecuteWithData(aliasProgram,
+            (NativeRuntimePolicy)policy);
+        Assert.That(aliasExecution.ExitCode, Is.EqualTo(0));
+        var aliasArtifact = StandaloneMethodImportOutputFramer.Frame(
+            aliasExecution, aliasBuffers);
+        AssertStandaloneAliasesShareExpectedMethod(aliasArtifact);
+
         var remapSource = SourceText.From(
             "using api; int32 Local(int32 first, int32 second) { "
             + "return first; } int32 Main(int32 value) { return "
@@ -1837,6 +1953,227 @@ internal sealed class StandaloneMethodImportInputTests
         Assert.That(blobs.Length, Is.GreaterThan(0));
     }
 
+    private static void AssertStandaloneOutputStateContractArtifact(
+        byte[] artifact)
+    {
+        var index = new TrRmArtifactIndex(artifact);
+        Assert.That(index.TryGetSection(0x0001, out var modules,
+                out var moduleCount), Is.True);
+        Assert.That(moduleCount, Is.EqualTo(1));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                modules.Slice(24, sizeof(uint))), Is.EqualTo(1));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                modules.Slice(28, sizeof(uint))), Is.EqualTo(3));
+
+        Assert.That(index.TryGetSection(0x0004, out var features,
+                out var featureCount), Is.True);
+        Assert.That(featureCount, Is.EqualTo(3));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                features.Slice(0, sizeof(uint))), Is.EqualTo(9));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                features.Slice(sizeof(uint), sizeof(uint))), Is.EqualTo(1));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                features.Slice(2 * sizeof(uint), sizeof(uint))),
+            Is.EqualTo(10));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                features.Slice(3 * sizeof(uint), sizeof(uint))),
+            Is.EqualTo(1));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                features.Slice(4 * sizeof(uint), sizeof(uint))),
+            Is.EqualTo(11));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                features.Slice(5 * sizeof(uint), sizeof(uint))),
+            Is.EqualTo(1));
+
+        Assert.That(index.TryGetSection(0x0016, out var methodDefs,
+                out var methodCount), Is.True);
+        Assert.That(methodCount, Is.EqualTo(3));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                methodDefs.Slice(28 + 16, sizeof(uint))), Is.EqualTo(1));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                methodDefs.Slice(28 + 20, sizeof(uint))), Is.EqualTo(3));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                methodDefs.Slice(56 + 16, sizeof(uint))), Is.EqualTo(4));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                methodDefs.Slice(56 + 20, sizeof(uint))), Is.EqualTo(3));
+
+        Assert.That(index.TryGetSection(0x001B, out var contracts,
+                out var contractCount), Is.True);
+        Assert.That(contractCount, Is.EqualTo(6));
+        Assert.That(contracts.Length, Is.EqualTo(148));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                contracts.Slice(0, sizeof(uint))), Is.EqualTo(0));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                contracts.Slice(4, sizeof(uint))), Is.EqualTo(20));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                contracts.Slice(8, sizeof(uint))), Is.EqualTo(40));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                contracts.Slice(12, sizeof(uint))), Is.EqualTo(60));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                contracts.Slice(16, sizeof(uint))), Is.EqualTo(80));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                contracts.Slice(20, sizeof(uint))), Is.EqualTo(100));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                contracts.Slice(24, sizeof(uint))), Is.EqualTo(120));
+
+        var predicateClause = contracts.Slice(28, 20);
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(predicateClause),
+            Is.EqualTo(0x1600_0002));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+                predicateClause.Slice(4, sizeof(ushort))),
+            Is.EqualTo(0x000B));
+        Assert.That(predicateClause[8], Is.EqualTo(3));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                predicateClause.Slice(12, sizeof(uint))), Is.EqualTo(0));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                predicateClause.Slice(16, sizeof(uint))), Is.EqualTo(1));
+
+        var outputStateClause = contracts.Slice(48, 20);
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(outputStateClause),
+            Is.EqualTo(0x1600_0002));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+                outputStateClause.Slice(4, sizeof(ushort))),
+            Is.EqualTo(2));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                outputStateClause.Slice(8, sizeof(uint))), Is.EqualTo(0));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                outputStateClause.Slice(12, sizeof(uint))), Is.EqualTo(1));
+        Assert.That(outputStateClause[16], Is.EqualTo(1));
+
+        var dependencyClause = contracts.Slice(68, 20);
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(dependencyClause),
+            Is.EqualTo(0x1600_0002));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+                dependencyClause.Slice(4, sizeof(ushort))),
+            Is.EqualTo(4));
+        Assert.That(dependencyClause[8], Is.EqualTo(2));
+        Assert.That(dependencyClause[9], Is.EqualTo(1));
+        Assert.That(dependencyClause[10], Is.EqualTo(1));
+        Assert.That(dependencyClause[11], Is.EqualTo(1));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                dependencyClause.Slice(12, sizeof(uint))), Is.EqualTo(0));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                dependencyClause.Slice(16, sizeof(uint))), Is.EqualTo(0));
+        var secondPredicateClause = contracts.Slice(88, 20);
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                secondPredicateClause), Is.EqualTo(0x1600_0003));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                secondPredicateClause.Slice(16, sizeof(uint))),
+            Is.EqualTo(2));
+        var secondOutputStateClause = contracts.Slice(108, 20);
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                secondOutputStateClause), Is.EqualTo(0x1600_0003));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                secondOutputStateClause.Slice(12, sizeof(uint))),
+            Is.EqualTo(2));
+        var secondDependencyClause = contracts.Slice(128, 20);
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                secondDependencyClause), Is.EqualTo(0x1600_0003));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+                secondDependencyClause.Slice(4, sizeof(ushort))),
+            Is.EqualTo(4));
+
+        Assert.That(index.TryGetSection(0x0037, out var graphs,
+                out var graphCount), Is.True);
+        Assert.That(graphCount, Is.EqualTo(2));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                graphs.Slice(0, sizeof(uint))), Is.EqualTo(1));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                graphs.Slice(4, sizeof(uint))), Is.EqualTo(1));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                graphs.Slice(8, sizeof(uint))), Is.EqualTo(2));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                graphs.Slice(12, sizeof(uint))), Is.EqualTo(2));
+        Assert.That(index.TryGetSection(0x0038, out var footprints,
+                out var footprintCount), Is.True);
+        Assert.That(footprintCount, Is.EqualTo(2));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                footprints.Slice(0, sizeof(uint))), Is.EqualTo(1));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                footprints.Slice(4, sizeof(uint))), Is.EqualTo(1));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                footprints.Slice(8, sizeof(uint))), Is.EqualTo(0));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                footprints.Slice(12, sizeof(uint))), Is.EqualTo(0));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                footprints.Slice(16, sizeof(uint))), Is.EqualTo(2));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                footprints.Slice(20, sizeof(uint))), Is.EqualTo(1));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                footprints.Slice(24, sizeof(uint))), Is.EqualTo(0));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                footprints.Slice(28, sizeof(uint))), Is.EqualTo(0));
+        Assert.That(index.TryGetSection(0x0039, out var roots,
+                out var rootCount), Is.True);
+        Assert.That(rootCount, Is.EqualTo(2));
+        Assert.That(roots[0], Is.EqualTo(5));
+        Assert.That(roots[1], Is.EqualTo(0));
+        Assert.That(roots[8], Is.EqualTo(5));
+        Assert.That(roots[9], Is.EqualTo(0));
+        Assert.That(index.TryGetSection(0x003B, out var nodes,
+                out var nodeCount), Is.True);
+        Assert.That(nodeCount, Is.EqualTo(2));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                nodes.Slice(0, sizeof(uint))), Is.EqualTo(1));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                nodes.Slice(4, sizeof(uint))), Is.EqualTo(0xF200_0001));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                nodes.Slice(8, sizeof(uint))), Is.EqualTo(1));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                nodes.Slice(12, sizeof(uint))), Is.EqualTo(1));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                nodes.Slice(16, sizeof(uint))), Is.EqualTo(1));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                nodes.Slice(20, sizeof(uint))), Is.EqualTo(0xF200_0001));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                nodes.Slice(24, sizeof(uint))), Is.EqualTo(2));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                nodes.Slice(28, sizeof(uint))), Is.EqualTo(1));
+        Assert.That(index.TryGetSection(0x003C, out var operands,
+                out var operandCount), Is.True);
+        Assert.That(operandCount, Is.EqualTo(2));
+        Assert.That(operands[0], Is.EqualTo(1));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                operands.Slice(4, sizeof(uint))), Is.EqualTo(1));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                operands.Slice(12, sizeof(uint))), Is.EqualTo(2));
+    }
+
+    private static void AssertStandaloneAliasesShareExpectedMethod(
+        byte[] artifact)
+    {
+        var index = new TrRmArtifactIndex(artifact);
+        Assert.That(index.TryGetSection(0x0016, out var methodDefs,
+                out var methodCount), Is.True);
+        Assert.That(methodCount, Is.EqualTo(2));
+        Assert.That(index.TryGetSection(0x001C, out var imports,
+                out var importCount), Is.True);
+        Assert.That(importCount, Is.EqualTo(2));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                imports.Slice(8, sizeof(uint))),
+            Is.EqualTo(0x1600_0002));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                imports.Slice(12 + 8, sizeof(uint))),
+            Is.EqualTo(0x1600_0002));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                imports.Slice(4, sizeof(uint))),
+            Is.Not.EqualTo(BinaryPrimitives.ReadUInt32LittleEndian(
+                imports.Slice(12 + 4, sizeof(uint)))));
+
+        Assert.That(index.TryGetSection(0x0020, out var bodySection,
+                out var bodyCount), Is.True);
+        Assert.That(bodyCount, Is.EqualTo(1));
+        var bodyTable = new TrRmBodyTableReader(bodySection, bodyCount);
+        var body = new TrRmRegisterBodyReader(bodyTable.GetRow(1));
+        Assert.That(body.MethodMap.Length, Is.EqualTo(2 * sizeof(uint)));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                body.MethodMap), Is.EqualTo(0x1C00_0001));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                body.MethodMap.Slice(sizeof(uint))), Is.EqualTo(0x1C00_0002));
+        Assert.That(body.RecordCount, Is.EqualTo(3));
+        Assert.That(methodDefs.Length, Is.EqualTo(2 * 28));
+    }
+
     private static byte[] CreateAliasedProviderArtifact(
         string moduleIdentity, string firstExportKey,
         string secondExportKey)
@@ -2374,7 +2711,9 @@ internal sealed class StandaloneMethodImportInputTests
         byte outputState = 1, bool includeDependency = false,
         bool duplicateDependency = false,
         bool conflictEmptyAndSourcedDependency = false,
-        uint nodeKind = 1, uint methodResultTypeSpecRef = 0xF200_0001)
+        bool sourcedDependency = false,
+        uint nodeKind = 1, uint methodResultTypeSpecRef = 0xF200_0001,
+        uint predicateGraphRow = 1, string exportKey = "api/Run")
     {
         var typeSpecRows = new ReadOnlyMemory<byte>[] {
             TrRmTypeSpecTableWriter.InitializationReference(
@@ -2395,10 +2734,14 @@ internal sealed class StandaloneMethodImportInputTests
         var stringSection = TrRmStringTableWriter.EncodeNames([
             (moduleIdentity, 0),
             ("Implementation", 0),
-            ("api/Run", 0),
+            (exportKey, 0),
         ]);
         var strings = new TrRmStringTableReader(stringSection, 3);
-        var featureCount = featureId == 0 ? 0 : 1;
+        var featureIds = featureId == 10
+            ? new uint[] { 9, 10, 11 }
+            : featureId == 0 ? Array.Empty<uint>()
+            : new uint[] { featureId };
+        var featureCount = featureIds.Length;
         var moduleSection = TrRmModuleTableWriter.Encode([
             new TrRmModuleRow(1, 1, 0, 0, 1, 1, 1, 1,
                 featureCount == 0 ? 0 : 1, featureCount),
@@ -2420,31 +2763,51 @@ internal sealed class StandaloneMethodImportInputTests
         BinaryPrimitives.WriteUInt32LittleEndian(
             methodDefSection.AsSpan(20), (uint)contractRowCount);
 
-        var predicateGraphSection = new byte[8];
-        BinaryPrimitives.WriteUInt32LittleEndian(
-            predicateGraphSection, 1);
-        BinaryPrimitives.WriteUInt32LittleEndian(
-            predicateGraphSection.AsSpan(4), 1);
-        var readFootprintSection = new byte[16];
-        BinaryPrimitives.WriteUInt32LittleEndian(
-            readFootprintSection, 1);
-        BinaryPrimitives.WriteUInt32LittleEndian(
-            readFootprintSection.AsSpan(4), 1);
-        var readRootSection = new byte[8];
-        readRootSection[0] = 5;
-        var predicateNodeSection = new byte[16];
-        BinaryPrimitives.WriteUInt32LittleEndian(
-            predicateNodeSection, nodeKind);
-        BinaryPrimitives.WriteUInt32LittleEndian(
-            predicateNodeSection.AsSpan(4), 0xF200_0001);
-        BinaryPrimitives.WriteUInt32LittleEndian(
-            predicateNodeSection.AsSpan(8), 1);
-        BinaryPrimitives.WriteUInt32LittleEndian(
-            predicateNodeSection.AsSpan(12), 1);
-        var predicateOperandSection = new byte[8];
-        predicateOperandSection[0] = 1;
-        BinaryPrimitives.WriteUInt32LittleEndian(
-            predicateOperandSection.AsSpan(4), 1);
+        var predicateGraphCount = checked((int)predicateGraphRow);
+        var predicateGraphSection
+            = new byte[predicateGraphCount * 8];
+        var readFootprintSection
+            = new byte[predicateGraphCount * 16];
+        var readRootSection = new byte[predicateGraphCount * 8];
+        var predicateNodeSection
+            = new byte[predicateGraphCount * 16];
+        var predicateOperandSection
+            = new byte[predicateGraphCount * 8];
+        for (var index = 0; index < predicateGraphCount; index++)
+        {
+            var row = checked((uint)index + 1);
+            var graphOffset = index * 8;
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                predicateGraphSection.AsSpan(graphOffset), row);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                predicateGraphSection.AsSpan(graphOffset + 4), row);
+
+            var footprintOffset = index * 16;
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                readFootprintSection.AsSpan(footprintOffset), row);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                readFootprintSection.AsSpan(footprintOffset + 4), 1);
+
+            var rootOffset = index * 8;
+            readRootSection[rootOffset] = 5;
+
+            var nodeOffset = index * 16;
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                predicateNodeSection.AsSpan(nodeOffset),
+                row == predicateGraphRow ? nodeKind : 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                predicateNodeSection.AsSpan(nodeOffset + 4),
+                0xF200_0001);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                predicateNodeSection.AsSpan(nodeOffset + 8), row);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                predicateNodeSection.AsSpan(nodeOffset + 12), 1);
+
+            var operandOffset = index * 8;
+            predicateOperandSection[operandOffset] = 1;
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                predicateOperandSection.AsSpan(operandOffset + 4), row);
+        }
         var owner = 0x1600_0001u;
         var contractRows = new ReadOnlyMemory<byte>[contractRowCount];
         var predicateAttachment = new byte[20];
@@ -2454,7 +2817,7 @@ internal sealed class StandaloneMethodImportInputTests
             predicateAttachment.AsSpan(4), 0x000B);
         predicateAttachment[8] = 3;
         BinaryPrimitives.WriteUInt32LittleEndian(
-            predicateAttachment.AsSpan(16), 1);
+            predicateAttachment.AsSpan(16), predicateGraphRow);
         contractRows[0] = predicateAttachment;
         var nextContractRow = 1;
         if (includeOutputState)
@@ -2465,7 +2828,7 @@ internal sealed class StandaloneMethodImportInputTests
             BinaryPrimitives.WriteUInt16LittleEndian(
                 outputStateRow.AsSpan(4), 0x0002);
             BinaryPrimitives.WriteUInt32LittleEndian(
-                outputStateRow.AsSpan(12), 1);
+                outputStateRow.AsSpan(12), predicateGraphRow);
             outputStateRow[16] = outputState;
             contractRows[nextContractRow] = outputStateRow;
             nextContractRow = nextContractRow + 1;
@@ -2483,8 +2846,10 @@ internal sealed class StandaloneMethodImportInputTests
                     dependencyRow.AsSpan(4), 0x0004);
                 dependencyRow[8] = 2;
                 dependencyRow[9]
-                    = conflictEmptyAndSourcedDependency
-                        && dependencyIndex == 1 ? (byte)1 : (byte)0;
+                    = (sourcedDependency && dependencyIndex == 0)
+                        || (conflictEmptyAndSourcedDependency
+                            && dependencyIndex == 1)
+                        ? (byte)1 : (byte)0;
                 dependencyRow[10] = dependencyRow[9];
                 dependencyRow[11] = 1;
                 BinaryPrimitives.WriteUInt32LittleEndian(
@@ -2508,12 +2873,17 @@ internal sealed class StandaloneMethodImportInputTests
         };
         if (featureCount != 0)
         {
-            var featureSection = new byte[8];
-            BinaryPrimitives.WriteUInt32LittleEndian(featureSection,
-                featureId);
-            BinaryPrimitives.WriteUInt32LittleEndian(
-                featureSection.AsSpan(4), 1);
-            sections.Add(new TrRmSection(0x0004, 0, 1, featureSection));
+            var featureSection = new byte[featureCount * 8];
+            for (var index = 0; index < featureCount; index++)
+            {
+                var rowOffset = index * 8;
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    featureSection.AsSpan(rowOffset), featureIds[index]);
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    featureSection.AsSpan(rowOffset + 4), 1);
+            }
+            sections.Add(new TrRmSection(0x0004, 0,
+                (uint)featureCount, featureSection));
         }
         sections.Add(new TrRmSection(0x0016, 0, 1, methodDefSection));
         sections.Add(new TrRmSection(0x0017, 0, 1, methodSigSection));
@@ -2521,14 +2891,19 @@ internal sealed class StandaloneMethodImportInputTests
         sections.Add(new TrRmSection(0x001B, 0,
             (uint)contractRowCount, contractSection));
         sections.Add(new TrRmSection(0x001D, 0, 1, exportSection));
-        sections.Add(new TrRmSection(0x0037, 0, 1,
+        sections.Add(new TrRmSection(0x0037, 0,
+            (uint)predicateGraphCount,
             predicateGraphSection));
-        sections.Add(new TrRmSection(0x0038, 0, 1,
+        sections.Add(new TrRmSection(0x0038, 0,
+            (uint)predicateGraphCount,
             readFootprintSection));
-        sections.Add(new TrRmSection(0x0039, 0, 1, readRootSection));
-        sections.Add(new TrRmSection(0x003B, 0, 1,
+        sections.Add(new TrRmSection(0x0039, 0,
+            (uint)predicateGraphCount, readRootSection));
+        sections.Add(new TrRmSection(0x003B, 0,
+            (uint)predicateGraphCount,
             predicateNodeSection));
-        sections.Add(new TrRmSection(0x003C, 0, 1,
+        sections.Add(new TrRmSection(0x003C, 0,
+            (uint)predicateGraphCount,
             predicateOperandSection));
         return TrRmArtifactWriter.Encode(sections);
     }

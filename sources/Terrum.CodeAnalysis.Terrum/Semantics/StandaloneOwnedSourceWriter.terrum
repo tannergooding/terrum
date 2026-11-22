@@ -21,10 +21,25 @@ bool ValidateStandaloneWriterBuffers()
             == Host.StandaloneMethodRoots.Length / 5
         && Host.StandaloneWriterRootOrdinals.Length
             == Host.StandaloneMethodRoots.Length / 5
+        && Host.StandaloneWriterRootExpectedGroupByImport.Length
+            == Host.StandaloneMethodRoots.Length / 5
+        && Host.StandaloneWriterRootRepresentativeImportByGroup.Length
+            == Host.StandaloneMethodRoots.Length / 5
+        && Host.StandaloneWriterRootExpectedMethodRowsByImport.Length
+            == Host.StandaloneMethodRoots.Length / 5
+        && Host.StandaloneWriterRootExpectedGroupCount.Length == 1
+        && Host.StandaloneWriterRootGroupHashSlots.Length
+            == Host.StandaloneMethodRoots.Length / 5 * 2 + 1
+        && Host.StandaloneWriterMethodContractCounts.Length
+            == Host.StandaloneSourceCallableInfo.Length / 12
+                + Host.StandaloneMethodRoots.Length / 5
+        && Host.StandaloneWriterPredicateGraphMapCount.Length == 1
+        && Host.StandaloneWriterPredicateGraphMap.Length % 4 == 0
         && Host.StandaloneWriterModuleRefCount.Length == 1
         && Host.StandaloneWriterModuleRefByModuleId.Length
             == Host.StandaloneModuleDirectory.Length / 8
         && Host.StandaloneWriterModuleIdentityStringId.Length == 1
+        && Host.StandaloneWriterTextCount.Length == 1
         && Host.StandaloneWriterModuleRefStringIds.Length
             == Host.StandaloneModuleDirectory.Length / 8
         && Host.StandaloneWriterModuleRefModuleIds.Length
@@ -83,6 +98,7 @@ void ClearStandaloneWriterOutputs()
     Host.StandaloneWriterStringCount[0] = 0;
     Host.StandaloneWriterModuleRefCount[0] = 0;
     Host.StandaloneWriterModuleIdentityStringId[0] = 0;
+    Host.StandaloneWriterTextCount[0] = 0;
     Host.StandaloneWriterTypeSpecCount[0] = 0;
     Host.StandaloneWriterBodyPlanCount[0] = 0;
     Host.StandaloneWriterTypeMapCount[0] = 0;
@@ -90,6 +106,8 @@ void ClearStandaloneWriterOutputs()
     Host.StandaloneWriterConstantMapCount[0] = 0;
     Host.StandaloneWriterUniqueConstantCount[0] = 0;
     Host.StandaloneWriterBlobCount[0] = 0;
+    Host.StandaloneWriterRootExpectedGroupCount[0] = 0;
+    Host.StandaloneWriterPredicateGraphMapCount[0] = 0;
     for (mut int32 index = 0;
         index < Host.StandaloneWriterSections.Length;
         index = index + 1)
@@ -128,6 +146,27 @@ void ClearStandaloneWriterOutputs()
         Host.StandaloneWriterRootKeyStringIds[index] = 0;
         Host.StandaloneWriterRootModuleStringIds[index] = 0;
         Host.StandaloneWriterRootOrdinals[index] = -1;
+        Host.StandaloneWriterRootExpectedGroupByImport[index] = -1;
+        Host.StandaloneWriterRootRepresentativeImportByGroup[index] = -1;
+        Host.StandaloneWriterRootExpectedMethodRowsByImport[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneWriterRootGroupHashSlots.Length;
+        index = index + 1)
+    {
+        Host.StandaloneWriterRootGroupHashSlots[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneWriterMethodContractCounts.Length;
+        index = index + 1)
+    {
+        Host.StandaloneWriterMethodContractCounts[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneWriterPredicateGraphMap.Length;
+        index = index + 1)
+    {
+        Host.StandaloneWriterPredicateGraphMap[index] = 0;
     }
     for (mut int32 index = 0;
         index < Host.StandaloneWriterModuleRefByModuleId.Length;
@@ -137,6 +176,7 @@ void ClearStandaloneWriterOutputs()
         Host.StandaloneWriterModuleRefStringIds[index] = 0;
         Host.StandaloneWriterModuleRefModuleIds[index] = 0;
     }
+
     for (mut int32 index = 0;
         index < Host.StandaloneWriterTypeSpecOrder.Length;
         index = index + 1)
@@ -347,6 +387,11 @@ int32 GetStandaloneWriterTextUnit(int32 inputKind, int32 index)
         return index >= 0 && index < Host.StandaloneText.Length
             ? int32(Host.StandaloneText[index]) : -1;
     }
+    if (inputKind == 3)
+    {
+        return index >= 0 && index < Host.StandaloneWriterTextCount[0]
+            ? int32(Host.StandaloneWriterText[index]) : -1;
+    }
     return -1;
 }
 
@@ -366,6 +411,14 @@ bool IsStandaloneWriterTextRangeValid(int32 inputKind,
     {
         return start <= Host.StandaloneText.Length
             && length <= Host.StandaloneText.Length - start;
+    }
+    if (inputKind == 3)
+    {
+        return start <= Host.StandaloneWriterTextCount[0]
+            && length
+                <= Host.StandaloneWriterTextCount[0] - start
+            && start <= Host.StandaloneWriterText.Length
+            && length <= Host.StandaloneWriterText.Length - start;
     }
     return false;
 }
@@ -472,8 +525,8 @@ int32 TryAddStandaloneWriterString(int32 inputKind,
 
     uint32 hash = GetStandaloneWriterTextHash(
         inputKind, start, length);
-    mut int32 slotIndex
-        = int32(hash % uint32(slotCapacity));
+    mut int32 slotIndex = GetStandaloneWriterHashSlot(
+        int32(hash & uint32(0x7FFF_FFFF)), slotCapacity);
     for (mut int32 probe = 0;
         probe < slotCapacity;
         probe = probe + 1)
@@ -525,6 +578,391 @@ int32 TryAddStandaloneWriterString(int32 inputKind,
         }
     }
     return 3;
+}
+
+int32 TryAddStandaloneWriterArtifactString(int32 artifactOrdinal,
+    int32 stringRow, ref<init int32> stringIdResult)
+    ensure return == 0 ? *stringIdResult is init : true
+{
+    init int32 artifactStart;
+    init int32 artifactLength;
+    if (!TryGetStandaloneArtifactExtent(artifactOrdinal,
+            ref init artifactStart, ref init artifactLength)
+        || !TryValidateStandaloneArtifactDirectory(artifactOrdinal))
+    {
+        return 3;
+    }
+
+    int32 stringEntry = FindStandaloneArtifactSection(0x0002);
+    int32 stringCount = GetStandaloneArtifactSectionCount(0x0002);
+    if (stringEntry == 0 || stringRow <= 0
+        || stringRow > stringCount)
+    {
+        return 3;
+    }
+    int32 stringSectionStart
+        = Host.StandaloneSectionStarts[stringEntry];
+    int32 stringSectionLength
+        = Host.StandaloneSectionLengths[stringEntry];
+    init int32 rowStart;
+    init int32 rowLength;
+    init int32 encoding;
+    init int32 contentByteLength;
+    if (!TryGetStandaloneStringRowInfo(artifactStart,
+            artifactLength, stringSectionStart,
+            stringSectionLength, stringCount, stringRow,
+            ref init rowStart, ref init rowLength,
+            ref init encoding, ref init contentByteLength)
+        || rowLength < 8
+        || !TryValidateStandaloneStringName(artifactOrdinal,
+            artifactStart, artifactLength, stringSectionStart,
+            stringSectionLength, stringCount, stringRow))
+    {
+        return 3;
+    }
+
+    mut uint32 hash = uint32(0x9E37_79B9);
+    mut int32 byteOffset = 0;
+    mut int32 unitCount = 0;
+    while (byteOffset < contentByteLength)
+    {
+        init int32 scalar;
+        init int32 bytesRead;
+        if (!TryReadStandaloneStringScalar(artifactStart,
+                artifactLength, rowStart + 4 + byteOffset,
+                contentByteLength - byteOffset, encoding,
+                ref init scalar, ref init bytesRead)
+            || scalar <= 0 || bytesRead <= 0)
+        {
+            return 3;
+        }
+        if (scalar <= 0xFFFF)
+        {
+            hash = (hash << 5) | (hash >> 27);
+            hash = hash ^ uint32(scalar);
+            unitCount = unitCount + 1;
+        }
+        else
+        {
+            int32 value = scalar - 0x10000;
+            int32 high = 0xD800 + (value >> 10);
+            int32 low = 0xDC00 + (value & 0x3FF);
+            hash = (hash << 5) | (hash >> 27);
+            hash = hash ^ uint32(high);
+            hash = (hash << 5) | (hash >> 27);
+            hash = hash ^ uint32(low);
+            unitCount = unitCount + 2;
+        }
+        byteOffset = byteOffset + bytesRead;
+    }
+    if (byteOffset != contentByteLength || unitCount <= 0)
+    {
+        return 3;
+    }
+
+    int32 slotCapacity
+        = Host.StandaloneWriterStringHashSlots.Length;
+    int32 slot = GetStandaloneWriterHashSlot(
+        int32(hash & uint32(0x7FFF_FFFF)), slotCapacity);
+    if (slot < 0)
+    {
+        return 3;
+    }
+    for (mut int32 probe = 0;
+        probe < slotCapacity;
+        probe = probe + 1)
+    {
+        int32 storedId
+            = Host.StandaloneWriterStringHashSlots[slot];
+        if (storedId == 0)
+        {
+            break;
+        }
+        int32 existingRow = storedId - 1;
+        if (existingRow < 0
+            || existingRow >= Host.StandaloneWriterStringCount[0])
+        {
+            return 3;
+        }
+        if (Host.StandaloneWriterStringHashes[existingRow] == hash)
+        {
+            int32 existingOffset = existingRow * 3;
+            if (StandaloneWriterStringEqualsArtifactRow(
+                    Host.StandaloneWriterStrings[existingOffset],
+                    Host.StandaloneWriterStrings[existingOffset + 1],
+                    Host.StandaloneWriterStrings[existingOffset + 2],
+                    artifactStart, artifactLength, rowStart,
+                    contentByteLength, encoding))
+            {
+                *stringIdResult = storedId;
+                return 0;
+            }
+        }
+        slot = slot + 1;
+        if (slot == slotCapacity)
+        {
+            slot = 0;
+        }
+    }
+
+    int32 textStart = Host.StandaloneWriterTextCount[0];
+    if (textStart < 0
+        || textStart > Host.StandaloneWriterText.Length
+        || unitCount > Host.StandaloneWriterText.Length - textStart)
+    {
+        return 3;
+    }
+    byteOffset = 0;
+    mut int32 unitOffset = 0;
+    while (byteOffset < contentByteLength)
+    {
+        init int32 scalar;
+        init int32 bytesRead;
+        if (!TryReadStandaloneStringScalar(artifactStart,
+                artifactLength, rowStart + 4 + byteOffset,
+                contentByteLength - byteOffset, encoding,
+                ref init scalar, ref init bytesRead)
+            || scalar <= 0 || bytesRead <= 0)
+        {
+            return 3;
+        }
+        if (scalar <= 0xFFFF)
+        {
+            Host.StandaloneWriterText[textStart + unitOffset]
+                = char16(scalar);
+            unitOffset = unitOffset + 1;
+        }
+        else
+        {
+            int32 value = scalar - 0x10000;
+            Host.StandaloneWriterText[textStart + unitOffset]
+                = char16(0xD800 + (value >> 10));
+            Host.StandaloneWriterText[textStart + unitOffset + 1]
+                = char16(0xDC00 + (value & 0x3FF));
+            unitOffset = unitOffset + 2;
+        }
+        byteOffset = byteOffset + bytesRead;
+    }
+    Host.StandaloneWriterTextCount[0] = textStart + unitCount;
+    return TryAddStandaloneWriterString(3, textStart,
+        unitCount, ref init *stringIdResult);
+}
+
+bool StandaloneWriterStringEqualsArtifactRow(int32 existingKind,
+    int32 existingStart, int32 existingLength,
+    int32 artifactStart, int32 artifactLength, int32 rowStart,
+    int32 contentByteLength, int32 encoding)
+{
+    mut int32 byteOffset = 0;
+    mut int32 unitOffset = 0;
+    while (byteOffset < contentByteLength)
+    {
+        init int32 scalar;
+        init int32 bytesRead;
+        if (!TryReadStandaloneStringScalar(artifactStart,
+                artifactLength, rowStart + 4 + byteOffset,
+                contentByteLength - byteOffset, encoding,
+                ref init scalar, ref init bytesRead)
+            || scalar <= 0 || bytesRead <= 0)
+        {
+            return false;
+        }
+
+        if (scalar <= 0xFFFF)
+        {
+            if (unitOffset >= existingLength
+                || GetStandaloneWriterTextUnit(existingKind,
+                    existingStart + unitOffset) != scalar)
+            {
+                return false;
+            }
+            unitOffset = unitOffset + 1;
+        }
+        else
+        {
+            int32 value = scalar - 0x10000;
+            int32 high = 0xD800 + (value >> 10);
+            int32 low = 0xDC00 + (value & 0x3FF);
+            if (unitOffset > existingLength - 2
+                || GetStandaloneWriterTextUnit(existingKind,
+                    existingStart + unitOffset) != high
+                || GetStandaloneWriterTextUnit(existingKind,
+                    existingStart + unitOffset + 1) != low)
+            {
+                return false;
+            }
+            unitOffset = unitOffset + 2;
+        }
+        byteOffset = byteOffset + bytesRead;
+    }
+    return byteOffset == contentByteLength
+        && unitOffset == existingLength;
+}
+
+int32 TryAddStandaloneWriterArtifactString(int32 artifactOrdinal,
+    int32 stringRow, ref<init int32> stringIdResult)
+    ensure return == 0 ? *stringIdResult is init : true
+{
+    init int32 artifactStart;
+    init int32 artifactLength;
+    if (!TryGetStandaloneArtifactExtent(artifactOrdinal,
+            ref init artifactStart, ref init artifactLength)
+        || !TryValidateStandaloneArtifactDirectory(artifactOrdinal))
+    {
+        return 3;
+    }
+    int32 stringEntry = FindStandaloneArtifactSection(0x0002);
+    int32 stringCount = GetStandaloneArtifactSectionCount(0x0002);
+    if (stringEntry == 0 || stringRow <= 0
+        || stringRow > stringCount)
+    {
+        return 3;
+    }
+    int32 stringSectionStart
+        = Host.StandaloneSectionStarts[stringEntry];
+    int32 stringSectionLength
+        = Host.StandaloneSectionLengths[stringEntry];
+    init int32 rowStart;
+    init int32 rowLength;
+    init int32 encoding;
+    init int32 contentByteLength;
+    if (!TryGetStandaloneStringRowInfo(artifactStart,
+            artifactLength, stringSectionStart,
+            stringSectionLength, stringCount, stringRow,
+            ref init rowStart, ref init rowLength,
+            ref init encoding, ref init contentByteLength)
+        || !TryValidateStandaloneStringName(artifactOrdinal,
+            artifactStart, artifactLength, stringSectionStart,
+            stringSectionLength, stringCount, stringRow))
+    {
+        return 3;
+    }
+
+    mut uint32 hash = uint32(0x9E37_79B9);
+    mut int32 byteOffset = 0;
+    mut int32 unitCount = 0;
+    while (byteOffset < contentByteLength)
+    {
+        init int32 scalar;
+        init int32 bytesRead;
+        if (!TryReadStandaloneStringScalar(artifactStart,
+                artifactLength, rowStart + 4 + byteOffset,
+                contentByteLength - byteOffset, encoding,
+                ref init scalar, ref init bytesRead)
+            || scalar <= 0 || bytesRead <= 0)
+        {
+            return 3;
+        }
+        if (scalar <= 0xFFFF)
+        {
+            hash = (hash << 5) | (hash >> 27);
+            hash = hash ^ uint32(scalar);
+            unitCount = unitCount + 1;
+        }
+        else
+        {
+            int32 value = scalar - 0x10000;
+            int32 high = 0xD800 + (value >> 10);
+            int32 low = 0xDC00 + (value & 0x3FF);
+            hash = (hash << 5) | (hash >> 27);
+            hash = hash ^ uint32(high);
+            hash = (hash << 5) | (hash >> 27);
+            hash = hash ^ uint32(low);
+            unitCount = unitCount + 2;
+        }
+        byteOffset = byteOffset + bytesRead;
+    }
+    if (byteOffset != contentByteLength || unitCount <= 0)
+    {
+        return 3;
+    }
+
+    int32 slotCapacity
+        = Host.StandaloneWriterStringHashSlots.Length;
+    int32 slotIndex = GetStandaloneWriterHashSlot(
+        int32(hash & uint32(0x7FFF_FFFF)), slotCapacity);
+    if (slotIndex < 0)
+    {
+        return 3;
+    }
+    for (mut int32 probe = 0;
+        probe < slotCapacity;
+        probe = probe + 1)
+    {
+        int32 storedId
+            = Host.StandaloneWriterStringHashSlots[slotIndex];
+        if (storedId == 0)
+        {
+            break;
+        }
+        int32 existingRow = storedId - 1;
+        if (existingRow < 0
+            || existingRow >= Host.StandaloneWriterStringCount[0])
+        {
+            return 3;
+        }
+        if (Host.StandaloneWriterStringHashes[existingRow] == hash)
+        {
+            int32 existingOffset = existingRow * 3;
+            if (StandaloneWriterStringEqualsArtifactRow(
+                    Host.StandaloneWriterStrings[existingOffset],
+                    Host.StandaloneWriterStrings[existingOffset + 1],
+                    Host.StandaloneWriterStrings[existingOffset + 2],
+                    artifactStart, artifactLength, rowStart,
+                    contentByteLength, encoding))
+            {
+                *stringIdResult = storedId;
+                return 0;
+            }
+        }
+        slotIndex = slotIndex + 1;
+        if (slotIndex == slotCapacity)
+        {
+            slotIndex = 0;
+        }
+    }
+
+    int32 textStart = Host.StandaloneWriterTextCount[0];
+    if (textStart < 0
+        || unitCount
+            > Host.StandaloneWriterText.Length - textStart)
+    {
+        return 3;
+    }
+    byteOffset = 0;
+    mut int32 unitOffset = 0;
+    while (byteOffset < contentByteLength)
+    {
+        init int32 scalar;
+        init int32 bytesRead;
+        if (!TryReadStandaloneStringScalar(artifactStart,
+                artifactLength, rowStart + 4 + byteOffset,
+                contentByteLength - byteOffset, encoding,
+                ref init scalar, ref init bytesRead)
+            || scalar <= 0 || bytesRead <= 0)
+        {
+            return 3;
+        }
+        if (scalar <= 0xFFFF)
+        {
+            Host.StandaloneWriterText[textStart + unitOffset]
+                = char16(scalar);
+            unitOffset = unitOffset + 1;
+        }
+        else
+        {
+            int32 value = scalar - 0x10000;
+            Host.StandaloneWriterText[textStart + unitOffset]
+                = char16(0xD800 + (value >> 10));
+            Host.StandaloneWriterText[textStart + unitOffset + 1]
+                = char16(0xDC00 + (value & 0x3FF));
+            unitOffset = unitOffset + 2;
+        }
+        byteOffset = byteOffset + bytesRead;
+    }
+    Host.StandaloneWriterTextCount[0] = textStart + unitCount;
+    return TryAddStandaloneWriterString(3, textStart,
+        unitCount, ref init *stringIdResult);
 }
 
 int32 BuildStandaloneWriterRootMap()
@@ -592,17 +1030,165 @@ int32 BuildStandaloneWriterRootMap()
         }
         Host.StandaloneWriterRootOrdinals[importedId] = root;
     }
+    return BuildStandaloneWriterRootExpectedGroups();
+}
+
+int32 GetStandaloneWriterRootGroupHash(int32 providerModuleId,
+    int32 methodDefRow)
+{
+    mut int32 hash = 0x5D58_8B65;
+    hash = ((hash << 5) | (hash >>> 27)) ^ providerModuleId;
+    hash = ((hash << 5) | (hash >>> 27)) ^ methodDefRow;
+    return hash;
+}
+
+int32 BuildStandaloneWriterRootExpectedGroups()
+{
+    int32 importedCount
+        = Host.StandaloneRewrittenImportedCallableCount[0];
+    int32 slotCapacity
+        = Host.StandaloneWriterRootGroupHashSlots.Length;
+    if (importedCount < 0
+        || importedCount
+            > Host.StandaloneWriterRootExpectedGroupByImport.Length
+        || importedCount
+            > Host.StandaloneWriterRootRepresentativeImportByGroup.Length
+        || slotCapacity <= 0)
+    {
+        return 3;
+    }
+
+    Host.StandaloneWriterRootExpectedGroupCount[0] = 0;
+    for (mut int32 slot = 0;
+        slot < slotCapacity;
+        slot = slot + 1)
+    {
+        Host.StandaloneWriterRootGroupHashSlots[slot] = 0;
+    }
+    int32 localCount
+        = Host.StandaloneRewrittenLocalCallableCount[0];
+    for (mut int32 importedId = 0;
+        importedId < importedCount;
+        importedId = importedId + 1)
+    {
+        int32 rootOrdinal
+            = Host.StandaloneWriterRootOrdinals[importedId];
+        int32 providerModuleId
+            = Host.StandaloneRewrittenImportedCallables[
+                importedId * 8 + 1];
+        if (rootOrdinal < 0
+            || rootOrdinal >= Host.StandaloneResolvedRootCount[0]
+            || providerModuleId < 0
+            || providerModuleId
+                >= Host.StandaloneWriterModuleRefByModuleId.Length)
+        {
+            return 3;
+        }
+        int32 methodDefRow
+            = int32(Host.StandaloneResolvedRoots[
+                rootOrdinal * 20 + 5]);
+        if (methodDefRow <= 0 || methodDefRow > 0x00FF_FFFF)
+        {
+            return 3;
+        }
+        int32 hash = GetStandaloneWriterRootGroupHash(
+            providerModuleId, methodDefRow);
+        int32 slot
+            = GetStandaloneWriterHashSlot(hash, slotCapacity);
+        if (slot < 0)
+        {
+            return 3;
+        }
+        mut bool found = false;
+        for (mut int32 probe = 0;
+            probe < slotCapacity;
+            probe = probe + 1)
+        {
+            int32 storedGroup
+                = Host.StandaloneWriterRootGroupHashSlots[slot];
+            if (storedGroup == 0)
+            {
+                int32 groupIndex
+                    = Host.StandaloneWriterRootExpectedGroupCount[0];
+                if (groupIndex
+                    >= Host.StandaloneWriterRootRepresentativeImportByGroup.Length)
+                {
+                    return 3;
+                }
+                Host.StandaloneWriterRootRepresentativeImportByGroup[
+                    groupIndex] = importedId;
+                Host.StandaloneWriterRootExpectedGroupCount[0]
+                    = groupIndex + 1;
+                Host.StandaloneWriterRootGroupHashSlots[slot]
+                    = groupIndex + 1;
+                Host.StandaloneWriterRootExpectedGroupByImport[
+                    importedId] = groupIndex;
+                found = true;
+                break;
+            }
+
+            int32 groupIndex = storedGroup - 1;
+            if (groupIndex < 0
+                || groupIndex
+                    >= Host.StandaloneWriterRootExpectedGroupCount[0])
+            {
+                return 3;
+            }
+            int32 representativeImport
+                = Host.StandaloneWriterRootRepresentativeImportByGroup[
+                    groupIndex];
+            int32 representativeModule
+                = Host.StandaloneRewrittenImportedCallables[
+                    representativeImport * 8 + 1];
+            int32 representativeRoot
+                = Host.StandaloneWriterRootOrdinals[
+                    representativeImport];
+            int32 representativeMethod
+                = int32(Host.StandaloneResolvedRoots[
+                    representativeRoot * 20 + 5]);
+            if (representativeModule == providerModuleId
+                && representativeMethod == methodDefRow)
+            {
+                Host.StandaloneWriterRootExpectedGroupByImport[
+                    importedId] = groupIndex;
+                found = true;
+                break;
+            }
+            slot = slot + 1;
+            if (slot == slotCapacity)
+            {
+                slot = 0;
+            }
+        }
+        if (!found)
+        {
+            return 3;
+        }
+    }
+
+    int32 groupCount
+        = Host.StandaloneWriterRootExpectedGroupCount[0];
+    for (mut int32 importedId = 0;
+        importedId < importedCount;
+        importedId = importedId + 1)
+    {
+        int32 groupIndex
+            = Host.StandaloneWriterRootExpectedGroupByImport[
+                importedId];
+        int32 methodRow = localCount + groupIndex + 1;
+        if (groupIndex < 0 || groupIndex >= groupCount
+            || methodRow > 0x00FF_FFFF)
+        {
+            return 3;
+        }
+        Host.StandaloneWriterRootExpectedMethodRowsByImport[
+            importedId] = methodRow;
+    }
     return 0;
 }
 
 int32 BuildStandaloneWriterStringInventory()
 {
-    int32 rootStatus = BuildStandaloneWriterRootMap();
-    if (rootStatus != 0)
-    {
-        return rootStatus;
-    }
-
     int32 moduleIdentityStart = Host.StandaloneRequest[2];
     int32 moduleIdentityLength = Host.StandaloneRequest[3];
     init int32 moduleIdentityStringId;
@@ -727,29 +1313,14 @@ int32 BuildStandaloneWriterStringInventory()
         importedId < importedCount;
         importedId = importedId + 1)
     {
-        int32 importedOffset = importedId * 8;
-        int32 keyStart
-            = Host.StandaloneRewrittenImportedCallables[
-                importedOffset + 2];
-        int32 keyLength
-            = Host.StandaloneRewrittenImportedCallables[
-                importedOffset + 3];
-        int32 nameStart = keyStart;
-        int32 nameLength = keyLength;
-        for (mut int32 offset = 0;
-            offset < keyLength;
-            offset = offset + 1)
-        {
-            if (GetStandaloneWriterTextUnit(2,
-                    keyStart + offset) == 46)
-            {
-                nameStart = keyStart + offset + 1;
-                nameLength = keyLength - offset - 1;
-            }
-        }
+        int32 rootOrdinal
+            = Host.StandaloneWriterRootOrdinals[importedId];
+        int32 rootOffset = rootOrdinal * 20;
         init int32 nameStringId;
-        stringStatus = TryAddStandaloneWriterString(2,
-            nameStart, nameLength, ref init nameStringId);
+        stringStatus = TryAddStandaloneWriterArtifactString(
+            int32(Host.StandaloneResolvedRoots[rootOffset + 2]),
+            int32(Host.StandaloneResolvedRoots[rootOffset + 6]),
+            ref init nameStringId);
         if (stringStatus != 0)
         {
             return stringStatus;
@@ -914,13 +1485,19 @@ int32 WriteStandaloneWriterModuleSection()
 {
     int32 moduleIdentityStringId
         = Host.StandaloneWriterModuleIdentityStringId[0];
+    int32 constantCount
+        = Host.StandaloneWriterUniqueConstantCount[0];
+    int32 predicateGraphCount
+        = Host.StandaloneWriterPredicateGraphMapCount[0];
+    bool requiresTypedValueFeatures
+        = constantCount != 0 || predicateGraphCount != 0;
     int32 featureCount
-        = Host.StandaloneWriterUniqueConstantCount[0] == 0 ? 0 : 2;
+        = (requiresTypedValueFeatures ? 2 : 0)
+            + (predicateGraphCount != 0 ? 1 : 0);
     if (moduleIdentityStringId <= 0
         || moduleIdentityStringId
             > Host.StandaloneWriterStringCount[0]
-        || (featureCount != 0
-            && Host.StandaloneWriterUniqueConstantCount[0] < 0))
+        || constantCount < 0 || predicateGraphCount < 0)
     {
         return 3;
     }
@@ -957,21 +1534,50 @@ int32 WriteStandaloneWriterModuleSection()
 
 int32 WriteStandaloneWriterFeatureSection()
 {
-    if (Host.StandaloneWriterUniqueConstantCount[0] == 0)
+    int32 constantCount
+        = Host.StandaloneWriterUniqueConstantCount[0];
+    int32 predicateGraphCount
+        = Host.StandaloneWriterPredicateGraphMapCount[0];
+    if (constantCount < 0 || predicateGraphCount < 0)
+    {
+        return 3;
+    }
+
+    bool requiresTypedValueFeatures
+        = constantCount != 0 || predicateGraphCount != 0;
+    int32 featureCount
+        = (requiresTypedValueFeatures ? 2 : 0)
+            + (predicateGraphCount == 0 ? 0 : 1);
+    if (featureCount == 0)
     {
         return 0;
     }
 
     int32 sectionStart = Host.StandaloneWriterOutputByteCount[0];
-    int32 status = AppendStandaloneWriterWord(9);
-    if (status != 0) { return status; }
-    status = AppendStandaloneWriterWord(1);
-    if (status != 0) { return status; }
-    status = AppendStandaloneWriterWord(11);
-    if (status != 0) { return status; }
-    status = AppendStandaloneWriterWord(1);
-    if (status != 0) { return status; }
-    return FinishStandaloneWriterSection(0x0004, 2, sectionStart);
+    int32 status = 0;
+    if (requiresTypedValueFeatures)
+    {
+        status = AppendStandaloneWriterWord(9);
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterWord(1);
+        if (status != 0) { return status; }
+    }
+    if (predicateGraphCount != 0)
+    {
+        status = AppendStandaloneWriterWord(10);
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterWord(1);
+        if (status != 0) { return status; }
+    }
+    if (requiresTypedValueFeatures)
+    {
+        status = AppendStandaloneWriterWord(11);
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterWord(1);
+        if (status != 0) { return status; }
+    }
+    return FinishStandaloneWriterSection(
+        0x0004, featureCount, sectionStart);
 }
 
 int32 WriteStandaloneWriterModuleRefSection()
@@ -1035,13 +1641,20 @@ int32 WriteStandaloneWriterModuleRefSection()
         0x0010, moduleRefCount, sectionStart);
 }
 
+int32 GetStandaloneWriterMethodCount()
+{
+    return Host.StandaloneRewrittenLocalCallableCount[0]
+        + Host.StandaloneWriterRootExpectedGroupCount[0];
+}
+
 int32 GetStandaloneWriterMethodParameterCount(int32 methodId)
 {
     int32 localCount
         = Host.StandaloneRewrittenLocalCallableCount[0];
-    int32 importedCount
-        = Host.StandaloneRewrittenImportedCallableCount[0];
-    if (methodId < 0 || methodId >= localCount + importedCount)
+    int32 rootGroupCount
+        = Host.StandaloneWriterRootExpectedGroupCount[0];
+    if (methodId < 0
+        || methodId >= localCount + rootGroupCount)
     {
         return -1;
     }
@@ -1051,25 +1664,41 @@ int32 GetStandaloneWriterMethodParameterCount(int32 methodId)
             methodId * 12 + 6];
     }
 
-    int32 importedId = methodId - localCount;
-    int32 rootOrdinal
-        = Host.StandaloneWriterRootOrdinals[importedId];
-    if (rootOrdinal < 0
-        || rootOrdinal >= Host.StandaloneResolvedRootCount[0])
+    int32 rootGroupIndex = methodId - localCount;
+    if (rootGroupIndex < rootGroupCount)
     {
-        return -1;
+        int32 representativeImport
+            = Host.StandaloneWriterRootRepresentativeImportByGroup[
+                rootGroupIndex];
+        if (representativeImport < 0
+            || representativeImport
+                >= Host.StandaloneRewrittenImportedCallableCount[0])
+        {
+            return -1;
+        }
+        int32 rootOrdinal
+            = Host.StandaloneWriterRootOrdinals[
+                representativeImport];
+        if (rootOrdinal < 0
+            || rootOrdinal >= Host.StandaloneResolvedRootCount[0])
+        {
+            return -1;
+        }
+        return int32(Host.StandaloneResolvedRoots[
+            rootOrdinal * 20 + 11]);
     }
-    return int32(Host.StandaloneResolvedRoots[
-        rootOrdinal * 20 + 11]);
+
+    return -1;
 }
 
 int32 GetStandaloneWriterMethodResultTypeId(int32 methodId)
 {
     int32 localCount
         = Host.StandaloneRewrittenLocalCallableCount[0];
-    int32 importedCount
-        = Host.StandaloneRewrittenImportedCallableCount[0];
-    if (methodId < 0 || methodId >= localCount + importedCount)
+    int32 rootGroupCount
+        = Host.StandaloneWriterRootExpectedGroupCount[0];
+    if (methodId < 0
+        || methodId >= localCount + rootGroupCount)
     {
         return -1;
     }
@@ -1079,10 +1708,24 @@ int32 GetStandaloneWriterMethodResultTypeId(int32 methodId)
             methodId * 12 + 4];
     }
 
-    int32 importedId = methodId - localCount;
-    int32 expectedCallableId
-        = Host.StandaloneRewrittenImportedCallables[
-            importedId * 8 + 4];
+    int32 expectedCallableId;
+    if (methodId < localCount + rootGroupCount)
+    {
+        int32 groupIndex = methodId - localCount;
+        int32 representativeImport
+            = Host.StandaloneWriterRootRepresentativeImportByGroup[
+                groupIndex];
+        if (representativeImport < 0
+            || representativeImport
+                >= Host.StandaloneRewrittenImportedCallableCount[0])
+        {
+            return -1;
+        }
+        expectedCallableId
+            = Host.StandaloneRewrittenImportedCallables[
+                representativeImport * 8 + 4];
+    }
+    else { return -1; }
     if (expectedCallableId < 0
         || expectedCallableId
             >= Host.StandaloneRewrittenCallableCount[0])
@@ -1098,6 +1741,8 @@ int32 GetStandaloneWriterMethodParameterTypeId(int32 methodId,
 {
     int32 localCount
         = Host.StandaloneRewrittenLocalCallableCount[0];
+    int32 rootGroupCount
+        = Host.StandaloneWriterRootExpectedGroupCount[0];
     int32 parameterCount
         = GetStandaloneWriterMethodParameterCount(methodId);
     if (parameterCount < 0 || ordinal < 0
@@ -1121,19 +1766,37 @@ int32 GetStandaloneWriterMethodParameterTypeId(int32 methodId,
             row * 4 + 1];
     }
 
-    int32 importedId = methodId - localCount;
-    int32 rootOrdinal
-        = Host.StandaloneWriterRootOrdinals[importedId];
-    if (rootOrdinal < 0
-        || rootOrdinal >= Host.StandaloneResolvedRootCount[0])
+    int32 artifactOrdinal;
+    int32 parameterFirst;
+    if (methodId < localCount + rootGroupCount)
     {
-        return -1;
+        int32 groupIndex = methodId - localCount;
+        int32 representativeImport
+            = Host.StandaloneWriterRootRepresentativeImportByGroup[
+                groupIndex];
+        if (representativeImport < 0
+            || representativeImport
+                >= Host.StandaloneRewrittenImportedCallableCount[0])
+        {
+            return -1;
+        }
+        int32 rootOrdinal
+            = Host.StandaloneWriterRootOrdinals[
+                representativeImport];
+        if (rootOrdinal < 0
+            || rootOrdinal >= Host.StandaloneResolvedRootCount[0])
+        {
+            return -1;
+        }
+        int32 rootOffset = rootOrdinal * 20;
+        artifactOrdinal
+            = int32(Host.StandaloneResolvedRoots[
+                rootOffset + 2]);
+        parameterFirst
+            = int32(Host.StandaloneResolvedRoots[
+                rootOffset + 10]);
     }
-    int32 rootOffset = rootOrdinal * 20;
-    int32 artifactOrdinal
-        = int32(Host.StandaloneResolvedRoots[rootOffset + 2]);
-    int32 parameterFirst
-        = int32(Host.StandaloneResolvedRoots[rootOffset + 10]);
+    else { return -1; }
     if (artifactOrdinal < 0
         || artifactOrdinal >= Host.StandaloneRequest[4])
     {
@@ -1156,9 +1819,10 @@ int32 GetStandaloneWriterMethodFlags(int32 methodId)
 {
     int32 localCount
         = Host.StandaloneRewrittenLocalCallableCount[0];
+    int32 rootGroupCount
+        = Host.StandaloneWriterRootExpectedGroupCount[0];
     if (methodId < 0
-        || methodId >= localCount
-            + Host.StandaloneRewrittenImportedCallableCount[0])
+        || methodId >= localCount + rootGroupCount)
     {
         return -1;
     }
@@ -1174,24 +1838,40 @@ int32 GetStandaloneWriterMethodFlags(int32 methodId)
         return (sourceFlags & 1) != 0 ? 2 : 0;
     }
 
-    int32 rootOrdinal
-        = Host.StandaloneWriterRootOrdinals[methodId - localCount];
-    if (rootOrdinal < 0
-        || rootOrdinal >= Host.StandaloneResolvedRootCount[0])
+    if (methodId < localCount + rootGroupCount)
     {
-        return -1;
+        int32 groupIndex = methodId - localCount;
+        int32 representativeImport
+            = Host.StandaloneWriterRootRepresentativeImportByGroup[
+                groupIndex];
+        if (representativeImport < 0
+            || representativeImport
+                >= Host.StandaloneRewrittenImportedCallableCount[0])
+        {
+            return -1;
+        }
+        int32 rootOrdinal
+            = Host.StandaloneWriterRootOrdinals[
+                representativeImport];
+        if (rootOrdinal < 0
+            || rootOrdinal >= Host.StandaloneResolvedRootCount[0])
+        {
+            return -1;
+        }
+        return int32(Host.StandaloneResolvedRoots[
+            rootOrdinal * 20 + 17]);
     }
-    return int32(Host.StandaloneResolvedRoots[
-        rootOrdinal * 20 + 17]);
+    return -1;
 }
 
 int32 GetStandaloneWriterMethodEffectMask(int32 methodId)
 {
     int32 localCount
         = Host.StandaloneRewrittenLocalCallableCount[0];
+    int32 rootGroupCount
+        = Host.StandaloneWriterRootExpectedGroupCount[0];
     if (methodId < 0
-        || methodId >= localCount
-            + Host.StandaloneRewrittenImportedCallableCount[0])
+        || methodId >= localCount + rootGroupCount)
     {
         return -1;
     }
@@ -1207,10 +1887,23 @@ int32 GetStandaloneWriterMethodEffectMask(int32 methodId)
         return (sourceFlags & 2) != 0 ? 4 : 0;
     }
 
-    int32 importedId = methodId - localCount;
-    int32 expectedCallableId
-        = Host.StandaloneRewrittenImportedCallables[
-            importedId * 8 + 4];
+    int32 expectedCallableId;
+    if (methodId < localCount + rootGroupCount)
+    {
+        int32 representativeImport
+            = Host.StandaloneWriterRootRepresentativeImportByGroup[
+                methodId - localCount];
+        if (representativeImport < 0
+            || representativeImport
+                >= Host.StandaloneRewrittenImportedCallableCount[0])
+        {
+            return -1;
+        }
+        expectedCallableId
+            = Host.StandaloneRewrittenImportedCallables[
+                representativeImport * 8 + 4];
+    }
+    else { return -1; }
     if (expectedCallableId < 0
         || expectedCallableId
             >= Host.StandaloneRewrittenCallableCount[0])
@@ -1227,9 +1920,8 @@ int32 GetStandaloneWriterMethodBodyRow(int32 methodId)
 {
     int32 localCount
         = Host.StandaloneRewrittenLocalCallableCount[0];
-    int32 importedCount
-        = Host.StandaloneRewrittenImportedCallableCount[0];
-    if (methodId < 0 || methodId >= localCount + importedCount)
+    int32 methodCount = GetStandaloneWriterMethodCount();
+    if (methodId < 0 || methodId >= methodCount)
     {
         return -1;
     }
@@ -1246,6 +1938,38 @@ int32 GetStandaloneWriterMethodBodyRow(int32 methodId)
         return -1;
     }
     return bodyId + 1;
+}
+
+int32 GetStandaloneWriterMethodNameStringId(int32 methodId)
+{
+    int32 localCount
+        = Host.StandaloneRewrittenLocalCallableCount[0];
+    int32 rootGroupCount
+        = Host.StandaloneWriterRootExpectedGroupCount[0];
+    if (methodId < 0
+        || methodId >= localCount + rootGroupCount)
+    {
+        return -1;
+    }
+    if (methodId < localCount)
+    {
+        return Host.StandaloneWriterLocalNameStringIds[methodId];
+    }
+    if (methodId < localCount + rootGroupCount)
+    {
+        int32 representativeImport
+            = Host.StandaloneWriterRootRepresentativeImportByGroup[
+                methodId - localCount];
+        if (representativeImport < 0
+            || representativeImport
+                >= Host.StandaloneRewrittenImportedCallableCount[0])
+        {
+            return -1;
+        }
+        return Host.StandaloneWriterRootNameStringIds[
+            representativeImport];
+    }
+    return -1;
 }
 
 int32 EnsureStandaloneWriterTypeSpec(int32 typeId,
@@ -1303,9 +2027,7 @@ int32 EnsureStandaloneWriterTypeSpec(int32 typeId,
 
 int32 BuildStandaloneWriterTypeSpecInventory()
 {
-    int32 methodCount
-        = Host.StandaloneRewrittenLocalCallableCount[0]
-            + Host.StandaloneRewrittenImportedCallableCount[0];
+    int32 methodCount = GetStandaloneWriterMethodCount();
     if (methodCount <= 0
         || methodCount
             > Host.StandaloneRewrittenCallableCount[0])
@@ -3193,6 +3915,138 @@ int32 WriteStandaloneWriterBodySection()
         0x0020, bodyCount, sectionStart);
 }
 
+int32 WriteStandaloneWriterPredicateGraphSections()
+{
+    int32 graphCount
+        = Host.StandaloneWriterPredicateGraphMapCount[0];
+    if (graphCount < 0
+        || graphCount
+            > Host.StandaloneWriterPredicateGraphMap.Length / 4
+        || graphCount > 0xFF_FFFF)
+    {
+        return 3;
+    }
+    if (graphCount == 0)
+    {
+        return 0;
+    }
+
+    for (mut int32 graphIndex = 0;
+        graphIndex < graphCount;
+        graphIndex = graphIndex + 1)
+    {
+        int32 mapOffset = graphIndex * 4;
+        int32 artifactOrdinal
+            = Host.StandaloneWriterPredicateGraphMap[mapOffset];
+        int32 inputGraphRow
+            = Host.StandaloneWriterPredicateGraphMap[mapOffset + 1];
+        int32 outputGraphRow
+            = Host.StandaloneWriterPredicateGraphMap[mapOffset + 2];
+        int32 nodeKind
+            = Host.StandaloneWriterPredicateGraphMap[mapOffset + 3];
+        if (artifactOrdinal < 0
+            || artifactOrdinal >= Host.StandaloneRequest[4]
+            || inputGraphRow <= 0
+            || outputGraphRow != graphIndex + 1
+            || nodeKind < 1 || nodeKind > 6)
+        {
+            return 3;
+        }
+    }
+
+    int32 sectionStart = Host.StandaloneWriterOutputByteCount[0];
+    for (mut int32 graphIndex = 0;
+        graphIndex < graphCount;
+        graphIndex = graphIndex + 1)
+    {
+        uint32 row = uint32(graphIndex + 1);
+        int32 status = AppendStandaloneWriterWord(row);
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterWord(row);
+        if (status != 0) { return status; }
+    }
+    int32 status = FinishStandaloneWriterSection(
+        0x0037, graphCount, sectionStart);
+    if (status != 0) { return status; }
+
+    sectionStart = Host.StandaloneWriterOutputByteCount[0];
+    for (mut int32 graphIndex = 0;
+        graphIndex < graphCount;
+        graphIndex = graphIndex + 1)
+    {
+        uint32 row = uint32(graphIndex + 1);
+        status = AppendStandaloneWriterWord(row);
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterWord(1);
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterWord(0);
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterWord(0);
+        if (status != 0) { return status; }
+    }
+    status = FinishStandaloneWriterSection(
+        0x0038, graphCount, sectionStart);
+    if (status != 0) { return status; }
+
+    sectionStart = Host.StandaloneWriterOutputByteCount[0];
+    for (mut int32 graphIndex = 0;
+        graphIndex < graphCount;
+        graphIndex = graphIndex + 1)
+    {
+        status = AppendStandaloneWriterByte(5);
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterByte(0);
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterHalfWord(0);
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterWord(0);
+        if (status != 0) { return status; }
+    }
+    status = FinishStandaloneWriterSection(
+        0x0039, graphCount, sectionStart);
+    if (status != 0) { return status; }
+
+    sectionStart = Host.StandaloneWriterOutputByteCount[0];
+    for (mut int32 graphIndex = 0;
+        graphIndex < graphCount;
+        graphIndex = graphIndex + 1)
+    {
+        int32 nodeKind
+            = Host.StandaloneWriterPredicateGraphMap[
+                graphIndex * 4 + 3];
+        status = AppendStandaloneWriterWord(uint32(nodeKind));
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterWord(uint32(0xF200_0001));
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterWord(
+            uint32(graphIndex + 1));
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterWord(1);
+        if (status != 0) { return status; }
+    }
+    status = FinishStandaloneWriterSection(
+        0x003B, graphCount, sectionStart);
+    if (status != 0) { return status; }
+
+    sectionStart = Host.StandaloneWriterOutputByteCount[0];
+    for (mut int32 graphIndex = 0;
+        graphIndex < graphCount;
+        graphIndex = graphIndex + 1)
+    {
+        status = AppendStandaloneWriterByte(1);
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterByte(0);
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterHalfWord(0);
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterWord(
+            uint32(graphIndex + 1));
+        if (status != 0) { return status; }
+    }
+    return FinishStandaloneWriterSection(
+        0x003C, graphCount, sectionStart);
+}
+
 public static int32 WriteStandaloneScalarModule()
 {
     if (!ValidateStandaloneWriterBuffers()
@@ -3314,6 +4168,11 @@ public static int32 WriteStandaloneScalarModule()
     {
         return FailStandaloneWriter(writeStatus);
     }
+    writeStatus = WriteStandaloneWriterPredicateGraphSections();
+    if (writeStatus != 0)
+    {
+        return FailStandaloneWriter(writeStatus);
+    }
 
     Host.StandaloneWriterStatus[0] = 0;
     return 0;
@@ -3321,86 +4180,245 @@ public static int32 WriteStandaloneScalarModule()
 
 int32 ValidateStandaloneWriterContractClosure()
 {
-    if (Host.StandaloneResolvedImportCount[0] != 0)
+    int32 rootMapStatus = BuildStandaloneWriterRootMap();
+    if (rootMapStatus != 0)
     {
-        return 2;
+        return rootMapStatus;
     }
 
-    int32 rootCount = Host.StandaloneResolvedRootCount[0];
-    for (mut int32 root = 0; root < rootCount; root = root + 1)
+    int32 localCount
+        = Host.StandaloneRewrittenLocalCallableCount[0];
+    int32 methodCount = GetStandaloneWriterMethodCount();
+    if (localCount < 0 || methodCount < localCount
+        || methodCount
+            > Host.StandaloneWriterMethodContractCounts.Length
+        || Host.StandaloneWriterPredicateGraphMap.Length % 4 != 0)
     {
-        int32 rootOffset = root * 20;
+        return 3;
+    }
+
+    Host.StandaloneWriterPredicateGraphMapCount[0] = 0;
+    for (mut int32 methodId = 0;
+        methodId < methodCount;
+        methodId = methodId + 1)
+    {
+        Host.StandaloneWriterMethodContractCounts[methodId] = 0;
+    }
+
+    for (mut int32 methodId = 0;
+        methodId < methodCount;
+        methodId = methodId + 1)
+    {
+        if (methodId < localCount)
+        {
+            int32 effectMask
+                = GetStandaloneWriterMethodEffectMask(methodId);
+            if (effectMask < 0 || (effectMask & ~6) != 0)
+            {
+                return 3;
+            }
+            Host.StandaloneWriterMethodContractCounts[methodId]
+                = effectMask == 0 ? 0 : 1;
+            continue;
+        }
+
+        int32 groupIndex = methodId - localCount;
+        int32 representativeImport
+            = Host.StandaloneWriterRootRepresentativeImportByGroup[
+                groupIndex];
+        if (representativeImport < 0
+            || representativeImport
+                >= Host.StandaloneRewrittenImportedCallableCount[0])
+        {
+            return 3;
+        }
+        int32 rootOrdinal
+            = Host.StandaloneWriterRootOrdinals[representativeImport];
+        if (rootOrdinal < 0
+            || rootOrdinal >= Host.StandaloneResolvedRootCount[0])
+        {
+            return 3;
+        }
+
+        int32 rootOffset = rootOrdinal * 20;
         int32 artifactOrdinal
             = int32(Host.StandaloneResolvedRoots[rootOffset + 2]);
+        int32 moduleRow
+            = int32(Host.StandaloneResolvedRoots[rootOffset + 3]);
+        int32 methodDefRow
+            = int32(Host.StandaloneResolvedRoots[rootOffset + 5]);
+        int32 paramFirst
+            = int32(Host.StandaloneResolvedRoots[rootOffset + 10]);
+        int32 paramCount
+            = int32(Host.StandaloneResolvedRoots[rootOffset + 11]);
         int32 contractFirst
             = int32(Host.StandaloneResolvedRoots[rootOffset + 14]);
         int32 contractCount
             = int32(Host.StandaloneResolvedRoots[rootOffset + 15]);
-        if (contractCount == 0)
-        {
-            continue;
-        }
-
-        if (artifactOrdinal < 0
-            || artifactOrdinal >= Host.StandaloneRequest[4]
-            || !TryValidateStandaloneArtifactDirectory(
-                artifactOrdinal))
-        {
-            return 3;
-        }
         init int32 artifactStart;
         init int32 artifactLength;
-        if (!TryGetStandaloneArtifactExtent(artifactOrdinal,
-                ref init artifactStart, ref init artifactLength))
+        if (moduleRow <= 0 || methodDefRow <= 0
+            || paramFirst < 0 || paramCount < 0
+            || contractFirst < 0 || contractCount < 0
+            || !TryGetStandaloneArtifactExtent(artifactOrdinal,
+                ref init artifactStart, ref init artifactLength)
+            || !TryValidateStandaloneArtifactDirectory(artifactOrdinal))
         {
             return 3;
         }
-        int32 contractEntry
-            = FindStandaloneArtifactSection(0x001B);
-        int32 contractTableCount
-            = GetStandaloneArtifactSectionCount(0x001B);
-        if (contractEntry == 0
-            || !IsStandaloneMetadataRange(uint32(contractFirst),
-                uint32(contractCount), contractTableCount))
+
+        int32 contractStatus = ValidateStandaloneMethodContracts(
+            artifactOrdinal, moduleRow, rootOrdinal,
+            artifactStart, artifactLength, methodDefRow,
+            uint32(paramFirst), uint32(paramCount),
+            uint32(contractFirst), uint32(contractCount));
+        if (contractStatus != 0)
+        {
+            return contractStatus;
+        }
+
+        int32 effectMask
+            = GetStandaloneWriterMethodEffectMask(methodId);
+        if (effectMask != Host.StandaloneCallableEffects[rootOrdinal])
         {
             return 3;
         }
-        int32 contractStart
-            = Host.StandaloneSectionStarts[contractEntry];
-        int32 contractLength
-            = Host.StandaloneSectionLengths[contractEntry];
-        if (!TryValidateStandaloneVariableTableIndex(
-                artifactStart, artifactLength, contractStart,
-                contractLength, contractTableCount, 8, 1))
+        int32 factCount = Host.StandaloneContractFactCount[0];
+        if (effectMask < 0 || (effectMask & ~6) != 0
+            || factCount < 0
+            || factCount > Host.StandaloneContractFacts.Length / 7 - 1
+            || factCount > 0xFF_FFFF
+                - (effectMask == 0 ? 0 : 1))
         {
             return 3;
         }
-        for (mut int32 offset = 0;
-            offset < contractCount;
-            offset = offset + 1)
+
+        for (mut int32 factRow = 1;
+            factRow <= factCount;
+            factRow = factRow + 1)
         {
-            init int32 rowStart;
-            init int32 rowLength;
-            if (!TryGetStandaloneVariableTableRowExtent(
-                    artifactStart, artifactLength, contractStart,
-                    contractLength, contractTableCount, 8, 1,
-                    contractFirst + offset,
-                    ref init rowStart, ref init rowLength))
+            int32 factOffset = factRow * 7;
+            int32 factKind
+                = Host.StandaloneContractFacts[factOffset];
+            if (factKind == 2 || factKind == 11)
+            {
+                int32 predicateGraphRow = factKind == 2
+                    ? Host.StandaloneContractFacts[factOffset + 2]
+                    : Host.StandaloneContractFacts[factOffset + 3];
+                init int32 outputGraphRow;
+                int32 graphStatus
+                    = EnsureStandaloneWriterPredicateGraph(
+                        artifactOrdinal, moduleRow, rootOrdinal,
+                        predicateGraphRow, ref init outputGraphRow);
+                if (graphStatus != 0)
+                {
+                    return graphStatus;
+                }
+            }
+            else if (factKind != 4)
             {
                 return 3;
             }
-            init uint32 clauseKind;
-            if (rowLength != 12
-                || !TryReadStandaloneArtifactAbsoluteHalfWord(
-                    artifactStart, artifactLength, rowStart + 4,
-                    ref init clauseKind))
-            {
-                return 3;
-            }
-            if (clauseKind != 1)
-            {
-                return 2;
-            }
+        }
+
+        Host.StandaloneWriterMethodContractCounts[methodId]
+            = factCount + (effectMask == 0 ? 0 : 1);
+    }
+
+    return 0;
+}
+
+int32 EnsureStandaloneWriterPredicateGraph(int32 artifactOrdinal,
+    int32 moduleRow, int32 callableSlot, int32 predicateGraphRow,
+    ref<init int32> outputGraphRowResult)
+    ensure return == 0 ? *outputGraphRowResult is init : true
+{
+    int32 mapCount
+        = Host.StandaloneWriterPredicateGraphMapCount[0];
+    int32 mapCapacity
+        = Host.StandaloneWriterPredicateGraphMap.Length / 4;
+    if (mapCount < 0 || mapCount > mapCapacity
+        || Host.StandaloneWriterPredicateGraphMap.Length % 4 != 0
+        || artifactOrdinal < 0
+        || artifactOrdinal >= Host.StandaloneRequest[4]
+        || predicateGraphRow <= 0)
+    {
+        return 3;
+    }
+
+    for (mut int32 mapRow = 0;
+        mapRow < mapCount;
+        mapRow = mapRow + 1)
+    {
+        int32 mapOffset = mapRow * 4;
+        if (Host.StandaloneWriterPredicateGraphMap[mapOffset]
+                == artifactOrdinal
+            && Host.StandaloneWriterPredicateGraphMap[
+                mapOffset + 1] == predicateGraphRow)
+        {
+            *outputGraphRowResult
+                = Host.StandaloneWriterPredicateGraphMap[mapOffset + 2];
+            return 0;
+        }
+    }
+
+    init int32 artifactStart;
+    init int32 artifactLength;
+    if (mapCount >= mapCapacity || mapCount >= 0xFF_FFFF
+        || !TryGetStandaloneArtifactExtent(artifactOrdinal,
+            ref init artifactStart, ref init artifactLength)
+        || !TryValidateStandaloneArtifactDirectory(artifactOrdinal))
+    {
+        return 3;
+    }
+
+    init int32 nodeKind;
+    int32 graphStatus = TryValidateStandalonePublishedPredicateGraph(
+        artifactStart, artifactLength, moduleRow, callableSlot,
+        uint32(predicateGraphRow), ref init nodeKind);
+    if (graphStatus != 0)
+    {
+        return graphStatus;
+    }
+
+    int32 outputGraphRow = mapCount + 1;
+    int32 mapOffset = mapCount * 4;
+    Host.StandaloneWriterPredicateGraphMap[mapOffset]
+        = artifactOrdinal;
+    Host.StandaloneWriterPredicateGraphMap[mapOffset + 1]
+        = predicateGraphRow;
+    Host.StandaloneWriterPredicateGraphMap[mapOffset + 2]
+        = outputGraphRow;
+    Host.StandaloneWriterPredicateGraphMap[mapOffset + 3]
+        = nodeKind;
+    Host.StandaloneWriterPredicateGraphMapCount[0]
+        = outputGraphRow;
+    *outputGraphRowResult = outputGraphRow;
+    return 0;
+}
+
+int32 FindStandaloneWriterPredicateGraph(int32 artifactOrdinal,
+    int32 predicateGraphRow)
+{
+    int32 mapCount
+        = Host.StandaloneWriterPredicateGraphMapCount[0];
+    if (mapCount < 0
+        || mapCount > Host.StandaloneWriterPredicateGraphMap.Length / 4)
+    {
+        return -1;
+    }
+    for (mut int32 mapRow = 0;
+        mapRow < mapCount;
+        mapRow = mapRow + 1)
+    {
+        int32 mapOffset = mapRow * 4;
+        if (Host.StandaloneWriterPredicateGraphMap[mapOffset]
+                == artifactOrdinal
+            && Host.StandaloneWriterPredicateGraphMap[
+                mapOffset + 1] == predicateGraphRow)
+        {
+            return Host.StandaloneWriterPredicateGraphMap[
+                mapOffset + 2];
         }
     }
     return 0;
@@ -3408,9 +4426,7 @@ int32 ValidateStandaloneWriterContractClosure()
 
 int32 GetStandaloneWriterTotalParameterCount()
 {
-    int32 methodCount
-        = Host.StandaloneRewrittenLocalCallableCount[0]
-            + Host.StandaloneRewrittenImportedCallableCount[0];
+    int32 methodCount = GetStandaloneWriterMethodCount();
     mut int32 total = 0;
     for (mut int32 methodId = 0;
         methodId < methodCount;
@@ -3430,37 +4446,36 @@ int32 GetStandaloneWriterTotalParameterCount()
 
 int32 GetStandaloneWriterTotalContractCount()
 {
-    int32 methodCount
-        = Host.StandaloneRewrittenLocalCallableCount[0]
-            + Host.StandaloneRewrittenImportedCallableCount[0];
+    int32 methodCount = GetStandaloneWriterMethodCount();
+    if (methodCount < 0
+        || methodCount
+            > Host.StandaloneWriterMethodContractCounts.Length)
+    {
+        return -1;
+    }
+
     mut int32 total = 0;
     for (mut int32 methodId = 0;
         methodId < methodCount;
         methodId = methodId + 1)
     {
-        int32 mask
-            = GetStandaloneWriterMethodEffectMask(methodId);
-        if (mask < 0 || (mask & ~6) != 0)
+        int32 count
+            = Host.StandaloneWriterMethodContractCounts[methodId];
+        if (count < 0 || total > 0xFF_FFFF - count)
         {
             return -1;
         }
-        if (mask != 0)
-        {
-            total = total + 1;
-        }
+        total = total + count;
     }
     return total;
 }
 
 int32 WriteStandaloneWriterMethodDefSection()
 {
-    int32 localCount
-        = Host.StandaloneRewrittenLocalCallableCount[0];
-    int32 importedCount
-        = Host.StandaloneRewrittenImportedCallableCount[0];
-    int32 methodCount = localCount + importedCount;
+    int32 methodCount = GetStandaloneWriterMethodCount();
     if (methodCount <= 0 || methodCount > 0xFF_FFFF
-        || importedCount != Host.StandaloneWriterRootOrdinals.Length)
+        || Host.StandaloneRewrittenImportedCallableCount[0]
+            != Host.StandaloneWriterRootOrdinals.Length)
     {
         return 3;
     }
@@ -3471,31 +4486,29 @@ int32 WriteStandaloneWriterMethodDefSection()
         methodId < methodCount;
         methodId = methodId + 1)
     {
-        int32 nameStringId = methodId < localCount
-            ? Host.StandaloneWriterLocalNameStringIds[methodId]
-            : Host.StandaloneWriterRootNameStringIds[
-                methodId - localCount];
+        int32 nameStringId
+            = GetStandaloneWriterMethodNameStringId(methodId);
         int32 flags = GetStandaloneWriterMethodFlags(methodId);
         int32 bodyRow
             = GetStandaloneWriterMethodBodyRow(methodId);
         int32 effectMask
             = GetStandaloneWriterMethodEffectMask(methodId);
+        int32 contractCount
+            = Host.StandaloneWriterMethodContractCounts[methodId];
         if (nameStringId <= 0
             || nameStringId > Host.StandaloneWriterStringCount[0]
             || (flags != 0 && flags != 2)
             || bodyRow < 0 || effectMask < 0
-            || (effectMask & ~6) != 0)
+            || (effectMask & ~6) != 0
+            || contractCount < 0
+            || nextContractRow > 0xFF_FFFF - contractCount)
         {
             return 3;
         }
 
-        int32 contractFirst = effectMask == 0
-            ? 0 : nextContractRow;
-        int32 contractCount = effectMask == 0 ? 0 : 1;
-        if (contractCount != 0)
-        {
-            nextContractRow = nextContractRow + 1;
-        }
+        int32 contractFirst
+            = contractCount == 0 ? 0 : nextContractRow;
+        nextContractRow = nextContractRow + contractCount;
         int32 status = AppendStandaloneWriterWord(0);
         if (status != 0) { return status; }
         status = AppendStandaloneWriterWord(uint32(nameStringId));
@@ -3511,15 +4524,18 @@ int32 WriteStandaloneWriterMethodDefSection()
         status = AppendStandaloneWriterWord(uint32(bodyRow));
         if (status != 0) { return status; }
     }
+    if (nextContractRow - 1
+        != GetStandaloneWriterTotalContractCount())
+    {
+        return 3;
+    }
     return FinishStandaloneWriterSection(
         0x0016, methodCount, sectionStart);
 }
 
 int32 WriteStandaloneWriterMethodSigSection()
 {
-    int32 methodCount
-        = Host.StandaloneRewrittenLocalCallableCount[0]
-            + Host.StandaloneRewrittenImportedCallableCount[0];
+    int32 methodCount = GetStandaloneWriterMethodCount();
     if (methodCount <= 0 || methodCount > 0xFF_FFFF)
     {
         return 3;
@@ -3594,9 +4610,7 @@ int32 WriteStandaloneWriterParamSection()
         return 0;
     }
 
-    int32 methodCount
-        = Host.StandaloneRewrittenLocalCallableCount[0]
-            + Host.StandaloneRewrittenImportedCallableCount[0];
+    int32 methodCount = GetStandaloneWriterMethodCount();
     int32 sectionStart = Host.StandaloneWriterOutputByteCount[0];
     for (mut int32 methodId = 0;
         methodId < methodCount;
@@ -3641,6 +4655,55 @@ int32 WriteStandaloneWriterParamSection()
         0x0018, totalParameterCount, sectionStart);
 }
 
+int32 GetStandaloneWriterMethodRootOrdinal(int32 methodId)
+{
+    int32 localCount
+        = Host.StandaloneRewrittenLocalCallableCount[0];
+    int32 rootGroupCount
+        = Host.StandaloneWriterRootExpectedGroupCount[0];
+    if (methodId < localCount
+        || methodId >= localCount + rootGroupCount)
+    {
+        return -1;
+    }
+
+    int32 representativeImport
+        = Host.StandaloneWriterRootRepresentativeImportByGroup[
+            methodId - localCount];
+    if (representativeImport < 0
+        || representativeImport
+            >= Host.StandaloneRewrittenImportedCallableCount[0])
+    {
+        return -1;
+    }
+    int32 rootOrdinal
+        = Host.StandaloneWriterRootOrdinals[representativeImport];
+    if (rootOrdinal < 0
+        || rootOrdinal >= Host.StandaloneResolvedRootCount[0])
+    {
+        return -1;
+    }
+    return rootOrdinal;
+}
+
+int32 AppendStandaloneWriterContractHeader(int32 methodId,
+    int32 clauseKind)
+{
+    int32 methodCount = GetStandaloneWriterMethodCount();
+    if (methodId < 0 || methodId >= methodCount
+        || clauseKind <= 0 || clauseKind > 0xFFFF)
+    {
+        return 3;
+    }
+
+    int32 status = AppendStandaloneWriterWord(
+        uint32(0x1600_0000) | uint32(methodId + 1));
+    if (status != 0) { return status; }
+    status = AppendStandaloneWriterHalfWord(uint32(clauseKind));
+    if (status != 0) { return status; }
+    return AppendStandaloneWriterHalfWord(0);
+}
+
 int32 WriteStandaloneWriterContractSection()
 {
     int32 contractCount
@@ -3654,23 +4717,159 @@ int32 WriteStandaloneWriterContractSection()
         return 0;
     }
 
-    int32 methodCount
-        = Host.StandaloneRewrittenLocalCallableCount[0]
-            + Host.StandaloneRewrittenImportedCallableCount[0];
+    int32 methodCount = GetStandaloneWriterMethodCount();
+    int32 localCount
+        = Host.StandaloneRewrittenLocalCallableCount[0];
     int32 sectionStart = Host.StandaloneWriterOutputByteCount[0];
-    for (mut int32 offset = 0;
-        offset <= contractCount;
-        offset = offset + 1)
+    mut int32 dataOffset = 0;
+    mut int32 outputContractRow = 0;
+    int32 status = AppendStandaloneWriterWord(0);
+    if (status != 0) { return status; }
+
+    for (mut int32 methodId = 0;
+        methodId < methodCount;
+        methodId = methodId + 1)
     {
-        int32 status = AppendStandaloneWriterWord(
-            uint32(offset * 12));
-        if (status != 0)
+        if (methodId < localCount)
         {
-            return status;
+            int32 effectMask
+                = GetStandaloneWriterMethodEffectMask(methodId);
+            int32 methodContractCount
+                = Host.StandaloneWriterMethodContractCounts[methodId];
+            if (effectMask < 0 || (effectMask & ~6) != 0
+                || methodContractCount
+                    != (effectMask == 0 ? 0 : 1))
+            {
+                return 3;
+            }
+            if (effectMask != 0)
+            {
+                dataOffset = dataOffset + 12;
+                outputContractRow = outputContractRow + 1;
+                status = AppendStandaloneWriterWord(
+                    uint32(dataOffset));
+                if (status != 0) { return status; }
+            }
+            continue;
+        }
+
+        int32 rootOrdinal
+            = GetStandaloneWriterMethodRootOrdinal(methodId);
+        if (rootOrdinal < 0)
+        {
+            return 3;
+        }
+        int32 rootOffset = rootOrdinal * 20;
+        int32 artifactOrdinal
+            = int32(Host.StandaloneResolvedRoots[rootOffset + 2]);
+        int32 inputContractFirst
+            = int32(Host.StandaloneResolvedRoots[rootOffset + 14]);
+        int32 inputContractCount
+            = int32(Host.StandaloneResolvedRoots[rootOffset + 15]);
+        if (inputContractCount < 0)
+        {
+            return 3;
+        }
+        if (inputContractCount == 0)
+        {
+            if (Host.StandaloneWriterMethodContractCounts[methodId] != 0)
+            {
+                return 3;
+            }
+            continue;
+        }
+
+        int32 methodFirstOutputRow = outputContractRow;
+        init int32 artifactStart;
+        init int32 artifactLength;
+        if (!TryGetStandaloneArtifactExtent(artifactOrdinal,
+                ref init artifactStart, ref init artifactLength)
+            || !TryValidateStandaloneArtifactDirectory(artifactOrdinal))
+        {
+            return 3;
+        }
+        int32 contractEntry
+            = FindStandaloneArtifactSection(0x001B);
+        int32 contractTableCount
+            = GetStandaloneArtifactSectionCount(0x001B);
+        if (contractEntry == 0)
+        {
+            return 3;
+        }
+        int32 contractStart
+            = Host.StandaloneSectionStarts[contractEntry];
+        int32 contractLength
+            = Host.StandaloneSectionLengths[contractEntry];
+        for (mut int32 inputOffset = 0;
+            inputOffset < inputContractCount;
+            inputOffset = inputOffset + 1)
+        {
+            init int32 rowStart;
+            init int32 rowLength;
+            if (!TryGetStandaloneVariableTableRowExtent(
+                    artifactStart, artifactLength, contractStart,
+                    contractLength, contractTableCount, 8, 1,
+                    inputContractFirst + inputOffset,
+                    ref init rowStart, ref init rowLength))
+            {
+                return 3;
+            }
+            init uint32 clauseKind;
+            if (rowLength < 8
+                || !TryReadStandaloneArtifactAbsoluteHalfWord(
+                    artifactStart, artifactLength, rowStart + 4,
+                    ref init clauseKind))
+            {
+                return 3;
+            }
+
+            if (clauseKind == 1)
+            {
+                init uint32 effectMask;
+                if (rowLength != 12
+                    || !TryReadStandaloneArtifactAbsoluteWord(
+                        artifactStart, artifactLength, rowStart + 8,
+                        ref init effectMask))
+                {
+                    return 3;
+                }
+                if (effectMask == 0)
+                {
+                    continue;
+                }
+            }
+            else if (clauseKind != 2 && clauseKind != 4
+                && clauseKind != 0x0B)
+            {
+                return 2;
+            }
+            else if (rowLength != 20)
+            {
+                return 3;
+            }
+
+            if (dataOffset > int32.MaxValue - rowLength)
+            {
+                return 3;
+            }
+            dataOffset = dataOffset + rowLength;
+            outputContractRow = outputContractRow + 1;
+            status = AppendStandaloneWriterWord(uint32(dataOffset));
+            if (status != 0) { return status; }
+        }
+        if (outputContractRow - methodFirstOutputRow
+            != Host.StandaloneWriterMethodContractCounts[methodId])
+        {
+            return 3;
         }
     }
 
-    mut int32 outputContractRow = 0;
+    if (outputContractRow != contractCount)
+    {
+        return 3;
+    }
+
+    outputContractRow = 0;
     for (mut int32 methodId = 0;
         methodId < methodCount;
         methodId = methodId + 1)
@@ -3681,22 +4880,302 @@ int32 WriteStandaloneWriterContractSection()
         {
             return 3;
         }
-        if (effectMask == 0)
+        if (methodId < localCount)
         {
+            if (effectMask != 0)
+            {
+                status = AppendStandaloneWriterContractHeader(
+                    methodId, 1);
+                if (status != 0) { return status; }
+                status = AppendStandaloneWriterWord(
+                    uint32(effectMask));
+                if (status != 0) { return status; }
+                outputContractRow = outputContractRow + 1;
+            }
             continue;
         }
 
-        outputContractRow = outputContractRow + 1;
-        int32 status = AppendStandaloneWriterWord(
-            uint32(0x1600_0000) | uint32(methodId + 1));
-        if (status != 0) { return status; }
-        status = AppendStandaloneWriterHalfWord(1);
-        if (status != 0) { return status; }
-        status = AppendStandaloneWriterHalfWord(0);
-        if (status != 0) { return status; }
-        status = AppendStandaloneWriterWord(uint32(effectMask));
-        if (status != 0) { return status; }
+        int32 rootOrdinal
+            = GetStandaloneWriterMethodRootOrdinal(methodId);
+        if (rootOrdinal < 0)
+        {
+            return 3;
+        }
+        int32 rootOffset = rootOrdinal * 20;
+        int32 artifactOrdinal
+            = int32(Host.StandaloneResolvedRoots[rootOffset + 2]);
+        int32 methodDefRow
+            = int32(Host.StandaloneResolvedRoots[rootOffset + 5]);
+        int32 inputContractFirst
+            = int32(Host.StandaloneResolvedRoots[rootOffset + 14]);
+        int32 inputContractCount
+            = int32(Host.StandaloneResolvedRoots[rootOffset + 15]);
+        if (inputContractCount < 0)
+        {
+            return 3;
+        }
+        if (inputContractCount == 0)
+        {
+            if (Host.StandaloneWriterMethodContractCounts[methodId] != 0)
+            {
+                return 3;
+            }
+            continue;
+        }
+
+        int32 methodFirstOutputRow = outputContractRow;
+        init int32 artifactStart;
+        init int32 artifactLength;
+        if (!TryGetStandaloneArtifactExtent(artifactOrdinal,
+                ref init artifactStart, ref init artifactLength)
+            || !TryValidateStandaloneArtifactDirectory(artifactOrdinal))
+        {
+            return 3;
+        }
+        int32 contractEntry
+            = FindStandaloneArtifactSection(0x001B);
+        int32 contractTableCount
+            = GetStandaloneArtifactSectionCount(0x001B);
+        if (contractEntry == 0)
+        {
+            return 3;
+        }
+        int32 contractStart
+            = Host.StandaloneSectionStarts[contractEntry];
+        int32 contractLength
+            = Host.StandaloneSectionLengths[contractEntry];
+        for (mut int32 inputOffset = 0;
+            inputOffset < inputContractCount;
+            inputOffset = inputOffset + 1)
+        {
+            init int32 rowStart;
+            init int32 rowLength;
+            init uint32 owner;
+            init uint32 clauseKind;
+            init uint32 clauseFlags;
+            if (!TryGetStandaloneVariableTableRowExtent(
+                    artifactStart, artifactLength, contractStart,
+                    contractLength, contractTableCount, 8, 1,
+                    inputContractFirst + inputOffset,
+                    ref init rowStart, ref init rowLength)
+                || rowLength < 8
+                || !TryReadStandaloneArtifactAbsoluteWord(
+                    artifactStart, artifactLength, rowStart,
+                    ref init owner)
+                || !TryReadStandaloneArtifactAbsoluteHalfWord(
+                    artifactStart, artifactLength, rowStart + 4,
+                    ref init clauseKind)
+                || !TryReadStandaloneArtifactAbsoluteHalfWord(
+                    artifactStart, artifactLength, rowStart + 6,
+                    ref init clauseFlags)
+                || owner != (uint32(0x1600_0000)
+                    | uint32(methodDefRow))
+                || clauseFlags != 0)
+            {
+                return 3;
+            }
+
+            if (clauseKind == 1)
+            {
+                init uint32 inputEffectMask;
+                if (rowLength != 12
+                    || !TryReadStandaloneArtifactAbsoluteWord(
+                        artifactStart, artifactLength, rowStart + 8,
+                        ref init inputEffectMask))
+                {
+                    return 3;
+                }
+                if (inputEffectMask == 0)
+                {
+                    continue;
+                }
+                if (int32(inputEffectMask) != effectMask)
+                {
+                    return 3;
+                }
+                status = AppendStandaloneWriterContractHeader(
+                    methodId, 1);
+                if (status != 0) { return status; }
+                status = AppendStandaloneWriterWord(inputEffectMask);
+                if (status != 0) { return status; }
+                outputContractRow = outputContractRow + 1;
+                continue;
+            }
+
+            if (rowLength != 20)
+            {
+                return 3;
+            }
+            if (clauseKind == 2)
+            {
+                init uint32 parameterOrdinal;
+                init uint32 inputGraphRow;
+                init int32 state;
+                init int32 reserved0;
+                init int32 reserved1;
+                init int32 reserved2;
+                if (!TryReadStandaloneArtifactAbsoluteWord(
+                        artifactStart, artifactLength, rowStart + 8,
+                        ref init parameterOrdinal)
+                    || !TryReadStandaloneArtifactAbsoluteWord(
+                        artifactStart, artifactLength, rowStart + 12,
+                        ref init inputGraphRow)
+                    || !TryReadStandaloneArtifactAbsoluteByte(
+                        artifactStart, artifactLength, rowStart + 16,
+                        ref init state)
+                    || !TryReadStandaloneArtifactAbsoluteByte(
+                        artifactStart, artifactLength, rowStart + 17,
+                        ref init reserved0)
+                    || !TryReadStandaloneArtifactAbsoluteByte(
+                        artifactStart, artifactLength, rowStart + 18,
+                        ref init reserved1)
+                    || !TryReadStandaloneArtifactAbsoluteByte(
+                        artifactStart, artifactLength, rowStart + 19,
+                        ref init reserved2))
+                {
+                    return 3;
+                }
+                int32 outputGraphRow
+                    = FindStandaloneWriterPredicateGraph(
+                        artifactOrdinal, int32(inputGraphRow));
+                if (outputGraphRow <= 0 || state < 0 || state > 1
+                    || reserved0 != 0 || reserved1 != 0
+                    || reserved2 != 0)
+                {
+                    return 3;
+                }
+
+                status = AppendStandaloneWriterContractHeader(
+                    methodId, 2);
+                if (status != 0) { return status; }
+                status = AppendStandaloneWriterWord(
+                    parameterOrdinal);
+                if (status != 0) { return status; }
+                status = AppendStandaloneWriterWord(
+                    uint32(outputGraphRow));
+                if (status != 0) { return status; }
+                status = AppendStandaloneWriterByte(state);
+                if (status != 0) { return status; }
+                status = AppendStandaloneWriterByte(0);
+                if (status != 0) { return status; }
+                status = AppendStandaloneWriterByte(0);
+                if (status != 0) { return status; }
+                status = AppendStandaloneWriterByte(0);
+                if (status != 0) { return status; }
+                outputContractRow = outputContractRow + 1;
+                continue;
+            }
+
+            if (clauseKind == 0x0B)
+            {
+                init int32 phaseTag;
+                init int32 phaseFlags;
+                init uint32 phaseReserved;
+                init uint32 phaseOrdinal;
+                init uint32 inputGraphRow;
+                if (!TryReadStandaloneArtifactAbsoluteByte(
+                        artifactStart, artifactLength, rowStart + 8,
+                        ref init phaseTag)
+                    || !TryReadStandaloneArtifactAbsoluteByte(
+                        artifactStart, artifactLength, rowStart + 9,
+                        ref init phaseFlags)
+                    || !TryReadStandaloneArtifactAbsoluteHalfWord(
+                        artifactStart, artifactLength, rowStart + 10,
+                        ref init phaseReserved)
+                    || !TryReadStandaloneArtifactAbsoluteWord(
+                        artifactStart, artifactLength, rowStart + 12,
+                        ref init phaseOrdinal)
+                    || !TryReadStandaloneArtifactAbsoluteWord(
+                        artifactStart, artifactLength, rowStart + 16,
+                        ref init inputGraphRow)
+                    || phaseFlags != 0 || phaseReserved != 0)
+                {
+                    return 3;
+                }
+                int32 outputGraphRow
+                    = FindStandaloneWriterPredicateGraph(
+                        artifactOrdinal, int32(inputGraphRow));
+                if (outputGraphRow <= 0)
+                {
+                    return 3;
+                }
+
+                status = AppendStandaloneWriterContractHeader(
+                    methodId, 0x0B);
+                if (status != 0) { return status; }
+                status = AppendStandaloneWriterByte(phaseTag);
+                if (status != 0) { return status; }
+                status = AppendStandaloneWriterByte(0);
+                if (status != 0) { return status; }
+                status = AppendStandaloneWriterHalfWord(0);
+                if (status != 0) { return status; }
+                status = AppendStandaloneWriterWord(phaseOrdinal);
+                if (status != 0) { return status; }
+                status = AppendStandaloneWriterWord(
+                    uint32(outputGraphRow));
+                if (status != 0) { return status; }
+                outputContractRow = outputContractRow + 1;
+                continue;
+            }
+
+            if (clauseKind == 4)
+            {
+                init int32 destinationKind;
+                init int32 sourceKind;
+                init int32 relationship;
+                init int32 phase;
+                init uint32 destinationOrdinal;
+                init uint32 sourceOrdinal;
+                if (!TryReadStandaloneArtifactAbsoluteByte(
+                        artifactStart, artifactLength, rowStart + 8,
+                        ref init destinationKind)
+                    || !TryReadStandaloneArtifactAbsoluteByte(
+                        artifactStart, artifactLength, rowStart + 9,
+                        ref init sourceKind)
+                    || !TryReadStandaloneArtifactAbsoluteByte(
+                        artifactStart, artifactLength, rowStart + 10,
+                        ref init relationship)
+                    || !TryReadStandaloneArtifactAbsoluteByte(
+                        artifactStart, artifactLength, rowStart + 11,
+                        ref init phase)
+                    || !TryReadStandaloneArtifactAbsoluteWord(
+                        artifactStart, artifactLength, rowStart + 12,
+                        ref init destinationOrdinal)
+                    || !TryReadStandaloneArtifactAbsoluteWord(
+                        artifactStart, artifactLength, rowStart + 16,
+                        ref init sourceOrdinal))
+                {
+                    return 3;
+                }
+                status = AppendStandaloneWriterContractHeader(
+                    methodId, 4);
+                if (status != 0) { return status; }
+                status = AppendStandaloneWriterByte(destinationKind);
+                if (status != 0) { return status; }
+                status = AppendStandaloneWriterByte(sourceKind);
+                if (status != 0) { return status; }
+                status = AppendStandaloneWriterByte(relationship);
+                if (status != 0) { return status; }
+                status = AppendStandaloneWriterByte(phase);
+                if (status != 0) { return status; }
+                status = AppendStandaloneWriterWord(
+                    destinationOrdinal);
+                if (status != 0) { return status; }
+                status = AppendStandaloneWriterWord(sourceOrdinal);
+                if (status != 0) { return status; }
+                outputContractRow = outputContractRow + 1;
+                continue;
+            }
+
+            return 2;
+        }
+        if (outputContractRow - methodFirstOutputRow
+            != Host.StandaloneWriterMethodContractCounts[methodId])
+        {
+            return 3;
+        }
     }
+
     if (outputContractRow != contractCount)
     {
         return 3;
@@ -3707,10 +5186,12 @@ int32 WriteStandaloneWriterContractSection()
 
 int32 WriteStandaloneWriterImportSection()
 {
-    int32 localCount
-        = Host.StandaloneRewrittenLocalCallableCount[0];
     int32 importedCount
         = Host.StandaloneRewrittenImportedCallableCount[0];
+    if (importedCount < 0 || importedCount > 0xFF_FFFF)
+    {
+        return 3;
+    }
     if (importedCount == 0)
     {
         return 0;
@@ -3737,10 +5218,13 @@ int32 WriteStandaloneWriterImportSection()
         int32 moduleRefRow
             = Host.StandaloneWriterModuleRefByModuleId[
                 providerModuleId];
-        int32 expectedMethodRow = localCount + importedId + 1;
+        int32 expectedMethodRow
+            = Host.StandaloneWriterRootExpectedMethodRowsByImport[
+                importedId];
         if (moduleRefRow <= 0
             || moduleRefRow
                 > Host.StandaloneWriterModuleRefCount[0]
+            || expectedMethodRow <= 0
             || expectedMethodRow > 0x00FF_FFFF)
         {
             return 3;

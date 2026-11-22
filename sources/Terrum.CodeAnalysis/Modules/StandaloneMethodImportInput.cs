@@ -358,7 +358,7 @@ internal readonly record struct CapturedStandaloneMethodImportInput(
         }
 
         var writerOutputByteCapacity = checked(
-            ((long)artifactByteLength * (MethodRoots.Length + 1L))
+            ((long)artifactByteLength * 4)
             + ((long)standaloneTextLength * 8)
             + ((long)source.Length * 128)
             + 65_536);
@@ -371,6 +371,14 @@ internal readonly record struct CapturedStandaloneMethodImportInput(
         var writerStringHashCapacity = checked(
             (writerStringCapacity * 2) + 1);
         var writerConstantHashCapacity = checked((tokenCapacity * 2) + 1);
+        var writerRootGroupHashCapacity = checked(
+            (MethodRoots.Length * 2) + 1);
+        var writerMethodCapacity = checked(
+            tokenCapacity + MethodRoots.Length);
+        var writerContractFactCapacity = checked(
+            (artifactByteLength / 20) + 1);
+        var writerTextCapacity = checked(artifactByteLength
+            + standaloneTextLength + source.Length);
         return hostBuffers.AddRange([
             new HostBuffer("StandaloneSourceProgramStatus",
                 PrimitiveType.Int32, [0], true),
@@ -667,6 +675,35 @@ internal readonly record struct CapturedStandaloneMethodImportInput(
             new HostBuffer("StandaloneWriterRootOrdinals",
                 PrimitiveType.Int32,
                 [.. new int[MethodRoots.Length]], true),
+            new HostBuffer("StandaloneWriterRootExpectedGroupByImport",
+                PrimitiveType.Int32,
+                [.. new int[MethodRoots.Length]], true),
+            new HostBuffer("StandaloneWriterRootRepresentativeImportByGroup",
+                PrimitiveType.Int32,
+                [.. new int[MethodRoots.Length]], true),
+            new HostBuffer("StandaloneWriterRootExpectedMethodRowsByImport",
+                PrimitiveType.Int32,
+                [.. new int[MethodRoots.Length]], true),
+            new HostBuffer("StandaloneWriterRootExpectedGroupCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneWriterRootGroupHashSlots",
+                PrimitiveType.Int32,
+                [.. new int[writerRootGroupHashCapacity]], true),
+            new HostBuffer("StandaloneWriterMethodContractCounts",
+                PrimitiveType.Int32,
+                [.. new int[writerMethodCapacity]], true),
+            new HostBuffer("StandaloneWriterPredicateGraphMapCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneWriterPredicateGraphMap",
+                PrimitiveType.Int32,
+                [.. new int[checked(writerContractFactCapacity * 4)]],
+                true),
+            new HostBuffer("StandaloneWriterTextCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneWriterText",
+                PrimitiveType.Char16,
+                [.. new int[writerTextCapacity]], true),
+
             new HostBuffer("StandaloneWriterModuleRefCount",
                 PrimitiveType.Int32, [0], true),
             new HostBuffer("StandaloneWriterModuleRefByModuleId",
