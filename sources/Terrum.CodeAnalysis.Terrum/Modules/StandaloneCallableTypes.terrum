@@ -11,11 +11,7 @@ int32 ValidateStandaloneMethodCallableTypes(int32 artifactOrdinal,
         : Host.StandaloneSectionStarts[typeSpecEntry];
     int32 typeSpecLength = typeSpecEntry == 0 ? 0
         : Host.StandaloneSectionLengths[typeSpecEntry];
-    if ((typeSpecEntry == 0) != (typeSpecCount == 0)
-        || (typeSpecCount != 0
-            && !TryValidateStandaloneVariableTableIndex(artifactStart,
-                artifactLength, typeSpecStart, typeSpecLength,
-                typeSpecCount, 2, 1)))
+    if ((typeSpecEntry == 0) != (typeSpecCount == 0))
     {
         return 3;
     }

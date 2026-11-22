@@ -458,6 +458,7 @@ internal sealed class StandaloneMethodImportInputTests
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneStringTable.terrum",
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneModuleDirectory.terrum",
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneCallableTypes.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneTypeSpecValidation.terrum",
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodEffects.terrum",
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodOutputStates.terrum",
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodRoots.terrum",
@@ -817,6 +818,50 @@ internal sealed class StandaloneMethodImportInputTests
                 assertionFeatures.Slice(3 * sizeof(uint), sizeof(uint))),
             Is.EqualTo(1));
 
+        var malformedTypeSpecSource = SourceText.From(
+            "bool Main() { return false; }");
+        var malformedTypeSpecInput = new StandaloneMethodImportInput(
+            Agreement, "consumer/malformed-typespec", [
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreatePhaseOnePredicateArtifact("provider/malformed",
+                        invalidTypeSpec: true)),
+            ], [
+                new StandaloneMethodRoot(0, "provider/malformed",
+                    "api/Check"),
+            ]);
+        const string malformedTypeSpecVerificationSource = """
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                if (Scan() < 1) { return 50; }
+                int32 status = ValidateStandaloneMethodImportInput();
+                if (status != 0) { return status; }
+                if (TryValidateStandaloneArtifactDirectory(0)) {
+                    return 51;
+                }
+                return 0;
+            }
+            """;
+        var malformedTypeSpecComponents = new List<SyntaxTree>(
+            components.GetRange(0, sourcePaths.Length));
+        malformedTypeSpecComponents.Add(SyntaxTree.Parse(
+            malformedTypeSpecVerificationSource,
+            "standalone-malformed-typespec-preflight-tests.terrum"));
+        var malformedTypeSpecBuffers
+            = ScannerHost.CreateBuffers(malformedTypeSpecSource).AddRange(
+                malformedTypeSpecInput.Capture()
+                    .CreateSourceCallHostBuffers(malformedTypeSpecSource));
+        var malformedTypeSpecCompilation = Compilation.Create(
+            malformedTypeSpecComponents, malformedTypeSpecBuffers, policy);
+        Assert.That(malformedTypeSpecCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                malformedTypeSpecCompilation.Diagnostics));
+        var malformedTypeSpecProgram = malformedTypeSpecCompilation.Program
+            ?? throw new AssertionException(
+                "Expected a bound standalone TypeSpec preflight validator.");
+        var malformedTypeSpecExecution = NativeJit.ExecuteWithData(
+            malformedTypeSpecProgram, (NativeRuntimePolicy)policy);
+        Assert.That(malformedTypeSpecExecution.ExitCode, Is.EqualTo(0));
+
         var decoderInput = new StandaloneMethodImportArtifactInput(
             Agreement, "consumer/contracts",
             new TrRmStandardArtifactInput(SchemaIdentity, contractArtifact),
@@ -834,6 +879,7 @@ internal sealed class StandaloneMethodImportInputTests
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneStringTable.terrum",
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneModuleDirectory.terrum",
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneCallableTypes.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneTypeSpecValidation.terrum",
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodEffects.terrum",
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodOutputStates.terrum",
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodRoots.terrum",
@@ -1697,6 +1743,7 @@ internal sealed class StandaloneMethodImportInputTests
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneStringTable.terrum",
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneModuleDirectory.terrum",
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneCallableTypes.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneTypeSpecValidation.terrum",
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodEffects.terrum",
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodOutputStates.terrum",
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodRoots.terrum",
@@ -1832,6 +1879,7 @@ internal sealed class StandaloneMethodImportInputTests
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneStringTable.terrum",
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneModuleDirectory.terrum",
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneCallableTypes.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneTypeSpecValidation.terrum",
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodEffects.terrum",
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodOutputStates.terrum",
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodRoots.terrum",
@@ -3303,7 +3351,7 @@ internal sealed class StandaloneMethodImportInputTests
     }
 
     private static byte[] CreatePhaseOnePredicateArtifact(
-        string moduleIdentity)
+        string moduleIdentity, bool invalidTypeSpec = false)
     {
         var typeSpecRows = new ReadOnlyMemory<byte>[] {
             TrRmTypeSpecTableWriter.InitializationReference(
@@ -3313,6 +3361,17 @@ internal sealed class StandaloneMethodImportInputTests
             typeSpecRows, 0, 0, 0);
         var typeSpecs = new TrRmTypeSpecTableReader(typeSpecSection,
             1, 0, 0, 0);
+        var outputTypeSpecSection = typeSpecSection;
+        if (invalidTypeSpec)
+        {
+            outputTypeSpecSection = new byte[14];
+            BinaryPrimitives.WriteUInt32LittleEndian(outputTypeSpecSection, 0);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                outputTypeSpecSection.AsSpan(4), 6);
+            outputTypeSpecSection[8] = 2;
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                outputTypeSpecSection.AsSpan(10), 1);
+        }
         var methodSigSection = TrRmMethodSigTableWriter.Encode([
             new TrRmMethodSigRow(0xF200_0001, 0, 1, 1, 0, 0),
         ], typeSpecs, 1, 0);
@@ -3393,7 +3452,7 @@ internal sealed class StandaloneMethodImportInputTests
         return TrRmArtifactWriter.Encode([
             new TrRmSection(0x0001, 0, 1, moduleSection),
             new TrRmSection(0x0002, 0, 3, stringSection),
-            new TrRmSection(0x0003, 0, 1, typeSpecSection),
+            new TrRmSection(0x0003, 0, 1, outputTypeSpecSection),
             new TrRmSection(0x0004, 0, 2, featureSection),
             new TrRmSection(0x0016, 0, 1, methodDefSection),
             new TrRmSection(0x0017, 0, 1, methodSigSection),

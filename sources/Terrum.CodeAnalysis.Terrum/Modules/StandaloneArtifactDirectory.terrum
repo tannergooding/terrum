@@ -169,6 +169,8 @@ public static bool TryValidateStandaloneArtifactDirectory(int32 artifactOrdinal)
     if (!moduleFound
         || !ValidateStandaloneArtifactPayloadExtents(
             artifactStart, artifactLength, directoryEnd, entryCount)
+        || !TryValidateStandaloneTypeSpecTable(
+            artifactStart, artifactLength)
         || !ValidateStandaloneArtifactFeatures(
             artifactStart, artifactLength)
         || !ValidateStandaloneArtifactReferenceSlots(
@@ -243,6 +245,7 @@ int32 GetStandaloneArtifactSectionStride(int32 kind)
     if (kind == 0x0001) { return 48; }
     if (kind == 0x0002 || kind == 0x0003 || kind == 0x0011
         || kind == 0x001B || kind == 0x0020 || kind == 0x004B
+        || kind == 0x0068
         || kind == 0x7F00) { return 0; }
     if (kind == 0x0004) { return 8; }
     if (kind == 0x0010 || kind == 0x001C) { return 12; }

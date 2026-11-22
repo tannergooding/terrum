@@ -1,0 +1,419 @@
+namespace Terrum.CodeAnalysis;
+
+bool IsStandaloneTypeSpecInlineFamily(int32 familyCode)
+{
+    return (familyCode >= 0x80 && familyCode <= 0x84)
+        || familyCode == 0x8A
+        || (familyCode >= 0x8B && familyCode <= 0x8F);
+}
+
+bool TryValidateStandaloneTypeSpecTable(int32 artifactStart,
+    int32 artifactLength)
+{
+    int32 typeSpecEntry = FindStandaloneArtifactSection(0x0011);
+    int32 typeSpecCount = GetStandaloneArtifactSectionCount(0x0011);
+    if (typeSpecCount == 0)
+    {
+        return typeSpecEntry == 0;
+    }
+    if (typeSpecEntry == 0)
+    {
+        return false;
+    }
+
+    int32 typeSpecStart = Host.StandaloneSectionStarts[typeSpecEntry];
+    int32 typeSpecLength = Host.StandaloneSectionLengths[typeSpecEntry];
+    if (!TryValidateStandaloneVariableTableIndex(artifactStart,
+            artifactLength, typeSpecStart, typeSpecLength,
+            typeSpecCount, 2, 1))
+    {
+        return false;
+    }
+
+    int32 typeDefCount = GetStandaloneArtifactSectionCount(0x0013);
+    int32 importCount = GetStandaloneArtifactSectionCount(0x001C);
+    int32 genericParamCount = GetStandaloneArtifactSectionCount(0x0019);
+    int32 methodDefCount = GetStandaloneArtifactSectionCount(0x0016);
+    int32 predicateCaptureCount = GetStandaloneArtifactSectionCount(0x003E);
+    for (mut int32 row = 1; row <= typeSpecCount; row = row + 1)
+    {
+        init int32 rowStart;
+        init int32 rowLength;
+        if (!TryGetStandaloneVariableTableRowExtent(artifactStart,
+                artifactLength, typeSpecStart, typeSpecLength,
+                typeSpecCount, 2, 1, row,
+                ref init rowStart, ref init rowLength))
+        {
+            return false;
+        }
+
+        init int32 form;
+        init int32 qualifiers;
+        if (!TryReadStandaloneArtifactAbsoluteByte(artifactStart,
+                artifactLength, rowStart, ref init form)
+            || !TryReadStandaloneArtifactAbsoluteByte(artifactStart,
+                artifactLength, rowStart + 1, ref init qualifiers)
+            || (qualifiers & ~7) != 0)
+        {
+            return false;
+        }
+
+        if (form == 1)
+        {
+            init int32 code;
+            if (rowLength < 3
+                || !TryReadStandaloneArtifactAbsoluteByte(artifactStart,
+                    artifactLength, rowStart + 2, ref init code))
+            {
+                return false;
+            }
+            if (code <= 0x19)
+            {
+                if (rowLength != 3 || (qualifiers & ~4) != 0)
+                {
+                    return false;
+                }
+            }
+            else
+            {
+                init int32 argumentCode;
+                if (!IsStandaloneTypeSpecInlineFamily(code)
+                    || rowLength != 4
+                    || !TryReadStandaloneArtifactAbsoluteByte(
+                        artifactStart, artifactLength, rowStart + 3,
+                        ref init argumentCode)
+                    || argumentCode > 0x19
+                    || ((qualifiers & 2) != 0
+                        && code != 0x8B && code != 0x8D))
+                {
+                    return false;
+                }
+            }
+            continue;
+        }
+
+        if (form >= 2 && form <= 4)
+        {
+            init uint32 targetRow;
+            int32 targetCount = form == 2 ? typeDefCount
+                : form == 3 ? importCount : genericParamCount;
+            if (rowLength != 6
+                || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                    artifactLength, rowStart + 2, ref init targetRow)
+                || targetRow == 0 || targetRow > uint32(targetCount))
+            {
+                return false;
+            }
+            continue;
+        }
+
+        if (form == 5)
+        {
+            init uint32 genericTypeSpec;
+            if (rowLength < 10 || (rowLength - 6) % 4 != 0
+                || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                    artifactLength, rowStart + 2,
+                    ref init genericTypeSpec)
+                || genericTypeSpec == 0
+                || genericTypeSpec >= uint32(row))
+            {
+                return false;
+            }
+            init int32 genericRowStart;
+            init int32 genericRowLength;
+            init int32 genericForm;
+            if (!TryGetStandaloneVariableTableRowExtent(artifactStart,
+                    artifactLength, typeSpecStart, typeSpecLength,
+                    typeSpecCount, 2, 1, int32(genericTypeSpec),
+                    ref init genericRowStart, ref init genericRowLength)
+                || !TryReadStandaloneArtifactAbsoluteByte(artifactStart,
+                    artifactLength, genericRowStart,
+                    ref init genericForm)
+                || (genericForm != 2 && genericForm != 3))
+            {
+                return false;
+            }
+            for (mut int64 argumentOffset = 6;
+                argumentOffset < int64(rowLength);
+                argumentOffset = argumentOffset + 4)
+            {
+                init uint32 argument;
+                if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                        artifactLength,
+                        rowStart + int32(argumentOffset),
+                        ref init argument)
+                    || argument == 0)
+                {
+                    return false;
+                }
+                uint32 tag = argument & 0xFF00_0000;
+                if (tag != 0 && tag != 0xF200_0000
+                    && tag != 0xF300_0000)
+                {
+                    return false;
+                }
+                if (tag != 0)
+                {
+                    init bool isRow;
+                    init int32 argumentRow;
+                    init int32 argumentForm;
+                    init int32 argumentQualifiers;
+                    init int32 argumentCode;
+                    init int32 argumentAtom;
+                    if (!TryGetStandaloneTypeSpecRefInfo(
+                            artifactStart, artifactLength,
+                            typeSpecStart, typeSpecLength, typeSpecCount,
+                            argument, allowInitQualifier: false,
+                            rowLimit: 0, ref init isRow,
+                            ref init argumentRow, ref init argumentForm,
+                            ref init argumentQualifiers,
+                            ref init argumentCode, ref init argumentAtom))
+                    {
+                        return false;
+                    }
+                }
+            }
+            continue;
+        }
+
+        if (form >= 6 && form <= 0x0B)
+        {
+            init uint32 inner;
+            init bool isRow;
+            init int32 innerRow;
+            init int32 innerForm;
+            init int32 innerQualifiers;
+            init int32 innerCode;
+            init int32 innerArgument;
+            if (rowLength != 6
+                || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                    artifactLength, rowStart + 2, ref init inner)
+                || !TryGetStandaloneTypeSpecRefInfo(artifactStart,
+                    artifactLength, typeSpecStart, typeSpecLength,
+                    typeSpecCount, inner, allowInitQualifier: false,
+                    rowLimit: row, ref init isRow, ref init innerRow,
+                    ref init innerForm, ref init innerQualifiers,
+                    ref init innerCode, ref init innerArgument)
+                || (form != 6 && isRow && innerForm == 1
+                    && innerCode < 0x80 && innerQualifiers == 0))
+            {
+                return false;
+            }
+            continue;
+        }
+
+        if (form == 0x0C)
+        {
+            init int32 familyCode;
+            init uint32 argument;
+            init bool isRow;
+            init int32 argumentRow;
+            init int32 argumentForm;
+            init int32 argumentQualifiers;
+            init int32 argumentCode;
+            init int32 argumentAtom;
+            if (rowLength != 7
+                || !TryReadStandaloneArtifactAbsoluteByte(artifactStart,
+                    artifactLength, rowStart + 2,
+                    ref init familyCode)
+                || !IsStandaloneTypeSpecInlineFamily(familyCode)
+                || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                    artifactLength, rowStart + 3,
+                    ref init argument)
+                || !TryGetStandaloneTypeSpecRefInfo(artifactStart,
+                    artifactLength, typeSpecStart, typeSpecLength,
+                    typeSpecCount, argument,
+                    allowInitQualifier: familyCode == 0x8A,
+                    rowLimit: row, ref init isRow,
+                    ref init argumentRow, ref init argumentForm,
+                    ref init argumentQualifiers, ref init argumentCode,
+                    ref init argumentAtom)
+                || (isRow && argumentForm == 1
+                    && argumentCode < 0x80
+                    && argumentQualifiers == 0))
+            {
+                return false;
+            }
+            continue;
+        }
+
+        if (form == 0x0D)
+        {
+            init int32 callingConvention;
+            init uint32 methodDefRow;
+            if (rowLength != 7 || qualifiers != 0
+                || !TryReadStandaloneArtifactAbsoluteByte(artifactStart,
+                    artifactLength, rowStart + 2,
+                    ref init callingConvention)
+                || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                    artifactLength, rowStart + 3,
+                    ref init methodDefRow)
+                || callingConvention > 4 || methodDefRow == 0
+                || methodDefRow > uint32(methodDefCount))
+            {
+                return false;
+            }
+            continue;
+        }
+
+        if (form == 0x0E)
+        {
+            init uint32 inner;
+            init bool isRow;
+            init int32 innerRow;
+            init int32 innerForm;
+            init int32 innerQualifiers;
+            init int32 innerCode;
+            init int32 innerArgument;
+            if (rowLength != 6 || (qualifiers & ~1) != 0
+                || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                    artifactLength, rowStart + 2, ref init inner)
+                || !TryGetStandaloneTypeSpecRefInfo(artifactStart,
+                    artifactLength, typeSpecStart, typeSpecLength,
+                    typeSpecCount, inner, allowInitQualifier: false,
+                    rowLimit: row, ref init isRow, ref init innerRow,
+                    ref init innerForm, ref init innerQualifiers,
+                    ref init innerCode, ref init innerArgument))
+            {
+                return false;
+            }
+            continue;
+        }
+
+        if (form == 0x0F)
+        {
+            if (rowLength != 2 || qualifiers != 0)
+            {
+                return false;
+            }
+            continue;
+        }
+
+        if (form == 0x10)
+        {
+            init uint32 captureRow;
+            if (rowLength != 6 || qualifiers != 0
+                || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+                    artifactLength, rowStart + 2, ref init captureRow)
+                || captureRow == 0
+                || captureRow > uint32(predicateCaptureCount))
+            {
+                return false;
+            }
+            continue;
+        }
+
+        return false;
+    }
+
+    return true;
+}
+
+bool TryGetStandaloneTypeSpecRefInfo(int32 artifactStart,
+    int32 artifactLength, int32 typeSpecStart, int32 typeSpecLength,
+    int32 typeSpecCount, uint32 typeSpecRef, bool allowInitQualifier,
+    int32 rowLimit, ref<init bool> isRowResult,
+    ref<init int32> rowResult, ref<init int32> formResult,
+    ref<init int32> qualifiersResult, ref<init int32> typeCodeResult,
+    ref<init int32> argumentCodeResult)
+    ensure return ? (*isRowResult is init && *rowResult is init
+        && *formResult is init && *qualifiersResult is init
+        && *typeCodeResult is init && *argumentCodeResult is init)
+        : true
+{
+    uint32 tag = typeSpecRef & 0xFF00_0000;
+    if (tag == 0)
+    {
+        if (typeSpecRef == 0 || typeSpecRef > uint32(typeSpecCount)
+            || (rowLimit > 0 && typeSpecRef >= uint32(rowLimit)))
+        {
+            return false;
+        }
+        init int32 rowStart;
+        init int32 rowLength;
+        init int32 form;
+        init int32 qualifiers;
+        init int32 typeCode;
+        init int32 argumentCode;
+        if (!TryGetStandaloneVariableTableRowExtent(artifactStart,
+                artifactLength, typeSpecStart, typeSpecLength,
+                typeSpecCount, 2, 1, int32(typeSpecRef),
+                ref init rowStart, ref init rowLength)
+            || rowLength < 2
+            || !TryReadStandaloneArtifactAbsoluteByte(artifactStart,
+                artifactLength, rowStart, ref init form)
+            || !TryReadStandaloneArtifactAbsoluteByte(artifactStart,
+                artifactLength, rowStart + 1, ref init qualifiers))
+        {
+            return false;
+        }
+
+        if (rowLength < 3)
+        {
+            typeCode = 0;
+        }
+        else if (!TryReadStandaloneArtifactAbsoluteByte(artifactStart,
+                artifactLength, rowStart + 2, ref init typeCode))
+        {
+            return false;
+        }
+        if (rowLength < 4)
+        {
+            argumentCode = 0;
+        }
+        else if (!TryReadStandaloneArtifactAbsoluteByte(artifactStart,
+                artifactLength, rowStart + 3, ref init argumentCode))
+        {
+            return false;
+        }
+        if ((qualifiers & ~7) != 0
+            || (!allowInitQualifier && (qualifiers & 4) != 0))
+        {
+            return false;
+        }
+        *isRowResult = true;
+        *rowResult = int32(typeSpecRef);
+        *formResult = form;
+        *qualifiersResult = qualifiers;
+        *typeCodeResult = typeCode;
+        *argumentCodeResult = argumentCode;
+        return true;
+    }
+    if (tag == 0xF200_0000)
+    {
+        int32 code = int32(typeSpecRef & 0xFF);
+        if ((typeSpecRef & 0x00FF_FF00) != 0 || code > 0x1A)
+        {
+            return false;
+        }
+        *isRowResult = false;
+        *rowResult = 0;
+        *formResult = code == 0x1A ? 0x0F : 1;
+        *qualifiersResult = 0;
+        *typeCodeResult = code;
+        *argumentCodeResult = 0;
+        return true;
+    }
+    if (tag == 0xF300_0000)
+    {
+        int32 qualifiers = int32((typeSpecRef >> 16) & 0xFF);
+        int32 familyCode = int32((typeSpecRef >> 8) & 0xFF);
+        int32 argumentCode = int32(typeSpecRef & 0xFF);
+        if (!IsStandaloneTypeSpecInlineFamily(familyCode)
+            || argumentCode > 0x19 || (qualifiers & ~7) != 0
+            || (!allowInitQualifier && (qualifiers & 4) != 0)
+            || ((qualifiers & 2) != 0
+                && familyCode != 0x8B && familyCode != 0x8D))
+        {
+            return false;
+        }
+        *isRowResult = false;
+        *rowResult = 0;
+        *formResult = 1;
+        *qualifiersResult = qualifiers;
+        *typeCodeResult = familyCode;
+        *argumentCodeResult = argumentCode;
+        return true;
+    }
+    return false;
+}
