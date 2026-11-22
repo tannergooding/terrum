@@ -2227,7 +2227,7 @@ public static partial class TrRmExecutableCompiler
 
         var outputVariables = new HashSet<int>();
         var seenParameters = new bool[target.ParameterCount];
-        BoundCall? nestedForeignInterfaceCall = null;
+        var nestedForeignInterfaceCalls = new List<BoundCall>();
         for (var sourceArgument = 0;
             sourceArgument < boundCall.Arguments.Length;
             sourceArgument++)
@@ -2271,14 +2271,17 @@ public static partial class TrRmExecutableCompiler
                     return false;
                 }
             }
-            else if (nestedForeignInterfaceCall is null
+            else if (nestedForeignInterfaceCalls.Count
+                    < (stagedLocalVariables.Count == 0 ? 13 : 12)
                 && GetNestedForeignInterfaceCall(argument)
                     is BoundCall nestedCall
+                && !nestedForeignInterfaceCalls.Any(candidate =>
+                    ReferenceEquals(candidate, nestedCall))
                 && nestedCall.Type == target.Variables[formal].Type
                 && IsValidNestedForeignInterfaceCall(nestedCall,
                     nestedCall.Type))
             {
-                nestedForeignInterfaceCall = nestedCall;
+                nestedForeignInterfaceCalls.Add(nestedCall);
             }
             else
             {
@@ -2391,9 +2394,12 @@ public static partial class TrRmExecutableCompiler
         var typeTokens = function.Variables.Select(variable =>
             GetStandardBodyTypeMapToken(variable.Type, typeSpecRowFor))
             .ToArray();
+        var stagedLocalVariables = stagedLocals.Select(
+                static local => local.Variable)
+            .ToHashSet();
         var methodMapToken
             = methodMapTokenForForeignInterface(foreignCall.Member);
-        BoundCall? nestedCall = null;
+        var nestedCalls = new List<BoundCall>();
         foreach (var argument in call.Arguments)
         {
             if (GetNestedForeignInterfaceCall(argument) is not
@@ -2402,19 +2408,29 @@ public static partial class TrRmExecutableCompiler
                 continue;
             }
 
-            if (nestedCall is not null)
+            if (nestedCalls.Count == 13
+                || nestedCalls.Any(nested =>
+                    ReferenceEquals(nested, candidate)))
             {
                 throw Unsupported(
-                    $"Function '{function.Name}' has more than one nested F+I input call.");
+                    $"Function '{function.Name}' has duplicate or excessive nested F+I input calls.");
             }
 
-            nestedCall = candidate;
+            nestedCalls.Add(candidate);
         }
 
-        TrRmRegisterBodyCallInput[]? nestedInputs = null;
-        uint nestedMethodMapToken = 0;
-        if (nestedCall is not null)
+        var nestedMethodMapTokens = new List<uint>(nestedCalls.Count);
+        var nestedInputs = new List<TrRmRegisterBodyCallInput[]>(
+            nestedCalls.Count);
+        var nestedRegisterByCall
+            = new Dictionary<BoundCall, byte>(
+                ReferenceEqualityComparer.Instance);
+        var methodMapTokens = new List<uint>(nestedCalls.Count + 1);
+        for (var nestedIndex = 0;
+            nestedIndex < nestedCalls.Count;
+            nestedIndex++)
         {
+            var nestedCall = nestedCalls[nestedIndex];
             var nestedForeignCall = nestedCall.ForeignInterfaceCall
                 ?? throw Invalid(
                     "A nested F+I input has no selected InterfaceMethod identity.");
@@ -2432,7 +2448,7 @@ public static partial class TrRmExecutableCompiler
                     $"Function '{function.Name}' has a nested F+I input call outside the scalar no-output subset.");
             }
 
-            nestedMethodMapToken = methodMapTokenForForeignInterface(
+            var nestedMethodMapToken = methodMapTokenForForeignInterface(
                 nestedForeignCall.Member);
             if (nestedMethodMapToken == methodMapToken)
             {
@@ -2440,9 +2456,9 @@ public static partial class TrRmExecutableCompiler
                     $"Function '{function.Name}' has nested and outer F+I calls that share one MethodMap target.");
             }
 
-            nestedInputs = new TrRmRegisterBodyCallInput[
+            var nestedInputMap = new TrRmRegisterBodyCallInput[
                 nestedTarget.ParameterCount + 1];
-            nestedInputs[0] = CreateInput(nestedForeignCall.Receiver);
+            nestedInputMap[0] = CreateInput(nestedForeignCall.Receiver);
             var nestedArgumentsByFormal
                 = new BoundExpression?[nestedTarget.ParameterCount];
             for (var argumentIndex = 0;
@@ -2464,23 +2480,30 @@ public static partial class TrRmExecutableCompiler
             for (var formal = 0;
                 formal < nestedArgumentsByFormal.Length; formal++)
             {
-                nestedInputs[formal + 1] = CreateInput(
+                nestedInputMap[formal + 1] = CreateInput(
                     nestedArgumentsByFormal[formal]
                     ?? throw Invalid(
                         "A nested F+I input is missing a formal argument."));
             }
+
+            var resultRegister = checked((byte)(nestedIndex
+                + (stagedLocals.IsEmpty ? 1 : 2)));
+            if (!nestedRegisterByCall.TryAdd(nestedCall, resultRegister))
+            {
+                throw Invalid(
+                    "A nested F+I input was assigned twice.");
+            }
+
+            nestedMethodMapTokens.Add(nestedMethodMapToken);
+            nestedInputs.Add(nestedInputMap);
+            methodMapTokens.Add(nestedMethodMapToken);
         }
 
-        var methodMapTokens = nestedCall is null
-            ? new[] { methodMapToken }
-            : new[] { nestedMethodMapToken, methodMapToken };
+        methodMapTokens.Add(methodMapToken);
         var maps = TrRmRegisterBodyMapBuilder.Create(typeTokens,
             methodMapTokens);
         var homeMap = EncodeStandardInitializationHomeMap(function,
             typeTokens, maps);
-        var stagedLocalVariables = stagedLocals.Select(
-                static local => local.Variable)
-            .ToHashSet();
         var inputs = new TrRmRegisterBodyCallInput[
             target.ParameterCount + 1];
         inputs[0] = CreateInput(foreignCall.Receiver);
@@ -2536,11 +2559,13 @@ public static partial class TrRmExecutableCompiler
                 inputs[formal + 1] = new TrRmRegisterBodyCallInput(2, 6,
                     checked((ushort)reservation.Variable));
             }
-            else if (nestedCall is not null
-                && GetNestedForeignInterfaceCall(
-                    argumentsByFormal[formal]) is not null)
+            else if (GetNestedForeignInterfaceCall(
+                    argumentsByFormal[formal]) is BoundCall nestedInputCall
+                && nestedRegisterByCall.TryGetValue(nestedInputCall,
+                    out var nestedRegister))
             {
-                inputs[formal + 1] = new TrRmRegisterBodyCallInput(1, 1, 1);
+                inputs[formal + 1] = new TrRmRegisterBodyCallInput(1, 1,
+                    nestedRegister);
             }
             else
             {
@@ -2552,11 +2577,21 @@ public static partial class TrRmExecutableCompiler
         var doesNotReturn = foreignCall.DoesNotReturn;
         var hasResult = !doesNotReturn
             && call.Type != PrimitiveType.Void;
-        var nestedCallSite = nestedInputs is null
-            ? null
-            : TrRmRegisterBodyRecordWriter.EncodeCallSite(1, 1,
-                maps.GetMethodMapIndex(nestedMethodMapToken), 1,
-                nestedInputs, [], schema: schema);
+        var nestedCallSites = new List<byte[]>(nestedInputs.Count);
+        for (var nestedIndex = 0;
+            nestedIndex < nestedInputs.Count;
+            nestedIndex++)
+        {
+            var resultRegister = nestedRegisterByCall[
+                nestedCalls[nestedIndex]];
+            nestedCallSites.Add(
+                TrRmRegisterBodyRecordWriter.EncodeCallSite(1, 1,
+                    maps.GetMethodMapIndex(
+                        nestedMethodMapTokens[nestedIndex]),
+                    resultRegister,
+                    nestedInputs[nestedIndex], [], schema: schema));
+        }
+
         var callSite = TrRmRegisterBodyRecordWriter.EncodeCallSite(1,
             hasResult ? (byte)1 : (byte)0,
             maps.GetMethodMapIndex(methodMapToken), 0, inputs, [],
@@ -2564,10 +2599,11 @@ public static partial class TrRmExecutableCompiler
         var records = new List<ReadOnlyMemory<byte>> {
             new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 },
         };
-        ushort? nestedCallSiteRecordIndex = null;
-        if (nestedCallSite is not null)
+        var nestedCallSiteRecordIndexes = new List<ushort>(
+            nestedCallSites.Count);
+        foreach (var nestedCallSite in nestedCallSites)
         {
-            nestedCallSiteRecordIndex = checked((ushort)records.Count);
+            nestedCallSiteRecordIndexes.Add(checked((ushort)records.Count));
             records.Add(new(nestedCallSite));
         }
 
@@ -2575,7 +2611,7 @@ public static partial class TrRmExecutableCompiler
         records.Add(new(callSite));
         var code = new List<byte>(checked(
             (stagedLocals.Length * 6)
-            + (nestedCallSiteRecordIndex is null ? 0 : 2)
+            + (nestedCallSiteRecordIndexes.Count * 2)
             + (outputReservations.Count * 4) + 4));
         foreach (var local in stagedLocals)
         {
@@ -2597,7 +2633,7 @@ public static partial class TrRmExecutableCompiler
             code.Add((byte)(homeIndex >> 8));
         }
 
-        if (nestedCallSiteRecordIndex is ushort nestedRecord)
+        foreach (var nestedRecord in nestedCallSiteRecordIndexes)
         {
             code.Add(0x90);
             code.Add(checked((byte)nestedRecord));
@@ -2632,13 +2668,14 @@ public static partial class TrRmExecutableCompiler
         TrRmRegisterBodyCallInput CreateInput(BoundExpression expression)
         {
             if (expression is not BoundRead read
-                || (uint)read.Variable >= (uint)function.ParameterCount
+                || ((uint)read.Variable >= (uint)function.ParameterCount
+                    && !stagedLocalVariables.Contains(read.Variable))
                 || function.Variables[read.Variable].Type != read.Type
                 || function.Variables[read.Variable].IsOut
                 || function.Variables[read.Variable].IsInit)
             {
                 throw Unsupported(
-                    $"Function '{function.Name}' has a nested F+I call input outside the direct-parameter Body subset.");
+                    $"Function '{function.Name}' has a nested F+I call input outside the direct-parameter or staged-local Body subset.");
             }
 
             return new TrRmRegisterBodyCallInput(2, 1,
@@ -5336,7 +5373,7 @@ public static partial class TrRmExecutableCompiler
                     : body.HomeCount > function.ParameterCount + 1)
             || body.MethodCount > (body.UsesNativePointerLoads
                 ? 14
-                : body.Schema.UsesForeignNativeInterface() ? 2 : 1))
+                : body.Schema.UsesForeignNativeInterface() ? 14 : 1))
         {
             throw Unsupported(
                 "The Standard initialization-reference Body consumer requires one scalar Block and direct Homes.");
@@ -5453,6 +5490,7 @@ public static partial class TrRmExecutableCompiler
         var foreignInterfaceCalls = 0;
         var foreignInterfaceNonReturningCalls = 0;
         var foreignInterfaceOutputReservations = 0;
+        var foreignInterfaceValueResultRegisters = new List<ushort>();
         var forwardedInitializationReference = false;
         var nativeOutputReservationsByRecord
             = new Dictionary<int, (int CallSiteRecordIndex, int HomeIndex,
@@ -6044,10 +6082,12 @@ public static partial class TrRmExecutableCompiler
                                     "A ForeignNativeInterface CallSite has no completed raw-pointer receiver input.");
                             }
 
-                            var arguments
-                                = ImmutableArray.CreateBuilder<
-                                    BoundExpression>(
-                                    member.Parameters.Length);
+                            var argumentsByFormal = new BoundExpression?[
+                                member.Parameters.Length];
+                            var nestedFormalByRegister
+                                = new Dictionary<ushort, int>(
+                                    foreignInterfaceValueResultRegisters.Count);
+                            var nestedFormalIndices = new HashSet<int>();
                             var inputOffset = 24;
                             for (var formal = 0;
                                 formal < member.Parameters.Length; formal++)
@@ -6106,10 +6146,10 @@ public static partial class TrRmExecutableCompiler
                                             "A ForeignNativeInterface NativeOutput input does not select a matching vacant local.");
                                     }
 
-                                    arguments.Add(
-                                        new BoundNativeOutputReservation(
+                                    argumentsByFormal[formal]
+                                        = new BoundNativeOutputReservation(
                                             outputVariable,
-                                            output.PointeeType, default));
+                                            output.PointeeType, default);
                                 }
                                 else if (selectorKind == 1 && sourceUse == 1
                                     && selectorIndex < 14
@@ -6118,7 +6158,19 @@ public static partial class TrRmExecutableCompiler
                                         out var registerArgument)
                                     && registerArgument.Type == formalType)
                                 {
-                                    arguments.Add(registerArgument);
+                                    if (GetNestedForeignInterfaceCall(
+                                            registerArgument) is not null
+                                        && (!nestedFormalByRegister.TryAdd(
+                                                selectorIndex, formal)
+                                            || !nestedFormalIndices.Add(
+                                                formal)))
+                                    {
+                                        throw Invalid(
+                                            "A ForeignNativeInterface CallSite reuses a nested result register.");
+                                    }
+
+                                    argumentsByFormal[formal]
+                                        = registerArgument;
                                 }
                                 else if (selectorKind == 2
                                     && sourceUse == 1
@@ -6139,10 +6191,10 @@ public static partial class TrRmExecutableCompiler
                                 {
                                     var argumentVariable
                                         = homeVariables[selectorIndex];
-                                    arguments.Add(new BoundRead(
+                                    argumentsByFormal[formal] = new BoundRead(
                                         argumentVariable,
                                         variables[argumentVariable].Type,
-                                        default));
+                                        default);
                                 }
                                 else
                                 {
@@ -6151,6 +6203,59 @@ public static partial class TrRmExecutableCompiler
                                 }
 
                                 inputOffset += 4;
+                            }
+
+                            if (nestedFormalByRegister.Count != 0
+                                && nestedFormalByRegister.Count
+                                != foreignInterfaceValueResultRegisters.Count)
+                            {
+                                throw Invalid(
+                                    "A ForeignNativeInterface CallSite does not consume each earlier nested result exactly once.");
+                            }
+
+                            var arguments
+                                = ImmutableArray.CreateBuilder<
+                                    BoundExpression>(
+                                    member.Parameters.Length);
+                            var argumentParameterIndices
+                                = ImmutableArray.CreateBuilder<int>(
+                                    member.Parameters.Length);
+                            var orderedNestedInputCount = 0;
+                            foreach (var nestedRegister
+                                in foreignInterfaceValueResultRegisters)
+                            {
+                                if (!nestedFormalByRegister.TryGetValue(
+                                        nestedRegister, out var formal))
+                                {
+                                    continue;
+                                }
+
+                                arguments.Add(argumentsByFormal[formal]
+                                    ?? throw Invalid(
+                                        "A ForeignNativeInterface CallSite omits a nested input formal."));
+                                argumentParameterIndices.Add(formal);
+                                orderedNestedInputCount++;
+                            }
+
+                            if (orderedNestedInputCount
+                                != nestedFormalByRegister.Count)
+                            {
+                                throw Invalid(
+                                    "A ForeignNativeInterface CallSite references a non-FNI result register.");
+                            }
+
+                            for (var formal = 0;
+                                formal < member.Parameters.Length; formal++)
+                            {
+                                if (nestedFormalIndices.Contains(formal))
+                                {
+                                    continue;
+                                }
+
+                                arguments.Add(argumentsByFormal[formal]
+                                    ?? throw Invalid(
+                                        "A ForeignNativeInterface CallSite omits a formal input."));
+                                argumentParameterIndices.Add(formal);
                             }
 
                             if (reservationsForCallSite.Any(reservation =>
@@ -6174,10 +6279,9 @@ public static partial class TrRmExecutableCompiler
                                         member.RequiresMutableReceiver,
                                         member.DoesNotReturn,
                                         member.NativeOutputContracts),
-                                ArgumentParameterIndices = [
-                                    .. Enumerable.Range(0,
-                                        member.Parameters.Length),
-                                ],
+                                ArgumentParameterIndices
+                                    = argumentParameterIndices
+                                        .MoveToImmutable(),
                             };
                             // The caller-unsafe FNI target makes this CallSite the authored unsafe assertion.
                             var authorizedCall
@@ -6188,6 +6292,11 @@ public static partial class TrRmExecutableCompiler
                             {
                                 throw Invalid(
                                     "A ForeignNativeInterface CallSite overwrites an existing value register.");
+                            }
+                            if (hasValueResult)
+                            {
+                                foreignInterfaceValueResultRegisters.Add(
+                                    resultIndex);
                             }
                             if (!hasValueResult)
                             {
@@ -6869,6 +6978,7 @@ public static partial class TrRmExecutableCompiler
                 && pointerLoads == 0 && initializedLocals.Count == 0
                 && foreignInterfaceOutputReservations == 0
                 && foreignInterfaceNonReturningCalls == 0
+                && body.MethodCount == 1
                 && variables.Count == function.ParameterCount
                     + initializedValueLocals.Count;
         var valueCall = function.ReturnType != PrimitiveType.Void
@@ -6881,6 +6991,7 @@ public static partial class TrRmExecutableCompiler
                 && foreignInterfaceNonReturningCalls == 0
                 && initializedLocals.Count
                     == foreignInterfaceOutputReservations
+                && body.MethodCount == 1
                 && variables.Count == function.ParameterCount
                     + foreignInterfaceOutputReservations
                     + initializedValueLocals.Count;
@@ -6890,26 +7001,67 @@ public static partial class TrRmExecutableCompiler
             && pointerLoads == 0
             && initializedLocals.Count
                 == foreignInterfaceOutputReservations
+            && body.MethodCount == 1
             && variables.Count == function.ParameterCount
                 + foreignInterfaceOutputReservations
                 + initializedValueLocals.Count;
-        var nestedFniValueReturn = statements.Count != 0
+        BoundCall? nestedInputOuterCall = null;
+        if (statements.Count != 0
             && statements[^1] is BoundReturn {
                 Value: BoundExpression returnValue,
-            }
-            && GetNestedForeignInterfaceCall(returnValue) is
-                BoundCall outerCall
-            && outerCall.Arguments.Count(argument =>
-                GetNestedForeignInterfaceCall(argument) is not null) == 1;
-        var foreignInterfaceNestedValueCall
-            = function.ReturnType != PrimitiveType.Void
-                && stores == 0 && calls == 2 && foreignInterfaceCalls == 2
+            })
+        {
+            nestedInputOuterCall
+                = GetNestedForeignInterfaceCall(returnValue);
+        }
+        else if (function.ReturnType == PrimitiveType.Void
+            && statements.Count >= 2
+            && statements[^1] is BoundReturn { Value: null }
+            && statements[^2] is BoundExpressionStatement {
+                Expression: BoundExpression expression,
+            })
+        {
+            nestedInputOuterCall
+                = GetNestedForeignInterfaceCall(expression);
+        }
+
+        var nestedInputCalls = nestedInputOuterCall is BoundCall outerCall
+            ? outerCall.Arguments
+                .Select(GetNestedForeignInterfaceCall)
+                .OfType<BoundCall>()
+                .ToArray()
+            : Array.Empty<BoundCall>();
+        var nestedInputCallsValid
+            = nestedInputOuterCall?.ForeignInterfaceCall is
+                BoundForeignInterfaceCall outerForeignCall
+            && nestedInputCalls.Length is > 0 and <= 13
+            && nestedInputCalls.Distinct(
+                ReferenceEqualityComparer.Instance).Count()
+                == nestedInputCalls.Length
+            && nestedInputCalls.All(nested =>
+                nested.IsUnsafeAuthorized
+                && DirectNativeImportContract.IsScalar(nested.Type)
+                && nested.ForeignInterfaceCall is
+                    BoundForeignInterfaceCall nestedForeignCall
+                && !nestedForeignCall.DoesNotReturn
+                && nestedForeignCall.NativeOutputContracts.IsEmpty
+                && nestedForeignCall.Member != outerForeignCall.Member
+                && nestedForeignCall.Receiver is BoundRead {
+                    Type: PrimitiveType.NativeRawPointer,
+                }
+                && nested.Arguments.All(static argument =>
+                    argument is BoundRead));
+        var foreignInterfaceNestedCall
+            = stores == 0
+                && calls == nestedInputCalls.Length + 1
+                && foreignInterfaceCalls == calls
                 && foreignInterfaceNonReturningCalls == 0
                 && pointerLoads == 0
                 && initializedLocals.Count
                     == foreignInterfaceOutputReservations
-                && body.MethodCount == 2
-                && nestedFniValueReturn
+                && body.MethodCount > 1
+                && body.MethodCount <= nestedInputCalls.Length + 1
+                && nestedInputCallsValid
                 && variables.Count == function.ParameterCount
                     + foreignInterfaceOutputReservations
                     + initializedValueLocals.Count;
@@ -6955,7 +7107,7 @@ public static partial class TrRmExecutableCompiler
         var simpleInitializationBody = voidStore || voidForwardingCall
             || voidInitializationCall || foreignInterfaceVoidCall || valueCall
             || foreignInterfaceValueCall || foreignInterfaceTerminalCall
-            || foreignInterfaceNestedValueCall;
+            || foreignInterfaceNestedCall;
         if (returns != (foreignInterfaceTerminalCall ? 0 : 1)
             || !(simpleInitializationBody || valuePointerLoad))
         {
@@ -7082,7 +7234,8 @@ public static partial class TrRmExecutableCompiler
             || body.RecordCount != (nestedCallCount + 4)
             || nestedCallCount > 13
             || (!hasNestedCalls && body.MethodCount != 1)
-            || (hasNestedCalls && body.MethodCount < 2)
+            || (hasNestedCalls && (body.MethodCount < 2
+                || body.MethodCount > nestedCallCount + 1))
             || ((hasNestedCalls || hasConstantInputs) && !hasFallback)
             || body.HomeCount != variables.Count
             || !HasEmptyEntryState(body, 0)

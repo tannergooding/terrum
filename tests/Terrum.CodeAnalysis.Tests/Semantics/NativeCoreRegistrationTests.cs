@@ -856,6 +856,10 @@ internal sealed class NativeCoreRegistrationTests
                 public unsafe int32 GetIndex(ptr<int32> source);
                 public unsafe int32 GetOtherIndex(ptr<int32> source);
                 public unsafe int32 UseIndex(int32 index);
+                public unsafe int32 UsePair(int32 first, int32 second);
+                public unsafe int32 UseTriple(int32 first, int32 second,
+                    int32 third);
+                public unsafe void UsePairVoid(int32 first, int32 second);
 
                 [param(value): Terrum.Interop.NativeOutput(
                     When: Terrum.Interop.NativeOutputCondition.NonNegative)]
@@ -1051,6 +1055,37 @@ internal sealed class NativeCoreRegistrationTests
                     return fallback;
                 }
             }
+
+            int32 InvokeNestedValuePair(ptr<void> receiver,
+                ptr<int32> sourceA, ptr<int32> sourceB) {
+                unsafe {
+                    return IProbe.UsePair(receiver,
+                        second: IProbe.GetOtherIndex(receiver, sourceB),
+                        first: IProbe.GetIndex(receiver, sourceA));
+                }
+            }
+
+            int32 InvokeNestedValuePairWithStagedInput(
+                ptr<void> receiver, ptr<int32> sourceA,
+                ptr<int32> sourceB, int32 value) {
+                int32 staged = value;
+                unsafe {
+                    return IProbe.UseTriple(receiver,
+                        second: IProbe.GetOtherIndex(receiver, sourceB),
+                        first: IProbe.GetIndex(receiver, sourceA),
+                        third: staged);
+                }
+            }
+
+            void InvokeNestedVoidPair(ptr<void> receiver,
+                ptr<int32> sourceA, ptr<int32> sourceB) {
+                unsafe {
+                    IProbe.UsePairVoid(receiver,
+                        second: IProbe.GetOtherIndex(receiver, sourceB),
+                        first: IProbe.GetIndex(receiver, sourceA));
+                    return;
+                }
+            }
             """;
         const string consumerSource = """
             int32 Invoke(ptr<void> receiver, ptr<int32> source) {
@@ -1241,6 +1276,37 @@ internal sealed class NativeCoreRegistrationTests
                     return fallback;
                 }
             }
+
+            int32 InvokeNestedValuePair(ptr<void> receiver,
+                ptr<int32> sourceA, ptr<int32> sourceB) {
+                unsafe {
+                    return IProbe.UsePair(receiver,
+                        second: IProbe.GetOtherIndex(receiver, sourceB),
+                        first: IProbe.GetIndex(receiver, sourceA));
+                }
+            }
+
+            int32 InvokeNestedValuePairWithStagedInput(
+                ptr<void> receiver, ptr<int32> sourceA,
+                ptr<int32> sourceB, int32 value) {
+                int32 staged = value;
+                unsafe {
+                    return IProbe.UseTriple(receiver,
+                        second: IProbe.GetOtherIndex(receiver, sourceB),
+                        first: IProbe.GetIndex(receiver, sourceA),
+                        third: staged);
+                }
+            }
+
+            void InvokeNestedVoidPair(ptr<void> receiver,
+                ptr<int32> sourceA, ptr<int32> sourceB) {
+                unsafe {
+                    IProbe.UsePairVoid(receiver,
+                        second: IProbe.GetOtherIndex(receiver, sourceB),
+                        first: IProbe.GetIndex(receiver, sourceA));
+                    return;
+                }
+            }
             """;
         var providerCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse(providerSource), options);
@@ -1420,6 +1486,28 @@ internal sealed class NativeCoreRegistrationTests
                 providerTables.Contracts.Count);
         AssertNestedFniConditionalOutputBody(
             providerNestedCorrelatedBody, 0x16);
+        foreach (var functionName in new[] {
+                    "InvokeNestedValuePair", "InvokeNestedVoidPair",
+                })
+        {
+            var row = Enumerable.Range(1, providerTables.Methods.Count)
+                .Single(candidate => providerTables.Methods.GetName(candidate)
+                    == functionName);
+            AssertNestedFniDirectPairBody(
+                providerTables.Bodies.GetRegisterBody(
+                    providerTables.Methods.GetBodyRow(row),
+                    providerTables.Contracts.Count), 0x16,
+                hasValueResult: functionName == "InvokeNestedValuePair");
+        }
+        var providerNestedStagedPairRow
+            = Enumerable.Range(1, providerTables.Methods.Count).Single(row =>
+                providerTables.Methods.GetName(row)
+                    == "InvokeNestedValuePairWithStagedInput");
+        AssertNestedFniStagedPairBody(
+            providerTables.Bodies.GetRegisterBody(
+                providerTables.Methods.GetBodyRow(
+                    providerNestedStagedPairRow),
+                providerTables.Contracts.Count), 0x16);
 
         var loadedProvider = TrRmExecutableCompiler.LoadStandard(
             providerInput, "provider.module", []);
@@ -1470,6 +1558,11 @@ internal sealed class NativeCoreRegistrationTests
             PrimitiveType.Int32);
         AssertNestedFniInputCall(loadedProvider, null);
         AssertNestedFniConditionalOutputCall(loadedProvider, null);
+        AssertNestedFniDirectPairCall(loadedProvider,
+            "InvokeNestedValuePair", "UsePair", PrimitiveType.Int32, null);
+        AssertNestedFniDirectPairCall(loadedProvider,
+            "InvokeNestedVoidPair", "UsePairVoid", PrimitiveType.Void, null);
+        AssertNestedFniStagedPairCall(loadedProvider, null);
         var reference = TrRmExecutableCompiler.CreateStandardReference(
             providerInput, "provider.module", []);
         var consumerCompilation = Compilation.CreateLibrary(
@@ -1637,6 +1730,37 @@ internal sealed class NativeCoreRegistrationTests
                 consumerTables.Contracts.Count);
         AssertNestedFniConditionalOutputBody(
             consumerNestedCorrelatedBody, 0x1C);
+        var consumerNestedValuePairRow
+            = Enumerable.Range(1, consumerTables.Methods.Count).Single(row =>
+                consumerTables.Methods.GetName(row)
+                    == "InvokeNestedValuePair");
+        var consumerNestedValuePairBody
+            = consumerTables.Bodies.GetRegisterBody(
+                consumerTables.Methods.GetBodyRow(
+                    consumerNestedValuePairRow),
+                consumerTables.Contracts.Count);
+        AssertNestedFniDirectPairBody(
+            consumerNestedValuePairBody, 0x1C, hasValueResult: true);
+        var consumerNestedVoidPairRow
+            = Enumerable.Range(1, consumerTables.Methods.Count).Single(row =>
+                consumerTables.Methods.GetName(row)
+                    == "InvokeNestedVoidPair");
+        AssertNestedFniDirectPairBody(
+            consumerTables.Bodies.GetRegisterBody(
+                consumerTables.Methods.GetBodyRow(
+                    consumerNestedVoidPairRow),
+                consumerTables.Contracts.Count), 0x1C,
+            hasValueResult: false);
+        var consumerNestedStagedPairRow
+            = Enumerable.Range(1, consumerTables.Methods.Count).Single(row =>
+                consumerTables.Methods.GetName(row)
+                    == "InvokeNestedValuePairWithStagedInput");
+        var consumerNestedStagedPairBody
+            = consumerTables.Bodies.GetRegisterBody(
+                consumerTables.Methods.GetBodyRow(
+                    consumerNestedStagedPairRow),
+                consumerTables.Contracts.Count);
+        AssertNestedFniStagedPairBody(consumerNestedStagedPairBody, 0x1C);
 
         var providers = new[] { providerInput };
         var malformedIndex = new TrRmArtifactIndex(consumerArtifact,
@@ -1654,16 +1778,32 @@ internal sealed class NativeCoreRegistrationTests
             (section, _, reservationRecordStart, _) =>
                 BinaryPrimitives.WriteUInt16LittleEndian(
                     section.AsSpan(reservationRecordStart + 6), 3));
-        AssertMalformedNestedCorrelatedBodyRejected(
+        AssertMalformedNestedFniBodyRejected(
+            consumerNestedCorrelatedRow, consumerNestedCorrelatedBody,
             (section, codeStart, _, _) => section[codeStart + 3] = 1);
-        AssertMalformedNestedCorrelatedBodyRejected(
+        AssertMalformedNestedFniBodyRejected(
+            consumerNestedCorrelatedRow, consumerNestedCorrelatedBody,
             (section, _, secondNestedCallRecordStart, _) =>
                 BinaryPrimitives.WriteUInt16LittleEndian(
                     section.AsSpan(secondNestedCallRecordStart + 10), 1));
-        AssertMalformedNestedCorrelatedBodyRejected(
+        AssertMalformedNestedFniBodyRejected(
+            consumerNestedCorrelatedRow, consumerNestedCorrelatedBody,
             (section, _, _, outerCallRecordStart) =>
                 BinaryPrimitives.WriteUInt16LittleEndian(
                     section.AsSpan(outerCallRecordStart + 30), 2));
+        AssertMalformedNestedFniBodyRejected(
+            consumerNestedValuePairRow, consumerNestedValuePairBody,
+            (section, codeStart, _, _) => section[codeStart + 3] = 1);
+        AssertMalformedNestedFniBodyRejected(
+            consumerNestedValuePairRow, consumerNestedValuePairBody,
+            (section, _, secondNestedCallRecordStart, _) =>
+                BinaryPrimitives.WriteUInt16LittleEndian(
+                    section.AsSpan(secondNestedCallRecordStart + 10), 1));
+        AssertMalformedNestedFniBodyRejected(
+            consumerNestedValuePairRow, consumerNestedValuePairBody,
+            (section, _, _, outerCallRecordStart) =>
+                BinaryPrimitives.WriteUInt16LittleEndian(
+                    section.AsSpan(outerCallRecordStart + 26), 1));
 
         var loadedConsumer = TrRmExecutableCompiler.LoadStandard(
             consumerInput, "consumer.module", providers);
@@ -1715,6 +1855,14 @@ internal sealed class NativeCoreRegistrationTests
         AssertNestedFniInputCall(loadedConsumer, "provider.module");
         AssertNestedFniConditionalOutputCall(
             loadedConsumer, "provider.module");
+        AssertNestedFniDirectPairCall(loadedConsumer,
+            "InvokeNestedValuePair", "UsePair", PrimitiveType.Int32,
+            "provider.module");
+        AssertNestedFniDirectPairCall(loadedConsumer,
+            "InvokeNestedVoidPair", "UsePairVoid", PrimitiveType.Void,
+            "provider.module");
+        AssertNestedFniStagedPairCall(
+            loadedConsumer, "provider.module");
         var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(
             loadedConsumer, "consumer.module", schemaIdentity, 1, []);
         var reemittedTables = TrRmStructuralMetadataValidator
@@ -1731,6 +1879,28 @@ internal sealed class NativeCoreRegistrationTests
                 reemittedTables.Contracts.Count);
         AssertNestedFniConditionalOutputBody(
             reemittedNestedCorrelatedBody, 0x1C);
+        foreach (var functionName in new[] {
+                    "InvokeNestedValuePair", "InvokeNestedVoidPair",
+                })
+        {
+            var row = Enumerable.Range(1, reemittedTables.Methods.Count)
+                .Single(candidate => reemittedTables.Methods.GetName(candidate)
+                    == functionName);
+            AssertNestedFniDirectPairBody(
+                reemittedTables.Bodies.GetRegisterBody(
+                    reemittedTables.Methods.GetBodyRow(row),
+                    reemittedTables.Contracts.Count), 0x1C,
+                hasValueResult: functionName == "InvokeNestedValuePair");
+        }
+        var reemittedNestedStagedPairRow
+            = Enumerable.Range(1, reemittedTables.Methods.Count).Single(row =>
+                reemittedTables.Methods.GetName(row)
+                    == "InvokeNestedValuePairWithStagedInput");
+        AssertNestedFniStagedPairBody(
+            reemittedTables.Bodies.GetRegisterBody(
+                reemittedTables.Methods.GetBodyRow(
+                    reemittedNestedStagedPairRow),
+                reemittedTables.Contracts.Count), 0x1C);
         var reloadedConsumer = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(schemaIdentity,
                 reemittedArtifact), "consumer.module", providers);
@@ -1781,6 +1951,14 @@ internal sealed class NativeCoreRegistrationTests
             PrimitiveType.Int32);
         AssertNestedFniInputCall(reloadedConsumer, "provider.module");
         AssertNestedFniConditionalOutputCall(
+            reloadedConsumer, "provider.module");
+        AssertNestedFniDirectPairCall(reloadedConsumer,
+            "InvokeNestedValuePair", "UsePair", PrimitiveType.Int32,
+            "provider.module");
+        AssertNestedFniDirectPairCall(reloadedConsumer,
+            "InvokeNestedVoidPair", "UsePairVoid", PrimitiveType.Void,
+            "provider.module");
+        AssertNestedFniStagedPairCall(
             reloadedConsumer, "provider.module");
 
         static void AssertCorrelatedOutputBody(
@@ -1856,6 +2034,91 @@ internal sealed class NativeCoreRegistrationTests
             Assert.That(body.GetBlockCode(0).ToArray(),
                 Is.EqualTo(new byte[] {
                     0x90, 1, 0x90, 2, 0x17, 0,
+                }));
+        }
+
+        static void AssertNestedFniDirectPairBody(
+            TrRmRegisterBodyReader body, byte methodTokenKind,
+            bool hasValueResult)
+        {
+            Assert.That(body.BlockCount, Is.EqualTo(1));
+            Assert.That(body.RecordCount, Is.EqualTo(4));
+            Assert.That(body.MethodCount, Is.EqualTo(3));
+            for (var methodIndex = 0; methodIndex < body.MethodCount;
+                methodIndex++)
+            {
+                Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                    body.MethodMap[(methodIndex * sizeof(uint))..]) >> 24,
+                    Is.EqualTo((uint)methodTokenKind));
+            }
+
+            var firstNestedCall = body.GetRecord(1);
+            var secondNestedCall = body.GetRecord(2);
+            var outerCall = body.GetRecord(3);
+            Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+                firstNestedCall[10..]), Is.EqualTo((ushort)1));
+            Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+                secondNestedCall[10..]), Is.EqualTo((ushort)2));
+            Assert.That(outerCall[5],
+                Is.EqualTo(hasValueResult ? (byte)1 : (byte)0));
+            Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+                outerCall[10..]), Is.Zero);
+            Assert.That(new[] {
+                BinaryPrimitives.ReadUInt16LittleEndian(
+                    firstNestedCall[8..]),
+                BinaryPrimitives.ReadUInt16LittleEndian(
+                    secondNestedCall[8..]),
+                BinaryPrimitives.ReadUInt16LittleEndian(outerCall[8..]),
+            }.Distinct().Count(), Is.EqualTo(3));
+            Assert.That((outerCall[24], outerCall[25],
+                    BinaryPrimitives.ReadUInt16LittleEndian(outerCall[26..])),
+                Is.EqualTo(((byte)1, (byte)1, (ushort)2)));
+            Assert.That((outerCall[28], outerCall[29],
+                    BinaryPrimitives.ReadUInt16LittleEndian(outerCall[30..])),
+                Is.EqualTo(((byte)1, (byte)1, (ushort)1)));
+            Assert.That(body.GetBlockCode(0).ToArray(), Is.EqualTo(
+                new byte[] {
+                    0x90, 1, 0x90, 2, 0x90, 3,
+                    hasValueResult ? (byte)0x17 : (byte)0x18, 0,
+                }));
+        }
+
+        static void AssertNestedFniStagedPairBody(
+            TrRmRegisterBodyReader body, byte methodTokenKind)
+        {
+            Assert.That(body.BlockCount, Is.EqualTo(1));
+            Assert.That(body.RecordCount, Is.EqualTo(4));
+            Assert.That(body.MethodCount, Is.EqualTo(3));
+            for (var methodIndex = 0; methodIndex < body.MethodCount;
+                methodIndex++)
+            {
+                Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                    body.MethodMap[(methodIndex * sizeof(uint))..]) >> 24,
+                    Is.EqualTo((uint)methodTokenKind));
+            }
+
+            var firstNestedCall = body.GetRecord(1);
+            var secondNestedCall = body.GetRecord(2);
+            var outerCall = body.GetRecord(3);
+            Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+                firstNestedCall[10..]), Is.EqualTo((ushort)2));
+            Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+                secondNestedCall[10..]), Is.EqualTo((ushort)3));
+            Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+                outerCall[10..]), Is.Zero);
+            Assert.That((outerCall[24], outerCall[25],
+                    BinaryPrimitives.ReadUInt16LittleEndian(outerCall[26..])),
+                Is.EqualTo(((byte)1, (byte)1, (ushort)3)));
+            Assert.That((outerCall[28], outerCall[29],
+                    BinaryPrimitives.ReadUInt16LittleEndian(outerCall[30..])),
+                Is.EqualTo(((byte)1, (byte)1, (ushort)2)));
+            Assert.That((outerCall[32], outerCall[33],
+                    BinaryPrimitives.ReadUInt16LittleEndian(outerCall[34..])),
+                Is.EqualTo(((byte)2, (byte)1, (ushort)4)));
+            Assert.That(body.GetBlockCode(0).ToArray(), Is.EqualTo(
+                new byte[] {
+                    0x11, 0x31, 0xD6, 0x11, 4, 0,
+                    0x90, 1, 0x90, 2, 0x90, 3, 0x17, 0,
                 }));
         }
 
@@ -2128,6 +2391,146 @@ internal sealed class NativeCoreRegistrationTests
                 Is.EqualTo(expectedProvider));
         }
 
+        static void AssertNestedFniDirectPairCall(BoundProgram program,
+            string functionName, string outerMemberName,
+            PrimitiveType expectedResultType, string? expectedProvider)
+        {
+            var invoke = program.Functions.Single(function =>
+                function.Name == functionName);
+            var members = program.Interfaces.Single().Members;
+            string GetMemberName(BoundCall call)
+                => members.Single(member => member.Ordinal
+                    == call.ForeignInterfaceCall!.Member.MemberOrdinal).Name;
+
+            var calls = new List<BoundCall>();
+            Assert.That(BoundTreeTraversal.VisitExpressions(invoke.Body,
+                expression =>
+                {
+                    if (expression is BoundCall {
+                            ForeignInterfaceCall: not null,
+                        } call)
+                    {
+                        calls.Add(call);
+                    }
+                }), Is.True);
+            Assert.That(calls, Has.Count.EqualTo(3));
+            var outerCall = calls.Single(call =>
+                GetMemberName(call) == outerMemberName);
+            BoundCall? UnwrapCall(BoundExpression expression)
+            {
+                while (expression is BoundUnsafeExpression unsafeCall)
+                {
+                    expression = unsafeCall.Expression;
+                }
+
+                return expression as BoundCall;
+            }
+
+            var nestedCalls = new[] {
+                UnwrapCall(outerCall.Arguments[0]),
+                UnwrapCall(outerCall.Arguments[1]),
+            };
+            Assert.That(nestedCalls.All(static call => call is not null),
+                Is.True);
+            Assert.That(nestedCalls.Select(call => GetMemberName(call!)),
+                Is.EqualTo(new[] { "GetOtherIndex", "GetIndex" }));
+            Assert.That(new[] { 0, 1 }.Select(outerCall.ParameterIndex),
+                Is.EqualTo(new[] { 1, 0 }));
+            Assert.That(outerCall.Type, Is.EqualTo(expectedResultType));
+            Assert.That(outerCall.IsUnsafeAuthorized, Is.True);
+
+            var expectedSourceVariables = new[] { 2, 1 };
+            for (var index = 0; index < nestedCalls.Length; index++)
+            {
+                var nestedCall = nestedCalls[index]!;
+                Assert.That(nestedCall.IsUnsafeAuthorized, Is.True);
+                Assert.That(nestedCall.Type,
+                    Is.EqualTo(PrimitiveType.Int32));
+                Assert.That(((BoundRead)nestedCall.Arguments.Single())
+                    .Variable, Is.EqualTo(expectedSourceVariables[index]));
+                Assert.That(nestedCall.ForeignInterfaceCall!
+                    .Member.DeclaringInterface.ModuleImport?.ProducerIdentity,
+                    Is.EqualTo(expectedProvider));
+            }
+
+            Assert.That(outerCall.ForeignInterfaceCall!.Member
+                .DeclaringInterface.ModuleImport?.ProducerIdentity,
+                Is.EqualTo(expectedProvider));
+        }
+
+        static void AssertNestedFniStagedPairCall(
+            BoundProgram program, string? expectedProvider)
+        {
+            var invoke = program.Functions.Single(function =>
+                function.Name == "InvokeNestedValuePairWithStagedInput");
+            var members = program.Interfaces.Single().Members;
+            string GetMemberName(BoundCall call)
+                => members.Single(member => member.Ordinal
+                    == call.ForeignInterfaceCall!.Member.MemberOrdinal).Name;
+
+            var calls = new List<BoundCall>();
+            Assert.That(BoundTreeTraversal.VisitExpressions(invoke.Body,
+                expression =>
+                {
+                    if (expression is BoundCall {
+                            ForeignInterfaceCall: not null,
+                        } call)
+                    {
+                        calls.Add(call);
+                    }
+                }), Is.True);
+            Assert.That(calls, Has.Count.EqualTo(3));
+            var outerCall = calls.Single(call =>
+                GetMemberName(call) == "UseTriple");
+            BoundCall? UnwrapCall(BoundExpression expression)
+            {
+                while (expression is BoundUnsafeExpression unsafeCall)
+                {
+                    expression = unsafeCall.Expression;
+                }
+
+                return expression as BoundCall;
+            }
+
+            var nestedCalls = new[] {
+                UnwrapCall(outerCall.Arguments[0]),
+                UnwrapCall(outerCall.Arguments[1]),
+            };
+            Assert.That(nestedCalls.All(static call => call is not null),
+                Is.True);
+            Assert.That(nestedCalls.Select(call => GetMemberName(call!)),
+                Is.EqualTo(new[] { "GetOtherIndex", "GetIndex" }));
+            Assert.That(new[] { 0, 1, 2 }.Select(outerCall.ParameterIndex),
+                Is.EqualTo(new[] { 1, 0, 2 }));
+            Assert.That(outerCall.Arguments[2], Is.TypeOf<BoundRead>());
+            Assert.That(((BoundRead)outerCall.Arguments[2]).Variable,
+                Is.EqualTo(4));
+            Assert.That(invoke.Variables[4].Type,
+                Is.EqualTo(PrimitiveType.Int32));
+            var stagedLocal = invoke.Body.Statements.OfType<BoundLocal>()
+                .Single(local => local.Variable == 4);
+            Assert.That(((BoundRead)stagedLocal.Initializer).Variable,
+                Is.EqualTo(3));
+
+            var expectedSourceVariables = new[] { 2, 1 };
+            for (var index = 0; index < nestedCalls.Length; index++)
+            {
+                var nestedCall = nestedCalls[index]!;
+                Assert.That(nestedCall.IsUnsafeAuthorized, Is.True);
+                Assert.That(nestedCall.Type,
+                    Is.EqualTo(PrimitiveType.Int32));
+                Assert.That(((BoundRead)nestedCall.Arguments.Single())
+                    .Variable, Is.EqualTo(expectedSourceVariables[index]));
+                Assert.That(nestedCall.ForeignInterfaceCall!
+                    .Member.DeclaringInterface.ModuleImport?.ProducerIdentity,
+                    Is.EqualTo(expectedProvider));
+            }
+
+            Assert.That(outerCall.ForeignInterfaceCall!.Member
+                .DeclaringInterface.ModuleImport?.ProducerIdentity,
+                Is.EqualTo(expectedProvider));
+        }
+
         static void AssertNestedFniConditionalOutputCall(
             BoundProgram program, string? expectedProvider)
         {
@@ -2198,36 +2601,35 @@ internal sealed class NativeCoreRegistrationTests
                 Is.EqualTo(expectedProvider));
         }
 
-        void AssertMalformedNestedCorrelatedBodyRejected(
-            Action<byte[], int, int, int> mutate)
+        void AssertMalformedNestedFniBodyRejected(int methodRow,
+            TrRmRegisterBodyReader body, Action<byte[], int, int, int> mutate)
         {
             var malformedBodySection = bodySectionBytes.ToArray();
-            var bodyRow = consumerTables.Methods.GetBodyRow(
-                consumerNestedCorrelatedRow);
+            var bodyRow = consumerTables.Methods.GetBodyRow(methodRow);
             var bodyRowEnd = checked((bodyCount + 1) * sizeof(uint)
                 + (int)BinaryPrimitives.ReadUInt32LittleEndian(
                     malformedBodySection.AsSpan(bodyRow * sizeof(uint),
                         sizeof(uint))));
             var codeStart = checked(bodyRowEnd
-                - consumerNestedCorrelatedBody.CodeByteLength);
+                - body.CodeByteLength);
             var recordDataLength = 0;
             for (var record = 0;
-                record < consumerNestedCorrelatedBody.RecordCount; record++)
+                record < body.RecordCount; record++)
             {
                 recordDataLength = checked(recordDataLength
-                    + consumerNestedCorrelatedBody.GetRecord(record).Length);
+                    + body.GetRecord(record).Length);
             }
 
             var recordDataStart = checked(codeStart - recordDataLength);
             var secondNestedCallRecordStart = checked(recordDataStart
-                + consumerNestedCorrelatedBody.GetRecord(0).Length
-                + consumerNestedCorrelatedBody.GetRecord(1).Length);
+                + body.GetRecord(0).Length
+                + body.GetRecord(1).Length);
             var outerCallRecordStart = checked(
                 secondNestedCallRecordStart
-                + consumerNestedCorrelatedBody.GetRecord(2).Length);
+                + body.GetRecord(2).Length);
             var entryBlockStart = checked(codeStart + (int)
                 BinaryPrimitives.ReadUInt32LittleEndian(
-                    consumerNestedCorrelatedBody.GetBlock(0)));
+                    body.GetBlock(0)));
             mutate(malformedBodySection, entryBlockStart,
                 secondNestedCallRecordStart, outerCallRecordStart);
 
