@@ -468,6 +468,82 @@ internal sealed class TrRmExecutableCompilerTests
     }
 
     [Test]
+    public void TerrumFunctionPointerFieldProjectsPointerPointeeClosure()
+    {
+        var schemaIdentity = TrRmArtifactSchemaFacts
+            .StandardTerrumFunctionPointerSchemaIdentity;
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        var layoutOptions = new CompilationOptions {
+            LayoutCoreRegistration
+                = LayoutCoreRegistrationTestData.Create(),
+        };
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            namespace Example {
+                [Blittable]
+                [Layout(LayoutKind.Sequential, Packing: 1)]
+                public struct Payload {
+                    public int32 Value;
+                }
+
+                [Blittable]
+                [Layout(LayoutKind.Sequential, Packing: 1)]
+                public struct CallbackHolder {
+                    public fnptr<ptr<Payload>, int32> Callback;
+                    public uint8 Tag;
+                }
+            }
+            """), layoutOptions);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, "callback-pointee-provider",
+            schemaIdentity, targetRequirement, [
+                new TrRmSourceTypeExport("Example", "CallbackHolder",
+                    "callback-holder") {
+                    FieldExports = [
+                        new TrRmSourceFieldExport("Callback",
+                            "callback-callback"),
+                        new TrRmSourceFieldExport("Tag", "callback-tag"),
+                    ],
+                },
+                new TrRmSourceTypeExport("Example", "Payload", "payload"),
+            ]);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            "callback-pointee-provider",
+            Array.Empty<TrRmStandardArtifactInput>(),
+            ["callback-holder"], ["callback-callback", "callback-tag"]);
+        Assert.That(reference.NativeFunctionPointerSignatures,
+            Has.Length.EqualTo(1));
+        Assert.That(reference.NativePointerTypes, Has.Length.EqualTo(1));
+        var signature = reference.NativeFunctionPointerSignatures[0];
+        Assert.That(signature.CallingConvention,
+            Is.EqualTo(NativeCallingConvention.Native));
+        Assert.That(signature.ParameterTypes, Has.Length.EqualTo(1));
+        Assert.That(NativePointerTypes.IsType(signature.ParameterTypes[0]),
+            Is.True);
+        var pointeeType = reference.NativePointerTypes[
+            NativePointerTypes.Index(signature.ParameterTypes[0])].PointeeType;
+        var payloadStructureIndex = Enumerable.Range(0,
+                reference.Structures.Length)
+            .Single(index => reference.Structures[index].Name
+                == "Example.Payload");
+        Assert.That(pointeeType,
+            Is.EqualTo((PrimitiveType)(100 + payloadStructureIndex)));
+
+        var consumer = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            using Example;
+            int32 ReadOffset() {
+                return int32(offsetof(CallbackHolder, Tag));
+            }
+            """), reference, layoutOptions);
+        Assert.That(consumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumer.Diagnostics));
+    }
+
+    [Test]
     public void TerrumFunctionPointerFieldProviderReplacementChecksAnchorSignature()
     {
         var schemaIdentity = TrRmArtifactSchemaFacts
@@ -479,7 +555,8 @@ internal sealed class TrRmExecutableCompilerTests
                 = LayoutCoreRegistrationTestData.Create(),
         };
 
-        byte[] EmitCallbackProvider(bool includePrefix, string callbackType)
+        byte[] EmitCallbackProvider(bool includePrefix,
+            string callbackResultType)
         {
             var prefix = includePrefix
                 ? """
@@ -498,8 +575,14 @@ internal sealed class TrRmExecutableCompilerTests
                         {{prefixFunction}}
                         [Blittable]
                         [Layout(LayoutKind.Sequential, Packing: 1)]
+                        public struct Payload {
+                            public int32 Value;
+                        }
+                        [Blittable]
+                        [Layout(LayoutKind.Sequential, Packing: 1)]
                         public struct CallbackHolder {
-                            public {{callbackType}} Callback;
+                            public fnptr<ptr<Payload>,
+                                {{callbackResultType}}> Callback;
                             public uint8 Tag;
                         }
                     }
@@ -518,11 +601,13 @@ internal sealed class TrRmExecutableCompilerTests
                                 "callback-tag"),
                         ],
                     },
+                    new TrRmSourceTypeExport("Example", "Payload",
+                        "payload"),
                 ]);
         }
 
         var providerArtifact = EmitCallbackProvider(false,
-            "fnptr<int32, int32>");
+            "int32");
         var providerReference = TrRmExecutableCompiler.CreateStandardReference(
             new TrRmStandardArtifactInput(schemaIdentity, providerArtifact),
             "callback-provider", Array.Empty<TrRmStandardArtifactInput>(),
@@ -559,7 +644,7 @@ internal sealed class TrRmExecutableCompilerTests
             ], ["pair"], ["pair-inner", "pair-tag"]);
 
         var relocatedCompatibleProvider = EmitCallbackProvider(true,
-            "fnptr<int32, int32>");
+            "int32");
         _ = TrRmExecutableCompiler.CreateStandardReference(
             new TrRmStandardArtifactInput(schemaIdentity, pairArtifact),
             "pair-provider", [
@@ -568,7 +653,7 @@ internal sealed class TrRmExecutableCompilerTests
             ], ["pair"], ["pair-inner", "pair-tag"]);
 
         var incompatibleProvider = EmitCallbackProvider(true,
-            "fnptr<int64, int64>");
+            "int64");
         _ = Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.CreateStandardReference(
                 new TrRmStandardArtifactInput(schemaIdentity, pairArtifact),
