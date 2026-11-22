@@ -250,6 +250,97 @@ internal sealed class PrivateForeignNativeInterfaceTests
         Assert.That(reference.Interfaces, Is.Empty);
     }
 
+    [Test]
+    public void PrivateFniReferenceSetsPreserveDistinctOwnerBindings()
+    {
+        const string schemaIdentity
+            = "terrum/private-semantic-111-foreign-native-interfaces-1";
+        var first = CreateFniProvider("PrivateFniSetA", "IProbeA", "AddA",
+            "PayloadA");
+        var second = CreateFniProvider("PrivateFniSetB", "IProbeB", "AddB",
+            "PayloadB");
+        var reference = ModuleCompiler.CreateReferenceSetWithSchema(
+            [first, second], schemaIdentity);
+        var source = SyntaxTree.Parse("""
+            public unsafe int32 CallA(ptr<void> receiver,
+                ptr<PayloadA> value) {
+                unsafe { return IProbeA.Get(receiver, value); }
+            }
+            public unsafe int32 CallB(ptr<void> receiver,
+                ptr<PayloadB> value) {
+                unsafe { return IProbeB.Get(receiver, value); }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(source, reference);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var reversedReference = ModuleCompiler.CreateReferenceSetWithSchema(
+            [second, first], schemaIdentity);
+        var reversedCompilation = Compilation.CreateLibrary(source,
+            reversedReference);
+        Assert.That(reversedCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                reversedCompilation.Diagnostics));
+    }
+
+    private static byte[] CreateFniProvider(string moduleIdentity,
+        string interfaceName, string functionName, string payloadTypeName)
+    {
+        const string schemaIdentity
+            = "terrum/private-semantic-111-foreign-native-interfaces-1";
+        var source = SyntaxTree.Parse($$"""
+            using Terrum.Interop;
+            public int32 {{functionName}}(int32 value) { return value; }
+            [Blittable]
+            public struct {{payloadTypeName}} {
+                public int32 Value;
+            }
+            [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+            [ForeignNativeInterface(VTableByteOffset: uint32(0))]
+            public interface {{interfaceName}} {
+                public unsafe int32 Get(ptr<{{payloadTypeName}}> value);
+            }
+            """);
+        var nativeRegistration
+            = CreateFniNativeCoreRegistration(moduleIdentity);
+        var compilation = Compilation.CreateLibrary(source,
+            new CompilationOptions {
+                NativeCoreRegistration = nativeRegistration,
+                LayoutCoreRegistration =
+                    NativeCoreRegistrationTests
+                        .CreateLayoutRegistration(nativeRegistration),
+                RuntimePolicy = BoundRuntimePolicy.FailFast,
+            });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        var identities = PrivateModuleIdentityInputs.CreateFromSelectors(
+            program, moduleIdentity, [], [], [], [], [
+                new PrivateForeignInterfaceDefinitionAssignment(0,
+                    moduleIdentity + ".owner", true, [
+                        new PrivateForeignInterfaceMemberDefinitionAssignment(
+                            0, moduleIdentity + ".member"),
+                    ]),
+            ], []);
+        return ModuleCompiler.CreateProducerWithSchema(program,
+            [functionName], schemaIdentity, identities);
+    }
+
+    private static NativeCoreRegistrationSet
+        CreateFniNativeCoreRegistration(string usingModuleIdentity)
+    {
+        var source = NativeCoreRegistrationTests.CreateRegistration(
+            includeForeignNativeInterface: true);
+        var bindings = CoreProviderModuleBindings.Create(
+            usingModuleIdentity, source.ModuleBindings.Providers,
+            source.ModuleBindings.Declarations);
+        return NativeCoreRegistrationSet.Create(bindings,
+            source.CallingConventions, source.ResolutionModes,
+            source.ResolutionPolicies, source.NativeImport,
+            source.NativeCallable, source.NativeCallConv,
+            source.NativeExport, source.ForeignNativeInterface);
+    }
+
     private static int PublishOutput(IntPtr receiver, IntPtr output)
     {
         _ = receiver;
