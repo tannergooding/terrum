@@ -36,7 +36,8 @@ internal sealed class NativeCoreRegistrationTests
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate NativeAggregateNestedPayload
         NativeAggregateNestedPayloadFunction(IntPtr receiver, IntPtr source,
-            IntPtr tagSource, NativeAggregateNestedPayload fallback);
+            IntPtr tagSource, int mode,
+            NativeAggregateNestedPayload fallback);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate NativeAggregateNestedPayload
@@ -48,7 +49,7 @@ internal sealed class NativeCoreRegistrationTests
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int NativeOutputTaggedPayloadFunction(IntPtr receiver,
-        IntPtr source, int tag, IntPtr value);
+        IntPtr source, int tag, int mode, IntPtr value);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int NativePointerOutputCallback(IntPtr receiver,
@@ -2335,9 +2336,9 @@ internal sealed class NativeCoreRegistrationTests
                 [param(value): NativeOutput(
                     When: NativeOutputCondition.NonZero)]
                 public unsafe int32 TryReadPayload(ptr<int32> source,
-                    int32 tag,
+                    int32 tag, int32 mode,
                     [Terrum.CodeAnalysis.DependsOn(
-                        this, nameof(source), nameof(tag))]
+                        this, nameof(source), nameof(tag), nameof(mode))]
                     [Terrum.CodeAnalysis.ForwardsBacking(
                         this, nameof(source))]
                     write ptr<Payload> value);
@@ -2349,19 +2350,20 @@ internal sealed class NativeCoreRegistrationTests
                 init Payload value;
                 unsafe {
                     int32 status = IProbe.TryReadPayload(
-                        receiver, source, 7, &init value);
+                        receiver, source, 7, 9, &init value);
                     if (status != 0) { return value; }
                     return fallback;
                 }
             }
 
             Payload InvokePayload(ptr<void> receiver, ptr<int32> source,
-                ptr<int32> tagSource, Payload fallback) {
+                ptr<int32> tagSource, int32 mode, Payload fallback) {
                 init Payload value;
                 unsafe {
                     int32 status = IProbe.TryReadPayload(
                         receiver, source,
-                        IProbe.GetTag(receiver, tagSource), &init value);
+                        IProbe.GetTag(receiver, tagSource), mode,
+                        &init value);
                     if (status != 0) { return value; }
                     return fallback;
                 }
@@ -2488,7 +2490,7 @@ internal sealed class NativeCoreRegistrationTests
         Assert.That(body.BlockCount, Is.EqualTo(3));
         Assert.That(body.RecordCount, Is.EqualTo(5));
         Assert.That(body.MethodCount, Is.EqualTo(2));
-        Assert.That(body.HomeCount, Is.EqualTo(6));
+        Assert.That(body.HomeCount, Is.EqualTo(7));
         Assert.That(body.GetBlockCode(0)[..2].ToArray(),
             Is.EqualTo(new byte[] { 0x90, 1 }));
         var nestedCallPayload = body.GetRecord(1)[4..];
@@ -2499,7 +2501,7 @@ internal sealed class NativeCoreRegistrationTests
         Assert.That(outerCallPayload[25], Is.EqualTo(1));
         Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
             outerCallPayload[26..]), Is.EqualTo((ushort)1));
-        var outputHome = body.HomeMap.Slice(4 * 8, 8);
+        var outputHome = body.HomeMap.Slice(5 * 8, 8);
         var outputTypeMapIndex
             = BinaryPrimitives.ReadUInt16LittleEndian(outputHome[2..]);
         var outputTypeToken = BinaryPrimitives.ReadUInt32LittleEndian(
@@ -2510,9 +2512,9 @@ internal sealed class NativeCoreRegistrationTests
         Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
             body.MethodMap[sizeof(uint)..]) >> 24, Is.EqualTo(0x1Cu));
         Assert.That(body.GetBlockCode(1).ToArray(),
-            Is.EqualTo(new byte[] { 0xD5, 0, 4, 0, 0x17, 0 }));
+            Is.EqualTo(new byte[] { 0xD5, 0, 5, 0, 0x17, 0 }));
         Assert.That(body.GetBlockCode(2).ToArray(),
-            Is.EqualTo(new byte[] { 0xD5, 0, 3, 0, 0x17, 0 }));
+            Is.EqualTo(new byte[] { 0xD5, 0, 4, 0, 0x17, 0 }));
 
         var literalMethod = Enumerable.Range(1, consumerTables.Methods.Count)
             .Single(row =>
@@ -2524,15 +2526,19 @@ internal sealed class NativeCoreRegistrationTests
         Assert.That(literalBody.RecordCount, Is.EqualTo(4));
         Assert.That(literalBody.MethodCount, Is.EqualTo(1));
         Assert.That(literalBody.HomeCount, Is.EqualTo(5));
-        Assert.That(literalBody.ConstantCount, Is.EqualTo(1));
-        Assert.That(literalBody.ConstantMap.Length, Is.EqualTo(8));
-        Assert.That(literalBody.GetBlockCode(0)[..3].ToArray(),
-            Is.EqualTo(new byte[] { 0x16, 1, 0xDF }));
+        Assert.That(literalBody.ConstantCount, Is.EqualTo(2));
+        Assert.That(literalBody.ConstantMap.Length, Is.EqualTo(16));
+        Assert.That(literalBody.GetBlockCode(0)[..5].ToArray(),
+            Is.EqualTo(new byte[] { 0x16, 1, 0x16, 0x12, 0xDF }));
         var literalCallPayload = literalBody.GetRecord(1)[4..];
         Assert.That(literalCallPayload[24], Is.EqualTo(1));
         Assert.That(literalCallPayload[25], Is.EqualTo(1));
         Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
             literalCallPayload[26..]), Is.EqualTo((ushort)1));
+        Assert.That(literalCallPayload[28], Is.EqualTo(1));
+        Assert.That(literalCallPayload[29], Is.EqualTo(1));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+            literalCallPayload[30..]), Is.EqualTo((ushort)2));
 
         var consumerInput = new TrRmStandardArtifactInput(schemaIdentity,
             consumerArtifact);
@@ -2549,7 +2555,7 @@ internal sealed class NativeCoreRegistrationTests
         Assert.That(((BoundRead)outputReturn.Value).Variable,
             Is.EqualTo(function.ParameterCount));
         Assert.That(((BoundRead)fallbackReturn.Value).Variable,
-            Is.EqualTo(3));
+            Is.EqualTo(4));
         var literalFunction = loaded.Functions.Single(
             function => function.Name == "InvokeLiteralPayload");
         var literalStatus = (BoundLocal)literalFunction.Body.Statements[1];
@@ -2558,6 +2564,9 @@ internal sealed class NativeCoreRegistrationTests
         Assert.That(literalCall.Arguments[1], Is.TypeOf<BoundConstant>());
         Assert.That(((BoundConstant)literalCall.Arguments[1]).Value,
             Is.EqualTo(7));
+        Assert.That(literalCall.Arguments[2], Is.TypeOf<BoundConstant>());
+        Assert.That(((BoundConstant)literalCall.Arguments[2]).Value,
+            Is.EqualTo(9));
         var image = NativeEmitter.EmitLibrary(loaded,
             ["InvokePayload", "InvokeLiteralPayload"],
             NativeRuntimePolicy.FailFast);
@@ -6387,9 +6396,11 @@ internal sealed class NativeCoreRegistrationTests
                 tagCalls++;
                 return Marshal.ReadInt32(actualSource);
             };
-            outputCallback = (actualReceiver, actualSource, tag, value) => {
+            outputCallback = (actualReceiver, actualSource, tag, mode,
+                value) => {
                 payloadCalls++;
                 if (actualReceiver != receiver || actualSource != source
+                    || mode != 4
                     || tagCalls != payloadCalls)
                 {
                     return 0;
@@ -6398,6 +6409,10 @@ internal sealed class NativeCoreRegistrationTests
                 if (tag == 0)
                 {
                     Marshal.WriteInt64(value, -1);
+                    return 0;
+                }
+                if (tag != 7)
+                {
                     return 0;
                 }
 
@@ -6424,7 +6439,7 @@ internal sealed class NativeCoreRegistrationTests
                 },
                 Z = 6,
             };
-            var result = invoke(receiver, source, tagSource, fallback);
+            var result = invoke(receiver, source, tagSource, 4, fallback);
             Assert.That(result.Inner.X, Is.EqualTo(11));
             Assert.That(result.Inner.Y, Is.EqualTo(22));
             Assert.That(result.Z, Is.EqualTo(33));
@@ -6432,7 +6447,7 @@ internal sealed class NativeCoreRegistrationTests
             Assert.That(payloadCalls, Is.EqualTo(1));
 
             Marshal.WriteInt32(tagSource, 0);
-            result = invoke(receiver, source, tagSource, fallback);
+            result = invoke(receiver, source, tagSource, 4, fallback);
             Assert.That(result.Inner.X, Is.EqualTo(fallback.Inner.X));
             Assert.That(result.Inner.Y, Is.EqualTo(fallback.Inner.Y));
             Assert.That(result.Z, Is.EqualTo(fallback.Z));
@@ -6485,9 +6500,9 @@ internal sealed class NativeCoreRegistrationTests
             receiver = Marshal.AllocHGlobal(IntPtr.Size);
             vtable = Marshal.AllocHGlobal(2 * IntPtr.Size);
             source = Marshal.AllocHGlobal(sizeof(int));
-            callback = (actualReceiver, actualSource, tag, value) => {
+            callback = (actualReceiver, actualSource, tag, mode, value) => {
                 if (actualReceiver != receiver || actualSource != source
-                    || tag != 7)
+                    || tag != 7 || mode != 9)
                 {
                     return 0;
                 }

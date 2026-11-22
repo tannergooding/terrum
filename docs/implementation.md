@@ -1361,8 +1361,8 @@ inputs through typed ConstantMap/TypedFrozenValues loads; the nested call
 executes before output reservation. Imported-provider source-free
 load/re-emission and Windows x64 success/partial-failure regressions remain
 unverified under the hold. The receiver is a direct parameter. One non-void
-call may
-reserve distinct local `init` Homes for each NativeOutput formal; source-use 6
+call may reserve distinct local `init` Homes for each NativeOutput formal;
+source-use 6
 and reservation records use the receiver-first flattened ordinal
 (`formal n` maps to input `n+1`). Source-free decoding restores the
 `BoundNativeOutputReservation`, unsafe assertion, exact MethodDef/Import
