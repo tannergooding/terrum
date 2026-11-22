@@ -1,0 +1,333 @@
+namespace Terrum.CodeAnalysis;
+
+// 0 accepts; 1 is malformed; 2 is an unsupported agreement; 3 is an
+// unsupported artifact schema; 4 is a duplicate MethodRoot triple.
+public static int32 ValidateStandaloneMethodImportInput()
+{
+    if (Host.StandaloneRequest.Length != 6
+        || Host.StandaloneArtifactInputs.Length % 4 != 0
+        || Host.StandaloneMethodRoots.Length % 5 != 0)
+    {
+        return 1;
+    }
+
+    int32 agreementStart = Host.StandaloneRequest[0];
+    int32 agreementLength = Host.StandaloneRequest[1];
+    int32 usingModuleStart = Host.StandaloneRequest[2];
+    int32 usingModuleLength = Host.StandaloneRequest[3];
+    int32 artifactCount = Host.StandaloneRequest[4];
+    int32 rootCount = Host.StandaloneRequest[5];
+    if (artifactCount < 0
+        || artifactCount != Host.StandaloneArtifactInputs.Length / 4
+        || rootCount < 0
+        || rootCount != Host.StandaloneMethodRoots.Length / 5
+        || (rootCount != 0 && artifactCount == 0)
+        || agreementStart != 0
+        || !IsStandaloneTextRange(agreementStart, agreementLength)
+        || !IsStandaloneTextRange(usingModuleStart, usingModuleLength))
+    {
+        return 1;
+    }
+
+    for (mut int32 index = 0;
+        index < Host.StandaloneText.Length;
+        index = index + 1)
+    {
+        int32 codeUnit = int32(Host.StandaloneText[index]);
+        if (codeUnit < 0 || codeUnit > 65535)
+        {
+            return 1;
+        }
+    }
+
+    if (!IsWellFormedStandaloneIdentity(agreementStart,
+            agreementLength)
+        || !IsWellFormedStandaloneIdentity(usingModuleStart,
+            usingModuleLength))
+    {
+        return 1;
+    }
+    if (!MatchesStandaloneImportAgreement(agreementStart,
+            agreementLength))
+    {
+        return 2;
+    }
+
+    mut int32 expectedTextStart
+        = agreementStart + agreementLength + usingModuleLength;
+    if (usingModuleStart != agreementStart + agreementLength)
+    {
+        return 1;
+    }
+    for (mut int32 artifact = 0;
+        artifact < artifactCount;
+        artifact = artifact + 1)
+    {
+        int32 row = artifact * 4;
+        int32 schemaStart = Host.StandaloneArtifactInputs[row];
+        int32 schemaLength = Host.StandaloneArtifactInputs[row + 1];
+        if (schemaStart != expectedTextStart
+            || !IsStandaloneTextRange(schemaStart, schemaLength)
+            || !IsWellFormedStandaloneIdentity(schemaStart,
+                schemaLength))
+        {
+            return 1;
+        }
+        expectedTextStart = schemaStart + schemaLength;
+        if (!MatchesInitializationReferenceSchema(schemaStart,
+                schemaLength))
+        {
+            return 3;
+        }
+    }
+
+    mut int32 expectedArtifactStart = 0;
+    for (mut int32 artifact = 0;
+        artifact < artifactCount;
+        artifact = artifact + 1)
+    {
+        int32 row = artifact * 4;
+        int32 artifactStart = Host.StandaloneArtifactInputs[row + 2];
+        int32 artifactLength = Host.StandaloneArtifactInputs[row + 3];
+        if (artifactLength <= 0
+            || artifactStart != expectedArtifactStart
+            || artifactStart < 0
+            || artifactStart > Host.StandaloneArtifacts.Length
+            || artifactLength
+                > Host.StandaloneArtifacts.Length - artifactStart)
+        {
+            return 1;
+        }
+
+        for (mut int32 offset = artifactStart;
+            offset < artifactStart + artifactLength;
+            offset = offset + 1)
+        {
+            if (Host.StandaloneArtifacts[offset] < 0
+                || Host.StandaloneArtifacts[offset] > 255)
+            {
+                return 1;
+            }
+        }
+        expectedArtifactStart = artifactStart + artifactLength;
+    }
+    if (expectedArtifactStart != Host.StandaloneArtifacts.Length)
+    {
+        return 1;
+    }
+
+    for (mut int32 root = 0; root < rootCount; root = root + 1)
+    {
+        int32 row = root * 5;
+        int32 artifactOrdinal = Host.StandaloneMethodRoots[row];
+        int32 moduleStart = Host.StandaloneMethodRoots[row + 1];
+        int32 moduleLength = Host.StandaloneMethodRoots[row + 2];
+        int32 exportStart = Host.StandaloneMethodRoots[row + 3];
+        int32 exportLength = Host.StandaloneMethodRoots[row + 4];
+        if (artifactOrdinal < 0 || artifactOrdinal >= artifactCount
+            || moduleStart != expectedTextStart
+            || !IsStandaloneTextRange(moduleStart, moduleLength)
+            || !IsWellFormedStandaloneIdentity(moduleStart,
+                moduleLength)
+            || exportStart != moduleStart + moduleLength
+            || !IsStandaloneTextRange(exportStart, exportLength)
+            || !IsWellFormedStandaloneIdentity(exportStart,
+                exportLength))
+        {
+            return 1;
+        }
+        expectedTextStart = exportStart + exportLength;
+
+        for (mut int32 prior = 0; prior < root; prior = prior + 1)
+        {
+            int32 priorRow = prior * 5;
+            if (artifactOrdinal == Host.StandaloneMethodRoots[priorRow]
+                && StandaloneTextRangesEqual(moduleStart, moduleLength,
+                    Host.StandaloneMethodRoots[priorRow + 1],
+                    Host.StandaloneMethodRoots[priorRow + 2])
+                && StandaloneTextRangesEqual(exportStart, exportLength,
+                    Host.StandaloneMethodRoots[priorRow + 3],
+                    Host.StandaloneMethodRoots[priorRow + 4]))
+            {
+                return 4;
+            }
+        }
+    }
+    if (expectedTextStart != Host.StandaloneText.Length)
+    {
+        return 1;
+    }
+
+    return 0;
+}
+
+bool IsStandaloneTextRange(int32 start, int32 length)
+{
+    return start >= 0 && start <= Host.StandaloneText.Length
+        && length > 0 && length <= Host.StandaloneText.Length - start;
+}
+
+bool IsWellFormedStandaloneIdentity(int32 start, int32 length)
+{
+    if (!IsStandaloneTextRange(start, length))
+    {
+        return false;
+    }
+
+    int32 end = start + length;
+    mut int32 at = start;
+    while (at < end)
+    {
+        init int32 scalar;
+        if (!TryReadStandaloneTextScalar(at, end, ref init scalar)
+            || scalar <= 0)
+        {
+            return false;
+        }
+        at = at + Utf16ScalarWidth(scalar);
+    }
+
+    return true;
+}
+
+bool TryReadStandaloneTextScalar(int32 at, int32 end,
+    ref<init int32> scalar)
+{
+    if (at < 0 || at >= end || end > Host.StandaloneText.Length)
+    {
+        return false;
+    }
+
+    char16 first = char16(Host.StandaloneText[at]);
+    mut char16 second = char16(0);
+    int32 firstValue = int32(first);
+    if (firstValue >= 55296 && firstValue <= 56319 && at + 1 < end)
+    {
+        second = char16(Host.StandaloneText[at + 1]);
+    }
+    int32 decoded = DecodeUtf16Scalar(first, second);
+    if (decoded < 0)
+    {
+        return false;
+    }
+
+    *scalar = decoded;
+    return true;
+}
+
+bool StandaloneTextRangesEqual(int32 firstStart, int32 firstLength,
+    int32 secondStart, int32 secondLength)
+{
+    if (firstLength != secondLength
+        || !IsStandaloneTextRange(firstStart, firstLength)
+        || !IsStandaloneTextRange(secondStart, secondLength))
+    {
+        return false;
+    }
+
+    for (mut int32 offset = 0;
+        offset < firstLength;
+        offset = offset + 1)
+    {
+        if (Host.StandaloneText[firstStart + offset]
+            != Host.StandaloneText[secondStart + offset])
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool MatchesStandaloneImportAgreement(int32 start, int32 length)
+{
+    return length == 47
+        && Host.StandaloneText[start] == 't'
+        && Host.StandaloneText[start + 1] == 'e'
+        && Host.StandaloneText[start + 2] == 'r'
+        && Host.StandaloneText[start + 3] == 'r'
+        && Host.StandaloneText[start + 4] == 'u'
+        && Host.StandaloneText[start + 5] == 'm'
+        && Host.StandaloneText[start + 6] == '.'
+        && Host.StandaloneText[start + 7] == 'e'
+        && Host.StandaloneText[start + 8] == 'x'
+        && Host.StandaloneText[start + 9] == 'p'
+        && Host.StandaloneText[start + 10] == 'e'
+        && Host.StandaloneText[start + 11] == 'r'
+        && Host.StandaloneText[start + 12] == 'i'
+        && Host.StandaloneText[start + 13] == 'm'
+        && Host.StandaloneText[start + 14] == 'e'
+        && Host.StandaloneText[start + 15] == 'n'
+        && Host.StandaloneText[start + 16] == 't'
+        && Host.StandaloneText[start + 17] == 'a'
+        && Host.StandaloneText[start + 18] == 'l'
+        && Host.StandaloneText[start + 19] == '.'
+        && Host.StandaloneText[start + 20] == 's'
+        && Host.StandaloneText[start + 21] == 't'
+        && Host.StandaloneText[start + 22] == 'a'
+        && Host.StandaloneText[start + 23] == 'n'
+        && Host.StandaloneText[start + 24] == 'd'
+        && Host.StandaloneText[start + 25] == 'a'
+        && Host.StandaloneText[start + 26] == 'l'
+        && Host.StandaloneText[start + 27] == 'o'
+        && Host.StandaloneText[start + 28] == 'n'
+        && Host.StandaloneText[start + 29] == 'e'
+        && Host.StandaloneText[start + 30] == '-'
+        && Host.StandaloneText[start + 31] == 'm'
+        && Host.StandaloneText[start + 32] == 'e'
+        && Host.StandaloneText[start + 33] == 't'
+        && Host.StandaloneText[start + 34] == 'h'
+        && Host.StandaloneText[start + 35] == 'o'
+        && Host.StandaloneText[start + 36] == 'd'
+        && Host.StandaloneText[start + 37] == '-'
+        && Host.StandaloneText[start + 38] == 'i'
+        && Host.StandaloneText[start + 39] == 'm'
+        && Host.StandaloneText[start + 40] == 'p'
+        && Host.StandaloneText[start + 41] == 'o'
+        && Host.StandaloneText[start + 42] == 'r'
+        && Host.StandaloneText[start + 43] == 't'
+        && Host.StandaloneText[start + 44] == 's'
+        && Host.StandaloneText[start + 45] == '/'
+        && Host.StandaloneText[start + 46] == '1';
+}
+
+bool MatchesInitializationReferenceSchema(int32 start, int32 length)
+{
+    return length == 36
+        && Host.StandaloneText[start] == 't'
+        && Host.StandaloneText[start + 1] == 'r'
+        && Host.StandaloneText[start + 2] == 'r'
+        && Host.StandaloneText[start + 3] == 'm'
+        && Host.StandaloneText[start + 4] == '/'
+        && Host.StandaloneText[start + 5] == '1'
+        && Host.StandaloneText[start + 6] == '-'
+        && Host.StandaloneText[start + 7] == 'd'
+        && Host.StandaloneText[start + 8] == 'r'
+        && Host.StandaloneText[start + 9] == 'a'
+        && Host.StandaloneText[start + 10] == 'f'
+        && Host.StandaloneText[start + 11] == 't'
+        && Host.StandaloneText[start + 12] == '-'
+        && Host.StandaloneText[start + 13] == 'i'
+        && Host.StandaloneText[start + 14] == 'n'
+        && Host.StandaloneText[start + 15] == 'i'
+        && Host.StandaloneText[start + 16] == 't'
+        && Host.StandaloneText[start + 17] == '-'
+        && Host.StandaloneText[start + 18] == 'r'
+        && Host.StandaloneText[start + 19] == 'e'
+        && Host.StandaloneText[start + 20] == 'f'
+        && Host.StandaloneText[start + 21] == 'e'
+        && Host.StandaloneText[start + 22] == 'r'
+        && Host.StandaloneText[start + 23] == 'e'
+        && Host.StandaloneText[start + 24] == 'n'
+        && Host.StandaloneText[start + 25] == 'c'
+        && Host.StandaloneText[start + 26] == 'e'
+        && Host.StandaloneText[start + 27] == '-'
+        && Host.StandaloneText[start + 28] == 'b'
+        && Host.StandaloneText[start + 29] == 'o'
+        && Host.StandaloneText[start + 30] == 'd'
+        && Host.StandaloneText[start + 31] == 'i'
+        && Host.StandaloneText[start + 32] == 'e'
+        && Host.StandaloneText[start + 33] == 's'
+        && Host.StandaloneText[start + 34] == '-'
+        && Host.StandaloneText[start + 35] == '1';
+}
