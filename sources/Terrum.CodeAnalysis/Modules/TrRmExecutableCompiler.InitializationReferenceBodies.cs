@@ -1350,11 +1350,13 @@ public static partial class TrRmExecutableCompiler
         if (TryGetForeignInterfaceCallSequence(function, program,
                 out var foreignInterfaceCallsInSequence,
                 out var foreignInterfaceCallSequenceHasValueResult,
-                out var foreignInterfaceCallSequenceNestedInputs))
+                out var foreignInterfaceCallSequenceNestedInputs,
+                out var foreignInterfaceCallSequenceIsTerminal))
         {
             return EncodeForeignInterfaceCallSequenceBody(function, program,
                 foreignInterfaceCallsInSequence,
-                foreignInterfaceCallSequenceHasValueResult, typeSpecRowFor,
+                foreignInterfaceCallSequenceHasValueResult,
+                foreignInterfaceCallSequenceIsTerminal, typeSpecRowFor,
                 foreignInterfaceCallSequenceNestedInputs,
                 foreignInterfaceMethodMapTokenForCall
                     ?? throw Unsupported(
@@ -2476,13 +2478,13 @@ public static partial class TrRmExecutableCompiler
     private static bool TryGetForeignInterfaceCallSequence(
         BoundFunction function, BoundProgram program,
         out ImmutableArray<BoundCall> calls, out bool hasValueResult,
-        out ImmutableArray<BoundCall> nestedInputs)
+        out ImmutableArray<BoundCall> nestedInputs, out bool isTerminal)
     {
         calls = [];
         hasValueResult = false;
         nestedInputs = [];
+        isTerminal = false;
         if (function.IsExternal
-            || function.DoesNotReturn
             || function.Body.RetiredManagedLocals.Length != 0
             || function.Variables.Length != function.ParameterCount
             || function.Variables.Any(static variable =>
@@ -2527,8 +2529,17 @@ public static partial class TrRmExecutableCompiler
             statements = statementBuilder.ToImmutable();
         }
 
-        if (statements.Length < (function.ReturnType == PrimitiveType.Void
-                ? 3 : 2)
+        var terminal = function.DoesNotReturn;
+        if (terminal)
+        {
+            if (statements.Length < 2
+                || statements[^1] is not BoundExpressionStatement)
+            {
+                return false;
+            }
+        }
+        else if (statements.Length < (function.ReturnType == PrimitiveType.Void
+                    ? 3 : 2)
             || statements[^1] is not BoundReturn returned
             || (function.ReturnType == PrimitiveType.Void)
                 != (returned.Value is null))
@@ -2537,8 +2548,8 @@ public static partial class TrRmExecutableCompiler
         }
 
         var callBuilder = ImmutableArray.CreateBuilder<BoundCall>(
-            function.ReturnType == PrimitiveType.Void
-                ? statements.Length - 1 : statements.Length);
+            terminal || function.ReturnType != PrimitiveType.Void
+                ? statements.Length : statements.Length - 1);
         var nestedInputBuilder = ImmutableArray.CreateBuilder<BoundCall>();
         var constantInputs
             = new HashSet<(PrimitiveType Type, ScalarBits Bits)>();
@@ -2560,7 +2571,7 @@ public static partial class TrRmExecutableCompiler
 
             if (expression is not BoundCall boundCall
                 || !TryValidateCall(boundCall, PrimitiveType.Void,
-                    allowNestedInputs: false))
+                    allowNestedInputs: false, isTerminalCall: false))
             {
                 return false;
             }
@@ -2568,7 +2579,27 @@ public static partial class TrRmExecutableCompiler
             callBuilder.Add(boundCall);
         }
 
-        if (returned.Value is BoundExpression returnExpression)
+        if (terminal)
+        {
+            var terminalExpression
+                = ((BoundExpressionStatement)statements[^1]).Expression;
+            while (terminalExpression is BoundUnsafeExpression unsafeTerminal)
+            {
+                terminalExpression = unsafeTerminal.Expression;
+            }
+
+            if (terminalExpression is not BoundCall terminalCall
+                || !TryValidateCall(terminalCall, terminalCall.Type,
+                    allowNestedInputs: true, isTerminalCall: true))
+            {
+                return false;
+            }
+
+            callBuilder.Add(terminalCall);
+        }
+        else if (statements[^1] is BoundReturn {
+                Value: BoundExpression returnExpression,
+            })
         {
             while (returnExpression is BoundUnsafeExpression unsafeReturn)
             {
@@ -2577,7 +2608,7 @@ public static partial class TrRmExecutableCompiler
 
             if (returnExpression is not BoundCall returnCall
                 || !TryValidateCall(returnCall, function.ReturnType,
-                    allowNestedInputs: true))
+                    allowNestedInputs: true, isTerminalCall: false))
             {
                 return false;
             }
@@ -2592,18 +2623,21 @@ public static partial class TrRmExecutableCompiler
         }
 
         calls = callBuilder.MoveToImmutable();
-        hasValueResult = function.ReturnType != PrimitiveType.Void;
+        hasValueResult = !terminal
+            && function.ReturnType != PrimitiveType.Void;
         nestedInputs = nestedInputBuilder.ToImmutable();
+        isTerminal = terminal;
         return true;
 
         bool TryValidateCall(BoundCall boundCall,
-            PrimitiveType expectedReturnType, bool allowNestedInputs)
+            PrimitiveType expectedReturnType, bool allowNestedInputs,
+            bool isTerminalCall)
         {
             if (boundCall.Function != BoundCall.ForeignInterfaceFunction
                 || boundCall.ForeignInterfaceCall is not
                     BoundForeignInterfaceCall foreignCall
                 || !boundCall.IsUnsafeAuthorized
-                || foreignCall.DoesNotReturn
+                || foreignCall.DoesNotReturn != isTerminalCall
                 || boundCall.Type != expectedReturnType
                 || !ForeignNativeInterfaceContract.TryCreateCallTarget(
                     foreignCall, program, out var target)
@@ -2768,6 +2802,7 @@ public static partial class TrRmExecutableCompiler
     private static byte[] EncodeForeignInterfaceCallSequenceBody(
         BoundFunction function, BoundProgram program,
         ImmutableArray<BoundCall> calls, bool hasValueResult,
+        bool isTerminal,
         Func<PrimitiveType, int> typeSpecRowFor,
         ImmutableArray<BoundCall> nestedCalls,
         Func<BoundInterfaceMemberIdentity, uint>
@@ -2775,7 +2810,11 @@ public static partial class TrRmExecutableCompiler
         TrRmFrozenScalarValueBuilder scalarValues,
         TrRmArtifactSchema schema)
     {
-        if (hasValueResult == (function.ReturnType == PrimitiveType.Void))
+        if (isTerminal != function.DoesNotReturn
+            || (hasValueResult
+                && (isTerminal || function.ReturnType == PrimitiveType.Void))
+            || (!hasValueResult && !isTerminal
+                && function.ReturnType != PrimitiveType.Void))
         {
             throw Invalid(
                 "A Standard F+I call sequence has an inconsistent return form.");
@@ -2791,13 +2830,14 @@ public static partial class TrRmExecutableCompiler
         var constantRegisterByValue
             = new Dictionary<(PrimitiveType Type, ScalarBits Bits), byte>();
         var constantLoads = new List<(ushort MapIndex, byte Register)>();
-        var prefixCallCount = calls.Length - (hasValueResult ? 1 : 0);
+        var hasFinalCall = hasValueResult || isTerminal;
+        var prefixCallCount = calls.Length - (hasFinalCall ? 1 : 0);
         var prefixMethodMapTokens = new List<uint>(prefixCallCount);
         var nestedMethodMapTokens = new List<uint>(nestedCalls.Length);
         var methodMapTokens = new List<uint>(
             calls.Length + nestedCalls.Length);
         var outerMethodMapToken = 0u;
-        var outerForeignCall = hasValueResult
+        var outerForeignCall = hasFinalCall
             ? calls[^1].ForeignInterfaceCall
                 ?? throw Invalid(
                     "A Standard F+I call sequence has no final InterfaceMethod identity.")
@@ -2876,7 +2916,7 @@ public static partial class TrRmExecutableCompiler
 
             var nestedMethodMapToken = methodMapTokenForForeignInterface(
                 nestedForeignCall.Member);
-            if (hasValueResult
+            if (hasFinalCall
                 && nestedMethodMapToken == outerMethodMapToken)
             {
                 throw Unsupported(
@@ -2894,7 +2934,7 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
-        if (hasValueResult)
+        if (hasFinalCall)
         {
             var call = calls[^1];
             var foreignCall = outerForeignCall
@@ -2903,9 +2943,9 @@ public static partial class TrRmExecutableCompiler
             if (!ForeignNativeInterfaceContract.TryCreateCallTarget(
                     foreignCall, program, out var target)
                 || !call.IsUnsafeAuthorized
-                || foreignCall.DoesNotReturn
-                || call.Type != function.ReturnType
-                || target.ReturnType != function.ReturnType
+                || foreignCall.DoesNotReturn != isTerminal
+                || call.Type != target.ReturnType
+                || (hasValueResult && call.Type != function.ReturnType)
                 || !target.NativeOutputContracts.IsEmpty
                 || target.ParameterCount != call.Arguments.Length
                 || foreignCall.Receiver is not BoundRead {
@@ -2940,7 +2980,7 @@ public static partial class TrRmExecutableCompiler
 
         if (calls.Length + nestedCalls.Length > 13
             || nestedCalls.Length + constantLoads.Count > 13
-            || (!hasValueResult && !nestedCalls.IsEmpty))
+            || (!hasFinalCall && !nestedCalls.IsEmpty))
         {
             throw Unsupported(
                 $"Function '{function.Name}' has too many F+I call sequence CallSites or input registers.");
@@ -2991,17 +3031,18 @@ public static partial class TrRmExecutableCompiler
         }
 
         ushort? outerRecordIndex = null;
-        if (hasValueResult)
+        if (hasFinalCall)
         {
             var outerCallSite = EncodeCallSite(calls[^1],
-                outerMethodMapToken, 1, 0);
+                outerMethodMapToken, hasValueResult ? (byte)1 : (byte)0, 0);
             outerRecordIndex = checked((ushort)records.Count);
             records.Add(new(outerCallSite));
         }
 
         var code = new List<byte>(checked(
             (constantLoads.Count * 2)
-            + ((calls.Length + nestedCalls.Length) * 2) + 2));
+            + ((calls.Length + nestedCalls.Length) * 2)
+            + (isTerminal ? 0 : 2)));
         foreach (var (constantMapIndex, register) in constantLoads)
         {
             if (constantMapIndex >= 16)
@@ -3050,8 +3091,11 @@ public static partial class TrRmExecutableCompiler
             code.Add(checked((byte)valueRecordIndex));
         }
 
-        code.Add(hasValueResult ? (byte)0x17 : (byte)0x18);
-        code.Add(0);
+        if (!isTerminal)
+        {
+            code.Add(hasValueResult ? (byte)0x17 : (byte)0x18);
+            code.Add(0);
+        }
         var constantMap = EncodeConstantMap();
         return TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
             maps.MethodMap, default, constantMap,
@@ -8180,12 +8224,20 @@ public static partial class TrRmExecutableCompiler
                 .OfType<BoundCall>()
                 .ToArray()
             : Array.Empty<BoundCall>();
+        var nestedInputOuterTerminal
+            = nestedInputOuterCall?.ForeignInterfaceCall?.DoesNotReturn
+                == true;
         var nestedInputPrefixCallCount
-            = function.ReturnType != PrimitiveType.Void
-                && !function.DoesNotReturn
-                && nestedInputOuterCall is BoundCall
+            = nestedInputOuterCall is BoundCall
                 && statements.Count > 1
-                && statements[^1] is BoundReturn { Value: not null }
+                && (function.DoesNotReturn
+                    ? nestedInputOuterTerminal
+                        && statements[^1]
+                            is BoundExpressionStatement
+                    : function.ReturnType != PrimitiveType.Void
+                        && statements[^1] is BoundReturn {
+                            Value: not null,
+                        })
                 && statements.Take(statements.Count - 1).All(statement =>
                     statement is BoundExpressionStatement {
                         Expression: BoundExpression expression,
@@ -8253,9 +8305,6 @@ public static partial class TrRmExecutableCompiler
                             constant.Type)
                         && constant.RepresentationType == constant.Type
                         && constant.Bits.IsCanonicalFor(constant.Type)));
-        var nestedInputOuterTerminal
-            = nestedInputOuterCall?.ForeignInterfaceCall?.DoesNotReturn
-                == true;
         var foreignInterfaceNestedCall
             = stores == 0
                 && calls == nestedInputPrefixCallCount
@@ -8278,6 +8327,41 @@ public static partial class TrRmExecutableCompiler
                 && variables.Count == function.ParameterCount
                     + foreignInterfaceOutputReservations
                     + initializedValueLocals.Count;
+        var foreignInterfaceTerminalCallSequence
+            = function.DoesNotReturn
+                && nestedInputOuterTerminal
+                && nestedInputPrefixCallCount > 0
+                && nestedInputCalls.Length == 0
+                && stores == 0
+                && foreignInterfaceCalls == calls
+                && foreignInterfaceNonReturningCalls == 1
+                && pointerLoads == 0
+                && initializedLocals.Count == 0
+                && initializedValueLocals.Count == 0
+                && foreignInterfaceOutputReservations == 0
+                && statements.Count == nestedInputPrefixCallCount + 1
+                && statements[^1] is BoundExpressionStatement {
+                    Expression: BoundExpression terminalExpression,
+                }
+                && GetNestedForeignInterfaceCall(terminalExpression)
+                    is BoundCall terminalCall
+                && terminalCall.IsUnsafeAuthorized
+                && terminalCall.ForeignInterfaceCall is
+                    BoundForeignInterfaceCall terminalForeignCall
+                && terminalForeignCall.DoesNotReturn
+                && terminalForeignCall.NativeOutputContracts.IsEmpty
+                && terminalCall.Arguments.All(static argument =>
+                    argument is BoundRead
+                    || argument is BoundConstant constant
+                        && DirectNativeImportContract.IsScalar(
+                            constant.Type)
+                        && constant.RepresentationType == constant.Type
+                        && constant.Bits.IsCanonicalFor(constant.Type))
+                && body.RecordCount == calls + 1
+                && body.MethodCount > 0
+                && body.MethodCount <= calls
+                && nestedInputPrefixCallsValid
+                && variables.Count == function.ParameterCount;
         var foreignInterfaceNestedTerminalCall
             = foreignInterfaceNestedCall && nestedInputOuterTerminal;
         var pointerLoadCallCount = 0;
@@ -8324,9 +8408,11 @@ public static partial class TrRmExecutableCompiler
             || foreignInterfaceVoidCallSequence
             || foreignInterfaceValueCallSequence || valueCall
             || foreignInterfaceValueCall || foreignInterfaceTerminalCall
-            || foreignInterfaceNestedCall;
+            || foreignInterfaceNestedCall
+            || foreignInterfaceTerminalCallSequence;
         if (returns != (foreignInterfaceTerminalCall
-                || foreignInterfaceNestedTerminalCall ? 0 : 1)
+                || foreignInterfaceNestedTerminalCall
+                || foreignInterfaceTerminalCallSequence ? 0 : 1)
             || !(simpleInitializationBody || valuePointerLoad))
         {
             throw Unsupported(

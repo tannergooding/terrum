@@ -1382,7 +1382,10 @@ target, and selected method's output relations. Terminal FNI
 `DoesNotReturn` calls preserve their output contracts and reservations without
 inventing a normal return, publication or cancellation; a terminal call may
 also consume bounded nested scalar/no-output FNI inputs before the terminal
-CallSite. FNI emission requires the
+CallSite. Terminal calls may follow a bounded void-call prefix with direct or
+nested inputs without introducing a normal return; local/imported and
+malformed-result regressions remain unverified under the hold. FNI emission
+requires the
 NativeOutput cells Feature for selected methods with outputs, retaining its
 PublishedPredicates prerequisite. A bounded three-block result branch now
 supports `NonNegative` `int32` and `NonZero` `int32`/`uint32` call results,
