@@ -1939,7 +1939,7 @@ public static partial class TrRmExecutableCompiler
                     return false;
                 }
             }
-            else if (argument is BoundUnary or BoundBinary
+            else if (argument is BoundUnary or BoundBinary or BoundCast
                 or BoundUnsafeExpression)
             {
                 var expressionConstants
@@ -2372,7 +2372,7 @@ public static partial class TrRmExecutableCompiler
             expression = unsafeExpression.Expression;
         }
 
-        if (expression is not (BoundUnary or BoundBinary)
+        if (expression is not (BoundUnary or BoundBinary or BoundCast)
             || !DirectNativeImportContract.IsScalar(expectedType))
         {
             return false;
@@ -2424,6 +2424,20 @@ public static partial class TrRmExecutableCompiler
                 _ = expressionConstantInputs.Add((constant.Type,
                     constant.Bits));
                 return (true, 0, false);
+            }
+
+            if (candidate is BoundCast cast)
+            {
+                if (cast.Type != type
+                    || !TryGetGeneralPredicateConversion(cast, out _, out _))
+                {
+                    return (false, 0, false);
+                }
+
+                var operand = Visit(cast.Operand, cast.Operand.Type);
+                return operand.IsValid && operand.OwnsRegister
+                    ? (true, operand.RegisterCount, true)
+                    : (false, 0, false);
             }
 
             if (candidate is BoundUnary unary)
@@ -2488,6 +2502,11 @@ public static partial class TrRmExecutableCompiler
             CollectForeignInterfaceScalarInputConstants(unary.Operand,
                 addConstant);
         }
+        else if (expression is BoundCast cast)
+        {
+            CollectForeignInterfaceScalarInputConstants(cast.Operand,
+                addConstant);
+        }
         else if (expression is BoundBinary binary)
         {
             CollectForeignInterfaceScalarInputConstants(binary.Left,
@@ -2514,6 +2533,11 @@ public static partial class TrRmExecutableCompiler
             CollectForeignInterfaceScalarInputHomeVariables(unary.Operand,
                 homeVariables);
         }
+        else if (expression is BoundCast cast)
+        {
+            CollectForeignInterfaceScalarInputHomeVariables(cast.Operand,
+                homeVariables);
+        }
         else if (expression is BoundBinary binary)
         {
             CollectForeignInterfaceScalarInputHomeVariables(binary.Left,
@@ -2521,6 +2545,51 @@ public static partial class TrRmExecutableCompiler
             CollectForeignInterfaceScalarInputHomeVariables(binary.Right,
                 homeVariables);
         }
+    }
+
+    private static void CollectForeignInterfaceScalarInputConversionTypes(
+        BoundExpression expression, Action<PrimitiveType> addType)
+    {
+        while (expression is BoundUnsafeExpression unsafeExpression)
+        {
+            expression = unsafeExpression.Expression;
+        }
+
+        if (expression is BoundCast cast)
+        {
+            addType(cast.Type);
+            CollectForeignInterfaceScalarInputConversionTypes(cast.Operand,
+                addType);
+        }
+        else if (expression is BoundUnary unary)
+        {
+            CollectForeignInterfaceScalarInputConversionTypes(unary.Operand,
+                addType);
+        }
+        else if (expression is BoundBinary binary)
+        {
+            CollectForeignInterfaceScalarInputConversionTypes(binary.Left,
+                addType);
+            CollectForeignInterfaceScalarInputConversionTypes(binary.Right,
+                addType);
+        }
+    }
+
+    private static uint[] GetStandardForeignInterfaceBodyTypeTokens(
+        BoundFunction function, IEnumerable<BoundExpression> expressions,
+        Func<PrimitiveType, int> typeSpecRowFor)
+    {
+        var typeTokens = function.Variables.Select(variable =>
+            GetStandardBodyTypeMapToken(variable.Type, typeSpecRowFor))
+            .ToList();
+        foreach (var expression in expressions)
+        {
+            CollectForeignInterfaceScalarInputConversionTypes(expression,
+                type => typeTokens.Add(
+                    GetStandardBodyTypeMapToken(type, typeSpecRowFor)));
+        }
+
+        return [.. typeTokens];
     }
 
     private static bool ForeignInterfaceScalarInputExpressionMayThrow(
@@ -2532,6 +2601,8 @@ public static partial class TrRmExecutableCompiler
         }
 
         return expression switch {
+            BoundCast cast =>
+                ForeignInterfaceScalarInputExpressionMayThrow(cast.Operand),
             BoundUnary unary =>
                 (unary.Operator == TokenKind.Minus
                     && PrimitiveTypeFacts.IsIntegerOrWide(unary.Type)
@@ -2558,7 +2629,8 @@ public static partial class TrRmExecutableCompiler
     private static int EmitForeignInterfaceScalarInputExpression(
         BoundExpression expression, PrimitiveType expectedType,
         Func<int> allocateRegister,
-        Func<BoundConstant, byte> getConstantRegister, List<byte> code)
+        Func<BoundConstant, byte> getConstantRegister,
+        Func<PrimitiveType, int> getTypeMapIndex, List<byte> code)
     {
         var result = Emit(expression, expectedType);
         if (!result.OwnsRegister)
@@ -2603,6 +2675,30 @@ public static partial class TrRmExecutableCompiler
                 }
 
                 return (getConstantRegister(constant), false);
+            }
+
+            if (candidate is BoundCast cast
+                && cast.Type == type
+                && TryGetGeneralPredicateConversion(cast, out _, out _))
+            {
+                var operand = Emit(cast.Operand, cast.Operand.Type);
+                if (!operand.OwnsRegister)
+                {
+                    throw Invalid(
+                        "A Standard F+I total conversion would overwrite a ConstantMap register.");
+                }
+
+                var typeMapIndex = getTypeMapIndex(cast.Type);
+                if (typeMapIndex > 15)
+                {
+                    throw Unsupported(
+                        "A Standard F+I total conversion exceeds the short TypeMap index range.");
+                }
+
+                code.Add(0x50);
+                code.Add(checked((byte)((typeMapIndex << 4)
+                    | operand.Register)));
+                return operand;
             }
 
             if (candidate is BoundUnary unary
@@ -2706,7 +2802,7 @@ public static partial class TrRmExecutableCompiler
             }
 
             throw Unsupported(
-                "A Standard F+I scalar expression is outside the wrapping arithmetic subset.");
+                "A Standard F+I scalar expression is outside the supported input-expression subset.");
         }
     }
 
@@ -2963,7 +3059,7 @@ public static partial class TrRmExecutableCompiler
                     return false;
                 }
             }
-            else if (argument is BoundUnary or BoundBinary
+            else if (argument is BoundUnary or BoundBinary or BoundCast
                 or BoundUnsafeExpression)
             {
                 var expressionConstants
@@ -3361,7 +3457,7 @@ public static partial class TrRmExecutableCompiler
                     }
                 }
                 else if (allowNestedInputs
-                    && argument is (BoundUnary or BoundBinary
+                    && argument is (BoundUnary or BoundBinary or BoundCast
                         or BoundUnsafeExpression))
                 {
                     var expressionConstants
@@ -3721,9 +3817,14 @@ public static partial class TrRmExecutableCompiler
                 "A Standard F+I call sequence has an inconsistent return form.");
         }
 
-        var typeTokens = function.Variables.Select(variable =>
+        var homeTypeTokens = function.Variables.Select(variable =>
             GetStandardBodyTypeMapToken(variable.Type, typeSpecRowFor))
             .ToArray();
+        var typeTokens = GetStandardForeignInterfaceBodyTypeTokens(function,
+            calls.SelectMany(static candidate => candidate.Arguments)
+                .Concat(nestedCalls.SelectMany(
+                    static candidate => candidate.Arguments)),
+            typeSpecRowFor);
         var bodyConstantMapValues
             = new List<TrRmFrozenScalarValueReference>();
         var bodyConstantMapIndexByValue
@@ -3926,7 +4027,7 @@ public static partial class TrRmExecutableCompiler
         var maps = TrRmRegisterBodyMapBuilder.Create(typeTokens,
             methodMapTokens);
         var homeMap = EncodeStandardInitializationHomeMap(function,
-            typeTokens, maps);
+            homeTypeTokens, maps);
         var nestedRegisterByCall
             = new Dictionary<BoundCall, byte>(
                 ReferenceEqualityComparer.Instance);
@@ -4096,9 +4197,12 @@ public static partial class TrRmExecutableCompiler
             if (allowScalarExpression)
             {
                 var resultRegister
-                    = EmitForeignNativeInterfaceScalarInputExpression(
+                    = EmitForeignInterfaceScalarInputExpression(
                         expression, expectedType,
                         AllocateExpressionRegister, GetConstantRegister,
+                        type => maps.GetTypeMapIndex(
+                            GetStandardBodyTypeMapToken(type,
+                                typeSpecRowFor)),
                         argumentExpressionCode);
                 return new TrRmRegisterBodyCallInput(1, 1,
                     checked((ushort)resultRegister));
@@ -4467,9 +4571,11 @@ public static partial class TrRmExecutableCompiler
                 "A Standard F+I caller Body has an invalid InterfaceMethod target.");
         }
 
-        var typeTokens = function.Variables.Select(variable =>
+        var homeTypeTokens = function.Variables.Select(variable =>
             GetStandardBodyTypeMapToken(variable.Type, typeSpecRowFor))
             .ToArray();
+        var typeTokens = GetStandardForeignInterfaceBodyTypeTokens(function,
+            call.Arguments, typeSpecRowFor);
         var stagedLocalVariables = stagedLocals.Select(
                 static local => local.Variable)
             .ToHashSet();
@@ -4620,6 +4726,9 @@ public static partial class TrRmExecutableCompiler
             methodMapTokens.Add(nestedMethodMapToken);
         }
 
+        methodMapTokens.Add(methodMapToken);
+        var maps = TrRmRegisterBodyMapBuilder.Create(typeTokens,
+            methodMapTokens);
         var nextExpressionRegister
             = (stagedLocals.IsEmpty ? 1 : 2)
                 + constantLoads.Count + nestedCalls.Count;
@@ -4649,13 +4758,16 @@ public static partial class TrRmExecutableCompiler
                 argumentPreparationCode.Add(0);
                 nestedRecordPatches.Add((operandOffset, nestedInputCall));
             }
-            else if (argument is BoundUnary or BoundBinary
+            else if (argument is BoundUnary or BoundBinary or BoundCast
                 or BoundUnsafeExpression)
             {
                 var resultRegister
-                    = EmitForeignNativeInterfaceScalarInputExpression(
+                    = EmitForeignInterfaceScalarInputExpression(
                         argument, target.Variables[formal].Type,
                         AllocateExpressionRegister, GetConstantRegister,
+                        type => maps.GetTypeMapIndex(
+                            GetStandardBodyTypeMapToken(type,
+                                typeSpecRowFor)),
                         argumentPreparationCode);
                 if (!expressionRegisterByFormal.TryAdd(formal,
                         checked((byte)resultRegister)))
@@ -4666,11 +4778,8 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
-        methodMapTokens.Add(methodMapToken);
-        var maps = TrRmRegisterBodyMapBuilder.Create(typeTokens,
-            methodMapTokens);
         var homeMap = EncodeStandardInitializationHomeMap(function,
-            typeTokens, maps);
+            homeTypeTokens, maps);
         var inputs = new TrRmRegisterBodyCallInput[
             target.ParameterCount + 1];
         inputs[0] = CreateInput(foreignCall.Receiver,
@@ -4995,7 +5104,11 @@ public static partial class TrRmExecutableCompiler
                 var resultRegister
                     = EmitForeignInterfaceScalarInputExpression(expression,
                         expectedType, AllocateExpressionRegister,
-                        GetConstantRegister, argumentPreparationCode);
+                        GetConstantRegister,
+                        type => maps.GetTypeMapIndex(
+                            GetStandardBodyTypeMapToken(type,
+                                typeSpecRowFor)),
+                        argumentPreparationCode);
                 return new TrRmRegisterBodyCallInput(1, 1,
                     checked((ushort)resultRegister));
             }
@@ -5025,9 +5138,11 @@ public static partial class TrRmExecutableCompiler
                 "A Standard F+I conditional Body has an invalid InterfaceMethod target.");
         }
 
-        var typeTokens = function.Variables.Select(variable =>
+        var homeTypeTokens = function.Variables.Select(variable =>
             GetStandardBodyTypeMapToken(variable.Type, typeSpecRowFor))
             .ToArray();
+        var typeTokens = GetStandardForeignInterfaceBodyTypeTokens(function,
+            call.Arguments, typeSpecRowFor);
         var bodyConstantMapValues
             = new List<TrRmFrozenScalarValueReference>();
         var bodyConstantMapIndexByValue
@@ -5065,7 +5180,7 @@ public static partial class TrRmExecutableCompiler
             argumentIndex++)
         {
             var argument = call.Arguments[argumentIndex];
-            if (argument is BoundUnary or BoundBinary
+            if (argument is BoundUnary or BoundBinary or BoundCast
                 or BoundUnsafeExpression)
             {
                 var formal = call.ParameterIndex(argumentIndex);
@@ -5075,7 +5190,7 @@ public static partial class TrRmExecutableCompiler
                         out var expressionRegisterCount))
                 {
                     throw Unsupported(
-                        $"Function '{function.Name}' has a conditional F+I scalar expression outside the Home-rooted arithmetic subset.");
+                        $"Function '{function.Name}' has a conditional F+I scalar expression outside the supported Home-rooted subset.");
                 }
 
                 scalarExpressionRegisterCount = checked(
@@ -5101,7 +5216,7 @@ public static partial class TrRmExecutableCompiler
                     }
                 }
             }
-            else if (argument is BoundUnary or BoundBinary
+            else if (argument is BoundUnary or BoundBinary or BoundCast
                 or BoundUnsafeExpression)
             {
                 CollectForeignInterfaceScalarInputConstants(argument,
@@ -5204,7 +5319,7 @@ public static partial class TrRmExecutableCompiler
         var maps = TrRmRegisterBodyMapBuilder.Create(typeTokens,
             methodMapTokens);
         var homeMap = EncodeStandardInitializationHomeMap(function,
-            typeTokens, maps);
+            homeTypeTokens, maps);
         var inputs = new TrRmRegisterBodyCallInput[
             target.ParameterCount + 1];
         inputs[0] = new TrRmRegisterBodyCallInput(2, 1, 0);
@@ -5266,14 +5381,18 @@ public static partial class TrRmExecutableCompiler
                     GetConstantRegister(constant));
             }
             else if (call.Arguments[sourceArgument] is BoundUnary or
-                BoundBinary or BoundUnsafeExpression)
+                BoundBinary or BoundCast or BoundUnsafeExpression)
             {
                 var resultRegister
                     = EmitForeignInterfaceScalarInputExpression(
                         call.Arguments[sourceArgument],
                         target.Variables[formal].Type,
                         () => nextExpressionRegister++,
-                        GetConstantRegister, inputPreparationCode);
+                        GetConstantRegister,
+                        type => maps.GetTypeMapIndex(
+                            GetStandardBodyTypeMapToken(type,
+                                typeSpecRowFor)),
+                        inputPreparationCode);
                 inputs[formal + 1] = new TrRmRegisterBodyCallInput(1, 1,
                     checked((ushort)resultRegister));
             }
@@ -7855,7 +7974,10 @@ public static partial class TrRmExecutableCompiler
             if (foreignInterfaceConditionalOutputBody)
             {
                 return DecodeStandardForeignInterfaceConditionalOutputBody(
-                    body, function, variables, imports,
+                    body, function, variables, typeSpecs, imports,
+                    nativePointerTypes, structureTypeByTypeDef,
+                    checkedReferenceTypes, checkedReferenceTypeIndexes,
+                    nominalClassTypesByTypeSpecReference,
                     homeVariables, homeRoles, homeTypes,
                     scalarConstants, foreignInterfaceBodyTargets);
             }
@@ -8915,7 +9037,7 @@ public static partial class TrRmExecutableCompiler
                                             "A ForeignNativeInterface CallSite reuses a nested result register.");
                                     }
                                     else if (registerArgument is BoundUnary or
-                                        BoundBinary)
+                                        BoundBinary or BoundCast)
                                     {
                                         var expressionConstants
                                             = new HashSet<(PrimitiveType Type,
@@ -9720,8 +9842,13 @@ public static partial class TrRmExecutableCompiler
                         structureTypeByTypeDef, checkedReferenceTypes,
                         checkedReferenceTypeIndexes,
                         nominalClassTypesByTypeSpecReference);
+                    var conversion = new BoundCast(value, destinationType,
+                        default);
                     if (!SemanticVerifier.IsTotalConversion(value.Type,
                             destinationType)
+                        || (foreignInterfaceDirectCallBody
+                            && !TryGetGeneralPredicateConversion(conversion,
+                                out _, out _))
                         || (body.UsesNativePointerLoads
                             && !IsStandardNativePointerLoadValueType(
                                 destinationType, structures,
@@ -9731,8 +9858,7 @@ public static partial class TrRmExecutableCompiler
                             "A Standard short conversion is not total for its complete types.");
                     }
 
-                    valueByRegister[register] = new BoundCast(value,
-                        destinationType, default);
+                    valueByRegister[register] = conversion;
                     conversions++;
                     break;
                 }
@@ -10641,7 +10767,7 @@ public static partial class TrRmExecutableCompiler
                 hasScalarExpressions = true;
                 offset += 4;
             }
-            else if ((code[offset] == 0x11
+            else if ((code[offset] == 0x11 || code[offset] == 0x50
                     || code[offset] is >= 0x20 and <= 0x2B
                         or >= 0x30 and <= 0x36)
                 && code.Length - offset >= 2)
@@ -10663,7 +10789,16 @@ public static partial class TrRmExecutableCompiler
         DecodeStandardForeignInterfaceConditionalOutputBody(
             TrRmRegisterBodyReader body, BoundFunction function,
             ImmutableArray<BoundVariable>.Builder variables,
-            TrRmImportTableReader imports, int[] homeVariables,
+            TrRmTypeSpecTableReader typeSpecs,
+            TrRmImportTableReader imports,
+            List<NativePointerTypeDefinition> nativePointerTypes,
+            int[] structureTypeByTypeDef,
+            List<CheckedReferenceTypeDefinition> checkedReferenceTypes,
+            Dictionary<CheckedReferenceTypeDefinition, int>
+                checkedReferenceTypeIndexes,
+            IReadOnlyDictionary<uint, PrimitiveType>?
+                nominalClassTypesByTypeSpecReference,
+            int[] homeVariables,
             byte[] homeRoles, PrimitiveType[] homeTypes,
             ImmutableArray<BoundConstant> scalarConstants,
             IReadOnlyDictionary<int, ForeignNativeInterfaceBodyTarget>?
@@ -10834,7 +10969,7 @@ public static partial class TrRmExecutableCompiler
             {
                 preparationOffset += 4;
             }
-            else if (rawEntryCode[preparationOffset] == 0x11
+            else if (rawEntryCode[preparationOffset] is 0x11 or 0x50
                 || rawEntryCode[preparationOffset] is >= 0x20 and <= 0x2B
                     or >= 0x30 and <= 0x36)
             {
@@ -10991,7 +11126,7 @@ public static partial class TrRmExecutableCompiler
                 constantOffset += 2;
                 continue;
             }
-            if (opcode == 0x11
+            if (opcode is 0x11 or 0x50
                 || opcode is >= 0x20 and <= 0x2B
                     or >= 0x30 and <= 0x36)
             {
@@ -11561,6 +11696,40 @@ public static partial class TrRmExecutableCompiler
                 continue;
             }
 
+            if (opcode == 0x50)
+            {
+                if (destinationRegister is 0 or >= 14
+                    || !availableRegisters.Contains(destinationRegister)
+                    || !writableExpressionRegisters.Contains(
+                        destinationRegister))
+                {
+                    throw Invalid(
+                        "The Standard F+I conditional-output total conversion has an invalid register mapping.");
+                }
+
+                var source = registerInputs[destinationRegister];
+                var destinationType = GetStandardInitializationBodyType(
+                    body, sourceRegister, typeSpecs, imports,
+                    nativePointerTypes, structureTypeByTypeDef,
+                    checkedReferenceTypes, checkedReferenceTypeIndexes,
+                    nominalClassTypesByTypeSpecReference);
+                var conversion = new BoundCast(source, destinationType,
+                    default);
+                if (!TryGetGeneralPredicateConversion(conversion, out _, out _))
+                {
+                    throw Invalid(
+                        "The Standard F+I conditional-output conversion is not total for its complete types.");
+                }
+
+                _ = scalarExpressionResultRegisters.Remove(
+                    destinationRegister);
+                registerInputs[destinationRegister] = conversion;
+                _ = scalarExpressionResultRegisters.Add(
+                    destinationRegister);
+                preparationOffset += 2;
+                continue;
+            }
+
             if (opcode is not (>= 0x20 and <= 0x2B
                     or >= 0x30 and <= 0x36)
                 || destinationRegister is 0 or >= 14
@@ -11697,7 +11866,7 @@ public static partial class TrRmExecutableCompiler
             {
                 if (registerInput is not BoundConstant)
                 {
-                    if (registerInput is BoundUnary or BoundBinary)
+                    if (registerInput is BoundUnary or BoundBinary or BoundCast)
                     {
                         if (!hasScalarExpressions
                             || !scalarExpressionResultRegisters.Remove(

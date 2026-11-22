@@ -877,6 +877,115 @@ internal sealed class NativeCoreRegistrationTests
     }
 
     [Test]
+    public void StandardForeignNativeInterfaceCallsRoundTripTotalScalarConversions()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-native-interface-parameter-surface-1";
+        var registration = CreateRegistration(
+            includeForeignNativeInterface: true);
+        var options = new CompilationOptions {
+            NativeCoreRegistration = registration,
+            LayoutCoreRegistration = CreateLayoutRegistration(registration),
+        };
+        var providerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Terrum.Interop;
+                [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+                [ForeignNativeInterface(VTableByteOffset: uint32(0))]
+                public interface IProbe {
+                    public unsafe float64 Read(float64 value);
+                }
+                """), options);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+        var providerProgram = providerCompilation.Program
+            ?? throw new AssertionException("Expected a bound provider.");
+        var providerInterface = providerProgram.Interfaces.Single();
+        var providerRead = providerInterface.Members.Single();
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerProgram, "provider.module", schemaIdentity, 1, [
+                new TrRmSourceTypeExport("", "IProbe", "provider/IProbe") {
+                    GenericArity = 0,
+                    InterfaceMethodExports = [
+                        new TrRmSourceInterfaceMethodExport(
+                            providerRead.SourceInputOrdinal,
+                            providerRead.SourceDeclarationSpan,
+                            "provider/IProbe.Read"),
+                    ],
+                },
+            ]);
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            providerArtifact);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            providerInput, "provider.module", []);
+        var consumerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                float64 Invoke(ptr<void> receiver, float32 value) {
+                    unsafe {
+                        return IProbe.Read(receiver, float64(value));
+                    }
+                }
+                """), reference, options);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumerProgram = consumerCompilation.Program
+            ?? throw new AssertionException("Expected a bound consumer.");
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            consumerProgram, "consumer.module", schemaIdentity, 1, []);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
+                consumerArtifact,
+                TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft));
+        var invokeRow = Enumerable.Range(1, tables.Methods.Count)
+            .Single(row => tables.Methods.GetName(row) == "Invoke");
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(invokeRow), tables.Contracts.Count);
+        Assert.That(body.GetBlockCode(0).ToArray(),
+            Does.Contain((byte)0x50));
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, consumerArtifact),
+            "consumer.module", [providerInput]);
+        AssertConversion(loaded);
+        var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
+            "consumer.module", schemaIdentity, 1, []);
+        var reloaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, reemitted),
+            "consumer.module", [providerInput]);
+        AssertConversion(reloaded);
+
+        static void AssertConversion(BoundProgram program)
+        {
+            var function = program.Functions.Single(
+                static candidate => candidate.Name == "Invoke");
+            BoundCall? foreignCall = null;
+            _ = BoundTreeTraversal.VisitExpressions(function.Body,
+                expression =>
+                {
+                    if (expression is BoundCall call
+                        && call.ForeignInterfaceCall?.Member.Name == "Read")
+                    {
+                        foreignCall = call;
+                    }
+                });
+            var selectedCall = foreignCall
+                ?? throw new AssertionException("Expected the FNI Read call.");
+            Assert.That(selectedCall.Arguments.Single(),
+                Is.TypeOf<BoundCast>());
+            var conversion = (BoundCast)selectedCall.Arguments.Single();
+            Assert.That(conversion.Type,
+                Is.EqualTo(PrimitiveType.Float64));
+            Assert.That(conversion.Operand, Is.TypeOf<BoundRead>());
+            Assert.That(conversion.Operand.Type,
+                Is.EqualTo(PrimitiveType.Float32));
+            Assert.That(((BoundRead)conversion.Operand).Variable,
+                Is.EqualTo(1));
+        }
+    }
+
+    [Test]
     public void StandardForeignNativeInterfaceShiftsPreserveTypedCountHomes()
     {
         const string schemaIdentity
@@ -1399,6 +1508,10 @@ internal sealed class NativeCoreRegistrationTests
                         When: Terrum.Interop.NativeOutputCondition.NonNegative)]
                     public unsafe int32 TryRead(bool flag,
                         write ptr<int32> output);
+                    [param(output): Terrum.Interop.NativeOutput(
+                        When: Terrum.Interop.NativeOutputCondition.NonNegative)]
+                    public unsafe int32 TryReadConverted(float64 value,
+                        write ptr<int32> output);
                 }
                 """), options);
         Assert.That(providerCompilation.HasErrors, Is.False,
@@ -1407,17 +1520,16 @@ internal sealed class NativeCoreRegistrationTests
         var providerProgram = providerCompilation.Program
             ?? throw new AssertionException("Expected a bound provider.");
         var providerInterface = providerProgram.Interfaces.Single();
-        var providerRead = providerInterface.Members.Single();
         var providerArtifact = TrRmExecutableCompiler.EmitStandard(
             providerProgram, "provider.module", schemaIdentity, 1, [
                 new TrRmSourceTypeExport("", "IProbe", "provider/IProbe") {
                     GenericArity = 0,
-                    InterfaceMethodExports = [
-                        new TrRmSourceInterfaceMethodExport(
-                            providerRead.SourceInputOrdinal,
-                            providerRead.SourceDeclarationSpan,
-                            "provider/IProbe.TryRead"),
-                    ],
+                    InterfaceMethodExports = [.. providerInterface.Members
+                        .Select(member =>
+                            new TrRmSourceInterfaceMethodExport(
+                                member.SourceInputOrdinal,
+                                member.SourceDeclarationSpan,
+                                $"provider/IProbe.{member.Name}"))],
                 },
             ]);
         var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
@@ -1442,6 +1554,16 @@ internal sealed class NativeCoreRegistrationTests
                     unsafe {
                         int32 status = IProbe.TryRead(receiver,
                             first < second, &init value);
+                        if (status >= 0) { return value; }
+                        return fallback;
+                    }
+                }
+                int32 InvokeConverted(ptr<void> receiver, float32 input,
+                    int32 fallback) {
+                    init int32 value;
+                    unsafe {
+                        int32 status = IProbe.TryReadConverted(receiver,
+                            float64(input), &init value);
                         if (status >= 0) { return value; }
                         return fallback;
                     }
@@ -1475,6 +1597,8 @@ internal sealed class NativeCoreRegistrationTests
             Is.EqualTo((byte)0xC3));
         Assert.That(orderedCode[orderedComparisonOffset + 5],
             Is.EqualTo((byte)0x01));
+        var convertedCode = GetBodyCode("InvokeConverted");
+        Assert.That(convertedCode, Does.Contain((byte)0x50));
 
         var loaded = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(schemaIdentity, consumerArtifact),
@@ -1483,6 +1607,7 @@ internal sealed class NativeCoreRegistrationTests
             PrimitiveType.Bool);
         AssertComparison(loaded, "InvokeOrdered", TokenKind.Less,
             PrimitiveType.Int32);
+        AssertConversion(loaded);
         var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
             "consumer.module", schemaIdentity, 1, []);
         var reloaded = TrRmExecutableCompiler.LoadStandard(
@@ -1492,6 +1617,7 @@ internal sealed class NativeCoreRegistrationTests
             PrimitiveType.Bool);
         AssertComparison(reloaded, "InvokeOrdered", TokenKind.Less,
             PrimitiveType.Int32);
+        AssertConversion(reloaded);
 
         byte[] GetBodyCode(string name)
         {
@@ -1537,6 +1663,38 @@ internal sealed class NativeCoreRegistrationTests
             Assert.That(comparison.Right.Type, Is.EqualTo(operandType));
             Assert.That(((BoundRead)comparison.Right).Variable,
                 Is.EqualTo(2));
+            Assert.That(selectedCall.Arguments[1],
+                Is.TypeOf<BoundNativeOutputReservation>());
+        }
+
+        static void AssertConversion(BoundProgram program)
+        {
+            var function = program.Functions.Single(
+                static candidate => candidate.Name == "InvokeConverted");
+            BoundCall? foreignCall = null;
+            _ = BoundTreeTraversal.VisitExpressions(function.Body,
+                expression =>
+                {
+                    if (expression is BoundCall call
+                        && call.ForeignInterfaceCall?.Member.Name
+                            == "TryReadConverted")
+                    {
+                        foreignCall = call;
+                    }
+                });
+            var selectedCall = foreignCall
+                ?? throw new AssertionException(
+                    "Expected the FNI TryReadConverted call.");
+            Assert.That(selectedCall.Arguments[0],
+                Is.TypeOf<BoundCast>());
+            var conversion = (BoundCast)selectedCall.Arguments[0];
+            Assert.That(conversion.Type,
+                Is.EqualTo(PrimitiveType.Float64));
+            Assert.That(conversion.Operand, Is.TypeOf<BoundRead>());
+            Assert.That(conversion.Operand.Type,
+                Is.EqualTo(PrimitiveType.Float32));
+            Assert.That(((BoundRead)conversion.Operand).Variable,
+                Is.EqualTo(1));
             Assert.That(selectedCall.Arguments[1],
                 Is.TypeOf<BoundNativeOutputReservation>());
         }
