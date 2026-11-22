@@ -165,6 +165,7 @@ public static int32 BindStandaloneMethodRoots()
 
 void ClearStandaloneResolvedRoots()
 {
+    Host.StandaloneResolvedRootCount[0] = 0;
     for (mut int32 index = 0;
         index < Host.StandaloneResolvedRoots.Length;
         index = index + 1)

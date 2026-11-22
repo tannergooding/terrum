@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Semantics;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Modules;
 
@@ -260,5 +262,80 @@ internal readonly record struct CapturedStandaloneMethodImportInput(
 
             return start;
         }
+    }
+
+    internal ImmutableArray<HostBuffer> CreateSourceCallHostBuffers(
+        SourceText source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        if (source.Length > ScannerHost.MaximumSourceLength)
+        {
+            throw new ArgumentException(
+                "The standalone source exceeds the scanner limit.",
+                nameof(source));
+        }
+
+        var tokenCapacity = checked(source.Length + 1);
+        return CreateHostBuffers().AddRange([
+            new HostBuffer("StandaloneSourceProgramStatus",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneLocalCallableCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneLocalCallables",
+                PrimitiveType.Int32,
+                [.. new int[checked(tokenCapacity * 3)]], true),
+            new HostBuffer("StandaloneSourceCallableInfo",
+                PrimitiveType.Int32,
+                [.. new int[checked(tokenCapacity * 12)]], true),
+            new HostBuffer("StandaloneSourceParameterCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneSourceParameters",
+                PrimitiveType.Int32,
+                [.. new int[checked(tokenCapacity * 4)]], true),
+            new HostBuffer("StandaloneSourceBodyCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneSourceBodies",
+                PrimitiveType.Int32,
+                [.. new int[checked(tokenCapacity * 12)]], true),
+            new HostBuffer("StandaloneSourceExpressionCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneSourceExpressions",
+                PrimitiveType.Int32,
+                [.. new int[checked(tokenCapacity * 8)]], true),
+            new HostBuffer("StandaloneSourceExpressionUseCounts",
+                PrimitiveType.Int32,
+                [.. new int[tokenCapacity]], true),
+            new HostBuffer("StandaloneSourceDirectCallUseCounts",
+                PrimitiveType.Int32,
+                [.. new int[tokenCapacity]], true),
+            new HostBuffer("StandaloneSourceStatementCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneSourceStatements",
+                PrimitiveType.Int32,
+                [.. new int[checked(tokenCapacity * 3)]], true),
+            new HostBuffer("StandaloneSourceImportedCallableCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneSourceImportedCallables",
+                PrimitiveType.Int32,
+                [.. new int[checked(MethodRoots.Length * 8)]], true),
+            new HostBuffer("StandaloneSourceDirectCallCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneSourceDirectCalls",
+                PrimitiveType.Int32,
+                [.. new int[checked(tokenCapacity * 7)]], true),
+            new HostBuffer("StandaloneSourceCallArgumentCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneSourceCallArguments",
+                PrimitiveType.Int32,
+                [.. new int[checked(tokenCapacity * 3)]], true),
+            new HostBuffer("StandaloneSourceCallArgumentOwners",
+                PrimitiveType.Int32,
+                [.. new int[tokenCapacity]], true),
+            new HostBuffer("StandaloneSourceUsingCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneSourceUsings",
+                PrimitiveType.Int32,
+                [.. new int[checked(tokenCapacity * 2)]], true),
+        ]);
     }
 }

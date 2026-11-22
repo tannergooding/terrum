@@ -7,11 +7,13 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Modules;
 
@@ -411,6 +413,259 @@ internal sealed class StandaloneMethodImportInputTests
             Is.EqualTo(new[] { 26, 12, 0, 3, 38, 13, 3, 2 }));
         Assert.That(hostBuffers[4].Values[0], Is.EqualTo(1));
         Assert.That(hostBuffers[4].Values[5], Is.EqualTo(0));
+    }
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task TerrumOwnedSourceBinderValidatesOrderedCallUsesAsync(
+        BoundRuntimePolicy policy)
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+
+        var source = SourceText.From(
+            "using api; int32 Main(int32 value) { "
+            + "Imported(value); return Imported(7); }");
+        var input = new StandaloneMethodImportInput(Agreement,
+            "consumer/module", [
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateMethodProviderArtifact("provider/leaf",
+                        "api.Imported", scalarParameter: true)),
+            ], [
+                new StandaloneMethodRoot(0, "provider/leaf",
+                    "api.Imported"),
+            ]);
+        var sourcePaths = new[] {
+            "sources/Terrum.CodeAnalysis.Terrum/Text/SourceRange.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Lexing/CharacterFacts.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Text/Utf16CodeUnits.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Text/Utf16Scalar.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Lexing/CharacterLiteral.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Lexing/StringEscape.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Lexing/Token.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Lexing/ManagedTokenChain.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Lexing/Scanner.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Lexing/ManagedScanner.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Lexing/TokenSnapshot.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Lexing/TokenTriviaSnapshot.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Utilities/Numerics/WideIntegerFacts.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Utilities/Numerics/IntegerParsing.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Lexing/TokenIntegerSnapshot.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Lexing/TokenDiagnosticSnapshot.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodImportInput.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneArtifactDirectory.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneStringTable.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneModuleDirectory.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneCallableTypes.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodEffects.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodOutputStates.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodRoots.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodImports.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodImportBindings.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Semantics/StandaloneOwnedSourceProgram.terrum",
+        };
+        const string verificationSource = """
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                if (Scan() < 1) { return 40; }
+                int32 status = BindStandaloneOwnedSourceProgram();
+                if (status != 0) { return status; }
+                if (Host.StandaloneSourceProgramStatus[0] != 0
+                    || Host.StandaloneResolvedRootCount[0] != 1
+                    || Host.StandaloneSourceImportedCallableCount[0] != 1
+                    || Host.StandaloneLocalCallableCount[0] != 1
+                    || Host.StandaloneSourceBodyCount[0] != 1
+                    || Host.StandaloneSourceExpressionCount[0] != 4
+                    || Host.StandaloneSourceStatementCount[0] != 2
+                    || Host.StandaloneSourceDirectCallCount[0] != 2
+                    || Host.StandaloneSourceCallArgumentCount[0] != 2
+                    || Host.StandaloneLocalCallables[0] != 0
+                    || Host.StandaloneLocalCallables[1] != 1
+                    || Host.StandaloneLocalCallables[2] != 0
+                    || Host.StandaloneSourceDirectCalls[0] != 2
+                    || Host.StandaloneSourceDirectCalls[1] != 0
+                    || Host.StandaloneSourceDirectCalls[2] != 0
+                    || Host.StandaloneSourceDirectCalls[3]
+                        != Host.StandaloneCallableTypeIds[0]
+                    || Host.StandaloneSourceDirectCalls[4] != 0
+                    || Host.StandaloneSourceDirectCalls[5] != 1
+                    || Host.StandaloneSourceDirectCalls[6] != -1
+                    || Host.StandaloneSourceDirectCalls[7] != 2
+                    || Host.StandaloneSourceDirectCalls[8] != 0
+                    || Host.StandaloneSourceDirectCalls[9] != 0
+                    || Host.StandaloneSourceDirectCalls[10]
+                        != Host.StandaloneCallableTypeIds[0]
+                    || Host.StandaloneSourceDirectCalls[11] != 1
+                    || Host.StandaloneSourceDirectCalls[12] != 1
+                    || Host.StandaloneSourceDirectCalls[13] != -1
+                    || Host.StandaloneSourceCallArguments[0] != 0
+                    || Host.StandaloneSourceCallArguments[1] != 0
+                    || Host.StandaloneSourceCallArguments[2] != 1
+                    || Host.StandaloneSourceCallArguments[3] != 2
+                    || Host.StandaloneSourceCallArguments[4] != 0
+                    || Host.StandaloneSourceCallArguments[5] != 1
+                    || Host.StandaloneSourceExpressions[0] != 1
+                    || Host.StandaloneSourceExpressions[8] != 3
+                    || Host.StandaloneSourceExpressions[16] != 2
+                    || Host.StandaloneSourceExpressions[24] != 3
+                    || Host.StandaloneSourceExpressionUseCounts[0] != 1
+                    || Host.StandaloneSourceExpressionUseCounts[1] != 1
+                    || Host.StandaloneSourceExpressionUseCounts[2] != 1
+                    || Host.StandaloneSourceExpressionUseCounts[3] != 1
+                    || Host.StandaloneSourceDirectCallUseCounts[0] != 1
+                    || Host.StandaloneSourceDirectCallUseCounts[1] != 1
+                    || Host.StandaloneSourceCallArgumentOwners[0] != 1
+                    || Host.StandaloneSourceCallArgumentOwners[1] != 2
+                    || Host.StandaloneSourceStatements[0] != 2
+                    || Host.StandaloneSourceStatements[1] != 1
+                    || Host.StandaloneSourceStatements[3] != 1
+                    || Host.StandaloneSourceStatements[4] != 3) {
+                    return 41;
+                }
+                return 0;
+            }
+            """;
+
+        var root = RepositoryRoot();
+        var components = new List<SyntaxTree>(sourcePaths.Length + 1);
+        foreach (var sourcePath in sourcePaths)
+        {
+            var path = TerrumProjectPaths.RepositoryFile(root, sourcePath);
+            var tree = SyntaxTree.Parse(await File.ReadAllTextAsync(path)
+                .ConfigureAwait(true), path);
+            Assert.That(tree.HasErrors, Is.False,
+                string.Join(Environment.NewLine, tree.Diagnostics));
+            components.Add(tree);
+        }
+        components.Add(SyntaxTree.Parse(verificationSource,
+            "standalone-owned-source-program-tests.terrum"));
+
+        var buffers = ScannerHost.CreateBuffers(source).AddRange(
+            input.Capture().CreateSourceCallHostBuffers(source));
+        var compilation = Compilation.Create(components, buffers, policy);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program
+            ?? throw new AssertionException(
+                "Expected a bound standalone source-call validator.");
+        Assert.That(NativeJit.Execute(program,
+                (NativeRuntimePolicy)policy),
+            Is.EqualTo(0));
+    }
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task TerrumOwnedSourceBinderRetainsImportedDirectCallsAsync(
+        BoundRuntimePolicy policy)
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+
+        var source = SourceText.From(
+            "using api; int32 Main(int32 value) { return Imported(value); }");
+        var input = new StandaloneMethodImportInput(Agreement,
+            "consumer/module", [
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateMethodProviderArtifact("provider/leaf",
+                        "api.Imported", scalarParameter: true)),
+            ], [
+                new StandaloneMethodRoot(0, "provider/leaf",
+                    "api.Imported"),
+            ]);
+        var scannerSources = new[] {
+            "sources/Terrum.CodeAnalysis.Terrum/Text/SourceRange.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Lexing/CharacterFacts.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Text/Utf16CodeUnits.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Text/Utf16Scalar.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Lexing/CharacterLiteral.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Lexing/StringEscape.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Lexing/Token.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Lexing/ManagedTokenChain.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Lexing/Scanner.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Lexing/ManagedScanner.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Lexing/TokenSnapshot.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Lexing/TokenTriviaSnapshot.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Utilities/Numerics/WideIntegerFacts.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Utilities/Numerics/IntegerParsing.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Lexing/TokenIntegerSnapshot.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Lexing/TokenDiagnosticSnapshot.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodImportInput.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneArtifactDirectory.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneStringTable.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneModuleDirectory.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneCallableTypes.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodEffects.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodOutputStates.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodRoots.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodImports.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodImportBindings.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Semantics/StandaloneOwnedSourceProgram.terrum",
+        };
+        const string verificationSource = """
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                if (Scan() < 1) { return 40; }
+                int32 status = BindStandaloneOwnedSourceProgram();
+                if (status != 0) { return status; }
+                if (Host.StandaloneSourceProgramStatus[0] != 0
+                    || Host.StandaloneResolvedRootCount[0] != 1
+                    || Host.StandaloneSourceImportedCallableCount[0] != 1
+                    || Host.StandaloneLocalCallableCount[0] != 1
+                    || Host.StandaloneSourceBodyCount[0] != 1
+                    || Host.StandaloneSourceExpressionCount[0] != 2
+                    || Host.StandaloneSourceStatementCount[0] != 1
+                    || Host.StandaloneSourceDirectCallCount[0] != 1
+                    || Host.StandaloneSourceCallArgumentCount[0] != 1
+                    || Host.StandaloneLocalCallables[0] != 0
+                    || Host.StandaloneLocalCallables[1] != 1
+                    || Host.StandaloneLocalCallables[2] != 0
+                    || Host.StandaloneSourceDirectCalls[0] != 2
+                    || Host.StandaloneSourceDirectCalls[1] != 0
+                    || Host.StandaloneSourceDirectCalls[2] != 0
+                    || Host.StandaloneSourceDirectCalls[3]
+                        != Host.StandaloneCallableTypeIds[0]
+                    || Host.StandaloneSourceDirectCalls[4] != 0
+                    || Host.StandaloneSourceDirectCalls[5] != 1
+                    || Host.StandaloneSourceDirectCalls[6] != -1
+                    || Host.StandaloneSourceCallArguments[0] != 0
+                    || Host.StandaloneSourceCallArguments[1] != 0
+                    || Host.StandaloneSourceCallArguments[2] != 1
+                    || Host.StandaloneSourceExpressions[0] != 1
+                    || Host.StandaloneSourceExpressions[8] != 3
+                    || Host.StandaloneSourceStatements[0] != 1
+                    || Host.StandaloneSourceStatements[1] != 1) {
+                    return 41;
+                }
+                return 0;
+            }
+            """;
+
+        var root = RepositoryRoot();
+        var components = new List<SyntaxTree>(scannerSources.Length + 1);
+        foreach (var sourcePath in scannerSources)
+        {
+            var path = TerrumProjectPaths.RepositoryFile(root, sourcePath);
+            var tree = SyntaxTree.Parse(await File.ReadAllTextAsync(path)
+                .ConfigureAwait(true), path);
+            Assert.That(tree.HasErrors, Is.False,
+                string.Join(Environment.NewLine, tree.Diagnostics));
+            components.Add(tree);
+        }
+        components.Add(SyntaxTree.Parse(verificationSource,
+            "standalone-owned-source-program-tests.terrum"));
+
+        var captured = input.Capture();
+        var buffers = ScannerHost.CreateBuffers(source).AddRange(
+            captured.CreateSourceCallHostBuffers(source));
+        var compilation = Compilation.Create(components, buffers, policy);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program
+            ?? throw new AssertionException(
+                "Expected a bound standalone source-call validator.");
+        Assert.That(NativeJit.Execute(program,
+                (NativeRuntimePolicy)policy),
+            Is.EqualTo(0));
     }
 
     [TestCase(BoundRuntimePolicy.FailFast)]
@@ -1170,7 +1425,8 @@ internal sealed class StandaloneMethodImportInputTests
 
     private static byte[] CreateMethodProviderArtifact(
         string moduleIdentity, string exportKey,
-        uint resultTypeSpecRef = 0xF200_0008, uint effectsMask = 0)
+        uint resultTypeSpecRef = 0xF200_0008, uint effectsMask = 0,
+        bool scalarParameter = false)
     {
         var stringSection = TrRmStringTableWriter.EncodeNames([
             (moduleIdentity, 0),
@@ -1198,6 +1454,21 @@ internal sealed class StandaloneMethodImportInputTests
         var methodSigSection = new byte[24];
         BinaryPrimitives.WriteUInt32LittleEndian(
             methodSigSection, resultTypeSpecRef);
+        byte[]? paramSection = null;
+        if (scalarParameter)
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                methodSigSection.AsSpan(8), 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                methodSigSection.AsSpan(12), 1);
+            paramSection = new byte[16];
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                paramSection, 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                paramSection.AsSpan(4), 0);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                paramSection.AsSpan(8), 0xF200_0008);
+        }
         var exportSection = new byte[8];
         BinaryPrimitives.WriteUInt32LittleEndian(
             exportSection, 0x1600_0001);
@@ -1210,6 +1481,11 @@ internal sealed class StandaloneMethodImportInputTests
             new(0x0017, 0, 1, methodSigSection),
             new(0x001D, 0, 1, exportSection),
         };
+        if (paramSection is not null)
+        {
+            sections.Add(new TrRmSection(0x0018, 0, 1,
+                paramSection));
+        }
         if (effectsMask != 0)
         {
             var effectsRow = new byte[12];
@@ -1230,7 +1506,8 @@ internal sealed class StandaloneMethodImportInputTests
         string exportKey = "api/Run", uint methodFlags = 2,
         uint bodyRow = 0, uint moduleRefTargetRequirement = 1,
         bool methodOwnedBySecondModule = false, uint effectsMask = 0,
-        bool sharedExpectedAliases = false)
+        bool sharedExpectedAliases = false,
+        bool scalarParameter = false)
     {
         var stringSection = TrRmStringTableWriter.EncodeNames([
             (moduleIdentity, 0),
@@ -1286,6 +1563,21 @@ internal sealed class StandaloneMethodImportInputTests
         var methodSigSection = new byte[24];
         BinaryPrimitives.WriteUInt32LittleEndian(
             methodSigSection, 0xF200_0008);
+        byte[]? paramSection = null;
+        if (scalarParameter)
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                methodSigSection.AsSpan(8), 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                methodSigSection.AsSpan(12), 1);
+            paramSection = new byte[16];
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                paramSection, 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                paramSection.AsSpan(4), 0);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                paramSection.AsSpan(8), 0xF200_0008);
+        }
         var importCount = sharedExpectedAliases ? 2 : 1;
         var importSection = new byte[importCount * 12];
         for (var index = 0; index < importCount; index++)
@@ -1308,6 +1600,11 @@ internal sealed class StandaloneMethodImportInputTests
             new TrRmSection(0x0017, 0, 1, methodSigSection),
             new(0x001C, 0, (uint)importCount, importSection),
         };
+        if (paramSection is not null)
+        {
+            sections.Add(new TrRmSection(0x0018, 0, 1,
+                paramSection));
+        }
         if (effectsMask != 0)
         {
             var effectsRow = new byte[12];
