@@ -171,6 +171,8 @@ public static bool TryValidateStandaloneArtifactDirectory(int32 artifactOrdinal)
             artifactStart, artifactLength, directoryEnd, entryCount)
         || !TryValidateStandaloneTypeSpecTable(
             artifactStart, artifactLength)
+        || !TryValidateStandaloneWitnessProjectionTable(
+            artifactStart, artifactLength)
         || !ValidateStandaloneArtifactFeatures(
             artifactStart, artifactLength)
         || !ValidateStandaloneArtifactReferenceSlots(

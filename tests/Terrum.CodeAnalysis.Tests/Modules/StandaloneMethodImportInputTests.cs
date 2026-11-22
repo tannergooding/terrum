@@ -862,6 +862,73 @@ internal sealed class StandaloneMethodImportInputTests
             malformedTypeSpecProgram, (NativeRuntimePolicy)policy);
         Assert.That(malformedTypeSpecExecution.ExitCode, Is.EqualTo(0));
 
+        var witnessProjectionInput = new StandaloneMethodImportInput(
+            Agreement, "consumer/witness-projection", [
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateWitnessProjectionArtifact("provider/witness")),
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateWitnessProjectionArtifact(
+                        "provider/witness-invalid",
+                        invalidViewOrdinal: true)),
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateWitnessProjectionArtifact(
+                        "provider/witness-invalid-module-owner",
+                        invalidModuleLevelOwner: true)),
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateWitnessProjectionArtifact(
+                        "provider/witness-generic-argument")),
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateWitnessProjectionArtifact(
+                        "provider/witness-invalid-generic-argument",
+                        invalidConstructedTypeArgument: true)),
+            ], []);
+        var witnessProjectionSource = SourceText.From(
+            "bool Main() { return false; }");
+        const string witnessProjectionVerificationSource = """
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                if (Scan() < 1) { return 50; }
+                int32 status = ValidateStandaloneMethodImportInput();
+                if (status != 0) { return status; }
+                if (!TryValidateStandaloneArtifactDirectory(0)) {
+                    return 51;
+                }
+                if (TryValidateStandaloneArtifactDirectory(1)) {
+                    return 52;
+                }
+                if (TryValidateStandaloneArtifactDirectory(2)) {
+                    return 53;
+                }
+                if (!TryValidateStandaloneArtifactDirectory(3)) {
+                    return 54;
+                }
+                if (TryValidateStandaloneArtifactDirectory(4)) {
+                    return 55;
+                }
+                return 0;
+            }
+            """;
+        var witnessProjectionComponents = new List<SyntaxTree>(
+            components.GetRange(0, sourcePaths.Length));
+        witnessProjectionComponents.Add(SyntaxTree.Parse(
+            witnessProjectionVerificationSource,
+            "standalone-witness-projection-preflight-tests.terrum"));
+        var witnessProjectionBuffers
+            = ScannerHost.CreateBuffers(witnessProjectionSource).AddRange(
+                witnessProjectionInput.Capture()
+                    .CreateSourceCallHostBuffers(witnessProjectionSource));
+        var witnessProjectionCompilation = Compilation.Create(
+            witnessProjectionComponents, witnessProjectionBuffers, policy);
+        Assert.That(witnessProjectionCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                witnessProjectionCompilation.Diagnostics));
+        var witnessProjectionProgram = witnessProjectionCompilation.Program
+            ?? throw new AssertionException(
+                "Expected a bound standalone witness-projection validator.");
+        var witnessProjectionExecution = NativeJit.ExecuteWithData(
+            witnessProjectionProgram, (NativeRuntimePolicy)policy);
+        Assert.That(witnessProjectionExecution.ExitCode, Is.EqualTo(0));
+
         var decoderInput = new StandaloneMethodImportArtifactInput(
             Agreement, "consumer/contracts",
             new TrRmStandardArtifactInput(SchemaIdentity, contractArtifact),
@@ -3468,6 +3535,158 @@ internal sealed class StandaloneMethodImportInputTests
             standardSchemaIdentity:
                 StandaloneMethodImportOutputFramer
                     .GeneralPredicateGraphsWitnessProjectionsSchemaIdentity);
+    }
+
+    private static byte[] CreateWitnessProjectionArtifact(
+        string moduleIdentity, bool invalidViewOrdinal = false,
+        bool invalidModuleLevelOwner = false,
+        bool invalidConstructedTypeArgument = false)
+    {
+        var stringSection = TrRmStringTableWriter.EncodeNames([
+            ("", 0),
+            (moduleIdentity, 0),
+            ("Implementer", 0),
+            ("IExample", 0),
+            ("Requirement", 0),
+            ("Implementation", 0),
+            ("Generic", 0),
+            ("T", 0),
+        ]);
+        var strings = new TrRmStringTableReader(stringSection, 8);
+        var moduleSection = TrRmModuleTableWriter.Encode([
+            new TrRmModuleRow(2, 1, 0, 0, 0, 1, 1, 0, 1, 2),
+        ], strings, 0, 3, 2, 0, 2);
+        var modules = new TrRmModuleTableReader(moduleSection, 1, strings,
+            0, 3, 2, 0, 2);
+        var featureSection = new byte[16];
+        BinaryPrimitives.WriteUInt32LittleEndian(featureSection, 10);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            featureSection.AsSpan(4), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            featureSection.AsSpan(8), 17);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            featureSection.AsSpan(12), 1);
+
+        var typeSpecRows = new ReadOnlyMemory<byte>[] {
+            TrRmTypeSpecTableWriter.Reference(0x02, 1),
+            TrRmTypeSpecTableWriter.Reference(0x02, 2),
+            TrRmTypeSpecTableWriter.Reference(0x02, 3),
+            TrRmTypeSpecTableWriter.Constructed(3, [
+                invalidConstructedTypeArgument ? 0x00FF_FFFFu : 1u,
+            ]),
+        };
+        var typeSpecSection = TrRmTypeSpecTableWriter.Encode(
+            typeSpecRows, 3, 0, 1);
+        var typeSpecs = new TrRmTypeSpecTableReader(typeSpecSection,
+            4, 3, 0, 1);
+        var typeDefRows = new[] {
+            new TrRmTypeDefRow(1, 3, 6, 0, 0, 0, 0, 1, 1, 0, 0),
+            new TrRmTypeDefRow(1, 4, 14, 0, 0, 0, 0, 2, 1, 0, 0),
+            new TrRmTypeDefRow(1, 7, 6, 0, 0, 1, 1, 3, 1, 0, 0),
+        };
+        var typeDefSection = TrRmTypeDefTableWriter.Encode(typeDefRows,
+            strings, modules, 0, 1, 3, 0);
+        var typeDefs = new TrRmTypeDefTableReader(typeDefSection, 3,
+            strings, modules, 0, 1, 3, 0);
+        var targetProfiles = new TrRmTargetProfileTableReader([], 0);
+        var layoutSection = TrRmLayoutTableWriter.Encode([
+            new TrRmLayoutRow(1, 0, 0, 0, 0, 0, 0, 0),
+            new TrRmLayoutRow(2, 0, 0, 0, 0, 0, 0, 0),
+            new TrRmLayoutRow(3, 0, 0, 0, 0, 0, 0, 0),
+        ], typeDefs, targetProfiles, 0);
+        var methodSigSection = TrRmMethodSigTableWriter.Encode([
+            new TrRmMethodSigRow(0xF200_0001, 2, 0, 0, 0, 0),
+            new TrRmMethodSigRow(0xF200_0001, 1, 0, 0, 0, 0),
+        ], typeSpecs, 0, 0);
+        var signatures = new TrRmMethodSigTableReader(
+            methodSigSection, 2, typeSpecs, 0, 0);
+        var methodDefSection = TrRmMethodDefTableWriter.Encode([
+            new TrRmMethodDefRow(2, 5, 1, 2, 0, 0, 0),
+            new TrRmMethodDefRow(1, 6, 2, 2, 0, 0, 0),
+        ], strings, modules, typeDefs, signatures, 0, 0);
+        var methodDefs = new TrRmMethodDefTableReader(methodDefSection, 2,
+            strings, modules, typeDefs, signatures, 0, 0);
+        var genericParamSection = TrRmGenericParamTableWriter.Encode([
+            new TrRmGenericParamRow(0x1300_0003, 0, 8, 0, 0,
+                1, 1, 1, 0, 0),
+        ], strings, typeDefs, methodDefs, signatures, typeSpecs, 0);
+        var genericParams = new TrRmGenericParamTableReader(
+            genericParamSection, 1, strings, typeDefs, methodDefs,
+            signatures, typeSpecs, 0);
+        var interfaceDefSection = TrRmInterfaceDefTableWriter.Encode([
+            new TrRmInterfaceDefRow(2, 0, 0, 0, 1, 1,
+                0, 0, 0, 0, 0, 0),
+        ], typeDefs, genericParams, 0, 1, 0, 0, 0);
+        var interfaceDefs = new TrRmInterfaceDefTableReader(
+            interfaceDefSection, 1, typeDefs, genericParams, 0, 1,
+            0, 0, 0);
+        var interfaceMethodSection = TrRmInterfaceMethodTableWriter.Encode([
+            new TrRmInterfaceMethodRow(1, 0, 1),
+        ], interfaceDefs, methodDefs, signatures);
+        var witnessSection = TrRmInterfaceWitnessTableWriter.Encode([
+            new TrRmInterfaceWitnessRow(1, 2, 1, 1, 0, 0, 0, 0),
+        ], typeSpecs, 1, 0, 0);
+        var witnesses = new TrRmInterfaceWitnessTableReader(
+            witnessSection, 1, typeSpecs, 1, 0, 0);
+        var witnessMemberSection = TrRmWitnessMemberTableWriter.Encode([
+            new TrRmWitnessMemberRow(1, 2, 1, 1, 2),
+        ], witnesses, typeSpecs, methodDefs);
+        if (invalidModuleLevelOwner)
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                witnessMemberSection.AsSpan(12), 0);
+        }
+        var projectionRow = CreateStandaloneWitnessProjectionRow();
+        if (invalidViewOrdinal)
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                projectionRow.AsSpan(40), 1);
+        }
+        if (invalidModuleLevelOwner)
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                projectionRow.AsSpan(44), 0);
+        }
+        var projectionSection = TrRmVariableTableWriter.EncodeBlobs([
+            new ReadOnlyMemory<byte>(projectionRow),
+        ]);
+        return TrRmArtifactWriter.Encode([
+            new TrRmSection(0x0001, 0, 1, moduleSection),
+            new TrRmSection(0x0002, 0, 6, stringSection),
+            new TrRmSection(0x0003, 0, 2, typeSpecSection),
+            new TrRmSection(0x0004, 0, 2, featureSection),
+            new TrRmSection(0x0013, 0, 2, typeDefSection),
+            new TrRmSection(0x0015, 0, 2, layoutSection),
+            new TrRmSection(0x0016, 0, 2, methodDefSection),
+            new TrRmSection(0x0017, 0, 2, methodSigSection),
+            new TrRmSection(0x0019, 0, 1, genericParamSection),
+            new TrRmSection(0x0024, 0, 1, interfaceMethodSection),
+            new TrRmSection(0x0025, 0, 1, interfaceDefSection),
+            new TrRmSection(0x0028, 0, 1, witnessSection),
+            new TrRmSection(0x0029, 0, 1, witnessMemberSection),
+            new TrRmSection(0x0068, 0, 1, projectionSection),
+        ], TrRmArtifactSchema.GeneralPredicateGraphsDraft,
+            standardSchemaIdentity:
+                StandaloneMethodImportOutputFramer
+                    .GeneralPredicateGraphsWitnessProjectionsSchemaIdentity);
+    }
+
+    private static byte[] CreateStandaloneWitnessProjectionRow()
+    {
+        var row = new byte[52];
+        BinaryPrimitives.WriteUInt32LittleEndian(row, 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(row.AsSpan(4), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(row.AsSpan(8), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(row.AsSpan(12), 2);
+        BinaryPrimitives.WriteUInt32LittleEndian(row.AsSpan(16), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(row.AsSpan(20), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(row.AsSpan(24), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(row.AsSpan(28), 2);
+        BinaryPrimitives.WriteUInt32LittleEndian(row.AsSpan(32), 2);
+        BinaryPrimitives.WriteUInt32LittleEndian(row.AsSpan(36), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(row.AsSpan(44), 1);
+        row[48] = 1;
+        return row;
     }
 
     private static byte[] CreateOutputStateArtifact(string moduleIdentity,
