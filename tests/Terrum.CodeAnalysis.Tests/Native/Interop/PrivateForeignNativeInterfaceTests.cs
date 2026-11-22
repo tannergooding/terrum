@@ -410,6 +410,66 @@ internal sealed class PrivateForeignNativeInterfaceTests
     }
 
     [Test]
+    public void PrivateFniAggregateProviderBindsAcrossTypeDefRelocation()
+    {
+        const string schemaIdentity
+            = "terrum/private-semantic-111-foreign-native-interfaces-1";
+        const string providerIdentity = "PrivateFniTypeRelocation";
+        var producer = CreateFniProvider(providerIdentity, "IProbe", "Add",
+            "Payload");
+        var reference = ModuleCompiler.CreateReferenceWithSchema(producer,
+            schemaIdentity);
+        const string consumerSource = """
+            int32 Invoke(ptr<void> receiver, ptr<Payload> value) {
+                unsafe { return IProbe.Get(receiver, value); }
+            }
+            """;
+        var compilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(consumerSource), reference);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        var identities = PrivateModuleIdentityInputs.CreateFromSelectors(
+            program, "PrivateFniTypeRelocationConsumer", [], [
+                new PrivateNominalImportSelection(
+                    new PrivateNominalDeclarationSelector(
+                        PrivateNominalDeclarationKind.Struct, "Payload"),
+                    "consumer.payload", providerIdentity,
+                    providerIdentity + ".payload"),
+            ], [], [], [], [
+                new PrivateForeignInterfaceImportAssignment(0,
+                    "consumer.iprobe", providerIdentity,
+                    providerIdentity + ".owner", [
+                        new PrivateForeignInterfaceMemberImportAssignment(
+                            0, "consumer.iprobe.get",
+                            providerIdentity + ".member"),
+                    ]),
+            ]);
+        var consumer = ModuleCompiler.CreateConsumerWithSchema(program,
+            producer, schemaIdentity, identities);
+        var relocatedProducer = CreateFniProvider(providerIdentity, "IProbe",
+            "Add", "Payload", prependPrefixStruct: true);
+        var relocatedReference = ModuleCompiler.CreateReferenceWithSchema(
+            relocatedProducer, schemaIdentity);
+        Assert.That(reference.Structures.Select(static structure =>
+                structure.Name),
+            Is.EqualTo(["Payload"]));
+        Assert.That(relocatedReference.Structures.Select(
+                static structure => structure.Name),
+            Is.EqualTo(["Prefix", "Payload"]));
+
+        var linked = ModuleCompiler.Link(consumer, relocatedProducer);
+        Assert.That(linked.Functions.Select(static function => function.Name),
+            Does.Contain("Invoke"));
+
+        var incompatibleProducer = CreateFniProvider(providerIdentity,
+            "IProbe", "Add", "Payload", payloadFieldType: "int64",
+            prependPrefixStruct: true);
+        _ = Assert.Throws<ModuleContractException>(() =>
+            ModuleCompiler.Link(consumer, incompatibleProducer));
+    }
+
+    [Test]
     public void PrivateFniDirectoryRejectsMemberRedirectedToOrdinaryFunction()
     {
         const string schemaIdentity
@@ -633,19 +693,27 @@ internal sealed class PrivateForeignNativeInterfaceTests
 
     private static byte[] CreateFniProvider(string moduleIdentity,
         string interfaceName, string functionName, string payloadTypeName,
-        bool useTwoScalarFormals = false)
+        bool useTwoScalarFormals = false, string payloadFieldType = "int32",
+        bool prependPrefixStruct = false)
     {
         const string schemaIdentity
             = "terrum/private-semantic-111-foreign-native-interfaces-1";
         var formalParameters = useTwoScalarFormals
             ? "int32 first, int32 second"
             : $"ptr<{payloadTypeName}> value";
+        var prefixDeclaration = prependPrefixStruct
+            ? """
+              [Blittable] [Layout(LayoutKind.Sequential)]
+              public struct Prefix { public int32 Value; }
+              """
+            : string.Empty;
         var source = SyntaxTree.Parse($$"""
             using Terrum.Interop;
             public int32 {{functionName}}(int32 value) { return value; }
+            {{prefixDeclaration}}
             [Blittable]
             public struct {{payloadTypeName}} {
-                public int32 Value;
+                public {{payloadFieldType}} Value;
             }
             [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
             [ForeignNativeInterface(VTableByteOffset: uint32(0))]
@@ -666,14 +734,21 @@ internal sealed class PrivateForeignNativeInterfaceTests
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = compilation.Program!;
-        var identities = PrivateModuleIdentityInputs.CreateFromSelectors(
-            program, moduleIdentity, [
+        var payloadDefinition = new PrivateNominalDefinitionSelection(
+            new PrivateNominalDeclarationSelector(
+                PrivateNominalDeclarationKind.Struct, payloadTypeName),
+            moduleIdentity + ".payload", true);
+        var nominalDefinitions = prependPrefixStruct
+            ? new[] {
                 new PrivateNominalDefinitionSelection(
                     new PrivateNominalDeclarationSelector(
-                        PrivateNominalDeclarationKind.Struct,
-                        payloadTypeName),
-                    moduleIdentity + ".payload", true),
-            ], [], [], [], [
+                        PrivateNominalDeclarationKind.Struct, "Prefix"),
+                    moduleIdentity + ".prefix", true),
+                payloadDefinition,
+            }
+            : new[] { payloadDefinition };
+        var identities = PrivateModuleIdentityInputs.CreateFromSelectors(
+            program, moduleIdentity, nominalDefinitions, [], [], [], [
                 new PrivateForeignInterfaceDefinitionAssignment(0,
                     moduleIdentity + ".owner", true, [
                         new PrivateForeignInterfaceMemberDefinitionAssignment(
