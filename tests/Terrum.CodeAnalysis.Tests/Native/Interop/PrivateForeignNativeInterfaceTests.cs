@@ -543,7 +543,13 @@ internal sealed class PrivateForeignNativeInterfaceTests
             string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = compilation.Program!;
         var identities = PrivateModuleIdentityInputs.CreateFromSelectors(
-            program, moduleIdentity, [], [], [], [], [
+            program, moduleIdentity, [
+                new PrivateNominalDefinitionSelection(
+                    new PrivateNominalDeclarationSelector(
+                        PrivateNominalDeclarationKind.Struct,
+                        payloadTypeName),
+                    moduleIdentity + ".payload", true),
+            ], [], [], [], [
                 new PrivateForeignInterfaceDefinitionAssignment(0,
                     moduleIdentity + ".owner", true, [
                         new PrivateForeignInterfaceMemberDefinitionAssignment(
