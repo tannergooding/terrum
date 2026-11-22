@@ -198,6 +198,8 @@ internal sealed partial class CliTests
             "terrum-private-identity-v2-fni-");
         var providerSourcePath = Path.Combine(directory, "provider.terrum");
         var consumerSourcePath = Path.Combine(directory, "consumer.terrum");
+        var replacementSourcePath = Path.Combine(directory,
+            "replacement.terrum");
         var nativeManifestPath = Path.Combine(directory, "native.json");
         var nativeOutputManifestPath = Path.Combine(directory,
             "native-output.json");
@@ -211,6 +213,8 @@ internal sealed partial class CliTests
             "native-consumer.json");
         var moduleProvider = Path.Combine(directory, "provider.trm");
         var moduleConsumer = Path.Combine(directory, "consumer.trm");
+        var replacementModuleProvider = Path.Combine(directory,
+            "replacement.trm");
         var nativeProvider = Path.Combine(directory, "provider.trmn");
         var nativeConsumer = Path.Combine(directory, "consumer.trmn");
         var preservedOutput = Path.Combine(directory, "preserved.trm");
@@ -288,6 +292,48 @@ internal sealed partial class CliTests
             Assert.That(await File.ReadAllBytesAsync(preservedOutput)
                 .ConfigureAwait(false), Is.EqualTo(sentinel));
 
+            var malformedDefinition = new {
+                interfaceOrdinal = 0,
+                localDeclarationKey = ownerKey,
+                isExported = true,
+                members = new object[] {
+                    new {
+                        memberOrdinal = 0,
+                        localDeclarationKey = memberKeys[0],
+                    },
+                    new {
+                        memberOrdinal = 0,
+                        localDeclarationKey = memberKeys[1],
+                    },
+                },
+            };
+            await File.WriteAllTextAsync(moduleProviderManifest,
+                CreateManifestV2(providerIdentity, [Digest(source)], null,
+                    [malformedDefinition], [])).ConfigureAwait(false);
+            var (malformedExit, malformedOutput, malformedError)
+                = await RunAsync([], [
+                    "compile-module", "producer", providerSourcePath, "Add",
+                    "-o", preservedOutput, "--runtime", "fail-fast",
+                    "--native-core-manifest", nativeManifestPath,
+                    "--native-output-core-manifest",
+                    nativeOutputManifestPath,
+                    "--private-identity-manifest", moduleProviderManifest,
+                    "--private-schema", privateSchema, "--json",
+                ]).ConfigureAwait(false);
+            Assert.That(malformedExit, Is.EqualTo(2),
+                malformedOutput + malformedError);
+            Assert.That(malformedError, Is.Empty);
+            using (var document = JsonDocument.Parse(malformedOutput))
+            {
+                Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM2001"));
+            }
+            Assert.That(await File.ReadAllBytesAsync(preservedOutput)
+                .ConfigureAwait(false), Is.EqualTo(sentinel));
+
+            await File.WriteAllTextAsync(moduleProviderManifest,
+                CreateManifestV2(providerIdentity, [Digest(source)], null,
+                    [foreignDefinition], [])).ConfigureAwait(false);
             var (moduleProviderExit, moduleProviderOutput,
                 moduleProviderError) = await RunAsync([], [
                     "compile-module", "producer", providerSourcePath, "Add",
@@ -342,6 +388,47 @@ internal sealed partial class CliTests
                 "fail-fast",
             ]).ConfigureAwait(false);
             Assert.That(moduleRunExit, Is.EqualTo(42), moduleRunError);
+
+            var replacementSource = Encoding.UTF8.GetBytes(
+                Encoding.UTF8.GetString(source).Replace(
+                    "VTableByteOffset: uint32(0)",
+                    "VTableByteOffset: uint32(8)",
+                    StringComparison.Ordinal));
+            await File.WriteAllBytesAsync(replacementSourcePath,
+                replacementSource).ConfigureAwait(false);
+            var replacementManifest = Path.Combine(directory,
+                "replacement-provider.json");
+            await File.WriteAllTextAsync(replacementManifest,
+                CreateManifestV2(providerIdentity,
+                    [Digest(replacementSource)], null,
+                    [foreignDefinition], [])).ConfigureAwait(false);
+            var (replacementExit, replacementOutput, replacementError)
+                = await RunAsync([], [
+                    "compile-module", "producer", replacementSourcePath,
+                    "Add", "-o", replacementModuleProvider, "--runtime",
+                    "fail-fast", "--native-core-manifest",
+                    nativeManifestPath, "--native-output-core-manifest",
+                    nativeOutputManifestPath, "--private-identity-manifest",
+                    replacementManifest, "--private-schema", privateSchema,
+                    "--json",
+                ]).ConfigureAwait(false);
+            Assert.That(replacementExit, Is.Zero,
+                replacementOutput + replacementError);
+            Assert.That(replacementError, Is.Empty);
+            var (replacementValidationExit, replacementValidationOutput,
+                replacementValidationError) = await RunAsync([], [
+                    "run-module", moduleConsumer, replacementModuleProvider,
+                    "--runtime", "fail-fast", "--json",
+                ]).ConfigureAwait(false);
+            Assert.That(replacementValidationExit, Is.EqualTo(1),
+                replacementValidationOutput + replacementValidationError);
+            Assert.That(replacementValidationError, Is.Empty);
+            using (var document = JsonDocument.Parse(
+                replacementValidationOutput))
+            {
+                Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM5002"));
+            }
 
             await File.WriteAllTextAsync(nativeProviderManifest,
                 CreateManifestV2(providerIdentity, [Digest(source)], null,
