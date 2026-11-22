@@ -4052,8 +4052,61 @@ internal sealed class NativeCoreRegistrationTests
 
         Assert.That(consumerIndex.TryGetSection(0x0010,
                 out var moduleRefBytes, out var moduleRefCount), Is.True);
+        var middleModuleRef = consumerTables.Imports
+            .GetModuleRefForImportRow(middleImportRow);
+        var wrongLeafModuleRefBytes = importBytesArray.ToArray();
+        BinaryPrimitives.WriteInt32LittleEndian(
+            wrongLeafModuleRefBytes.AsSpan(leafImportOffset, 4),
+            middleModuleRef);
+        var wrongLeafModuleRefArtifact = RewriteSection(consumerArtifact,
+            0x001C, wrongLeafModuleRefBytes, importCount);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    wrongLeafModuleRefArtifact), "consumer.module", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        middleArtifact),
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        leafArtifact),
+                ]));
+
+        var wrongLeafTypeDefImportBytes = importBytesArray.ToArray();
+        var middleExpectedDefinitionId = consumerTables.Imports
+            .GetExpectedDefinitionForImportRow(middleImportRow);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            wrongLeafTypeDefImportBytes.AsSpan(leafImportOffset + 8, 4),
+            middleExpectedDefinitionId);
+        var wrongLeafTypeDefImportArtifact = RewriteSection(
+            consumerArtifact, 0x001C, wrongLeafTypeDefImportBytes,
+            importCount);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    wrongLeafTypeDefImportArtifact), "consumer.module", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        middleArtifact),
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        leafArtifact),
+                ]));
+
         var leafModuleRef = consumerTables.Imports
             .GetModuleRefForImportRow(leafImportRow);
+        Assert.That(middleModuleRef, Is.Not.EqualTo(leafModuleRef));
+        var wrongOwnerModuleRefBytes = moduleRefBytes.ToArray();
+        BinaryPrimitives.WriteInt32LittleEndian(
+            wrongOwnerModuleRefBytes.AsSpan((leafModuleRef - 1) * 12, 4), 0);
+        var wrongOwnerModuleRefArtifact = RewriteSection(consumerArtifact,
+            0x0010, wrongOwnerModuleRefBytes, moduleRefCount);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    wrongOwnerModuleRefArtifact), "consumer.module", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        middleArtifact),
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        leafArtifact),
+                ]));
+
         var wrongLeafRequirements = moduleRefBytes.ToArray();
         BinaryPrimitives.WriteUInt32LittleEndian(
             wrongLeafRequirements.AsSpan((leafModuleRef - 1) * 12 + 4, 4),
