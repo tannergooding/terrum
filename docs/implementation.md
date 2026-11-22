@@ -1419,10 +1419,10 @@ PS1 now admits pointer-valued FNI NativeOutput reads through the existing
 TypeSpec/D5 Body path, including non-first output-formal and named-input
 remapping; producer, source-free consumer, re-emission and Windows x64
 success/failure execution coverage, including NonNegative's zero-success
-boundary, is added but unverified under the hold.
-Other side-effecting argument
-expressions, defaults/constants, multiple calls, other condition expressions
-and Body control-flow shapes, nonreturning-call shapes beyond the terminal
+boundary, is added but unverified under the hold. Other side-effecting argument
+expressions, defaults/constants, multiple calls, condition selectors beyond
+NonZero/NonNegative, other Body control-flow shapes, nonreturning-call forms
+beyond the terminal
 subset and reservation cancellation remain open.
 Supervised native execution, private persistence and dependent runtime work
 remain open. CLI qualification is still unverified. NativeParameter is not
