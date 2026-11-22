@@ -6726,6 +6726,14 @@ public static partial class TrRmExecutableCompiler
 
         var selectedStructures = new HashSet<int>();
         var pendingStructures = new Stack<int>();
+        var visitedStructures = new HashSet<int>();
+        var selectedNativePointerTypes = new HashSet<int>();
+        var pendingNativePointerTypes = new Stack<int>();
+        var visitedNativePointerTypes = new HashSet<int>();
+        var selectedNativeFunctionPointerSignatures = new HashSet<int>();
+        var pendingNativeFunctionPointerSignatures = new Stack<int>();
+        var visitedNativeFunctionPointerSignatures = new HashSet<int>();
+        var remainingClosureVisits = SemanticVerifier.MaximumAnalysisVisits;
         foreach (var typeDefRow in requestedTypes.Keys)
         {
             var structureIndex = typeDefRow - typeDefStart;
@@ -6733,36 +6741,187 @@ public static partial class TrRmExecutableCompiler
             pendingStructures.Push(structureIndex);
         }
 
-        while (pendingStructures.TryPop(out var structureIndex))
+        void AddFunctionPointerSignature(PrimitiveType type)
         {
-            var structure = program.Structures[structureIndex];
-            if (structure.SourceGenericTypeDefinitionIndex >= 0)
+            if (!TrRmArtifactSchemaFacts
+                    .IsSelectedTerrumFunctionPointerSchemaIdentity(
+                        schemaIdentities[0])
+                || !NativeFunctionPointerTypes.IsType(type))
             {
                 throw Unsupported(
-                    "The LayoutQueries source projection does not admit generic nominal closure.");
+                    "Function-pointer type closure requires the exact Terrum successor and an admitted signature.");
             }
 
-            foreach (var field in structure.Fields)
+            var signatureIndex = NativeFunctionPointerTypes.Index(type);
+            if ((uint)signatureIndex
+                >= (uint)program.NativeFunctionPointerSignatures.Length)
             {
-                if (BoundEnumTypes.IsType(field.Type)
-                    || NativeFixedArrayTypes.IsType(field.Type)
-                    || NativePointerTypes.IsType(field.Type)
-                    || NativeFunctionPointerTypes.IsType(field.Type)
-                    || ManagedClassTypes.IsClass(field.Type))
+                throw Invalid(
+                    "A selected LayoutQueries field refers to an unknown function-pointer signature.");
+            }
+
+            if (selectedNativeFunctionPointerSignatures.Add(signatureIndex))
+            {
+                pendingNativeFunctionPointerSignatures.Push(signatureIndex);
+            }
+        }
+
+        void AddFunctionPointerSignatureType(PrimitiveType type)
+        {
+            if (NativeFunctionPointerTypes.IsType(type))
+            {
+                AddFunctionPointerSignature(type);
+                return;
+            }
+
+            if (NativePointerTypes.IsType(type))
+            {
+                var pointerIndex = NativePointerTypes.Index(type);
+                if ((uint)pointerIndex
+                    >= (uint)program.NativePointerTypes.Length)
                 {
-                    throw Unsupported(
-                        "The bounded LayoutQueries source projection requires scalar or inline-struct field types.");
+                    throw Invalid(
+                        "A function-pointer signature refers to an unknown native-pointer type.");
                 }
 
-                var childIndex = (int)field.Type - 100;
-                if (childIndex < 0
-                    || childIndex >= program.Structures.Length
-                    || !selectedStructures.Add(childIndex))
+                if (selectedNativePointerTypes.Add(pointerIndex))
+                {
+                    pendingNativePointerTypes.Push(pointerIndex);
+                }
+                return;
+            }
+
+            if (BoundEnumTypes.IsType(type)
+                || NativeFixedArrayTypes.IsType(type)
+                || ManagedClassTypes.IsClass(type)
+                || CheckedReferenceTypes.IsType(type))
+            {
+                throw Unsupported(
+                    "A function-pointer signature contains a type family outside the selected LayoutQueries closure.");
+            }
+
+            var structureIndex = (int)type - 100;
+            if (structureIndex >= 0
+                && structureIndex < program.Structures.Length)
+            {
+                if (selectedStructures.Add(structureIndex))
+                {
+                    pendingStructures.Push(structureIndex);
+                }
+                return;
+            }
+
+            if (type != PrimitiveType.Void
+                && type != PrimitiveType.NativeRawPointer
+                && !PrimitiveTypeFacts.IsBuiltInScalar(type))
+            {
+                throw Unsupported(
+                    "A function-pointer signature contains a type without a selected LayoutQueries representation.");
+            }
+        }
+
+        while (pendingStructures.Count != 0
+            || pendingNativePointerTypes.Count != 0
+            || pendingNativeFunctionPointerSignatures.Count != 0)
+        {
+            if (--remainingClosureVisits < 0)
+            {
+                throw new NotSupportedException(
+                    "The LayoutQueries function-pointer type closure exceeds the analysis limit.");
+            }
+
+            if (pendingStructures.TryPop(out var structureIndex))
+            {
+                var structure = program.Structures[structureIndex];
+                if (structure.SourceGenericTypeDefinitionIndex >= 0)
+                {
+                    throw Unsupported(
+                        "The LayoutQueries source projection does not admit generic nominal closure.");
+                }
+                if (!visitedStructures.Add(structureIndex))
                 {
                     continue;
                 }
 
-                pendingStructures.Push(childIndex);
+                foreach (var field in structure.Fields)
+                {
+                    if (--remainingClosureVisits < 0)
+                    {
+                        throw new NotSupportedException(
+                            "The LayoutQueries field closure exceeds the analysis limit.");
+                    }
+
+                    if (NativeFunctionPointerTypes.IsType(field.Type))
+                    {
+                        AddFunctionPointerSignature(field.Type);
+                        continue;
+                    }
+
+                    if (BoundEnumTypes.IsType(field.Type)
+                        || NativeFixedArrayTypes.IsType(field.Type)
+                        || NativePointerTypes.IsType(field.Type)
+                        || ManagedClassTypes.IsClass(field.Type)
+                        || CheckedReferenceTypes.IsType(field.Type))
+                    {
+                        throw Unsupported(
+                            "The bounded LayoutQueries source projection requires scalar or inline-struct fields, with function-pointer fields selected by the exact Terrum successor.");
+                    }
+
+                    var childIndex = (int)field.Type - 100;
+                    if (childIndex < 0
+                        || childIndex >= program.Structures.Length
+                        || !selectedStructures.Add(childIndex))
+                    {
+                        continue;
+                    }
+
+                    pendingStructures.Push(childIndex);
+                }
+
+                continue;
+            }
+
+            if (pendingNativePointerTypes.TryPop(out var pointerIndex))
+            {
+                if (!visitedNativePointerTypes.Add(pointerIndex))
+                {
+                    continue;
+                }
+
+                AddFunctionPointerSignatureType(
+                    program.NativePointerTypes[pointerIndex].PointeeType);
+                continue;
+            }
+
+            var signatureIndex
+                = pendingNativeFunctionPointerSignatures.Pop();
+            if (!visitedNativeFunctionPointerSignatures.Add(
+                    signatureIndex))
+            {
+                continue;
+            }
+
+            var signature
+                = program.NativeFunctionPointerSignatures[signatureIndex];
+            AddFunctionPointerSignatureType(signature.ReturnType);
+            foreach (var parameterType in signature.ParameterTypes)
+            {
+                if (--remainingClosureVisits < 0)
+                {
+                    throw new NotSupportedException(
+                        "The LayoutQueries function-pointer signature closure exceeds the analysis limit.");
+                }
+                AddFunctionPointerSignatureType(parameterType);
+            }
+
+            foreach (var nativeParameter in signature.NativeParameters)
+            {
+                if (--remainingClosureVisits < 0)
+                {
+                    throw new NotSupportedException(
+                        "The LayoutQueries native-parameter closure exceeds the analysis limit.");
+                }
+                AddFunctionPointerSignatureType(nativeParameter.PointeeType);
             }
         }
 
@@ -6833,8 +6992,151 @@ public static partial class TrRmExecutableCompiler
                 indexInProjection);
         }
 
+        var nativePointerTypeMap
+            = new int[program.NativePointerTypes.Length];
+        Array.Fill(nativePointerTypeMap, -1);
+        var nativePointerTypeStates
+            = new byte[program.NativePointerTypes.Length];
+        var nativeFunctionPointerTypeMap
+            = new int[program.NativeFunctionPointerSignatures.Length];
+        Array.Fill(nativeFunctionPointerTypeMap, -1);
+        var nativeFunctionPointerTypeStates
+            = new byte[program.NativeFunctionPointerSignatures.Length];
+        var projectedNativePointerTypes
+            = ImmutableArray.CreateBuilder<NativePointerTypeDefinition>();
+        var projectedNativePointerTypeIndexes
+            = new Dictionary<NativePointerTypeDefinition, int>();
+        var projectedNativeFunctionPointerSignatures
+            = ImmutableArray.CreateBuilder<
+                NativeFunctionPointerSignatureDefinition>();
+        var remainingTypeRemaps = SemanticVerifier.MaximumAnalysisVisits;
+        int RemapNativePointerType(int pointerIndex)
+        {
+            if ((uint)pointerIndex >= (uint)nativePointerTypeMap.Length)
+            {
+                throw Invalid(
+                    "A selected LayoutQueries function-pointer signature has an invalid native-pointer type.");
+            }
+
+            if (nativePointerTypeMap[pointerIndex] >= 0)
+            {
+                return nativePointerTypeMap[pointerIndex];
+            }
+
+            if (nativePointerTypeStates[pointerIndex] == 1
+                || --remainingTypeRemaps < 0)
+            {
+                throw new NotSupportedException(
+                    "The LayoutQueries native-pointer signature closure is recursive or exceeds its analysis limit.");
+            }
+
+            nativePointerTypeStates[pointerIndex] = 1;
+            var source = program.NativePointerTypes[pointerIndex];
+            var candidate = source with {
+                PointeeType = RemapType(source.PointeeType),
+            };
+            if (!projectedNativePointerTypeIndexes.TryGetValue(candidate,
+                    out var remappedIndex))
+            {
+                remappedIndex = projectedNativePointerTypes.Count;
+                projectedNativePointerTypeIndexes.Add(candidate,
+                    remappedIndex);
+                projectedNativePointerTypes.Add(candidate);
+            }
+
+            nativePointerTypeMap[pointerIndex] = remappedIndex;
+            nativePointerTypeStates[pointerIndex] = 2;
+            return remappedIndex;
+        }
+
+        int RemapNativeFunctionPointerType(int signatureIndex)
+        {
+            if ((uint)signatureIndex
+                >= (uint)nativeFunctionPointerTypeMap.Length)
+            {
+                throw Invalid(
+                    "A selected LayoutQueries field has an invalid function-pointer signature.");
+            }
+
+            if (nativeFunctionPointerTypeMap[signatureIndex] >= 0)
+            {
+                return nativeFunctionPointerTypeMap[signatureIndex];
+            }
+
+            if (nativeFunctionPointerTypeStates[signatureIndex] == 1
+                || --remainingTypeRemaps < 0)
+            {
+                throw new NotSupportedException(
+                    "The LayoutQueries function-pointer signature closure is recursive or exceeds its analysis limit.");
+            }
+
+            nativeFunctionPointerTypeStates[signatureIndex] = 1;
+            var source
+                = program.NativeFunctionPointerSignatures[signatureIndex];
+            var candidate = source with {
+                ReturnType = RemapType(source.ReturnType),
+                ParameterTypes = [
+                    .. source.ParameterTypes.Select(RemapType),
+                ],
+                NativeParameters = [
+                    .. source.NativeParameters.Select(parameter =>
+                        parameter with {
+                            PointeeType = RemapType(
+                                parameter.PointeeType),
+                        }),
+                ],
+            };
+            var remappedIndex = -1;
+            for (var index = 0;
+                index < projectedNativeFunctionPointerSignatures.Count;
+                index++)
+            {
+                if (NativeFunctionPointerContract.AreEquivalent(
+                        projectedNativeFunctionPointerSignatures[index],
+                        candidate))
+                {
+                    remappedIndex = index;
+                    break;
+                }
+            }
+
+            if (remappedIndex < 0)
+            {
+                remappedIndex
+                    = projectedNativeFunctionPointerSignatures.Count;
+                projectedNativeFunctionPointerSignatures.Add(candidate);
+            }
+
+            nativeFunctionPointerTypeMap[signatureIndex] = remappedIndex;
+            nativeFunctionPointerTypeStates[signatureIndex] = 2;
+            return remappedIndex;
+        }
+
         PrimitiveType RemapType(PrimitiveType type)
         {
+            if (NativeFunctionPointerTypes.IsType(type))
+            {
+                return NativeFunctionPointerTypes.Type(
+                    RemapNativeFunctionPointerType(
+                        NativeFunctionPointerTypes.Index(type)));
+            }
+
+            if (NativePointerTypes.IsType(type))
+            {
+                return NativePointerTypes.Type(
+                    RemapNativePointerType(
+                        NativePointerTypes.Index(type)));
+            }
+
+            if (BoundEnumTypes.IsType(type)
+                || NativeFixedArrayTypes.IsType(type)
+                || ManagedClassTypes.IsClass(type)
+                || CheckedReferenceTypes.IsType(type))
+            {
+                throw Unsupported(
+                    "The selected LayoutQueries reference cannot remap this type family.");
+            }
+
             var structureIndex = (int)type - 100;
             if (structureIndex < 0
                 || structureIndex >= program.Structures.Length)
@@ -6949,6 +7251,9 @@ public static partial class TrRmExecutableCompiler
         var projectedProgram = new BoundProgram([], -1) {
             RuntimePolicy = (BoundRuntimePolicy)runtimePolicy,
             Structures = structures,
+            NativeFunctionPointerSignatures
+                = projectedNativeFunctionPointerSignatures.ToImmutable(),
+            NativePointerTypes = projectedNativePointerTypes.ToImmutable(),
         };
         SemanticVerifier.VerifyLibraryReferences(projectedProgram);
         var standardFieldProviderClosure
@@ -6961,6 +7266,9 @@ public static partial class TrRmExecutableCompiler
             ]);
         return new CompilationReference(structures, [],
             (BoundRuntimePolicy)runtimePolicy,
+            nativeFunctionPointerSignatures:
+                projectedProgram.NativeFunctionPointerSignatures,
+            nativePointerTypes: projectedProgram.NativePointerTypes,
             standardQuerySourceAssociation:
                 standardQuerySourceAssociation,
             coreEvaluationFormIdentitySelections:

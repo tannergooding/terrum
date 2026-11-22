@@ -90,7 +90,6 @@ public static partial class TrRmExecutableCompiler
             if (!reference.Functions.IsEmpty
                 || !reference.Classes.IsEmpty
                 || !reference.NativeFixedArrayTypes.IsEmpty
-                || !reference.NativeFunctionPointerSignatures.IsEmpty
                 || !reference.EnumDefinitions.IsEmpty
                 || !reference.CheckedReferenceTypes.IsEmpty
                 || !reference.Interfaces.IsEmpty
@@ -106,7 +105,8 @@ public static partial class TrRmExecutableCompiler
                     "Reference composition requires type-only Standard references with retained provider associations.");
             }
             if (!NativePointerTypeContract.IsValidTable(
-                    reference.NativePointerTypes, reference.Structures, [],
+                    reference.NativePointerTypes, reference.Structures,
+                    reference.NativeFunctionPointerSignatures,
                     reference.NativeFixedArrayTypes,
                     reference.CheckedReferenceTypes,
                     reference.EnumDefinitions))
@@ -129,6 +129,17 @@ public static partial class TrRmExecutableCompiler
         var isLayoutQueriesReference
             = IsSelectedStandardLayoutQueriesSchemaIdentity(
                 sourceSchemaIdentity);
+        var allowsTerrumFunctionPointerTypes
+            = TrRmArtifactSchemaFacts
+                .IsSelectedTerrumFunctionPointerSchemaIdentity(
+                    sourceSchemaIdentity);
+        if (!allowsTerrumFunctionPointerTypes
+            && selectedReferences.Any(static reference =>
+                !reference.NativeFunctionPointerSignatures.IsEmpty))
+        {
+            throw Unsupported(
+                "Standard function-pointer type composition requires the exact Terrum successor identity.");
+        }
         var isNestedFieldPathReference
             = StringComparer.Ordinal.Equals(sourceSchemaIdentity,
                 StandardInitReferenceBodiesNestedFieldDestinationsSchemaIdentity);
@@ -149,12 +160,17 @@ public static partial class TrRmExecutableCompiler
         var structureMaps = new int[selectedReferences.Length][];
         var pointerMaps = new int[selectedReferences.Length][];
         var pointerStates = new byte[selectedReferences.Length][];
+        var functionPointerMaps = new int[selectedReferences.Length][];
+        var functionPointerStates = new byte[selectedReferences.Length][];
         var totalPointerCount = 0;
+        var totalFunctionPointerCount = 0;
         for (var referenceIndex = 0;
             referenceIndex < selectedReferences.Length; referenceIndex++)
         {
-            var pointerCount = selectedReferences[referenceIndex]
-                .NativePointerTypes.Length;
+            var reference = selectedReferences[referenceIndex];
+            var pointerCount = reference.NativePointerTypes.Length;
+            var functionPointerCount
+                = reference.NativeFunctionPointerSignatures.Length;
             if (pointerCount
                 > SemanticVerifier.MaximumAnalysisVisits - totalPointerCount)
             {
@@ -165,6 +181,25 @@ public static partial class TrRmExecutableCompiler
             pointerMaps[referenceIndex] = new int[pointerCount];
             Array.Fill(pointerMaps[referenceIndex], -1);
             pointerStates[referenceIndex] = new byte[pointerCount];
+            if (functionPointerCount
+                > SemanticVerifier.MaximumAnalysisVisits
+                    - totalFunctionPointerCount)
+            {
+                throw new NotSupportedException(
+                    "The composed Standard function-pointer closure exceeds the analysis limit.");
+            }
+            totalFunctionPointerCount += functionPointerCount;
+            functionPointerMaps[referenceIndex]
+                = new int[functionPointerCount];
+            Array.Fill(functionPointerMaps[referenceIndex], -1);
+            functionPointerStates[referenceIndex]
+                = new byte[functionPointerCount];
+            if (functionPointerCount != 0
+                && !allowsTerrumFunctionPointerTypes)
+            {
+                throw Unsupported(
+                    "Standard function-pointer type composition requires the exact Terrum successor identity.");
+            }
         }
 
         for (var referenceIndex = 0;
@@ -230,11 +265,17 @@ public static partial class TrRmExecutableCompiler
         {
             if (BoundEnumTypes.IsType(type)
                 || NativeFixedArrayTypes.IsType(type)
-                || NativeFunctionPointerTypes.IsType(type)
                 || ManagedClassTypes.IsClass(type))
             {
                 throw Unsupported(
                     "The selected Standard reference set contains an unsupported type family.");
+            }
+
+            if (NativeFunctionPointerTypes.IsType(type))
+            {
+                return NativeFunctionPointerTypes.Type(
+                    RemapFunctionPointerType(referenceIndex,
+                        NativeFunctionPointerTypes.Index(type)));
             }
 
             if (NativePointerTypes.IsType(type))
@@ -259,7 +300,10 @@ public static partial class TrRmExecutableCompiler
             = ImmutableArray.CreateBuilder<NativePointerTypeDefinition>();
         var pointerIndexes = new Dictionary<
             (PrimitiveType PointeeType, bool IsWritable), int>();
-        var remainingPointerVisits = SemanticVerifier.MaximumAnalysisVisits;
+        var mergedFunctionPointerSignatures
+            = ImmutableArray.CreateBuilder<
+                NativeFunctionPointerSignatureDefinition>();
+        var remainingTypeVisits = SemanticVerifier.MaximumAnalysisVisits;
         int RemapPointerType(int referenceIndex, int pointerIndex)
         {
             var sourcePointerTypes
@@ -278,10 +322,10 @@ public static partial class TrRmExecutableCompiler
                 throw Invalid(
                     "A selected Standard reference contains a recursive native-pointer type.");
             }
-            if (--remainingPointerVisits < 0)
+            if (--remainingTypeVisits < 0)
             {
                 throw new NotSupportedException(
-                    "The composed Standard native-pointer closure exceeds the analysis limit.");
+                    "The composed Standard native type closure exceeds the analysis limit.");
             }
 
             pointerStates[referenceIndex][pointerIndex] = 1;
@@ -308,6 +352,73 @@ public static partial class TrRmExecutableCompiler
             return mappedIndex;
         }
 
+        int RemapFunctionPointerType(int referenceIndex, int signatureIndex)
+        {
+            var sourceSignatures = selectedReferences[referenceIndex]
+                .NativeFunctionPointerSignatures;
+            if ((uint)signatureIndex >= (uint)sourceSignatures.Length)
+            {
+                throw Invalid(
+                    "A selected Standard reference contains an invalid function-pointer signature index.");
+            }
+            if (functionPointerMaps[referenceIndex][signatureIndex] >= 0)
+            {
+                return functionPointerMaps[referenceIndex][signatureIndex];
+            }
+            if (functionPointerStates[referenceIndex][signatureIndex] == 1
+                || --remainingTypeVisits < 0)
+            {
+                throw new NotSupportedException(
+                    "The composed Standard function-pointer closure is recursive or exceeds the analysis limit.");
+            }
+
+            functionPointerStates[referenceIndex][signatureIndex] = 1;
+            var source = sourceSignatures[signatureIndex];
+            var candidate = source with {
+                ReturnType = RemapType(referenceIndex,
+                    source.ReturnType),
+                ParameterTypes = [
+                    .. source.ParameterTypes.Select(type =>
+                        RemapType(referenceIndex, type)),
+                ],
+                NativeParameters = [
+                    .. source.NativeParameters.Select(parameter =>
+                        parameter with {
+                            PointeeType = RemapType(referenceIndex,
+                                parameter.PointeeType),
+                        }),
+                ],
+            };
+            var mappedIndex = -1;
+            for (var index = 0;
+                index < mergedFunctionPointerSignatures.Count; index++)
+            {
+                if (NativeFunctionPointerContract.AreEquivalent(
+                        mergedFunctionPointerSignatures[index], candidate))
+                {
+                    mappedIndex = index;
+                    break;
+                }
+            }
+
+            if (mappedIndex < 0)
+            {
+                if (mergedFunctionPointerSignatures.Count
+                    >= SemanticVerifier.MaximumAnalysisVisits)
+                {
+                    throw new NotSupportedException(
+                        "The composed Standard function-pointer table exceeds the analysis limit.");
+                }
+                mappedIndex = mergedFunctionPointerSignatures.Count;
+                mergedFunctionPointerSignatures.Add(candidate);
+            }
+
+            functionPointerMaps[referenceIndex][signatureIndex]
+                = mappedIndex;
+            functionPointerStates[referenceIndex][signatureIndex] = 2;
+            return mappedIndex;
+        }
+
         for (var referenceIndex = 0;
             referenceIndex < selectedReferences.Length; referenceIndex++)
         {
@@ -319,7 +430,26 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
+        for (var referenceIndex = 0;
+            referenceIndex < selectedReferences.Length; referenceIndex++)
+        {
+            foreach (var structure in selectedReferences[referenceIndex]
+                .Structures)
+            {
+                foreach (var field in structure.Fields)
+                {
+                    if (NativeFunctionPointerTypes.IsType(field.Type))
+                    {
+                        _ = RemapFunctionPointerType(referenceIndex,
+                            NativeFunctionPointerTypes.Index(field.Type));
+                    }
+                }
+            }
+        }
+
         var pointerTypesResult = mergedPointerTypes.ToImmutable();
+        var functionPointerSignaturesResult
+            = mergedFunctionPointerSignatures.ToImmutable();
         var mergedStructures = ImmutableArray.CreateBuilder<BoundStruct>(
             groups.Count);
         foreach (var group in groups)
@@ -528,7 +658,7 @@ public static partial class TrRmExecutableCompiler
 
         var structuresResult = mergedStructures.MoveToImmutable();
         if (!NativePointerTypeContract.IsValidTable(pointerTypesResult,
-                structuresResult, []))
+                structuresResult, functionPointerSignaturesResult))
         {
             throw Invalid(
                 "The composed Standard native-pointer type table is invalid.");
@@ -537,6 +667,8 @@ public static partial class TrRmExecutableCompiler
             RuntimePolicy = runtimePolicy,
             Structures = structuresResult,
             NativePointerTypes = pointerTypesResult,
+            NativeFunctionPointerSignatures
+                = functionPointerSignaturesResult,
             StandardQuerySourceAssociation
                 = new BoundStandardQuerySourceAssociation(
                     providerClosures.ToImmutable()),
@@ -547,6 +679,8 @@ public static partial class TrRmExecutableCompiler
                 selectedReferences);
         return new CompilationReference(structuresResult, [],
             runtimePolicy,
+            nativeFunctionPointerSignatures:
+                functionPointerSignaturesResult,
             nativePointerTypes: pointerTypesResult,
             standardQuerySourceAssociation:
                 mergedProgram.StandardQuerySourceAssociation,

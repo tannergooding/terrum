@@ -318,6 +318,221 @@ internal sealed class TrRmExecutableCompilerTests
     }
 
     [Test]
+    public void TerrumFunctionPointerFieldReferencesComposeAcrossProviders()
+    {
+        var schemaIdentity = TrRmArtifactSchemaFacts
+            .StandardTerrumFunctionPointerSchemaIdentity;
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        var layoutOptions = new CompilationOptions {
+            LayoutCoreRegistration
+                = LayoutCoreRegistrationTestData.Create(),
+        };
+
+        byte[] EmitProvider(string moduleIdentity, string typeName,
+            string typeExportKey, string fieldExportPrefix,
+            string callbackType)
+        {
+            var compilation = Compilation.CreateLibrary(
+                SyntaxTree.Parse($$"""
+                    namespace Example {
+                        [Blittable]
+                        [Layout(LayoutKind.Sequential, Packing: 1)]
+                        public struct {{typeName}} {
+                            public {{callbackType}} Callback;
+                            public uint8 Tag;
+                        }
+                    }
+                    """), layoutOptions);
+            Assert.That(compilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            return TrRmExecutableCompiler.EmitStandard(
+                compilation.Program!, moduleIdentity, schemaIdentity,
+                targetRequirement, [
+                    new TrRmSourceTypeExport("Example", typeName,
+                        typeExportKey) {
+                        FieldExports = [
+                            new TrRmSourceFieldExport("Callback",
+                                $"{fieldExportPrefix}-callback"),
+                            new TrRmSourceFieldExport("Tag",
+                                $"{fieldExportPrefix}-tag"),
+                        ],
+                    },
+                ]);
+        }
+
+        var firstArtifact = EmitProvider("callback-provider-a", "First",
+            "first", "first", "fnptr<int32, int32>");
+        var secondArtifact = EmitProvider("callback-provider-b", "Second",
+            "second", "second", "fnptr<int64, int64>");
+        var thirdArtifact = EmitProvider("callback-provider-c", "Third",
+            "third", "third", "fnptr<int32, int32>");
+        CompilationReference CreateReference(string moduleIdentity,
+            byte[] artifact, string typeKey, string fieldPrefix)
+            => TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, artifact),
+                moduleIdentity, Array.Empty<TrRmStandardArtifactInput>(),
+                [typeKey], [
+                    $"{fieldPrefix}-callback",
+                    $"{fieldPrefix}-tag",
+                ]);
+
+        var firstReference = CreateReference("callback-provider-a",
+            firstArtifact, "first", "first");
+        var secondReference = CreateReference("callback-provider-b",
+            secondArtifact, "second", "second");
+        var thirdReference = CreateReference("callback-provider-c",
+            thirdArtifact, "third", "third");
+        var composedReference
+            = TrRmExecutableCompiler.CreateStandardReferenceSet([
+                firstReference,
+                secondReference,
+                thirdReference,
+            ]);
+        Assert.That(composedReference.NativeFunctionPointerSignatures,
+            Has.Length.EqualTo(2));
+        var firstCallbackType = composedReference.Structures.Single(
+            static structure => structure.Name == "Example.First")
+            .Fields[0].Type;
+        var secondCallbackType = composedReference.Structures.Single(
+            static structure => structure.Name == "Example.Second")
+            .Fields[0].Type;
+        var thirdCallbackType = composedReference.Structures.Single(
+            static structure => structure.Name == "Example.Third")
+            .Fields[0].Type;
+        Assert.That(NativeFunctionPointerTypes.IsType(firstCallbackType),
+            Is.True);
+        Assert.That(NativeFunctionPointerTypes.IsType(secondCallbackType),
+            Is.True);
+        Assert.That(NativeFunctionPointerTypes.IsType(thirdCallbackType),
+            Is.True);
+        Assert.That(firstCallbackType, Is.Not.EqualTo(secondCallbackType));
+        Assert.That(firstCallbackType, Is.EqualTo(thirdCallbackType));
+
+        var consumer = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            using Example;
+            int32 ReadOffsets() {
+                return int32(offsetof(First, Tag)
+                    + offsetof(Second, Tag)
+                    + offsetof(Third, Tag));
+            }
+            """), composedReference, layoutOptions);
+        Assert.That(consumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumer.Diagnostics));
+    }
+
+    [Test]
+    public void TerrumFunctionPointerFieldProviderReplacementChecksAnchorSignature()
+    {
+        var schemaIdentity = TrRmArtifactSchemaFacts
+            .StandardTerrumFunctionPointerSchemaIdentity;
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        var layoutOptions = new CompilationOptions {
+            LayoutCoreRegistration
+                = LayoutCoreRegistrationTestData.Create(),
+        };
+
+        byte[] EmitCallbackProvider(bool includePrefix, string callbackType)
+        {
+            var prefix = includePrefix
+                ? """
+                  [Blittable]
+                  [Layout(LayoutKind.Sequential, Packing: 1)]
+                  public struct Prefix { public uint8 Value; }
+                  """
+                : string.Empty;
+            var prefixFunction = includePrefix
+                ? "public int32 PrecedeAnchor() { return 0; }"
+                : string.Empty;
+            var compilation = Compilation.CreateLibrary(
+                SyntaxTree.Parse($$"""
+                    namespace Example {
+                        {{prefix}}
+                        {{prefixFunction}}
+                        [Blittable]
+                        [Layout(LayoutKind.Sequential, Packing: 1)]
+                        public struct CallbackHolder {
+                            public {{callbackType}} Callback;
+                            public uint8 Tag;
+                        }
+                    }
+                    """), layoutOptions);
+            Assert.That(compilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            return TrRmExecutableCompiler.EmitStandard(
+                compilation.Program!, "callback-provider", schemaIdentity,
+                targetRequirement, [
+                    new TrRmSourceTypeExport("Example", "CallbackHolder",
+                        "callback-holder") {
+                        FieldExports = [
+                            new TrRmSourceFieldExport("Callback",
+                                "callback-callback"),
+                            new TrRmSourceFieldExport("Tag",
+                                "callback-tag"),
+                        ],
+                    },
+                ]);
+        }
+
+        var providerArtifact = EmitCallbackProvider(false,
+            "fnptr<int32, int32>");
+        var providerReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, providerArtifact),
+            "callback-provider", Array.Empty<TrRmStandardArtifactInput>(),
+            ["callback-holder"], []);
+        var pairCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                namespace Example {
+                    [Blittable]
+                    [Layout(LayoutKind.Sequential, Packing: 1)]
+                    public struct Pair {
+                        public CallbackHolder Inner;
+                        public uint8 Tag;
+                    }
+                }
+                """), providerReference, layoutOptions);
+        Assert.That(pairCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, pairCompilation.Diagnostics));
+        var pairArtifact = TrRmExecutableCompiler.EmitStandard(
+            pairCompilation.Program!, "pair-provider", schemaIdentity,
+            targetRequirement, [
+                new TrRmSourceTypeExport("Example", "Pair", "pair") {
+                    FieldExports = [
+                        new TrRmSourceFieldExport("Inner", "pair-inner"),
+                        new TrRmSourceFieldExport("Tag", "pair-tag"),
+                    ],
+                },
+            ]);
+
+        _ = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, pairArtifact),
+            "pair-provider", [
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    providerArtifact),
+            ], ["pair"], ["pair-inner", "pair-tag"]);
+
+        var relocatedCompatibleProvider = EmitCallbackProvider(true,
+            "fnptr<int32, int32>");
+        _ = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, pairArtifact),
+            "pair-provider", [
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    relocatedCompatibleProvider),
+            ], ["pair"], ["pair-inner", "pair-tag"]);
+
+        var incompatibleProvider = EmitCallbackProvider(true,
+            "fnptr<int64, int64>");
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, pairArtifact),
+                "pair-provider", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        incompatibleProvider),
+                ], ["pair"], ["pair-inner", "pair-tag"]));
+    }
+
+    [Test]
     public void StandardRegisteredLayoutQueryRoundTripsThroughFeature13Body()
     {
         const string schemaIdentity = "trrm/1-draft-layout-queries-1";

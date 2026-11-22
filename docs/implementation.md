@@ -845,8 +845,13 @@ validation also uses it after anchor construction. The full-artifact
 WitnessAssociatedConst duplicate-binding check likewise waits for validated
 anchors, rejecting distinct constructed interface instances whose nested
 function-pointer anchors have equivalent signatures and contracts.
-Producer/replacement identity, cross-module provider binding, other consumer
-routes and re-encoding/remapping remain open.
+Under the exact unapproved Terrum successor, Standard LayoutQueries source
+references now retain function-pointer field signatures through provider
+projection and composition. Provider replacement checks the complete anchor
+signature across TypeDef-row and anchor-MethodDef-row relocation; source,
+composition and replacement regressions are added but remain unverified under
+the active hold. Other consumer routes, NativeAddress eligibility, independent
+ABI support and broader re-encoding/remapping remain open.
 The Standard Contract reader also consumes the assigned 20-byte OutputState
 row, requiring Param mode `00`, a complete `ref<init T>` or `Span<init T>`
 type, and a phase-3 PredicateGraph attached to the same MethodDef. Its bounded
@@ -2467,6 +2472,13 @@ and Leaf path fields. Unselected fields, ambiguous equal-name types and
 conflicting provider snapshots reject. This is not broad
 provider-graph, replacement or re-emission support. The source projection
 remains nongeneric and requires Blittable scalar/inline-struct layout metadata.
+The exact unapproved Terrum function-pointer successor additionally projects
+function-pointer fields, remaps their complete scalar/pointer/inline-struct
+signature closure, and composes equivalent signatures while keeping different
+signatures distinct. Provider replacement covers compatible TypeDef/anchor
+row relocation and rejects a changed signature. These regressions remain
+unverified under the active hold; baseline LayoutQueries selection and
+ordinary field value access are unchanged.
 
 For source generic methods, mandatory verification now substitutes each
 closed local GenericCall's exact type and constant actuals into the owning
