@@ -1351,8 +1351,9 @@ correlated publication rules. PE-emission regressions cover reordered formals,
 slot 1, the high offset path and an imported aggregate view; they remain
 unverified under the active hold. Standard FNI Bodies now emit and source-free
 decode bounded receiver-first MethodMap CallSites for direct non-void return
-calls and direct void calls followed by void returns. Ordinary inputs may be
-read from caller parameters or scalar locals initialized from a direct
+calls, direct void calls followed by void returns, and ordered sequences of up
+to 13 void/no-output FNI calls. Ordinary inputs may be read from caller
+parameters or scalar locals initialized from a direct
 parameter read; direct non-void and void-call Bodies can also nest up to 13
 scalar-returning, no-output FNI CallSites as explicit inputs (12 when staged
 locals reserve register 1), plus scalar literal inputs through typed
