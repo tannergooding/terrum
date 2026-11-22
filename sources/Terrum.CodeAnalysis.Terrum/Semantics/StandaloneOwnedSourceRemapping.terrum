@@ -1,0 +1,1783 @@
+namespace Terrum.CodeAnalysis;
+
+public static int32 RewriteStandaloneOwnedCallNodes()
+{
+    if (Host.StandaloneRewriteStatus.Length != 1
+        || Host.StandaloneModuleCount.Length != 1
+        || !ValidateStandaloneSourceCallBuffers()
+        || !ValidateStandaloneNormalizationBuffers()
+        || !ValidateStandaloneRewriteBuffers())
+    {
+        return 3;
+    }
+
+    ClearStandaloneRewriteOutputs();
+    if (ValidateStandaloneMethodImportInput() != 0
+        || Host.StandaloneSourceProgramStatus[0] != 0
+        || Host.StandaloneNormalizedProgramStatus[0] != 0
+        || VerifyStandaloneDirectCalls() != 0
+        || !ValidateStandaloneRewriteMaps())
+    {
+        return FailStandaloneRewrite(3);
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneInvokeUseCounts.Length;
+        index = index + 1)
+    {
+        Host.StandaloneInvokeUseCounts[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneInvokeInputUseCounts.Length;
+        index = index + 1)
+    {
+        Host.StandaloneInvokeInputUseCounts[index] = 0;
+    }
+    if (VerifyStandaloneNormalizedProgram() != 0)
+    {
+        return FailStandaloneRewrite(3);
+    }
+
+    int32 moduleCount = Host.StandaloneModuleCount[0];
+    for (mut int32 oldModuleId = 0;
+        oldModuleId < moduleCount;
+        oldModuleId = oldModuleId + 1)
+    {
+        int32 newModuleId
+            = Host.StandaloneRewriteModuleIds[oldModuleId];
+        int32 sourceOffset = (oldModuleId + 1) * 8;
+        int32 targetOffset = (newModuleId + 1) * 8;
+        for (mut int32 field = 0; field < 8; field = field + 1)
+        {
+            Host.StandaloneRewrittenModuleDirectory[
+                targetOffset + field]
+                = Host.StandaloneModuleDirectory[
+                    sourceOffset + field];
+        }
+    }
+
+    int32 localCallableCount
+        = Host.StandaloneLocalCallableCount[0];
+    for (mut int32 oldLocalId = 0;
+        oldLocalId < localCallableCount;
+        oldLocalId = oldLocalId + 1)
+    {
+        int32 sourceOffset = oldLocalId * 3;
+        int32 newLocalId
+            = Host.StandaloneRewriteLocalCallableIds[oldLocalId];
+        int32 ownerModuleId
+            = Host.StandaloneLocalCallables[sourceOffset];
+        if (ownerModuleId < 0 || ownerModuleId >= moduleCount)
+        {
+            return FailStandaloneRewrite(3);
+        }
+        int32 targetOffset = newLocalId * 3;
+        Host.StandaloneRewrittenLocalCallables[targetOffset]
+            = Host.StandaloneRewriteModuleIds[ownerModuleId];
+        Host.StandaloneRewrittenLocalCallables[targetOffset + 1]
+            = Host.StandaloneRewriteCallableIds[
+                Host.StandaloneLocalCallables[sourceOffset + 1]];
+        Host.StandaloneRewrittenLocalCallables[targetOffset + 2]
+            = Host.StandaloneRewriteBodyIds[
+                Host.StandaloneLocalCallables[sourceOffset + 2]];
+    }
+
+    int32 importedCallableCount
+        = Host.StandaloneSourceImportedCallableCount[0];
+    for (mut int32 oldImportedId = 0;
+        oldImportedId < importedCallableCount;
+        oldImportedId = oldImportedId + 1)
+    {
+        int32 sourceOffset = oldImportedId * 8;
+        int32 newImportedId
+            = Host.StandaloneRewriteImportedCallableIds[oldImportedId];
+        int32 usingModuleId
+            = Host.StandaloneSourceImportedCallables[sourceOffset];
+        int32 providerModuleId
+            = Host.StandaloneSourceImportedCallables[
+                sourceOffset + 1];
+        int32 expectedCallableId
+            = Host.StandaloneSourceImportedCallables[
+                sourceOffset + 4];
+        if (usingModuleId < 0 || usingModuleId >= moduleCount
+            || providerModuleId < 0 || providerModuleId >= moduleCount
+            || expectedCallableId < 0
+            || expectedCallableId >= Host.StandaloneResolvedRootCount[0]
+            || expectedCallableId
+                >= Host.StandaloneRewriteCallableCount[0])
+        {
+            return FailStandaloneRewrite(3);
+        }
+        int32 rootOffset = expectedCallableId * 20;
+
+        int32 targetOffset = newImportedId * 8;
+        Host.StandaloneRewrittenImportedCallables[targetOffset]
+            = Host.StandaloneRewriteModuleIds[usingModuleId];
+        Host.StandaloneRewrittenImportedCallables[targetOffset + 1]
+            = Host.StandaloneRewriteModuleIds[providerModuleId];
+        Host.StandaloneRewrittenImportedCallables[targetOffset + 2]
+            = Host.StandaloneSourceImportedCallables[
+                sourceOffset + 2];
+        Host.StandaloneRewrittenImportedCallables[targetOffset + 3]
+            = Host.StandaloneSourceImportedCallables[
+                sourceOffset + 3];
+        Host.StandaloneRewrittenImportedCallables[targetOffset + 4]
+            = Host.StandaloneRewriteCallableIds[
+                expectedCallableId];
+        Host.StandaloneRewrittenCallableParameterCounts[
+            Host.StandaloneRewriteCallableIds[expectedCallableId]]
+            = int32(Host.StandaloneResolvedRoots[
+                rootOffset + 11]);
+        Host.StandaloneRewrittenImportedCallables[targetOffset + 5]
+            = Host.StandaloneSourceImportedCallables[
+                sourceOffset + 5];
+        Host.StandaloneRewrittenImportedCallables[targetOffset + 6]
+            = Host.StandaloneSourceImportedCallables[
+                sourceOffset + 6];
+        Host.StandaloneRewrittenImportedCallables[targetOffset + 7]
+            = Host.StandaloneSourceImportedCallables[
+                sourceOffset + 7];
+    }
+
+    int32 callableCount = Host.StandaloneRewriteCallableCount[0];
+    for (mut int32 oldCallableId = 0;
+        oldCallableId < callableCount;
+        oldCallableId = oldCallableId + 1)
+    {
+        int32 newCallableId
+            = Host.StandaloneRewriteCallableIds[oldCallableId];
+        int32 oldTypeId
+            = Host.StandaloneCallableTypeIds[oldCallableId];
+        if (oldTypeId <= 0
+            || oldTypeId > Host.StandaloneTypeFactCount[0])
+        {
+            return FailStandaloneRewrite(3);
+        }
+        Host.StandaloneRewrittenCallableTypeIds[newCallableId]
+            = Host.StandaloneRewriteTypeIds[oldTypeId];
+        Host.StandaloneRewrittenCallableEffects[newCallableId]
+            = Host.StandaloneCallableEffects[oldCallableId];
+    }
+
+    int32 typeCount = Host.StandaloneTypeFactCount[0];
+    for (mut int32 oldTypeId = 1;
+        oldTypeId <= typeCount;
+        oldTypeId = oldTypeId + 1)
+    {
+        int32 sourceOffset = oldTypeId * 3;
+        int32 targetOffset
+            = Host.StandaloneRewriteTypeIds[oldTypeId] * 3;
+        for (mut int32 field = 0; field < 3; field = field + 1)
+        {
+            Host.StandaloneRewrittenTypeFacts[targetOffset + field]
+                = Host.StandaloneTypeFacts[sourceOffset + field];
+        }
+    }
+
+    for (mut int32 parameterRow = 0;
+        parameterRow < Host.StandaloneParameterTypeIds.Length;
+        parameterRow = parameterRow + 1)
+    {
+        int32 typeId
+            = Host.StandaloneParameterTypeIds[parameterRow];
+        if (typeId < 0 || typeId > typeCount)
+        {
+            return FailStandaloneRewrite(3);
+        }
+        Host.StandaloneRewrittenParameterTypeIds[parameterRow]
+            = typeId == 0 ? 0
+                : Host.StandaloneRewriteTypeIds[typeId];
+    }
+
+    int32 sourceLocalCallableCount
+        = Host.StandaloneLocalCallableCount[0];
+    for (mut int32 oldLocalId = 0;
+        oldLocalId < sourceLocalCallableCount;
+        oldLocalId = oldLocalId + 1)
+    {
+        int32 newLocalId
+            = Host.StandaloneRewriteLocalCallableIds[oldLocalId];
+        int32 sourceOffset = oldLocalId * 12;
+        int32 targetOffset = newLocalId * 12;
+        for (mut int32 field = 0; field < 12; field = field + 1)
+        {
+            Host.StandaloneRewrittenSourceCallableInfo[
+                targetOffset + field]
+                = Host.StandaloneSourceCallableInfo[
+                    sourceOffset + field];
+        }
+        int32 resultTypeId
+            = Host.StandaloneSourceCallableInfo[sourceOffset + 4];
+        int32 oldBodyId
+            = Host.StandaloneSourceCallableInfo[sourceOffset + 7];
+        int32 expectedCallableId
+            = Host.StandaloneSourceCallableInfo[sourceOffset + 11];
+        if (resultTypeId <= 0 || resultTypeId > typeCount
+            || oldBodyId < 0
+            || oldBodyId >= Host.StandaloneSourceBodyCount[0]
+            || expectedCallableId < 0
+            || expectedCallableId >= callableCount)
+        {
+            return FailStandaloneRewrite(3);
+        }
+        Host.StandaloneRewrittenSourceCallableInfo[
+            targetOffset + 4]
+            = Host.StandaloneRewriteTypeIds[resultTypeId];
+        Host.StandaloneRewrittenSourceCallableInfo[
+            targetOffset + 7]
+            = Host.StandaloneRewriteLocalCallableIds[oldLocalId];
+        Host.StandaloneRewrittenSourceCallableInfo[
+            targetOffset + 11]
+            = Host.StandaloneRewriteCallableIds[
+                expectedCallableId];
+        Host.StandaloneRewrittenCallableParameterCounts[
+            Host.StandaloneRewriteCallableIds[expectedCallableId]]
+            = Host.StandaloneSourceCallableInfo[sourceOffset + 6];
+    }
+
+    int32 sourceParameterCount
+        = Host.StandaloneSourceParameterCount[0];
+    for (mut int32 parameterRow = 0;
+        parameterRow < sourceParameterCount;
+        parameterRow = parameterRow + 1)
+    {
+        int32 sourceOffset = parameterRow * 4;
+        int32 bodyId
+            = Host.StandaloneSourceParameters[sourceOffset];
+        int32 typeId
+            = Host.StandaloneSourceParameters[sourceOffset + 1];
+        if (bodyId < 0 || bodyId >= sourceLocalCallableCount
+            || typeId <= 0 || typeId > typeCount)
+        {
+            return FailStandaloneRewrite(3);
+        }
+        int32 targetOffset = parameterRow * 4;
+        Host.StandaloneRewrittenSourceParameters[targetOffset]
+            = Host.StandaloneRewriteLocalCallableIds[bodyId];
+        Host.StandaloneRewrittenSourceParameters[targetOffset + 1]
+            = Host.StandaloneRewriteTypeIds[typeId];
+        Host.StandaloneRewrittenSourceParameters[targetOffset + 2]
+            = Host.StandaloneSourceParameters[sourceOffset + 2];
+        Host.StandaloneRewrittenSourceParameters[targetOffset + 3]
+            = Host.StandaloneSourceParameters[sourceOffset + 3];
+    }
+
+    int32 bodyCount = Host.StandaloneSourceBodyCount[0];
+    for (mut int32 oldBodyId = 0;
+        oldBodyId < bodyCount;
+        oldBodyId = oldBodyId + 1)
+    {
+        int32 newBodyId
+            = Host.StandaloneRewriteBodyIds[oldBodyId];
+        int32 sourceOffset = oldBodyId * 12;
+        int32 targetOffset = newBodyId * 12;
+        for (mut int32 field = 0; field < 12; field = field + 1)
+        {
+            Host.StandaloneRewrittenSourceBodies[
+                targetOffset + field]
+                = Host.StandaloneSourceBodies[sourceOffset + field];
+        }
+        Host.StandaloneRewrittenSourceBodies[targetOffset]
+            = newBodyId;
+        int32 callFirst
+            = Host.StandaloneSourceBodies[sourceOffset + 5];
+        int32 callCount
+            = Host.StandaloneSourceBodies[sourceOffset + 6];
+        for (mut int32 callLocal = 0;
+            callLocal < callCount;
+            callLocal = callLocal + 1)
+        {
+            Host.StandaloneRewrittenDirectCallBodyIds[
+                callFirst + callLocal] = newBodyId;
+        }
+    }
+
+    int32 expressionCount
+        = Host.StandaloneSourceExpressionCount[0];
+    for (mut int32 oldBodyId = 0;
+        oldBodyId < bodyCount;
+        oldBodyId = oldBodyId + 1)
+    {
+        int32 bodyOffset = oldBodyId * 12;
+        int32 expressionFirst
+            = Host.StandaloneSourceBodies[bodyOffset + 3];
+        int32 bodyExpressionCount
+            = Host.StandaloneSourceBodies[bodyOffset + 4];
+        int32 newBodyId
+            = Host.StandaloneRewriteBodyIds[oldBodyId];
+        for (mut int32 expressionLocal = 0;
+            expressionLocal < bodyExpressionCount;
+            expressionLocal = expressionLocal + 1)
+        {
+            int32 oldExpressionId
+                = expressionFirst + expressionLocal;
+            int32 newExpressionId
+                = Host.StandaloneRewriteExpressionIds[
+                    oldExpressionId];
+            int32 sourceOffset = oldExpressionId * 8;
+            int32 targetOffset = newExpressionId * 8;
+            for (mut int32 field = 0; field < 8; field = field + 1)
+            {
+                Host.StandaloneRewrittenSourceExpressions[
+                    targetOffset + field]
+                    = Host.StandaloneSourceExpressions[
+                        sourceOffset + field];
+            }
+            int32 typeId
+                = Host.StandaloneSourceExpressions[
+                    sourceOffset + 1];
+            if (typeId <= 0 || typeId > typeCount)
+            {
+                return FailStandaloneRewrite(3);
+            }
+            Host.StandaloneRewrittenSourceExpressions[
+                targetOffset + 1]
+                = Host.StandaloneRewriteTypeIds[typeId];
+            Host.StandaloneRewrittenSourceExpressions[
+                targetOffset + 7] = newBodyId;
+        }
+    }
+
+    int32 directCallCount
+        = Host.StandaloneSourceDirectCallCount[0];
+    for (mut int32 callIndex = 0;
+        callIndex < directCallCount;
+        callIndex = callIndex + 1)
+    {
+        int32 sourceOffset = callIndex * 7;
+        int32 targetKind
+            = Host.StandaloneSourceDirectCalls[sourceOffset];
+        int32 targetIndex
+            = Host.StandaloneSourceDirectCalls[sourceOffset + 1];
+        int32 expectedCallableId
+            = Host.StandaloneSourceDirectCalls[sourceOffset + 2];
+        int32 resultTypeId
+            = Host.StandaloneSourceDirectCalls[sourceOffset + 3];
+        init int32 rewrittenTargetIndex;
+        int32 targetStatus = RewriteStandaloneCallableTarget(
+            targetKind, targetIndex, expectedCallableId,
+            ref init rewrittenTargetIndex);
+        if (targetStatus != 0
+            || resultTypeId <= 0 || resultTypeId > typeCount)
+        {
+            return FailStandaloneRewrite(targetStatus == 0
+                ? 3 : targetStatus);
+        }
+        int32 targetOffset = callIndex * 7;
+        for (mut int32 field = 0; field < 7; field = field + 1)
+        {
+            Host.StandaloneRewrittenSourceDirectCalls[
+                targetOffset + field]
+                = Host.StandaloneSourceDirectCalls[
+                    sourceOffset + field];
+        }
+        Host.StandaloneRewrittenSourceDirectCalls[
+            targetOffset] = targetKind;
+        Host.StandaloneRewrittenSourceDirectCalls[
+            targetOffset + 1] = rewrittenTargetIndex;
+        Host.StandaloneRewrittenSourceDirectCalls[
+            targetOffset + 2]
+            = Host.StandaloneRewriteCallableIds[
+                expectedCallableId];
+        Host.StandaloneRewrittenSourceDirectCalls[
+            targetOffset + 3]
+            = Host.StandaloneRewriteTypeIds[resultTypeId];
+    }
+    for (mut int32 callIndex = 0;
+        callIndex < directCallCount;
+        callIndex = callIndex + 1)
+    {
+        Host.StandaloneRewrittenDirectCallInvokeMap[callIndex]
+            = Host.StandaloneDirectCallInvokeMap[callIndex];
+        Host.StandaloneRewrittenDirectCallTraversal[callIndex]
+            = Host.StandaloneDirectCallTraversal[callIndex];
+    }
+    Host.StandaloneRewrittenDirectCallTraversalCount[0]
+        = Host.StandaloneDirectCallTraversalCount[0];
+
+    int32 argumentCount
+        = Host.StandaloneSourceCallArgumentCount[0];
+    for (mut int32 argumentIndex = 0;
+        argumentIndex < argumentCount;
+        argumentIndex = argumentIndex + 1)
+    {
+        int32 sourceOffset = argumentIndex * 3;
+        int32 expressionId
+            = Host.StandaloneSourceCallArguments[sourceOffset];
+        int32 parameterOrdinal
+            = Host.StandaloneSourceCallArguments[
+                sourceOffset + 1];
+        int32 sourceUse
+            = Host.StandaloneSourceCallArguments[
+                sourceOffset + 2];
+        int32 ownerBody = -1;
+        int32 expressionFirst = -1;
+        for (mut int32 bodyId = 0;
+            bodyId < bodyCount;
+            bodyId = bodyId + 1)
+        {
+            int32 bodyOffset = bodyId * 12;
+            int32 first = Host.StandaloneSourceBodies[
+                bodyOffset + 7];
+            int32 count = Host.StandaloneSourceBodies[
+                bodyOffset + 8];
+            if (argumentIndex >= first
+                && argumentIndex < first + count)
+            {
+                ownerBody = bodyId;
+                expressionFirst = Host.StandaloneSourceBodies[
+                    bodyOffset + 3];
+                break;
+            }
+        }
+        if (ownerBody < 0 || expressionId < 0
+            || expressionId
+                >= Host.StandaloneSourceBodies[
+                    ownerBody * 12 + 4])
+        {
+            return FailStandaloneRewrite(3);
+        }
+        int32 oldExpressionId = expressionFirst + expressionId;
+        int32 newExpressionId
+            = Host.StandaloneRewriteExpressionIds[oldExpressionId];
+        int32 newExpressionFirst
+            = Host.StandaloneRewrittenSourceBodies[
+                Host.StandaloneRewriteBodyIds[ownerBody] * 12 + 3];
+        int32 newLocalExpression = newExpressionId
+            - newExpressionFirst;
+        if (newLocalExpression < 0
+            || newLocalExpression
+                >= Host.StandaloneRewrittenSourceBodies[
+                    Host.StandaloneRewriteBodyIds[ownerBody] * 12 + 4])
+        {
+            return FailStandaloneRewrite(3);
+        }
+        int32 targetOffset = argumentIndex * 3;
+        Host.StandaloneRewrittenSourceCallArguments[
+            targetOffset] = newLocalExpression;
+        Host.StandaloneRewrittenSourceCallArguments[
+            targetOffset + 1] = parameterOrdinal;
+        Host.StandaloneRewrittenSourceCallArguments[
+            targetOffset + 2] = sourceUse;
+    }
+
+    int32 statementCount
+        = Host.StandaloneSourceStatementCount[0];
+    for (mut int32 statementIndex = 0;
+        statementIndex < statementCount;
+        statementIndex = statementIndex + 1)
+    {
+        int32 ownerBody = -1;
+        int32 expressionFirst = -1;
+        int32 bodyStatementFirst = -1;
+        for (mut int32 bodyId = 0;
+            bodyId < bodyCount;
+            bodyId = bodyId + 1)
+        {
+            int32 bodyOffset = bodyId * 12;
+            int32 first = Host.StandaloneSourceBodies[
+                bodyOffset + 9];
+            int32 count = Host.StandaloneSourceBodies[
+                bodyOffset + 10];
+            if (statementIndex >= first
+                && statementIndex < first + count)
+            {
+                ownerBody = bodyId;
+                expressionFirst = Host.StandaloneSourceBodies[
+                    bodyOffset + 3];
+                bodyStatementFirst = first;
+                break;
+            }
+        }
+        if (ownerBody < 0 || bodyStatementFirst < 0)
+        {
+            return FailStandaloneRewrite(3);
+        }
+        int32 sourceOffset = statementIndex * 3;
+        int32 targetOffset = statementIndex * 3;
+        for (mut int32 field = 0; field < 3; field = field + 1)
+        {
+            Host.StandaloneRewrittenSourceStatements[
+                targetOffset + field]
+                = Host.StandaloneSourceStatements[
+                    sourceOffset + field];
+        }
+        int32 expressionId
+            = Host.StandaloneSourceStatements[sourceOffset + 1];
+        if (expressionId >= 0)
+        {
+            if (expressionId
+                >= Host.StandaloneSourceBodies[
+                    ownerBody * 12 + 4])
+            {
+                return FailStandaloneRewrite(3);
+            }
+            int32 oldExpressionId = expressionFirst + expressionId;
+            int32 newExpressionId
+                = Host.StandaloneRewriteExpressionIds[
+                    oldExpressionId];
+            int32 newExpressionFirst
+                = Host.StandaloneRewrittenSourceBodies[
+                    Host.StandaloneRewriteBodyIds[
+                        ownerBody] * 12 + 3];
+            Host.StandaloneRewrittenSourceStatements[
+                targetOffset + 1]
+                = newExpressionId - newExpressionFirst;
+        }
+    }
+
+    for (mut int32 oldBodyId = 0;
+        oldBodyId < bodyCount;
+        oldBodyId = oldBodyId + 1)
+    {
+        int32 newBodyId
+            = Host.StandaloneRewriteBodyIds[oldBodyId];
+        int32 sourceOffset = oldBodyId * 12;
+        int32 targetOffset = newBodyId * 12;
+        for (mut int32 field = 0; field < 12; field = field + 1)
+        {
+            Host.StandaloneRewrittenNormalizedBodies[
+                targetOffset + field]
+                = Host.StandaloneNormalizedBodies[
+                    sourceOffset + field];
+        }
+        Host.StandaloneRewrittenNormalizedBodies[
+            targetOffset] = newBodyId;
+    }
+
+    for (mut int32 homeIndex = 0;
+        homeIndex < Host.StandaloneNormalizedHomeCount[0];
+        homeIndex = homeIndex + 1)
+    {
+        int32 sourceOffset = homeIndex * 5;
+        int32 targetOffset = homeIndex * 5;
+        for (mut int32 field = 0; field < 5; field = field + 1)
+        {
+            Host.StandaloneRewrittenNormalizedHomes[
+                targetOffset + field]
+                = Host.StandaloneNormalizedHomes[
+                    sourceOffset + field];
+        }
+        int32 oldBodyId
+            = Host.StandaloneNormalizedHomes[sourceOffset];
+        int32 typeId
+            = Host.StandaloneNormalizedHomes[sourceOffset + 3];
+        if (oldBodyId < 0 || oldBodyId >= bodyCount
+            || typeId <= 0 || typeId > typeCount)
+        {
+            return FailStandaloneRewrite(3);
+        }
+        Host.StandaloneRewrittenNormalizedHomes[
+            targetOffset] = Host.StandaloneRewriteBodyIds[oldBodyId];
+        Host.StandaloneRewrittenNormalizedHomes[
+            targetOffset + 3] = Host.StandaloneRewriteTypeIds[typeId];
+    }
+
+    for (mut int32 constantIndex = 0;
+        constantIndex < Host.StandaloneNormalizedConstantCount[0];
+        constantIndex = constantIndex + 1)
+    {
+        int32 sourceOffset = constantIndex * 4;
+        int32 targetOffset = constantIndex * 4;
+        int32 bodyId
+            = Host.StandaloneNormalizedConstants[sourceOffset];
+        int32 typeId
+            = Host.StandaloneNormalizedConstants[sourceOffset + 1];
+        if (bodyId < 0 || bodyId >= bodyCount
+            || typeId <= 0 || typeId > typeCount)
+        {
+            return FailStandaloneRewrite(3);
+        }
+        Host.StandaloneRewrittenNormalizedConstants[
+            targetOffset] = Host.StandaloneRewriteBodyIds[bodyId];
+        Host.StandaloneRewrittenNormalizedConstants[
+            targetOffset + 1]
+            = Host.StandaloneRewriteTypeIds[typeId];
+        Host.StandaloneRewrittenNormalizedConstants[
+            targetOffset + 2]
+            = Host.StandaloneNormalizedConstants[sourceOffset + 2];
+        Host.StandaloneRewrittenNormalizedConstants[
+            targetOffset + 3]
+            = Host.StandaloneNormalizedConstants[sourceOffset + 3];
+    }
+
+    int32 invokeCount = Host.StandaloneInvokeCount[0];
+    for (mut int32 invokeIndex = 0;
+        invokeIndex < invokeCount;
+        invokeIndex = invokeIndex + 1)
+    {
+        int32 sourceOffset = invokeIndex * 10;
+        int32 targetKind
+            = Host.StandaloneInvokes[sourceOffset];
+        int32 targetIndex
+            = Host.StandaloneInvokes[sourceOffset + 1];
+        int32 expectedCallableId
+            = Host.StandaloneInvokes[sourceOffset + 2];
+        init int32 rewrittenTargetIndex;
+        int32 targetStatus = RewriteStandaloneCallableTarget(
+            targetKind, targetIndex, expectedCallableId,
+            ref init rewrittenTargetIndex);
+        if (targetStatus != 0)
+        {
+            return FailStandaloneRewrite(targetStatus);
+        }
+        int32 targetOffset = invokeIndex * 10;
+        for (mut int32 field = 0; field < 10; field = field + 1)
+        {
+            Host.StandaloneRewrittenInvokes[targetOffset + field]
+                = Host.StandaloneInvokes[sourceOffset + field];
+        }
+        Host.StandaloneRewrittenInvokes[targetOffset]
+            = targetKind;
+        Host.StandaloneRewrittenInvokes[targetOffset + 1]
+            = rewrittenTargetIndex;
+        Host.StandaloneRewrittenInvokes[targetOffset + 2]
+            = Host.StandaloneRewriteCallableIds[
+                expectedCallableId];
+    }
+    for (mut int32 inputIndex = 0;
+        inputIndex < Host.StandaloneInvokeInputCount[0];
+        inputIndex = inputIndex + 1)
+    {
+        int32 offset = inputIndex * 3;
+        Host.StandaloneRewrittenInvokeInputs[offset]
+            = Host.StandaloneInvokeInputs[offset];
+        Host.StandaloneRewrittenInvokeInputs[offset + 1]
+            = Host.StandaloneInvokeInputs[offset + 1];
+        Host.StandaloneRewrittenInvokeInputs[offset + 2]
+            = Host.StandaloneInvokeInputs[offset + 2];
+    }
+
+    for (mut int32 operationIndex = 0;
+        operationIndex
+            < Host.StandaloneNormalizedOperationCount[0];
+        operationIndex = operationIndex + 1)
+    {
+        int32 sourceOffset = operationIndex * 4;
+        int32 targetOffset = operationIndex * 4;
+        int32 bodyId
+            = Host.StandaloneNormalizedOperations[sourceOffset + 3];
+        if (bodyId < 0 || bodyId >= bodyCount)
+        {
+            return FailStandaloneRewrite(3);
+        }
+        for (mut int32 field = 0; field < 4; field = field + 1)
+        {
+            Host.StandaloneRewrittenNormalizedOperations[
+                targetOffset + field]
+                = Host.StandaloneNormalizedOperations[
+                    sourceOffset + field];
+        }
+        Host.StandaloneRewrittenNormalizedOperations[
+            targetOffset + 3]
+            = Host.StandaloneRewriteBodyIds[bodyId];
+    }
+
+    Host.StandaloneRewrittenModuleCount[0] = moduleCount;
+    Host.StandaloneRewrittenLocalCallableCount[0]
+        = localCallableCount;
+    Host.StandaloneRewrittenImportedCallableCount[0]
+        = importedCallableCount;
+    Host.StandaloneRewrittenCallableCount[0] = callableCount;
+    Host.StandaloneRewrittenTypeFactCount[0] = typeCount;
+    Host.StandaloneRewrittenParameterTypeCount[0]
+        = Host.StandaloneParameterTypeIds.Length;
+    Host.StandaloneRewrittenSourceBodyCount[0] = bodyCount;
+    Host.StandaloneRewrittenNormalizedBodyCount[0] = bodyCount;
+    Host.StandaloneRewrittenSourceParameterCount[0]
+        = Host.StandaloneSourceParameterCount[0];
+    Host.StandaloneRewrittenSourceExpressionCount[0]
+        = expressionCount;
+    Host.StandaloneRewrittenSourceStatementCount[0]
+        = Host.StandaloneSourceStatementCount[0];
+    Host.StandaloneRewrittenSourceDirectCallCount[0]
+        = Host.StandaloneSourceDirectCallCount[0];
+    Host.StandaloneRewrittenSourceCallArgumentCount[0]
+        = Host.StandaloneSourceCallArgumentCount[0];
+    Host.StandaloneRewrittenNormalizedHomeCount[0]
+        = Host.StandaloneNormalizedHomeCount[0];
+    Host.StandaloneRewrittenNormalizedConstantCount[0]
+        = Host.StandaloneNormalizedConstantCount[0];
+    Host.StandaloneRewrittenInvokeCount[0] = invokeCount;
+    Host.StandaloneRewrittenInvokeInputCount[0]
+        = Host.StandaloneInvokeInputCount[0];
+    Host.StandaloneRewrittenNormalizedOperationCount[0]
+        = Host.StandaloneNormalizedOperationCount[0];
+
+    int32 verificationStatus = VerifyStandaloneRewrittenCallNodes();
+    if (verificationStatus != 0)
+    {
+        return FailStandaloneRewrite(verificationStatus);
+    }
+    Host.StandaloneRewriteStatus[0] = 0;
+    return 0;
+}
+
+bool ValidateStandaloneRewriteBuffers()
+{
+    return Host.StandaloneRewriteCallableCount.Length == 1
+        && Host.StandaloneRewriteModuleIds.Length
+            == Host.StandaloneModuleDirectory.Length / 8
+        && Host.StandaloneRewriteLocalCallableIds.Length
+            == Host.StandaloneLocalCallables.Length / 3
+        && Host.StandaloneRewriteImportedCallableIds.Length
+            == Host.StandaloneSourceImportedCallables.Length / 8
+        && Host.StandaloneRewriteCallableIds.Length
+            == Host.StandaloneCallableTypeIds.Length
+        && Host.StandaloneRewriteTypeIds.Length
+            == Host.StandaloneTypeFacts.Length / 3 + 1
+        && Host.StandaloneRewriteBodyIds.Length
+            == Host.StandaloneSourceBodies.Length / 12
+        && Host.StandaloneRewriteExpressionIds.Length
+            == Host.StandaloneSourceExpressions.Length / 8
+        && Host.StandaloneRewriteMapSeen.Length >=
+            Host.StandaloneRewriteTypeIds.Length
+        && Host.StandaloneRewrittenModuleDirectory.Length
+            == Host.StandaloneModuleDirectory.Length
+        && Host.StandaloneRewrittenLocalCallables.Length
+            == Host.StandaloneLocalCallables.Length
+        && Host.StandaloneRewrittenImportedCallables.Length
+            == Host.StandaloneSourceImportedCallables.Length
+        && Host.StandaloneRewrittenCallableTypeIds.Length
+            == Host.StandaloneCallableTypeIds.Length
+        && Host.StandaloneRewrittenCallableEffects.Length
+            == Host.StandaloneCallableEffects.Length
+        && Host.StandaloneRewrittenCallableParameterCounts.Length
+            == Host.StandaloneCallableEffects.Length
+        && Host.StandaloneRewrittenTypeFacts.Length
+            == Host.StandaloneTypeFacts.Length
+        && Host.StandaloneRewrittenParameterTypeIds.Length
+            == Host.StandaloneParameterTypeIds.Length
+        && Host.StandaloneRewrittenSourceCallableInfo.Length
+            == Host.StandaloneSourceCallableInfo.Length
+        && Host.StandaloneRewrittenSourceParameters.Length
+            == Host.StandaloneSourceParameters.Length
+        && Host.StandaloneRewrittenSourceBodies.Length
+            == Host.StandaloneSourceBodies.Length
+        && Host.StandaloneRewrittenSourceExpressions.Length
+            == Host.StandaloneSourceExpressions.Length
+        && Host.StandaloneRewrittenSourceStatements.Length
+            == Host.StandaloneSourceStatements.Length
+        && Host.StandaloneRewrittenSourceDirectCalls.Length
+            == Host.StandaloneSourceDirectCalls.Length
+        && Host.StandaloneRewrittenSourceCallArguments.Length
+            == Host.StandaloneSourceCallArguments.Length
+        && Host.StandaloneRewrittenDirectCallInvokeMap.Length
+            == Host.StandaloneDirectCallInvokeMap.Length
+        && Host.StandaloneRewrittenDirectCallBodyIds.Length
+            == Host.StandaloneDirectCallInvokeMap.Length
+        && Host.StandaloneRewrittenDirectCallTraversalCount.Length == 1
+        && Host.StandaloneRewrittenDirectCallTraversal.Length
+            == Host.StandaloneDirectCallTraversal.Length
+        && Host.StandaloneRewrittenNormalizedBodies.Length
+            == Host.StandaloneNormalizedBodies.Length
+        && Host.StandaloneRewrittenNormalizedHomes.Length
+            == Host.StandaloneNormalizedHomes.Length
+        && Host.StandaloneRewrittenNormalizedConstants.Length
+            == Host.StandaloneNormalizedConstants.Length
+        && Host.StandaloneRewrittenInvokes.Length
+            == Host.StandaloneInvokes.Length
+        && Host.StandaloneRewrittenInvokeInputs.Length
+            == Host.StandaloneInvokeInputs.Length
+        && Host.StandaloneRewrittenNormalizedOperations.Length
+            == Host.StandaloneNormalizedOperations.Length
+        && Host.StandaloneRewrittenSourceBodyCount.Length == 1
+        && Host.StandaloneRewrittenNormalizedBodyCount.Length == 1
+        && Host.StandaloneRewrittenDirectCallTraversalCount.Length == 1
+        && Host.StandaloneRewrittenModuleCount.Length == 1
+        && Host.StandaloneRewrittenLocalCallableCount.Length == 1
+        && Host.StandaloneRewrittenImportedCallableCount.Length == 1
+        && Host.StandaloneRewrittenCallableCount.Length == 1
+        && Host.StandaloneRewrittenTypeFactCount.Length == 1
+        && Host.StandaloneRewrittenParameterTypeCount.Length == 1
+        && Host.StandaloneRewrittenSourceParameterCount.Length == 1
+        && Host.StandaloneRewrittenSourceExpressionCount.Length == 1
+        && Host.StandaloneRewrittenSourceStatementCount.Length == 1
+        && Host.StandaloneRewrittenSourceDirectCallCount.Length == 1
+        && Host.StandaloneRewrittenSourceCallArgumentCount.Length == 1
+        && Host.StandaloneRewrittenNormalizedHomeCount.Length == 1
+        && Host.StandaloneRewrittenNormalizedConstantCount.Length == 1
+        && Host.StandaloneRewrittenInvokeCount.Length == 1
+        && Host.StandaloneRewrittenInvokeInputCount.Length == 1
+        && Host.StandaloneRewrittenNormalizedOperationCount.Length == 1;
+}
+
+void ClearStandaloneRewriteOutputs()
+{
+    Host.StandaloneRewriteStatus[0] = 0;
+    Host.StandaloneRewrittenSourceBodyCount[0] = 0;
+    Host.StandaloneRewrittenNormalizedBodyCount[0] = 0;
+    Host.StandaloneRewrittenModuleCount[0] = 0;
+    Host.StandaloneRewrittenLocalCallableCount[0] = 0;
+    Host.StandaloneRewrittenImportedCallableCount[0] = 0;
+    Host.StandaloneRewrittenCallableCount[0] = 0;
+    Host.StandaloneRewrittenTypeFactCount[0] = 0;
+    Host.StandaloneRewrittenParameterTypeCount[0] = 0;
+    Host.StandaloneRewrittenSourceParameterCount[0] = 0;
+    Host.StandaloneRewrittenSourceExpressionCount[0] = 0;
+    Host.StandaloneRewrittenSourceStatementCount[0] = 0;
+    Host.StandaloneRewrittenSourceDirectCallCount[0] = 0;
+    Host.StandaloneRewrittenSourceCallArgumentCount[0] = 0;
+    Host.StandaloneRewrittenNormalizedHomeCount[0] = 0;
+    Host.StandaloneRewrittenNormalizedConstantCount[0] = 0;
+    Host.StandaloneRewrittenInvokeCount[0] = 0;
+    Host.StandaloneRewrittenInvokeInputCount[0] = 0;
+    Host.StandaloneRewrittenNormalizedOperationCount[0] = 0;
+    Host.StandaloneRewrittenDirectCallTraversalCount[0] = 0;
+    for (mut int32 index = 0;
+        index < Host.StandaloneRewrittenModuleDirectory.Length;
+        index = index + 1)
+    {
+        Host.StandaloneRewrittenModuleDirectory[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneRewrittenLocalCallables.Length;
+        index = index + 1)
+    {
+        Host.StandaloneRewrittenLocalCallables[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneRewrittenImportedCallables.Length;
+        index = index + 1)
+    {
+        Host.StandaloneRewrittenImportedCallables[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneRewrittenCallableTypeIds.Length;
+        index = index + 1)
+    {
+        Host.StandaloneRewrittenCallableTypeIds[index] = 0;
+        Host.StandaloneRewrittenCallableEffects[index] = 0;
+        Host.StandaloneRewrittenCallableParameterCounts[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneRewrittenTypeFacts.Length;
+        index = index + 1)
+    {
+        Host.StandaloneRewrittenTypeFacts[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneRewrittenParameterTypeIds.Length;
+        index = index + 1)
+    {
+        Host.StandaloneRewrittenParameterTypeIds[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneRewrittenSourceCallableInfo.Length;
+        index = index + 1)
+    {
+        Host.StandaloneRewrittenSourceCallableInfo[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneRewrittenSourceParameters.Length;
+        index = index + 1)
+    {
+        Host.StandaloneRewrittenSourceParameters[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneRewrittenSourceBodies.Length;
+        index = index + 1)
+    {
+        Host.StandaloneRewrittenSourceBodies[index] = 0;
+        Host.StandaloneRewrittenNormalizedBodies[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneRewrittenSourceExpressions.Length;
+        index = index + 1)
+    {
+        Host.StandaloneRewrittenSourceExpressions[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneRewrittenSourceStatements.Length;
+        index = index + 1)
+    {
+        Host.StandaloneRewrittenSourceStatements[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneRewrittenSourceDirectCalls.Length;
+        index = index + 1)
+    {
+        Host.StandaloneRewrittenSourceDirectCalls[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneRewrittenSourceCallArguments.Length;
+        index = index + 1)
+    {
+        Host.StandaloneRewrittenSourceCallArguments[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneRewrittenDirectCallInvokeMap.Length;
+        index = index + 1)
+    {
+        Host.StandaloneRewrittenDirectCallInvokeMap[index] = -1;
+        Host.StandaloneRewrittenDirectCallBodyIds[index] = -1;
+    }
+    Host.StandaloneRewrittenDirectCallTraversalCount[0] = 0;
+    for (mut int32 index = 0;
+        index < Host.StandaloneRewrittenDirectCallTraversal.Length;
+        index = index + 1)
+    {
+        Host.StandaloneRewrittenDirectCallTraversal[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneRewrittenNormalizedHomes.Length;
+        index = index + 1)
+    {
+        Host.StandaloneRewrittenNormalizedHomes[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneRewrittenNormalizedConstants.Length;
+        index = index + 1)
+    {
+        Host.StandaloneRewrittenNormalizedConstants[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneRewrittenInvokes.Length;
+        index = index + 1)
+    {
+        Host.StandaloneRewrittenInvokes[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneRewrittenInvokeInputs.Length;
+        index = index + 1)
+    {
+        Host.StandaloneRewrittenInvokeInputs[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneRewrittenNormalizedOperations.Length;
+        index = index + 1)
+    {
+        Host.StandaloneRewrittenNormalizedOperations[index] = 0;
+    }
+}
+
+int32 FailStandaloneRewrite(int32 status)
+{
+    ClearStandaloneRewriteOutputs();
+    Host.StandaloneRewriteStatus[0] = status;
+    return status;
+}
+
+bool ValidateStandaloneRewriteMaps()
+{
+    int32 moduleCount = Host.StandaloneModuleCount[0];
+    int32 localCallableCount
+        = Host.StandaloneLocalCallableCount[0];
+    int32 importedCallableCount
+        = Host.StandaloneSourceImportedCallableCount[0];
+    int32 callableCount = Host.StandaloneRewriteCallableCount[0];
+    int32 typeCount = Host.StandaloneTypeFactCount[0];
+    int32 bodyCount = Host.StandaloneSourceBodyCount[0];
+    int32 expressionCount
+        = Host.StandaloneSourceExpressionCount[0];
+    if (moduleCount < 0
+        || moduleCount >= Host.StandaloneRewriteModuleIds.Length
+        || localCallableCount < 0
+        || localCallableCount
+            > Host.StandaloneRewriteLocalCallableIds.Length
+        || importedCallableCount < 0
+        || importedCallableCount
+            > Host.StandaloneRewriteImportedCallableIds.Length
+        || callableCount <= 0
+        || callableCount > Host.StandaloneRewriteCallableIds.Length
+        || typeCount < 0
+        || typeCount + 1 > Host.StandaloneRewriteTypeIds.Length
+        || bodyCount < 0
+        || bodyCount > Host.StandaloneRewriteBodyIds.Length
+        || expressionCount < 0
+        || expressionCount > Host.StandaloneRewriteExpressionIds.Length)
+    {
+        return false;
+    }
+    if (!IsStandaloneRewritePermutation(0, moduleCount)
+        || !IsStandaloneRewritePermutation(1, localCallableCount)
+        || !IsStandaloneRewritePermutation(2, importedCallableCount)
+        || !IsStandaloneRewritePermutation(3, callableCount)
+        || !IsStandaloneRewriteTypePermutation(typeCount)
+        || !IsStandaloneRewritePermutation(5, bodyCount))
+    {
+        return false;
+    }
+
+    for (mut int32 bodyId = 0;
+        bodyId < bodyCount;
+        bodyId = bodyId + 1)
+    {
+        int32 bodyOffset = bodyId * 12;
+        int32 expressionFirst
+            = Host.StandaloneSourceBodies[bodyOffset + 3];
+        int32 bodyExpressionCount
+            = Host.StandaloneSourceBodies[bodyOffset + 4];
+        if (expressionFirst < 0 || bodyExpressionCount < 0
+            || expressionFirst > expressionCount - bodyExpressionCount)
+        {
+            return false;
+        }
+        for (mut int32 localExpression = 0;
+            localExpression < bodyExpressionCount;
+            localExpression = localExpression + 1)
+        {
+            int32 oldExpressionId = expressionFirst + localExpression;
+            int32 newExpressionId
+                = Host.StandaloneRewriteExpressionIds[
+                    oldExpressionId];
+            if (newExpressionId < expressionFirst
+                || newExpressionId
+                    >= expressionFirst + bodyExpressionCount)
+            {
+                return false;
+            }
+        }
+        if (!IsStandaloneRewriteExpressionPermutation(
+                expressionFirst, bodyExpressionCount))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool IsStandaloneRewritePermutation(int32 mapKind, int32 count)
+{
+    if (count < 0 || count > Host.StandaloneRewriteMapSeen.Length)
+    {
+        return false;
+    }
+    for (mut int32 index = 0;
+        index < count;
+        index = index + 1)
+    {
+        Host.StandaloneRewriteMapSeen[index] = 0;
+    }
+    for (mut int32 oldId = 0;
+        oldId < count;
+        oldId = oldId + 1)
+    {
+        init int32 newId;
+        if (mapKind == 0)
+        {
+            newId = Host.StandaloneRewriteModuleIds[oldId];
+        }
+        else if (mapKind == 1)
+        {
+            newId
+                = Host.StandaloneRewriteLocalCallableIds[oldId];
+        }
+        else if (mapKind == 2)
+        {
+            newId
+                = Host.StandaloneRewriteImportedCallableIds[oldId];
+        }
+        else if (mapKind == 3)
+        {
+            newId = Host.StandaloneRewriteCallableIds[oldId];
+        }
+        else if (mapKind == 5)
+        {
+            newId = Host.StandaloneRewriteBodyIds[oldId];
+        }
+        else
+        {
+            return false;
+        }
+        if (newId < 0 || newId >= count
+            || Host.StandaloneRewriteMapSeen[newId] != 0)
+        {
+            return false;
+        }
+        Host.StandaloneRewriteMapSeen[newId] = 1;
+    }
+    return true;
+}
+
+bool IsStandaloneRewriteTypePermutation(int32 typeCount)
+{
+    if (typeCount < 0
+        || typeCount >= Host.StandaloneRewriteMapSeen.Length
+        || Host.StandaloneRewriteTypeIds[0] != 0)
+    {
+        return false;
+    }
+    for (mut int32 index = 0;
+        index < typeCount;
+        index = index + 1)
+    {
+        Host.StandaloneRewriteMapSeen[index] = 0;
+    }
+    for (mut int32 oldTypeId = 1;
+        oldTypeId <= typeCount;
+        oldTypeId = oldTypeId + 1)
+    {
+        int32 newTypeId
+            = Host.StandaloneRewriteTypeIds[oldTypeId];
+        if (newTypeId <= 0 || newTypeId > typeCount
+            || Host.StandaloneRewriteMapSeen[
+                newTypeId - 1] != 0)
+        {
+            return false;
+        }
+        Host.StandaloneRewriteMapSeen[newTypeId - 1] = 1;
+    }
+    return true;
+}
+
+bool IsStandaloneRewriteExpressionPermutation(
+    int32 expressionFirst, int32 expressionCount)
+{
+    if (expressionCount < 0
+        || expressionCount > Host.StandaloneRewriteMapSeen.Length)
+    {
+        return false;
+    }
+    for (mut int32 index = 0;
+        index < expressionCount;
+        index = index + 1)
+    {
+        Host.StandaloneRewriteMapSeen[index] = 0;
+    }
+    for (mut int32 oldExpressionId = expressionFirst;
+        oldExpressionId < expressionFirst + expressionCount;
+        oldExpressionId = oldExpressionId + 1)
+    {
+        int32 newExpressionId
+            = Host.StandaloneRewriteExpressionIds[
+                oldExpressionId];
+        int32 localNewId = newExpressionId - expressionFirst;
+        if (localNewId < 0 || localNewId >= expressionCount
+            || Host.StandaloneRewriteMapSeen[localNewId] != 0)
+        {
+            return false;
+        }
+        Host.StandaloneRewriteMapSeen[localNewId] = 1;
+    }
+    return true;
+}
+
+int32 RewriteStandaloneCallableTarget(int32 targetKind,
+    int32 targetIndex, int32 expectedCallableId,
+    ref<init int32> rewrittenTargetIndexResult)
+    ensure return == 0 ? *rewrittenTargetIndexResult is init : true
+{
+    init int32 resolvedCallableId;
+    int32 resolveStatus = ResolveStandaloneCallTarget(
+        targetKind, targetIndex, ref init resolvedCallableId);
+    if (resolveStatus != 0)
+    {
+        return resolveStatus;
+    }
+    if (resolvedCallableId != expectedCallableId
+        || expectedCallableId < 0
+        || expectedCallableId
+            >= Host.StandaloneRewriteCallableCount[0])
+    {
+        return 3;
+    }
+    int32 rewrittenCallableId
+        = Host.StandaloneRewriteCallableIds[expectedCallableId];
+    if (targetKind == 1)
+    {
+        if (targetIndex < 0
+            || targetIndex >= Host.StandaloneLocalCallableCount[0])
+        {
+            return 3;
+        }
+        int32 rewrittenTarget
+            = Host.StandaloneRewriteLocalCallableIds[targetIndex];
+        if (rewrittenTarget < 0
+            || rewrittenTarget
+                >= Host.StandaloneLocalCallableCount[0]
+            || Host.StandaloneRewrittenLocalCallables[
+                rewrittenTarget * 3 + 1] != rewrittenCallableId)
+        {
+            return 3;
+        }
+        *rewrittenTargetIndexResult = rewrittenTarget;
+        return 0;
+    }
+    if (targetKind == 2)
+    {
+        if (targetIndex < 0
+            || targetIndex
+                >= Host.StandaloneSourceImportedCallableCount[0])
+        {
+            return 3;
+        }
+        int32 rewrittenTarget
+            = Host.StandaloneRewriteImportedCallableIds[targetIndex];
+        if (rewrittenTarget < 0
+            || rewrittenTarget
+                >= Host.StandaloneSourceImportedCallableCount[0]
+            || Host.StandaloneRewrittenImportedCallables[
+                rewrittenTarget * 8 + 4] != rewrittenCallableId)
+        {
+            return 3;
+        }
+        *rewrittenTargetIndexResult = rewrittenTarget;
+        return 0;
+    }
+    return 3;
+}
+
+int32 VerifyStandaloneRewrittenCallNodes()
+{
+    int32 directCallCount
+        = Host.StandaloneSourceDirectCallCount[0];
+    for (mut int32 callIndex = 0;
+        callIndex < directCallCount;
+        callIndex = callIndex + 1)
+    {
+        int32 offset = callIndex * 7;
+        int32 targetKind
+            = Host.StandaloneRewrittenSourceDirectCalls[offset];
+        int32 targetIndex
+            = Host.StandaloneRewrittenSourceDirectCalls[offset + 1];
+        int32 expectedCallableId
+            = Host.StandaloneRewrittenSourceDirectCalls[offset + 2];
+        int32 resultTypeId
+            = Host.StandaloneRewrittenSourceDirectCalls[offset + 3];
+        int32 argumentCount
+            = Host.StandaloneRewrittenSourceDirectCalls[offset + 5];
+        init int32 targetExpectedCallableId;
+        init int32 targetResultTypeId;
+        init int32 parameterCount;
+        int32 targetStatus = TryGetRewrittenCallableSignature(
+            targetKind, targetIndex,
+            ref init targetExpectedCallableId,
+            ref init targetResultTypeId,
+            ref init parameterCount);
+        if (targetStatus != 0
+            || targetExpectedCallableId != expectedCallableId
+            || targetResultTypeId != resultTypeId
+            || argumentCount != parameterCount)
+        {
+            return 3;
+        }
+
+        int32 invokeIndex
+            = Host.StandaloneRewrittenDirectCallInvokeMap[callIndex];
+        if (invokeIndex < -1
+            || (invokeIndex >= 0
+                && invokeIndex >= Host.StandaloneInvokeCount[0]))
+        {
+            return 3;
+        }
+        if (invokeIndex < 0)
+        {
+            continue;
+        }
+        int32 invokeOffset = invokeIndex * 10;
+        if (Host.StandaloneRewrittenInvokes[invokeOffset]
+                != targetKind
+            || Host.StandaloneRewrittenInvokes[invokeOffset + 1]
+                != targetIndex
+            || Host.StandaloneRewrittenInvokes[invokeOffset + 2]
+                != expectedCallableId
+            || Host.StandaloneRewrittenInvokes[invokeOffset + 4]
+                != argumentCount)
+        {
+            return 3;
+        }
+        int32 bodyId
+            = Host.StandaloneRewrittenDirectCallBodyIds[callIndex];
+        if (bodyId < 0
+            || bodyId >= Host.StandaloneRewrittenSourceBodyCount[0])
+        {
+            return 3;
+        }
+        int32 bodyOffset = bodyId * 12;
+        int32 argumentFirst
+            = Host.StandaloneRewrittenSourceDirectCalls[
+                offset + 4];
+        int32 bodyArgumentFirst
+            = Host.StandaloneRewrittenSourceBodies[
+                bodyOffset + 7];
+        int32 bodyExpressionFirst
+            = Host.StandaloneRewrittenSourceBodies[
+                bodyOffset + 3];
+        int32 bodyExpressionCount
+            = Host.StandaloneRewrittenSourceBodies[
+                bodyOffset + 4];
+        int32 bodyInputFirst
+            = Host.StandaloneRewrittenNormalizedBodies[
+                bodyOffset + 7];
+        int32 bodyInputCount
+            = Host.StandaloneRewrittenNormalizedBodies[
+                bodyOffset + 8];
+        int32 invokeInputFirst
+            = Host.StandaloneRewrittenInvokes[
+                invokeOffset + 3];
+        int32 invokeInputCount
+            = Host.StandaloneRewrittenInvokes[
+                invokeOffset + 4];
+        if (invokeInputFirst < 0 || invokeInputCount < 0
+            || invokeInputFirst > bodyInputCount - invokeInputCount)
+        {
+            return 3;
+        }
+        for (mut int32 ordinal = 0;
+            ordinal < argumentCount;
+            ordinal = ordinal + 1)
+        {
+            int32 argumentIndex
+                = bodyArgumentFirst + argumentFirst + ordinal;
+            int32 argumentOffset = argumentIndex * 3;
+            int32 expressionId
+                = Host.StandaloneRewrittenSourceCallArguments[
+                    argumentOffset];
+            int32 sourceUse
+                = Host.StandaloneRewrittenSourceCallArguments[
+                    argumentOffset + 2];
+            if (expressionId < 0
+                || expressionId >= bodyExpressionCount)
+            {
+                return 3;
+            }
+            int32 expressionTypeId
+                = Host.StandaloneRewrittenSourceExpressions[
+                    (bodyExpressionFirst + expressionId) * 8 + 1];
+            init int32 parameterTypeId;
+            int32 parameterStatus
+                = GetStandaloneRewrittenCallableParameterTypeId(
+                    targetKind, targetIndex, ordinal,
+                    ref init parameterTypeId);
+            int32 inputOffset
+                = (bodyInputFirst + invokeInputFirst + ordinal) * 3;
+            int32 selectorKind
+                = Host.StandaloneRewrittenInvokeInputs[inputOffset];
+            int32 inputUse
+                = Host.StandaloneRewrittenInvokeInputs[
+                    inputOffset + 1];
+            int32 selectorIndex
+                = Host.StandaloneRewrittenInvokeInputs[
+                    inputOffset + 2];
+            if (parameterStatus != 0
+                || expressionTypeId != parameterTypeId
+                || inputUse != sourceUse
+                || inputUse != GetStandaloneRewrittenSourceUse(
+                    parameterTypeId))
+            {
+                return 3;
+            }
+            if (selectorKind == 0)
+            {
+                if (inputUse != 0 || selectorIndex != 0
+                    || !IsStandaloneRewrittenUnitType(
+                        expressionTypeId))
+                {
+                    return 3;
+                }
+            }
+            else if (selectorKind == 1)
+            {
+                if (selectorIndex < 0 || selectorIndex > 15
+                    || GetStandaloneRewrittenSourceUse(
+                        expressionTypeId) != inputUse)
+                {
+                    return 3;
+                }
+            }
+            else if (selectorKind == 2)
+            {
+                int32 bodyHomeFirst
+                    = Host.StandaloneRewrittenNormalizedBodies[
+                        bodyOffset + 1];
+                int32 bodyHomeCount
+                    = Host.StandaloneRewrittenNormalizedBodies[
+                        bodyOffset + 2];
+                if (selectorIndex < 0
+                    || selectorIndex >= bodyHomeCount)
+                {
+                    return 3;
+                }
+                int32 homeOffset
+                    = (bodyHomeFirst + selectorIndex) * 5;
+                if (Host.StandaloneRewrittenNormalizedHomes[
+                        homeOffset] != bodyId
+                    || Host.StandaloneRewrittenNormalizedHomes[
+                        homeOffset + 3] != expressionTypeId
+                    || GetStandaloneRewrittenSourceUse(
+                        expressionTypeId) != inputUse)
+                {
+                    return 3;
+                }
+            }
+            else
+            {
+                return 3;
+            }
+        }
+    }
+    for (mut int32 invokeIndex = 0;
+        invokeIndex < Host.StandaloneInvokeCount[0];
+        invokeIndex = invokeIndex + 1)
+    {
+        int32 offset = invokeIndex * 10;
+        int32 targetKind
+            = Host.StandaloneRewrittenInvokes[offset];
+        int32 targetIndex
+            = Host.StandaloneRewrittenInvokes[offset + 1];
+        int32 expectedCallableId
+            = Host.StandaloneRewrittenInvokes[offset + 2];
+        init int32 targetExpectedCallableId;
+        init int32 resultTypeId;
+        init int32 parameterCount;
+        int32 targetStatus = TryGetRewrittenCallableSignature(
+            targetKind, targetIndex,
+            ref init targetExpectedCallableId,
+            ref init resultTypeId, ref init parameterCount);
+        if (targetStatus != 0
+            || targetExpectedCallableId != expectedCallableId
+            || Host.StandaloneRewrittenInvokes[offset + 4]
+                != parameterCount)
+        {
+            return 3;
+        }
+        int32 resultKind
+            = Host.StandaloneRewrittenInvokes[offset + 5];
+        int32 resultIndex
+            = Host.StandaloneRewrittenInvokes[offset + 6];
+        bool doesNotReturn
+            = (Host.StandaloneRewrittenCallableEffects[
+                expectedCallableId] & 2) != 0;
+        bool unitResult
+            = IsStandaloneRewrittenUnitType(resultTypeId);
+        if ((doesNotReturn || unitResult)
+            ? resultKind != 0 || resultIndex != 0
+            : resultKind != 1 && resultKind != 2)
+        {
+            return 3;
+        }
+        if (resultKind == 1
+            && (resultIndex < 0 || resultIndex > 15))
+        {
+            return 3;
+        }
+        if (resultKind == 2)
+        {
+            int32 bodyId = -1;
+            for (mut int32 candidateBodyId = 0;
+                candidateBodyId
+                    < Host.StandaloneRewrittenNormalizedBodyCount[0];
+                candidateBodyId = candidateBodyId + 1)
+            {
+                int32 bodyOffset = candidateBodyId * 12;
+                int32 first
+                    = Host.StandaloneRewrittenNormalizedBodies[
+                        bodyOffset + 5];
+                int32 count
+                    = Host.StandaloneRewrittenNormalizedBodies[
+                        bodyOffset + 6];
+                if (invokeIndex >= first
+                    && invokeIndex < first + count)
+                {
+                    bodyId = candidateBodyId;
+                    break;
+                }
+            }
+            if (bodyId < 0)
+            {
+                return 3;
+            }
+            int32 bodyOffset = bodyId * 12;
+            int32 homeFirst
+                = Host.StandaloneRewrittenNormalizedBodies[
+                    bodyOffset + 1];
+            int32 homeCount
+                = Host.StandaloneRewrittenNormalizedBodies[
+                    bodyOffset + 2];
+            if (resultIndex < 0 || resultIndex >= homeCount)
+            {
+                return 3;
+            }
+            int32 homeOffset = (homeFirst + resultIndex) * 5;
+            if (Host.StandaloneRewrittenNormalizedHomes[
+                    homeOffset] != bodyId
+                || Host.StandaloneRewrittenNormalizedHomes[
+                    homeOffset + 1] != 3
+                || Host.StandaloneRewrittenNormalizedHomes[
+                    homeOffset + 3] != resultTypeId)
+            {
+                return 3;
+            }
+        }
+    }
+    for (mut int32 bodyId = 0;
+        bodyId < Host.StandaloneRewrittenNormalizedBodyCount[0];
+        bodyId = bodyId + 1)
+    {
+        int32 bodyOffset = bodyId * 12;
+        int32 invokeFirst
+            = Host.StandaloneRewrittenNormalizedBodies[
+                bodyOffset + 5];
+        int32 invokeCount
+            = Host.StandaloneRewrittenNormalizedBodies[
+                bodyOffset + 6];
+        int32 operationFirst
+            = Host.StandaloneRewrittenNormalizedBodies[
+                bodyOffset + 9];
+        int32 operationCount
+            = Host.StandaloneRewrittenNormalizedBodies[
+                bodyOffset + 10];
+        int32 terminalKind
+            = Host.StandaloneRewrittenNormalizedBodies[
+                bodyOffset + 11];
+        if (terminalKind != 0 && terminalKind != 1)
+        {
+            return 3;
+        }
+        for (mut int32 operationLocal = 0;
+            operationLocal < operationCount;
+            operationLocal = operationLocal + 1)
+        {
+            int32 operationOffset
+                = (operationFirst + operationLocal) * 4;
+            int32 kind
+                = Host.StandaloneRewrittenNormalizedOperations[
+                    operationOffset];
+            if (kind != 3)
+            {
+                continue;
+            }
+            int32 invokeLocal
+                = Host.StandaloneRewrittenNormalizedOperations[
+                    operationOffset + 1];
+            if (invokeLocal < 0 || invokeLocal >= invokeCount)
+            {
+                return 3;
+            }
+            int32 invokeIndex = invokeFirst + invokeLocal;
+            int32 expectedCallableId
+                = Host.StandaloneRewrittenInvokes[
+                    invokeIndex * 10 + 2];
+            bool doesNotReturn
+                = (Host.StandaloneRewrittenCallableEffects[
+                    expectedCallableId] & 2) != 0;
+            if (doesNotReturn
+                && (terminalKind != 1
+                    || operationLocal != operationCount - 1))
+            {
+                return 3;
+            }
+            if (terminalKind == 1
+                && operationLocal == operationCount - 1
+                && !doesNotReturn)
+            {
+                return 3;
+            }
+        }
+        if (terminalKind == 1
+            && (operationCount == 0
+                || Host.StandaloneRewrittenNormalizedOperations[
+                    (operationFirst + operationCount - 1) * 4] != 3))
+        {
+            return 3;
+        }
+    }
+    return 0;
+}
+
+int32 GetStandaloneRewrittenCallableParameterTypeId(
+    int32 targetKind, int32 targetIndex, int32 ordinal,
+    ref<init int32> typeIdResult)
+    ensure return == 0 ? *typeIdResult is init : true
+{
+    if (ordinal < 0)
+    {
+        return 3;
+    }
+    if (targetKind == 1)
+    {
+        if (targetIndex < 0
+            || targetIndex >= Host.StandaloneLocalCallableCount[0])
+        {
+            return 3;
+        }
+        int32 infoOffset = targetIndex * 12;
+        int32 parameterFirst
+            = Host.StandaloneRewrittenSourceCallableInfo[
+                infoOffset + 5];
+        int32 parameterCount
+            = Host.StandaloneRewrittenSourceCallableInfo[
+                infoOffset + 6];
+        if (ordinal >= parameterCount)
+        {
+            return 3;
+        }
+        int32 parameterOffset = (parameterFirst + ordinal) * 4;
+        if (Host.StandaloneRewrittenSourceParameters[
+                parameterOffset] != targetIndex)
+        {
+            return 3;
+        }
+        *typeIdResult
+            = Host.StandaloneRewrittenSourceParameters[
+                parameterOffset + 1];
+        return 0;
+    }
+    if (targetKind == 2)
+    {
+        if (targetIndex < 0
+            || targetIndex
+                >= Host.StandaloneSourceImportedCallableCount[0])
+        {
+            return 3;
+        }
+        int32 oldImportedId = -1;
+        for (mut int32 index = 0;
+            index < Host.StandaloneSourceImportedCallableCount[0];
+            index = index + 1)
+        {
+            if (Host.StandaloneRewriteImportedCallableIds[index]
+                == targetIndex)
+            {
+                oldImportedId = index;
+                break;
+            }
+        }
+        if (oldImportedId < 0)
+        {
+            return 3;
+        }
+        int32 rootOrdinal
+            = Host.StandaloneSourceImportedCallables[
+                oldImportedId * 8 + 4];
+        if (rootOrdinal < 0
+            || rootOrdinal >= Host.StandaloneResolvedRootCount[0])
+        {
+            return 3;
+        }
+        int32 rootOffset = rootOrdinal * 20;
+        int32 artifactOrdinal
+            = int32(Host.StandaloneResolvedRoots[
+                rootOffset + 2]);
+        int32 parameterFirst
+            = int32(Host.StandaloneResolvedRoots[
+                rootOffset + 10]);
+        int32 parameterCount
+            = int32(Host.StandaloneResolvedRoots[
+                rootOffset + 11]);
+        if (ordinal >= parameterCount
+            || artifactOrdinal < 0
+            || artifactOrdinal >= Host.StandaloneRequest[4])
+        {
+            return 3;
+        }
+        int32 globalParameterRow
+            = Host.StandaloneArtifactParameterStarts[
+                artifactOrdinal]
+                + parameterFirst + ordinal;
+        if (globalParameterRow <= 0
+            || globalParameterRow
+                >= Host.StandaloneParameterTypeIds.Length)
+        {
+            return 3;
+        }
+        int32 oldTypeId
+            = Host.StandaloneParameterTypeIds[globalParameterRow];
+        if (oldTypeId <= 0
+            || oldTypeId > Host.StandaloneTypeFactCount[0])
+        {
+            return 3;
+        }
+        *typeIdResult
+            = Host.StandaloneRewriteTypeIds[oldTypeId];
+        return 0;
+    }
+    return 3;
+}
+
+bool IsStandaloneRewrittenUnitType(int32 typeId)
+{
+    return typeId > 0
+        && typeId <= Host.StandaloneRewrittenTypeFactCount[0]
+        && Host.StandaloneRewrittenTypeFacts[typeId * 3] == 0
+        && Host.StandaloneRewrittenTypeFacts[typeId * 3 + 1] == 0;
+}
+
+int32 GetStandaloneRewrittenSourceUse(int32 typeId)
+{
+    if (typeId <= 0
+        || typeId > Host.StandaloneRewrittenTypeFactCount[0])
+    {
+        return -1;
+    }
+    if (Host.StandaloneRewrittenTypeFacts[typeId * 3] == 1)
+    {
+        return 5;
+    }
+    if (Host.StandaloneRewrittenTypeFacts[typeId * 3] == 0
+        && Host.StandaloneRewrittenTypeFacts[
+            typeId * 3 + 1] != 0)
+    {
+        return 1;
+    }
+    return -1;
+}
+
+int32 TryGetRewrittenCallableSignature(int32 targetKind,
+    int32 targetIndex, ref<init int32> expectedCallableIdResult,
+    ref<init int32> resultTypeIdResult,
+    ref<init int32> parameterCountResult)
+    ensure return == 0 ? (*expectedCallableIdResult is init
+        && *resultTypeIdResult is init
+        && *parameterCountResult is init) : true
+{
+    if (targetKind == 1)
+    {
+        if (targetIndex < 0
+            || targetIndex >= Host.StandaloneLocalCallableCount[0])
+        {
+            return 3;
+        }
+        int32 localOffset = targetIndex * 3;
+        int32 callableId
+            = Host.StandaloneRewrittenLocalCallables[
+                localOffset + 1];
+        int32 bodyId
+            = Host.StandaloneRewrittenLocalCallables[
+                localOffset + 2];
+        if (callableId < 0
+            || callableId >= Host.StandaloneRewriteCallableCount[0]
+            || bodyId < 0
+            || bodyId
+                >= Host.StandaloneRewrittenSourceBodyCount[0])
+        {
+            return 3;
+        }
+        int32 infoOffset = targetIndex * 12;
+        *expectedCallableIdResult = callableId;
+        *resultTypeIdResult
+            = Host.StandaloneRewrittenSourceCallableInfo[
+                infoOffset + 4];
+        *parameterCountResult
+            = Host.StandaloneRewrittenSourceCallableInfo[
+                infoOffset + 6];
+        return 0;
+    }
+    if (targetKind == 2)
+    {
+        if (targetIndex < 0
+            || targetIndex
+                >= Host.StandaloneSourceImportedCallableCount[0])
+        {
+            return 3;
+        }
+        int32 expectedCallableId
+            = Host.StandaloneRewrittenImportedCallables[
+                targetIndex * 8 + 4];
+        if (expectedCallableId < 0
+            || expectedCallableId
+                >= Host.StandaloneRewriteCallableCount[0])
+        {
+            return 3;
+        }
+        *expectedCallableIdResult = expectedCallableId;
+        *resultTypeIdResult
+            = Host.StandaloneRewrittenCallableTypeIds[
+                expectedCallableId];
+        *parameterCountResult
+            = Host.StandaloneRewrittenCallableParameterCounts[
+                expectedCallableId];
+        return 0;
+    }
+    return 3;
+}

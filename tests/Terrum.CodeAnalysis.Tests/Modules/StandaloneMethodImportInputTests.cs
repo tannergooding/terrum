@@ -464,6 +464,7 @@ internal sealed class StandaloneMethodImportInputTests
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodImportBindings.terrum",
             "sources/Terrum.CodeAnalysis.Terrum/Semantics/StandaloneOwnedSourceProgram.terrum",
             "sources/Terrum.CodeAnalysis.Terrum/Semantics/StandaloneOwnedSourceNormalization.terrum",
+            "sources/Terrum.CodeAnalysis.Terrum/Semantics/StandaloneOwnedSourceRemapping.terrum",
         };
         const string verificationSource = """
             namespace Terrum.CodeAnalysis;
@@ -623,6 +624,141 @@ internal sealed class StandaloneMethodImportInputTests
             ?? throw new AssertionException(
                 "Expected a bound standalone source-call validator.");
         Assert.That(NativeJit.Execute(program,
+                (NativeRuntimePolicy)policy),
+            Is.EqualTo(0));
+
+        var remapSource = SourceText.From(
+            "using api; int32 Local(int32 value) { return value; } "
+            + "int32 Main(int32 value) { return Imported(Local(value)); }");
+        var remapInput = new StandaloneMethodImportInput(Agreement,
+            "consumer/module", [
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateMethodProviderArtifact("provider/leaf",
+                        "api.Imported", scalarParameter: true)),
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateMethodProviderArtifact("provider/other",
+                        "other.Imported", scalarParameter: true)),
+            ], [
+                new StandaloneMethodRoot(0, "provider/leaf",
+                    "api.Imported"),
+                new StandaloneMethodRoot(1, "provider/other",
+                    "other.Imported"),
+            ]);
+        const string remapVerificationSource = """
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                if (Scan() < 1) { return 50; }
+                int32 status = BindStandaloneOwnedSourceProgram();
+                if (status != 0) { return status; }
+                status = NormalizeStandaloneOwnedSourceProgram();
+                if (status != 0) { return status; }
+                if (Host.StandaloneModuleCount[0] != 3
+                    || Host.StandaloneLocalCallableCount[0] != 2
+                    || Host.StandaloneSourceImportedCallableCount[0] != 2
+                    || Host.StandaloneSourceBodyCount[0] != 2
+                    || Host.StandaloneSourceDirectCallCount[0] != 2
+                    || Host.StandaloneInvokeCount[0] != 2
+                    || Host.StandaloneTypeFactCount[0] != 1) {
+                    return 51;
+                }
+                Host.StandaloneRewriteCallableCount[0] = 4;
+                for (mut int32 id = 0;
+                    id < Host.StandaloneModuleCount[0];
+                    id = id + 1) {
+                    Host.StandaloneRewriteModuleIds[id] = id;
+                }
+                for (mut int32 id = 0;
+                    id < Host.StandaloneLocalCallableCount[0];
+                    id = id + 1) {
+                    Host.StandaloneRewriteLocalCallableIds[id] = id;
+                }
+                Host.StandaloneRewriteImportedCallableIds[0] = 1;
+                Host.StandaloneRewriteImportedCallableIds[1] = 0;
+                Host.StandaloneRewriteCallableIds[0] = 1;
+                Host.StandaloneRewriteCallableIds[1] = 0;
+                Host.StandaloneRewriteCallableIds[2] = 2;
+                Host.StandaloneRewriteCallableIds[3] = 3;
+                Host.StandaloneRewriteTypeIds[0] = 0;
+                for (mut int32 id = 1;
+                    id <= Host.StandaloneTypeFactCount[0];
+                    id = id + 1) {
+                    Host.StandaloneRewriteTypeIds[id] = id;
+                }
+                Host.StandaloneRewriteBodyIds[0] = 1;
+                Host.StandaloneRewriteBodyIds[1] = 0;
+                for (mut int32 id = 0;
+                    id < Host.StandaloneSourceExpressionCount[0];
+                    id = id + 1) {
+                    Host.StandaloneRewriteExpressionIds[id] = id;
+                }
+                status = RewriteStandaloneOwnedCallNodes();
+                if (status != 0) { return status; }
+                if (Host.StandaloneRewriteStatus[0] != 0
+                    || Host.StandaloneRewrittenModuleCount[0] != 3
+                    || Host.StandaloneRewrittenLocalCallableCount[0] != 2
+                    || Host.StandaloneRewrittenImportedCallableCount[0] != 2
+                    || Host.StandaloneRewrittenCallableCount[0] != 4
+                    || Host.StandaloneRewrittenSourceBodyCount[0] != 2
+                    || Host.StandaloneRewrittenNormalizedBodyCount[0] != 2
+                    || Host.StandaloneRewrittenLocalCallables[1] != 2
+                    || Host.StandaloneRewrittenLocalCallables[2] != 1
+                    || Host.StandaloneRewrittenLocalCallables[4] != 3
+                    || Host.StandaloneRewrittenLocalCallables[5] != 0
+                    || Host.StandaloneRewrittenImportedCallables[4] != 0
+                    || Host.StandaloneRewrittenImportedCallables[12] != 1
+                    || Host.StandaloneRewrittenImportedCallables[8]
+                        != Host.StandaloneSourceImportedCallables[0]
+                    || Host.StandaloneRewrittenImportedCallables[9]
+                        != Host.StandaloneSourceImportedCallables[1]
+                    || Host.StandaloneRewrittenSourceBodies[0] != 0
+                    || Host.StandaloneRewrittenSourceBodies[12] != 1
+                    || Host.StandaloneRewrittenNormalizedBodies[0] != 0
+                    || Host.StandaloneRewrittenNormalizedBodies[12] != 1
+                    || Host.StandaloneRewrittenSourceExpressions[7] != 1
+                    || Host.StandaloneRewrittenSourceExpressions[15] != 0
+                    || Host.StandaloneRewrittenSourceDirectCalls[0] != 2
+                    || Host.StandaloneRewrittenSourceDirectCalls[1] != 1
+                    || Host.StandaloneRewrittenSourceDirectCalls[2] != 1
+                    || Host.StandaloneRewrittenSourceDirectCalls[7] != 1
+                    || Host.StandaloneRewrittenSourceDirectCalls[8] != 0
+                    || Host.StandaloneRewrittenSourceDirectCalls[9] != 2
+                    || Host.StandaloneRewrittenInvokes[0] != 1
+                    || Host.StandaloneRewrittenInvokes[1] != 0
+                    || Host.StandaloneRewrittenInvokes[2] != 2
+                    || Host.StandaloneRewrittenInvokes[10] != 2
+                    || Host.StandaloneRewrittenInvokes[11] != 1
+                    || Host.StandaloneRewrittenInvokes[12] != 1
+                    || Host.StandaloneRewrittenDirectCallInvokeMap[0] != 1
+                    || Host.StandaloneRewrittenDirectCallInvokeMap[1] != 0) {
+                    return 52;
+                }
+                return 0;
+            }
+            """;
+        var remapComponents = new List<SyntaxTree>(sourcePaths.Length + 1);
+        foreach (var sourcePath in sourcePaths)
+        {
+            var path = TerrumProjectPaths.RepositoryFile(root, sourcePath);
+            var tree = SyntaxTree.Parse(await File.ReadAllTextAsync(path)
+                .ConfigureAwait(true), path);
+            Assert.That(tree.HasErrors, Is.False,
+                string.Join(Environment.NewLine, tree.Diagnostics));
+            remapComponents.Add(tree);
+        }
+        remapComponents.Add(SyntaxTree.Parse(remapVerificationSource,
+            "standalone-owned-source-remapping-tests.terrum"));
+
+        var remapBuffers = ScannerHost.CreateBuffers(remapSource).AddRange(
+            remapInput.Capture().CreateSourceCallHostBuffers(remapSource));
+        var remapCompilation = Compilation.Create(remapComponents,
+            remapBuffers, policy);
+        Assert.That(remapCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                remapCompilation.Diagnostics));
+        var remapProgram = remapCompilation.Program
+            ?? throw new AssertionException(
+                "Expected a bound standalone call-remapping validator.");
+        Assert.That(NativeJit.Execute(remapProgram,
                 (NativeRuntimePolicy)policy),
             Is.EqualTo(0));
     }

@@ -276,7 +276,35 @@ internal readonly record struct CapturedStandaloneMethodImportInput(
         }
 
         var tokenCapacity = checked(source.Length + 1);
-        return CreateHostBuffers().AddRange([
+        var hostBuffers = CreateHostBuffers();
+        var moduleCapacity = 0;
+        var callableCapacity = 0;
+        var typeCapacity = 0;
+        var parameterTypeCapacity = 0;
+        foreach (var buffer in hostBuffers)
+        {
+            if (buffer.Name == "StandaloneModuleDirectory")
+            {
+                moduleCapacity = buffer.Values.Length / 8;
+            }
+            else if (buffer.Name == "StandaloneCallableTypeIds")
+            {
+                callableCapacity = buffer.Values.Length;
+            }
+            else if (buffer.Name == "StandaloneTypeFacts")
+            {
+                typeCapacity = buffer.Values.Length / 3;
+            }
+            else if (buffer.Name == "StandaloneParameterTypeIds")
+            {
+                parameterTypeCapacity = buffer.Values.Length;
+            }
+        }
+
+        var rewriteMapCapacity = Math.Max(checked(tokenCapacity * 2),
+            Math.Max(moduleCapacity,
+                Math.Max(callableCapacity, checked(typeCapacity + 1))));
+        return hostBuffers.AddRange([
             new HostBuffer("StandaloneSourceProgramStatus",
                 PrimitiveType.Int32, [0], true),
             new HostBuffer("StandaloneLocalCallableCount",
@@ -394,6 +422,144 @@ internal readonly record struct CapturedStandaloneMethodImportInput(
             new HostBuffer("StandaloneDirectCallTraversalExpressionStates",
                 PrimitiveType.Int32,
                 [.. new int[tokenCapacity]], true),
+            new HostBuffer("StandaloneRewriteStatus",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneRewriteCallableCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneRewriteModuleIds",
+                PrimitiveType.Int32,
+                [.. new int[moduleCapacity]], true),
+            new HostBuffer("StandaloneRewriteLocalCallableIds",
+                PrimitiveType.Int32,
+                [.. new int[tokenCapacity]], true),
+            new HostBuffer("StandaloneRewriteImportedCallableIds",
+                PrimitiveType.Int32,
+                [.. new int[MethodRoots.Length]], true),
+            new HostBuffer("StandaloneRewriteCallableIds",
+                PrimitiveType.Int32,
+                [.. new int[callableCapacity]], true),
+            new HostBuffer("StandaloneRewriteTypeIds",
+                PrimitiveType.Int32,
+                [.. new int[checked(typeCapacity + 1)]], true),
+            new HostBuffer("StandaloneRewriteBodyIds",
+                PrimitiveType.Int32,
+                [.. new int[tokenCapacity]], true),
+            new HostBuffer("StandaloneRewriteExpressionIds",
+                PrimitiveType.Int32,
+                [.. new int[tokenCapacity]], true),
+            new HostBuffer("StandaloneRewriteMapSeen",
+                PrimitiveType.Int32,
+                [.. new int[rewriteMapCapacity]], true),
+            new HostBuffer("StandaloneRewrittenModuleDirectory",
+                PrimitiveType.Int32,
+                [.. new int[checked(moduleCapacity * 8)]], true),
+            new HostBuffer("StandaloneRewrittenLocalCallables",
+                PrimitiveType.Int32,
+                [.. new int[checked(tokenCapacity * 3)]], true),
+            new HostBuffer("StandaloneRewrittenImportedCallables",
+                PrimitiveType.Int32,
+                [.. new int[checked(MethodRoots.Length * 8)]], true),
+            new HostBuffer("StandaloneRewrittenCallableTypeIds",
+                PrimitiveType.Int32,
+                [.. new int[callableCapacity]], true),
+            new HostBuffer("StandaloneRewrittenCallableEffects",
+                PrimitiveType.Int32,
+                [.. new int[callableCapacity]], true),
+            new HostBuffer("StandaloneRewrittenCallableParameterCounts",
+                PrimitiveType.Int32,
+                [.. new int[callableCapacity]], true),
+            new HostBuffer("StandaloneRewrittenTypeFacts",
+                PrimitiveType.Int32,
+                [.. new int[checked(typeCapacity * 3)]], true),
+            new HostBuffer("StandaloneRewrittenParameterTypeIds",
+                PrimitiveType.Int32,
+                [.. new int[parameterTypeCapacity]], true),
+            new HostBuffer("StandaloneRewrittenSourceCallableInfo",
+                PrimitiveType.Int32,
+                [.. new int[checked(tokenCapacity * 12)]], true),
+            new HostBuffer("StandaloneRewrittenSourceParameters",
+                PrimitiveType.Int32,
+                [.. new int[checked(tokenCapacity * 4)]], true),
+            new HostBuffer("StandaloneRewrittenSourceBodies",
+                PrimitiveType.Int32,
+                [.. new int[checked(tokenCapacity * 12)]], true),
+            new HostBuffer("StandaloneRewrittenSourceExpressions",
+                PrimitiveType.Int32,
+                [.. new int[checked(tokenCapacity * 8)]], true),
+            new HostBuffer("StandaloneRewrittenSourceStatements",
+                PrimitiveType.Int32,
+                [.. new int[checked(tokenCapacity * 3)]], true),
+            new HostBuffer("StandaloneRewrittenSourceDirectCalls",
+                PrimitiveType.Int32,
+                [.. new int[checked(tokenCapacity * 7)]], true),
+            new HostBuffer("StandaloneRewrittenSourceCallArguments",
+                PrimitiveType.Int32,
+                [.. new int[checked(tokenCapacity * 3)]], true),
+            new HostBuffer("StandaloneRewrittenDirectCallInvokeMap",
+                PrimitiveType.Int32,
+                [.. new int[tokenCapacity]], true),
+            new HostBuffer("StandaloneRewrittenDirectCallBodyIds",
+                PrimitiveType.Int32,
+                [.. new int[tokenCapacity]], true),
+            new HostBuffer("StandaloneRewrittenDirectCallTraversalCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneRewrittenDirectCallTraversal",
+                PrimitiveType.Int32,
+                [.. new int[tokenCapacity]], true),
+            new HostBuffer("StandaloneRewrittenNormalizedBodies",
+                PrimitiveType.Int32,
+                [.. new int[checked(tokenCapacity * 12)]], true),
+            new HostBuffer("StandaloneRewrittenNormalizedHomes",
+                PrimitiveType.Int32,
+                [.. new int[checked(tokenCapacity * 10)]], true),
+            new HostBuffer("StandaloneRewrittenNormalizedConstants",
+                PrimitiveType.Int32,
+                [.. new int[checked(tokenCapacity * 4)]], true),
+            new HostBuffer("StandaloneRewrittenInvokes",
+                PrimitiveType.Int32,
+                [.. new int[checked(tokenCapacity * 10)]], true),
+            new HostBuffer("StandaloneRewrittenInvokeInputs",
+                PrimitiveType.Int32,
+                [.. new int[checked(tokenCapacity * 3)]], true),
+            new HostBuffer("StandaloneRewrittenNormalizedOperations",
+                PrimitiveType.Int32,
+                [.. new int[checked(tokenCapacity * 12)]], true),
+            new HostBuffer("StandaloneRewrittenSourceBodyCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneRewrittenNormalizedBodyCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneRewrittenModuleCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneRewrittenLocalCallableCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneRewrittenImportedCallableCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneRewrittenCallableCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneRewrittenTypeFactCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneRewrittenParameterTypeCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneRewrittenSourceParameterCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneRewrittenSourceExpressionCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneRewrittenSourceStatementCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneRewrittenSourceDirectCallCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneRewrittenSourceCallArgumentCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneRewrittenNormalizedHomeCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneRewrittenNormalizedConstantCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneRewrittenInvokeCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneRewrittenInvokeInputCount",
+                PrimitiveType.Int32, [0], true),
+            new HostBuffer("StandaloneRewrittenNormalizedOperationCount",
+                PrimitiveType.Int32, [0], true),
         ]);
     }
 }
