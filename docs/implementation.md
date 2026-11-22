@@ -1415,10 +1415,12 @@ regression compiles a local AC1 FNI owner through a PS1 FNI root with an A2
 aggregate dependency, checking that Copy remains unknown in the PS1 expected
 view while the A2 provider carries positive evidence; it is also unverified.
 Formal proposal review and qualification remain open.
-Pointer output reads, other side-effecting argument expressions,
-defaults/constants, multiple calls, other condition expressions and Body
-control-flow shapes, nonreturning-call shapes beyond the terminal subset and
-reservation cancellation remain open.
+PS1 now admits pointer-valued FNI NativeOutput reads through the existing
+TypeSpec/D5 Body path; producer, source-free consumer and re-emission coverage
+is added but unverified under the hold. Other side-effecting argument
+expressions, defaults/constants, multiple calls, other condition expressions
+and Body control-flow shapes, nonreturning-call shapes beyond the terminal
+subset and reservation cancellation remain open.
 Supervised native execution, private persistence and dependent runtime work
 remain open. CLI qualification is still unverified. NativeParameter is not
 admitted on these methods or anchors, and neither FNI proposal is approved.

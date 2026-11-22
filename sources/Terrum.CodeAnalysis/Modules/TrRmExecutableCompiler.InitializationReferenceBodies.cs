@@ -1715,7 +1715,8 @@ public static partial class TrRmExecutableCompiler
         if (function.IsExternal || function.ParameterCount != 3
             || function.Variables.Length != 5
             || function.DoesNotReturn
-            || (!DirectNativeImportContract.IsScalar(function.ReturnType)
+            || (!DirectNativeImportContract.IsOutputPointee(
+                    function.ReturnType)
                 && !schema
                     .UsesForeignNativeInterfaceAggregateOutputConsumption())
             || function.Body.RetiredManagedLocals.Length != 0
@@ -6579,7 +6580,8 @@ public static partial class TrRmExecutableCompiler
             || !HasEmptyEntryState(body, 0)
             || !HasEmptyEntryState(body, 1)
             || !HasEmptyEntryState(body, 2)
-            || (!DirectNativeImportContract.IsScalar(function.ReturnType)
+            || (!DirectNativeImportContract.IsOutputPointee(
+                    function.ReturnType)
                 && !body.Schema
                     .UsesForeignNativeInterfaceAggregateOutputConsumption())
             || (!hasFallback && function.ReturnType is not (

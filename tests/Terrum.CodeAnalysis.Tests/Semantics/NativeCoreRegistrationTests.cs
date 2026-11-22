@@ -2089,6 +2089,140 @@ internal sealed class NativeCoreRegistrationTests
     }
 
     [Test]
+    public void StandardForeignNativeInterfaceReadsPointerOutputUnderPs1()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-native-interface-parameter-surface-1";
+        const string providerIdentity = "pointer-output-provider";
+        const string consumerIdentity = "pointer-output-consumer";
+        const string providerSource = """
+            using Terrum.Interop;
+            [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+            [ForeignNativeInterface(VTableByteOffset: uint32(0))]
+            public interface IPointerProbe {
+                [param(value): NativeOutput(
+                    When: NativeOutputCondition.NonZero)]
+                public unsafe int32 TryGetPointer(ptr<int32> source,
+                    [Terrum.CodeAnalysis.DependsOn(nameof(source))]
+                    [Terrum.CodeAnalysis.ForwardsBacking(nameof(source))]
+                    write ptr<ptr<int32>> value);
+            }
+            """;
+        const string consumerSource = """
+            [return: Terrum.CodeAnalysis.DependsOn(
+                nameof(source), nameof(fallback))]
+            [return: Terrum.CodeAnalysis.ForwardsBacking(
+                nameof(source), nameof(fallback))]
+            ptr<int32> InvokePointer(ptr<void> receiver,
+                ptr<int32> source, ptr<int32> fallback) {
+                init ptr<int32> value;
+                unsafe {
+                    int32 status = IPointerProbe.TryGetPointer(
+                        receiver, source, &init value);
+                    if (status != 0) { return value; }
+                    return fallback;
+                }
+            }
+            """;
+        var (native, output) = NativeOutputCoreRegistrationTests
+            .CreateCombinedRegistrations(
+                includeForeignNativeInterface: true);
+        var options = new CompilationOptions {
+            NativeCoreRegistration = native,
+            LayoutCoreRegistration = CreateLayoutRegistration(native),
+            NativeOutputCoreRegistration = output,
+        };
+        var providerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(providerSource), options);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+        var providerProgram = providerCompilation.Program!;
+        var providerMember = providerProgram.Interfaces.Single().Members
+            .Single();
+        var outputType = providerMember.NativeOutputContracts.Single()
+            .PointeeType;
+        Assert.That(NativePointerTypes.IsType(outputType), Is.True);
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerProgram, providerIdentity, schemaIdentity, 1, [
+                new TrRmSourceTypeExport("", "IPointerProbe",
+                    "provider/IPointerProbe") {
+                    GenericArity = 0,
+                    InterfaceMethodExports = [
+                        new TrRmSourceInterfaceMethodExport(
+                            providerMember.SourceInputOrdinal,
+                            providerMember.SourceDeclarationSpan,
+                            "provider/IPointerProbe.TryGetPointer"),
+                    ],
+                },
+            ]);
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            providerArtifact);
+        var providerReference = TrRmExecutableCompiler
+            .CreateStandardReference(providerInput, providerIdentity, []);
+        var referencedOutput = providerReference.Interfaces.Single()
+            .Members.Single().NativeOutputContracts.Single();
+        Assert.That(NativePointerTypes.IsType(
+            referencedOutput.PointeeType), Is.True);
+        Assert.That(referencedOutput.Dependencies,
+            Is.EqualTo(providerMember.NativeOutputContracts.Single()
+                .Dependencies));
+        var consumerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(consumerSource), providerReference, options);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumerProgram = consumerCompilation.Program!;
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            consumerProgram, consumerIdentity, schemaIdentity, 1, []);
+        var schema
+            = TrRmArtifactSchema
+                .ForeignNativeInterfaceParameterSurfaceDraft;
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
+                consumerArtifact, schema));
+        var methodRow = Enumerable.Range(1, tables.Methods.Count).Single(
+            row => tables.Methods.GetName(row) == "InvokePointer");
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(methodRow), tables.Contracts.Count);
+        Assert.That(body.GetBlockCode(1).ToArray(),
+            Is.EqualTo(new byte[] { 0xD5, 0, 3, 0, 0x17, 0 }));
+        Assert.That(body.GetBlockCode(2).ToArray(),
+            Is.EqualTo(new byte[] { 0xD5, 0, 2, 0, 0x17, 0 }));
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, consumerArtifact),
+            consumerIdentity, [providerInput]);
+        var loadedFunction = loaded.Functions.Single(
+            static function => function.Name == "InvokePointer");
+        Assert.That(NativePointerTypes.IsType(loadedFunction.ReturnType),
+            Is.True);
+        Assert.That(loaded.NativePointerTypes[NativePointerTypes.Index(
+            loadedFunction.ReturnType)].PointeeType,
+            Is.EqualTo(PrimitiveType.Int32));
+        var successReturn = (BoundReturn)loadedFunction.Body.Statements
+            .OfType<BoundIf>().Single().Then.Statements.Single();
+        Assert.That(successReturn.Value, Is.TypeOf<BoundRead>());
+        Assert.That(successReturn.Value.Type,
+            Is.EqualTo(loadedFunction.ReturnType));
+        Assert.That(((BoundRead)successReturn.Value).Variable,
+            Is.EqualTo(loadedFunction.ParameterCount));
+
+        var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(loaded,
+            consumerIdentity, schemaIdentity, 1, []);
+        var reloaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                reemittedArtifact), consumerIdentity, [providerInput]);
+        var reloadedFunction = reloaded.Functions.Single(
+            static function => function.Name == "InvokePointer");
+        Assert.That(NativePointerTypes.IsType(reloadedFunction.ReturnType),
+            Is.True);
+        Assert.That(reloaded.NativePointerTypes[NativePointerTypes.Index(
+            reloadedFunction.ReturnType)].PointeeType,
+            Is.EqualTo(PrimitiveType.Int32));
+    }
+
+    [Test]
     public async Task StandardForeignNativeInterfaceConsumesAggregateOutputUnderAc1()
     {
         Assume.That(OperatingSystem.IsWindows()
