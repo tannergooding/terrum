@@ -25,7 +25,8 @@ internal sealed class StandaloneMethodImportInputTests
     private const string Agreement
         = "terrum.experimental.standalone-method-imports/1";
     private const string SchemaIdentity
-        = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-witness-projections-1";
+        = StandaloneMethodImportOutputFramer
+            .GeneralPredicateGraphsWitnessProjectionsSchemaIdentity;
     private const string VerificationSource = """
         namespace Terrum.CodeAnalysis;
         int32 Main() {
@@ -796,7 +797,8 @@ internal sealed class StandaloneMethodImportInputTests
         var assertionArtifact = StandaloneMethodImportOutputFramer.Frame(
             assertionExecution, assertionBuffers);
         var assertionIndex
-            = TrRmArtifactIndex.ForGeneralPredicateGraphsDraft(
+            = TrRmArtifactIndex
+                .ForStandaloneGeneralPredicateGraphsWitnessProjectionsDraft(
                 assertionArtifact);
         Assert.That(assertionIndex.TryGetSection(0x0004,
                 out var assertionFeatures, out var assertionFeatureCount),
@@ -3403,7 +3405,10 @@ internal sealed class StandaloneMethodImportInputTests
             new TrRmSection(0x0039, 0, 1, readRootSection),
             new TrRmSection(0x003B, 0, 1, predicateNodeSection),
             new TrRmSection(0x003C, 0, 1, predicateOperandSection),
-        ], TrRmArtifactSchema.GeneralPredicateGraphsDraft);
+        ], TrRmArtifactSchema.GeneralPredicateGraphsDraft,
+            standardSchemaIdentity:
+                StandaloneMethodImportOutputFramer
+                    .GeneralPredicateGraphsWitnessProjectionsSchemaIdentity);
     }
 
     private static byte[] CreateOutputStateArtifact(string moduleIdentity,

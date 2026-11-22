@@ -959,6 +959,16 @@ internal readonly record struct CapturedStandaloneMethodImportInput(
 
 internal static class StandaloneMethodImportOutputFramer
 {
+    internal const string
+        GeneralPredicateGraphsWitnessProjectionsSchemaIdentity
+        = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-witness-projections-1";
+
+    internal static bool
+        IsSelectedGeneralPredicateGraphsWitnessProjectionsSchema(
+            string? schemaIdentity)
+        => StringComparer.Ordinal.Equals(schemaIdentity,
+            GeneralPredicateGraphsWitnessProjectionsSchemaIdentity);
+
     internal static byte[] Frame(
         NativeExecutionResult execution,
         ImmutableArray<HostBuffer> buffers)
@@ -1053,8 +1063,10 @@ internal static class StandaloneMethodImportOutputFramer
                 "The standalone output contains unclaimed section bytes.");
         }
 
-        return TrRmArtifactWriter.Encode(
-            sections, TrRmArtifactSchema.GeneralPredicateGraphsDraft);
+        return TrRmArtifactWriter.Encode(sections,
+            TrRmArtifactSchema.GeneralPredicateGraphsDraft,
+            standardSchemaIdentity:
+                GeneralPredicateGraphsWitnessProjectionsSchemaIdentity);
     }
 
     private static int FindBuffer(ImmutableArray<HostBuffer> buffers,

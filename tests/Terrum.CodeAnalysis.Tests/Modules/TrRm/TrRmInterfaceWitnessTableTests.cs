@@ -40,6 +40,33 @@ internal sealed class TrRmInterfaceWitnessTableTests
     }
 
     [Test]
+    public void IndexesWitnessProjectionSectionOnlyUnderExactWp1Schema()
+    {
+        var fixture = CreateFixture();
+        var readers = CreateReaders(fixture);
+        var witnesses = TrRmInterfaceWitnessTableWriter.Encode([
+            new TrRmInterfaceWitnessRow(1, 2, 1, 1, 0, 0, 0, 0),
+        ], readers.TypeSpecs, 1, 0, 0);
+        var witnessReader = new TrRmInterfaceWitnessTableReader(
+            witnesses, 1, readers.TypeSpecs, 1, 0, 0);
+        var members = TrRmWitnessMemberTableWriter.Encode([
+            new TrRmWitnessMemberRow(1, 2, 1, 1, 2),
+        ], witnessReader, readers.TypeSpecs, readers.Methods);
+        var artifact = fixture.CreateArtifact(witnesses, members,
+            witnessProjections: EncodeWitnessProjectionRows(
+                CreateWitnessProjectionRow()));
+
+        var selected = TrRmArtifactIndex
+            .ForStandaloneGeneralPredicateGraphsWitnessProjectionsDraft(
+                artifact);
+        Assert.That(selected.TryGetSection(0x0068, out _,
+            out var projectionCount), Is.True);
+        Assert.That(projectionCount, Is.EqualTo(1));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmArtifactIndex.ForGeneralPredicateGraphsDraft(artifact));
+    }
+
+    [Test]
     public void InterfaceWitnessAndMemberReadersChargeAtExactWorkBoundary()
     {
         var fixture = CreateFixture();
@@ -314,6 +341,29 @@ internal sealed class TrRmInterfaceWitnessTableTests
             readers.InterfaceBases, readers.AssociatedTypeDefs, default);
     }
 
+    private static byte[] CreateWitnessProjectionRow()
+    {
+        var row = new byte[52];
+        BinaryPrimitives.WriteUInt32LittleEndian(row, 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(row.AsSpan(4), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(row.AsSpan(8), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(row.AsSpan(12), 2);
+        BinaryPrimitives.WriteUInt32LittleEndian(row.AsSpan(16), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(row.AsSpan(20), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(row.AsSpan(24), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(row.AsSpan(28), 2);
+        BinaryPrimitives.WriteUInt32LittleEndian(row.AsSpan(32), 2);
+        BinaryPrimitives.WriteUInt32LittleEndian(row.AsSpan(36), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(row.AsSpan(44), 1);
+        row[48] = 1;
+        return row;
+    }
+
+    private static byte[] EncodeWitnessProjectionRows(byte[] row)
+        => TrRmVariableTableWriter.EncodeBlobs([
+            new ReadOnlyMemory<byte>(row),
+        ]);
+
     private static Fixture CreateFixture(bool includeAssociatedType = false,
         uint defaultTypeSpecRef = 0, bool includeBaseInterface = false)
     {
@@ -472,7 +522,8 @@ internal sealed class TrRmInterfaceWitnessTableTests
         byte[] InterfaceMethods)
     {
         public byte[] CreateArtifact(byte[] witnesses, byte[] members,
-            byte[]? witnessAssociatedTypes = null)
+            byte[]? witnessAssociatedTypes = null,
+            byte[]? witnessProjections = null)
         {
             var sections = new System.Collections.Generic.List<TrRmSection>
             {
@@ -511,8 +562,19 @@ internal sealed class TrRmInterfaceWitnessTableTests
                 sections.Add(new TrRmSection(0x002A, 0,
                     (uint)(witnessAssociatedTypes.Length / 20), witnessAssociatedTypes));
             }
+            if (witnessProjections is { Length: > 0 })
+            {
+                sections.Add(new TrRmSection(0x0068, 0, 1,
+                    witnessProjections));
+            }
 
-            return TrRmArtifactWriter.Encode(sections);
+            return witnessProjections is { Length: > 0 }
+                ? TrRmArtifactWriter.Encode(sections,
+                    TrRmArtifactSchema.GeneralPredicateGraphsDraft,
+                    standardSchemaIdentity:
+                        StandaloneMethodImportOutputFramer
+                            .GeneralPredicateGraphsWitnessProjectionsSchemaIdentity)
+                : TrRmArtifactWriter.Encode(sections);
         }
     }
 

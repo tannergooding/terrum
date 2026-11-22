@@ -38,9 +38,17 @@ not enabled by this graph-only integration.
 
 ## Exact candidate record
 
-All words are little-endian. Section `0068` has required policy `0000`,
-the existing `u32 offsets[recordCount+1]` framing and exact nonempty rows.
-Its prefix is **28 bytes**, in this order:
+All words are little-endian. Omit the `0068` directory entry and section
+when it has zero rows: [standard section framing](../specs/il-metadata.md#header-and-directory)
+requires every present section to have a positive record count. A present
+`0068` section uses required policy `0000`, the existing
+`u32 offsets[recordCount+1]` framing and exact nonempty rows.
+
+`0068` is a core typed table. Its cross-table fields hold direct typed
+row/TypeSpecRef references, not section-local ReferenceSlot numbers.
+The `0x0002` [optional reference-slotted policy](../specs/il-metadata.md#optional-section-reference-slots)
+does not apply; there is no slot-count prelude or ReferenceSlot array.
+Its row prefix is **28 bytes**, in this order:
 
 | Field | Meaning |
 |---|---|

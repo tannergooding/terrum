@@ -265,6 +265,13 @@ internal static class TrRmArtifactSchemaFacts
             or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft
             or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsDraft;
 
+    internal static bool UsesWitnessProjectionPredicateDependencies(
+        this TrRmArtifactSchema schema, string? standardSchemaIdentity) =>
+        schema == TrRmArtifactSchema.GeneralPredicateGraphsDraft
+            && StandaloneMethodImportOutputFramer
+                .IsSelectedGeneralPredicateGraphsWitnessProjectionsSchema(
+                    standardSchemaIdentity);
+
     internal static bool UsesPropertyInitializedState(
         this TrRmArtifactSchema schema)
         => schema is
@@ -573,9 +580,15 @@ public readonly ref struct TrRmArtifactIndex
             = TrRmExecutableCompiler
                 .IsSelectedTypeDefBindingEqualitySchemaIdentity(
                     standardSchemaIdentity);
+        var isStandaloneGeneralPredicateGraphsWitnessProjectionsSchema
+            = schema == TrRmArtifactSchema.GeneralPredicateGraphsDraft
+                && StandaloneMethodImportOutputFramer
+                    .IsSelectedGeneralPredicateGraphsWitnessProjectionsSchema(
+                        standardSchemaIdentity);
         if (standardSchemaIdentity is not null
             && !isClassInstanceLayoutSchema
             && !isLocalAggregatePointerLoadsSchema
+            && !isStandaloneGeneralPredicateGraphsWitnessProjectionsSchema
             && (!isTypeDefBindingEqualitySchema
                 || TrRmExecutableCompiler.GetForeignInvocationSchema(
                     standardSchemaIdentity) != schema))
@@ -1071,6 +1084,16 @@ public readonly ref struct TrRmArtifactIndex
     internal static TrRmArtifactIndex ForGeneralPredicateGraphsDraft(
         ReadOnlySpan<byte> artifact)
         => new(artifact, TrRmArtifactSchema.GeneralPredicateGraphsDraft);
+
+    internal static TrRmArtifactIndex
+        ForStandaloneGeneralPredicateGraphsWitnessProjectionsDraft(
+        ReadOnlySpan<byte> artifact)
+        => new(artifact,
+            TrRmArtifactSchema.GeneralPredicateGraphsDraft,
+            null,
+            standardSchemaIdentity:
+                StandaloneMethodImportOutputFramer
+                    .GeneralPredicateGraphsWitnessProjectionsSchemaIdentity);
 
     internal static TrRmArtifactIndex ForNativePointerLoadsDraft(
         ReadOnlySpan<byte> artifact,
@@ -1608,6 +1631,8 @@ public readonly ref struct TrRmArtifactIndex
             0x0067 when TrRmExecutableCompiler
                 .IsSelectedTypeDefBindingEqualitySchemaIdentity(
                     standardSchemaIdentity) => 12,
+            0x0068 when schema.UsesWitnessProjectionPredicateDependencies(
+                standardSchemaIdentity) => 0,
             _ => -1,
         };
     }
