@@ -2879,31 +2879,28 @@ internal sealed partial class CliTests
             expectation => expectation.UsingModule.ModuleIdentity
                     == providerIdentity
                 && expectation.ExportKey == "provider/Point"), Is.True);
-        var consumerCompilation = Compilation.CreateLibrary(
-            SyntaxTree.Parse("""
-                Point InvokeImportedPoint(ptr<void> receiver,
-                    ptr<int32> source, Point fallback) {
-                    init Point value;
-                    unsafe {
-                        int32 status = IProbe.TryReadPoint(
-                            receiver, source, &init value);
-                        if (status != 0) { return value; }
-                        return fallback;
-                    }
+        const string consumerSource = """
+            Point InvokeImportedPoint(ptr<void> receiver,
+                ptr<int32> source, Point fallback) {
+                init Point value;
+                unsafe {
+                    int32 status = IProbe.TryReadPoint(
+                        receiver, source, &init value);
+                    if (status != 0) { return value; }
+                    return fallback;
                 }
-                """), providerReference, options);
-        Assert.That(consumerCompilation.HasErrors, Is.False,
-            string.Join(Environment.NewLine,
-                consumerCompilation.Diagnostics));
-        var consumerProgram = consumerCompilation.Program
-            ?? throw new AssertionException("Expected an AC1 consumer.");
-        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
-            consumerProgram, consumerIdentity, ac1SchemaIdentity, 1, []);
+            }
+            """;
 
         var prefix = Path.Combine(TestArtifactPaths.DirectoryPath,
             $"trrm-ac1-ps1-provider-{Guid.NewGuid():N}");
         var providerPath = prefix + "-provider.trrm";
         var pointProviderPath = prefix + "-point-provider.trrm";
+        var invalidSourceProvidersPath
+            = prefix + "-invalid-source-providers.json";
+        var invalidConsumerPath = prefix + "-invalid-consumer.trrm";
+        var sourceProvidersPath = prefix + "-source-providers.json";
+        var consumerSourcePath = prefix + "-consumer.terrum";
         var consumerPath = prefix + "-consumer.trrm";
         var invalidLibraryPath = prefix + "-invalid.dll";
         var libraryPath = prefix + ".dll";
@@ -2914,7 +2911,142 @@ internal sealed partial class CliTests
                 .ConfigureAwait(true);
             await File.WriteAllBytesAsync(pointProviderPath, pointArtifact)
                 .ConfigureAwait(true);
-            await File.WriteAllBytesAsync(consumerPath, consumerArtifact)
+            await File.WriteAllTextAsync(consumerSourcePath, consumerSource,
+                new UTF8Encoding(false)).ConfigureAwait(true);
+            var malformedSourceProvidersConfigurations = new[] {
+                JsonSerializer.Serialize(new {
+                    schemaVersion = 4,
+                    unexpected = true,
+                    providers = new[] {
+                        new {
+                            schemaIdentity = a2SchemaIdentity,
+                            path = pointProviderPath,
+                        },
+                    },
+                    references = new[] {
+                        new {
+                            kind = "aggregate-types",
+                            providerInputOrdinal = 0,
+                            moduleIdentity = pointProviderIdentity,
+                            typeExportKeys = new[] { "provider/Point" },
+                        },
+                    },
+                }),
+                JsonSerializer.Serialize(new {
+                    schemaVersion = 4,
+                    providers = new[] {
+                        new {
+                            schemaIdentity = a2SchemaIdentity,
+                            path = pointProviderPath,
+                        },
+                    },
+                    references = new[] {
+                        new {
+                            kind = "aggregate-types",
+                            providerInputOrdinal = 0,
+                            moduleIdentity = pointProviderIdentity,
+                            typeExportKeys = new[] {
+                                "provider/Point", "provider/Point",
+                            },
+                        },
+                    },
+                }),
+            };
+            foreach (var malformedSourceProviders
+                in malformedSourceProvidersConfigurations)
+            {
+                await File.WriteAllTextAsync(invalidSourceProvidersPath,
+                    malformedSourceProviders)
+                    .ConfigureAwait(true);
+                var (malformedExit, malformedOutput, malformedError)
+                    = await RunAsync([], "compile-trrm",
+                        prefix + "-missing-source.terrum", "--identity",
+                        consumerIdentity, "--trrm-schema", ac1SchemaIdentity,
+                        "--trrm-source-providers",
+                        invalidSourceProvidersPath, "--library", "-o",
+                        invalidConsumerPath, "--runtime", "fail-fast",
+                        "--json").ConfigureAwait(true);
+                Assert.That(malformedExit, Is.EqualTo(2),
+                    $"{malformedOutput}{Environment.NewLine}{malformedError}");
+                using var malformedDocument
+                    = JsonDocument.Parse(malformedOutput);
+                Assert.That(malformedDocument.RootElement
+                    .GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM2001"));
+                Assert.That(File.Exists(invalidConsumerPath), Is.False);
+            }
+
+            await File.WriteAllTextAsync(invalidSourceProvidersPath,
+                JsonSerializer.Serialize(new {
+                    schemaVersion = 4,
+                    providers = new[] {
+                        new {
+                            schemaIdentity = ps1SchemaIdentity,
+                            path = prefix + "-missing-provider.trrm",
+                        },
+                        new {
+                            schemaIdentity = a2SchemaIdentity,
+                            path = prefix + "-missing-point.trrm",
+                        },
+                    },
+                    references = new[] {
+                        new {
+                            kind = "foreign-native-interface",
+                            providerInputOrdinal = 1,
+                            moduleIdentity = pointProviderIdentity,
+                        },
+                    },
+                })).ConfigureAwait(true);
+            var (invalidSourceSelection, invalidSourceOutput,
+                invalidSourceError) = await RunAsync([], "compile-trrm",
+                prefix + "-missing-source.terrum", "--identity",
+                consumerIdentity, "--trrm-schema", ac1SchemaIdentity,
+                "--trrm-source-providers", invalidSourceProvidersPath,
+                "--library", "-o", invalidConsumerPath, "--runtime",
+                "fail-fast", "--json").ConfigureAwait(true);
+            Assert.That(invalidSourceSelection, Is.EqualTo(2),
+                $"{invalidSourceOutput}{Environment.NewLine}{invalidSourceError}");
+            Assert.That(invalidSourceError, Is.Empty);
+            using (var invalidDocument = JsonDocument.Parse(
+                invalidSourceOutput))
+            {
+                Assert.That(invalidDocument.RootElement
+                    .GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM2000"));
+            }
+            Assert.That(File.Exists(invalidConsumerPath), Is.False);
+
+            await File.WriteAllTextAsync(sourceProvidersPath,
+                JsonSerializer.Serialize(new {
+                    schemaVersion = 4,
+                    providers = new[] {
+                        new {
+                            schemaIdentity = ps1SchemaIdentity,
+                            path = providerPath,
+                        },
+                        new {
+                            schemaIdentity = a2SchemaIdentity,
+                            path = pointProviderPath,
+                        },
+                    },
+                    references = new[] {
+                        new {
+                            kind = "foreign-native-interface",
+                            providerInputOrdinal = 0,
+                            moduleIdentity = providerIdentity,
+                        },
+                    },
+                })).ConfigureAwait(true);
+            var (compiled, compileOutput, compileError) = await RunAsync(
+                [], "compile-trrm", consumerSourcePath, "--identity",
+                consumerIdentity, "--trrm-schema", ac1SchemaIdentity,
+                "--trrm-source-providers", sourceProvidersPath, "--library",
+                "-o", consumerPath, "--runtime", "fail-fast", "--json")
+                .ConfigureAwait(true);
+            Assert.That(compiled, Is.Zero,
+                $"{compileOutput}{Environment.NewLine}{compileError}");
+            Assert.That(compileError, Is.Empty);
+            var consumerArtifact = await File.ReadAllBytesAsync(consumerPath)
                 .ConfigureAwait(true);
             await File.WriteAllBytesAsync(invalidLibraryPath, retained)
                 .ConfigureAwait(true);
@@ -2970,12 +3102,646 @@ internal sealed partial class CliTests
                 .ConfigureAwait(true);
             await TestFileCleanup.DeleteWithRetryAsync(pointProviderPath)
                 .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(
+                invalidSourceProvidersPath).ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(invalidConsumerPath)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(sourceProvidersPath)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(consumerSourcePath)
+                .ConfigureAwait(true);
             await TestFileCleanup.DeleteWithRetryAsync(consumerPath)
                 .ConfigureAwait(true);
             await TestFileCleanup.DeleteWithRetryAsync(invalidLibraryPath)
                 .ConfigureAwait(true);
             await TestFileCleanup.DeleteWithRetryAsync(libraryPath)
                 .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
+    public async Task CompileTrRmAc1PublishesFniOwnerFromSourceMapV2WithA2TypeProviderAsync()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-native-interface-aggregate-output-consumption-1";
+        const string providerIdentity = "cli-ac1-local-fni-provider";
+        const string pointProviderIdentity = "cli-ac1-local-fni-point";
+        const string a2SchemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
+        const string source = """
+            using Terrum.Interop;
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Payload {
+                public int64 X;
+                public int64 Y;
+            }
+            """;
+        const string interfaceSource = """
+            using Terrum.Interop;
+            [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+            [ForeignNativeInterface(VTableByteOffset: uint32(0))]
+            public interface IProbe {
+                [param(value): NativeOutput(
+                    When: NativeOutputCondition.NonZero)]
+                public unsafe int32 TryReadPoint(ptr<int32> source,
+                    [Terrum.CodeAnalysis.DependsOn(this, nameof(source))]
+                    [Terrum.CodeAnalysis.ForwardsBacking(
+                        this, nameof(source))]
+                    write ptr<Point> value);
+            }
+            """;
+        var pointNativeRegistration
+            = NativeCoreRegistrationTests.CreateRegistration();
+        var pointCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Point {
+                public int64 X;
+                public int64 Y;
+            }
+            """), new CompilationOptions {
+                NativeCoreRegistration = pointNativeRegistration,
+                LayoutCoreRegistration =
+                    NativeCoreRegistrationTests.CreateLayoutRegistration(
+                        pointNativeRegistration),
+            });
+        Assert.That(pointCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                pointCompilation.Diagnostics));
+        var pointArtifact = TrRmExecutableCompiler.EmitStandard(
+            pointCompilation.Program!, pointProviderIdentity,
+            a2SchemaIdentity, 1, [
+                new TrRmSourceTypeExport("", "Point", "provider/Point"),
+            ]);
+        var pointReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(a2SchemaIdentity, pointArtifact),
+            pointProviderIdentity, [], ["provider/Point"]);
+        var (native, output)
+            = NativeOutputCoreRegistrationTests
+                .CreateCombinedRegistrations(
+                    includeForeignNativeInterface: true);
+        var sourceTrees = ImmutableArray.Create(SyntaxTree.Parse(source),
+            SyntaxTree.Parse(interfaceSource));
+        var sourceCompilation = Compilation.CreateLibrary(sourceTrees,
+            pointReference, new CompilationOptions {
+                NativeCoreRegistration = native,
+                LayoutCoreRegistration =
+                    NativeCoreRegistrationTests.CreateLayoutRegistration(
+                        native),
+                NativeOutputCoreRegistration = output,
+            });
+        Assert.That(sourceCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                sourceCompilation.Diagnostics));
+        var providerProgram = sourceCompilation.Program!;
+        var member = providerProgram.Interfaces.Single().Members.Single();
+        Assert.That(member.SourceInputOrdinal, Is.EqualTo(1));
+        string CreateExportMap(string assertedSourcePath,
+            string assertedInterfaceSourcePath, int declarationStart,
+            string? snapshotSha256Override = null)
+            => JsonSerializer.Serialize(new {
+                schemaVersion = 2,
+                sources = new[] {
+                    new {
+                        path = assertedSourcePath,
+                        snapshotSha256 = LowercaseHex(SHA256.HashData(
+                            Encoding.Unicode.GetBytes(source))),
+                    },
+                    new {
+                        path = assertedInterfaceSourcePath,
+                        snapshotSha256 = snapshotSha256Override
+                            ?? LowercaseHex(SHA256.HashData(
+                                Encoding.Unicode.GetBytes(interfaceSource))),
+                    },
+                },
+                exports = new object[] {
+                    new {
+                        kind = "struct",
+                        @namespace = "",
+                        name = "Payload",
+                        exportKey = "local/Payload",
+                        fieldExports = new[] {
+                            new { name = "X", exportKey = "local/Payload.X" },
+                            new { name = "Y", exportKey = "local/Payload.Y" },
+                        },
+                    },
+                    new {
+                        kind = "foreign-native-interface",
+                        @namespace = "",
+                        name = "IProbe",
+                        exportKey = "local/IProbe",
+                        interfaceMethodExports = new[] {
+                            new {
+                                sourceInputOrdinal = member.SourceInputOrdinal,
+                                declarationStart,
+                                declarationLength =
+                                    member.SourceDeclarationSpan.Length,
+                                exportKey =
+                                    "local/IProbe.TryReadPoint",
+                            },
+                        },
+                    },
+                },
+            });
+
+        var directory = TestArtifactPaths.CreateDirectory(
+            "terrum-ac1-source-type-exports-v2-");
+        var sourcePath = Path.Combine(directory, "provider.terrum");
+        var interfaceSourcePath = Path.Combine(directory,
+            "interface.terrum");
+        var layoutManifest = Path.Combine(directory, "layout.json");
+        var nativeManifest = Path.Combine(directory, "native.json");
+        var nativeOutputManifest = Path.Combine(directory,
+            "native-output.json");
+        var exportManifest = Path.Combine(directory, "types.json");
+        var invalidExportManifest = Path.Combine(directory,
+            "invalid-types.json");
+        var pointProviderPath = Path.Combine(directory, "point.trrm");
+        var sourceProvidersPath = Path.Combine(directory,
+            "source-providers.json");
+        var artifact = Path.Combine(directory, "provider.trrm");
+        var preservedOutput = Path.Combine(directory, "preserved.trrm");
+        byte[] retained = [0xA5, 0x5A];
+        try
+        {
+            await File.WriteAllBytesAsync(sourcePath,
+                Encoding.UTF8.GetBytes(source)).ConfigureAwait(true);
+            await File.WriteAllBytesAsync(interfaceSourcePath,
+                Encoding.UTF8.GetBytes(interfaceSource))
+                .ConfigureAwait(true);
+            await File.WriteAllBytesAsync(pointProviderPath, pointArtifact)
+                .ConfigureAwait(true);
+            await File.WriteAllTextAsync(sourceProvidersPath,
+                JsonSerializer.Serialize(new {
+                    schemaVersion = 4,
+                    providers = new[] {
+                        new {
+                            schemaIdentity = a2SchemaIdentity,
+                            path = pointProviderPath,
+                        },
+                    },
+                    references = new[] {
+                        new {
+                            kind = "aggregate-types",
+                            providerInputOrdinal = 0,
+                            moduleIdentity = pointProviderIdentity,
+                            typeExportKeys = new[] { "provider/Point" },
+                        },
+                    },
+                })).ConfigureAwait(true);
+            await File.WriteAllTextAsync(layoutManifest,
+                CreateLayoutCoreManifest(providerIdentity))
+                .ConfigureAwait(true);
+            await File.WriteAllTextAsync(nativeManifest,
+                CreateNativeCoreManifest(providerIdentity,
+                    includeForeignNativeInterface: true))
+                .ConfigureAwait(true);
+            await File.WriteAllTextAsync(nativeOutputManifest,
+                CreateNativeOutputCoreManifest(providerIdentity))
+                .ConfigureAwait(true);
+            await File.WriteAllTextAsync(exportManifest,
+                CreateExportMap(sourcePath, interfaceSourcePath,
+                    member.SourceDeclarationSpan.Start))
+                .ConfigureAwait(true);
+
+            var (compileExit, compileOutput, compileError)
+                = await RunAsync([], [
+                    "compile-trrm", sourcePath, "--source",
+                    interfaceSourcePath, "--identity",
+                    providerIdentity, "--trrm-schema", schemaIdentity,
+                    "--trrm-source-type-exports", exportManifest,
+                    "--layout-core-manifest", layoutManifest,
+                    "--native-core-manifest", nativeManifest,
+                    "--native-output-core-manifest",
+                    nativeOutputManifest,
+                    "--trrm-source-providers", sourceProvidersPath,
+                    "--library", "-o", artifact, "--runtime", "fail-fast",
+                    "--json",
+                ]).ConfigureAwait(true);
+            Assert.That(compileExit, Is.Zero,
+                compileOutput + compileError);
+            Assert.That(compileError, Is.Empty);
+            var artifactBytes = await File.ReadAllBytesAsync(artifact)
+                .ConfigureAwait(true);
+            var reference = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, artifactBytes),
+                providerIdentity, [
+                    new TrRmStandardArtifactInput(a2SchemaIdentity,
+                        pointArtifact),
+                ]);
+            Assert.That(reference.Interfaces.Select(static definition =>
+                    definition.QualifiedName),
+                Is.EqualTo(["IProbe"]));
+            Assert.That(reference.Structures.Single(static structure =>
+                structure.Name == "Payload").DeclaredCopyEvidence,
+                Is.True);
+            Assert.That(reference.Structures.Single(static structure =>
+                structure.Name == "Point").DeclaredCopyEvidence,
+                Is.True);
+
+            await File.WriteAllBytesAsync(preservedOutput, retained)
+                .ConfigureAwait(true);
+            await File.WriteAllTextAsync(invalidExportManifest,
+                CreateExportMap(sourcePath, interfaceSourcePath,
+                    member.SourceDeclarationSpan.Start + 1))
+                .ConfigureAwait(true);
+            var (invalidExit, invalidOutput, invalidError)
+                = await RunAsync([], [
+                    "compile-trrm", sourcePath, "--source",
+                    interfaceSourcePath, "--identity",
+                    providerIdentity, "--trrm-schema", schemaIdentity,
+                    "--trrm-source-type-exports", invalidExportManifest,
+                    "--layout-core-manifest", layoutManifest,
+                    "--native-core-manifest", nativeManifest,
+                    "--native-output-core-manifest",
+                    nativeOutputManifest,
+                    "--trrm-source-providers", sourceProvidersPath,
+                    "--library", "-o", preservedOutput, "--runtime",
+                    "fail-fast", "--json",
+                ]).ConfigureAwait(true);
+            Assert.That(invalidExit, Is.EqualTo(2),
+                invalidOutput + invalidError);
+            Assert.That(invalidError, Is.Empty);
+            using (var document = JsonDocument.Parse(invalidOutput))
+            {
+                Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM2001"));
+            }
+            Assert.That(await File.ReadAllBytesAsync(preservedOutput)
+                .ConfigureAwait(true), Is.EqualTo(retained));
+
+            await File.WriteAllTextAsync(invalidExportManifest,
+                CreateExportMap(sourcePath, interfaceSourcePath,
+                    member.SourceDeclarationSpan.Start,
+                    new string('0', 64)))
+                .ConfigureAwait(true);
+            var (staleDigestExit, staleDigestOutput, staleDigestError)
+                = await RunAsync([], [
+                    "compile-trrm", sourcePath, "--source",
+                    interfaceSourcePath, "--identity",
+                    providerIdentity, "--trrm-schema", schemaIdentity,
+                    "--trrm-source-type-exports", invalidExportManifest,
+                    "--layout-core-manifest", layoutManifest,
+                    "--native-core-manifest", nativeManifest,
+                    "--native-output-core-manifest",
+                    nativeOutputManifest,
+                    "--library", "-o", preservedOutput, "--runtime",
+                    "fail-fast", "--json",
+                ]).ConfigureAwait(true);
+            Assert.That(staleDigestExit, Is.EqualTo(2),
+                staleDigestOutput + staleDigestError);
+            using (var staleDigestDocument
+                = JsonDocument.Parse(staleDigestOutput))
+            {
+                Assert.That(staleDigestDocument.RootElement
+                    .GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM2001"));
+            }
+            Assert.That(await File.ReadAllBytesAsync(preservedOutput)
+                .ConfigureAwait(true), Is.EqualTo(retained));
+
+            await File.WriteAllTextAsync(invalidExportManifest,
+                CreateExportMap(sourcePath, interfaceSourcePath + ".stale",
+                    member.SourceDeclarationSpan.Start))
+                .ConfigureAwait(true);
+            var (stalePathExit, stalePathOutput, stalePathError)
+                = await RunAsync([], [
+                    "compile-trrm", sourcePath, "--source",
+                    interfaceSourcePath, "--identity",
+                    providerIdentity, "--trrm-schema", schemaIdentity,
+                    "--trrm-source-type-exports", invalidExportManifest,
+                    "--layout-core-manifest", layoutManifest,
+                    "--native-core-manifest", nativeManifest,
+                    "--native-output-core-manifest",
+                    nativeOutputManifest,
+                    "--trrm-source-providers", sourceProvidersPath,
+                    "--library", "-o", preservedOutput, "--runtime",
+                    "fail-fast", "--json",
+                ]).ConfigureAwait(true);
+            Assert.That(stalePathExit, Is.EqualTo(2),
+                stalePathOutput + stalePathError);
+            using (var stalePathDocument = JsonDocument.Parse(stalePathOutput))
+            {
+                Assert.That(stalePathDocument.RootElement
+                    .GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM2001"));
+            }
+            Assert.That(await File.ReadAllBytesAsync(preservedOutput)
+                .ConfigureAwait(true), Is.EqualTo(retained));
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
+                .ConfigureAwait(false);
+        }
+    }
+
+    [Test]
+    public async Task CompileTrRmAc1PublishesFniOwnerFromSourceMapV2Async()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-native-interface-aggregate-output-consumption-1";
+        const string providerIdentity = "cli-ac1-local-fni-provider";
+        const string source = """
+            using Terrum.Interop;
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Point {
+                public int64 X;
+                public int64 Y;
+            }
+            [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+            [ForeignNativeInterface(VTableByteOffset: uint32(0))]
+            public interface IProbe {
+                [param(value): NativeOutput(
+                    When: NativeOutputCondition.NonZero)]
+                public unsafe int32 TryReadPoint(ptr<int32> source,
+                    [Terrum.CodeAnalysis.DependsOn(this, nameof(source))]
+                    [Terrum.CodeAnalysis.ForwardsBacking(
+                        this, nameof(source))]
+                    write ptr<Point> value);
+            }
+            """;
+        var (native, output)
+            = NativeOutputCoreRegistrationTests
+                .CreateCombinedRegistrations(
+                    includeForeignNativeInterface: true);
+        var sourceCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(source), new CompilationOptions {
+                NativeCoreRegistration = native,
+                LayoutCoreRegistration =
+                    NativeCoreRegistrationTests.CreateLayoutRegistration(
+                        native),
+                NativeOutputCoreRegistration = output,
+            });
+        Assert.That(sourceCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                sourceCompilation.Diagnostics));
+        var providerProgram = sourceCompilation.Program!;
+        var member = providerProgram.Interfaces.Single().Members.Single();
+        string CreateExportMap(string assertedSourcePath,
+            int declarationStart)
+            => JsonSerializer.Serialize(new {
+                schemaVersion = 2,
+                sources = new[] {
+                    new {
+                        path = assertedSourcePath,
+                        snapshotSha256 = LowercaseHex(SHA256.HashData(
+                            Encoding.Unicode.GetBytes(source))),
+                    },
+                },
+                exports = new object[] {
+                    new {
+                        kind = "struct",
+                        @namespace = "",
+                        name = "Point",
+                        exportKey = "local/Point",
+                        fieldExports = new[] {
+                            new { name = "X", exportKey = "local/Point.X" },
+                            new { name = "Y", exportKey = "local/Point.Y" },
+                        },
+                    },
+                    new {
+                        kind = "foreign-native-interface",
+                        @namespace = "",
+                        name = "IProbe",
+                        exportKey = "local/IProbe",
+                        interfaceMethodExports = new[] {
+                            new {
+                                sourceInputOrdinal = 0,
+                                declarationStart,
+                                declarationLength =
+                                    member.SourceDeclarationSpan.Length,
+                                exportKey =
+                                    "local/IProbe.TryReadPoint",
+                            },
+                        },
+                    },
+                },
+            });
+
+        var directory = TestArtifactPaths.CreateDirectory(
+            "terrum-ac1-source-type-exports-v2-");
+        var sourcePath = Path.Combine(directory, "provider.terrum");
+        var layoutManifest = Path.Combine(directory, "layout.json");
+        var nativeManifest = Path.Combine(directory, "native.json");
+        var nativeOutputManifest = Path.Combine(directory,
+            "native-output.json");
+        var exportManifest = Path.Combine(directory, "types.json");
+        var invalidExportManifest = Path.Combine(directory,
+            "invalid-types.json");
+        var artifact = Path.Combine(directory, "provider.trrm");
+        var preservedOutput = Path.Combine(directory, "preserved.trrm");
+        byte[] retained = [0xA5, 0x5A];
+        try
+        {
+            await File.WriteAllBytesAsync(sourcePath,
+                Encoding.UTF8.GetBytes(source)).ConfigureAwait(true);
+            await File.WriteAllTextAsync(layoutManifest,
+                CreateLayoutCoreManifest(providerIdentity))
+                .ConfigureAwait(true);
+            await File.WriteAllTextAsync(nativeManifest,
+                CreateNativeCoreManifest(providerIdentity,
+                    includeForeignNativeInterface: true))
+                .ConfigureAwait(true);
+            await File.WriteAllTextAsync(nativeOutputManifest,
+                CreateNativeOutputCoreManifest(providerIdentity))
+                .ConfigureAwait(true);
+            await File.WriteAllTextAsync(exportManifest,
+                CreateExportMap(sourcePath,
+                    member.SourceDeclarationSpan.Start))
+                .ConfigureAwait(true);
+
+            var (compileExit, compileOutput, compileError)
+                = await RunAsync([], [
+                    "compile-trrm", sourcePath, "--identity",
+                    providerIdentity, "--trrm-schema", schemaIdentity,
+                    "--trrm-source-type-exports", exportManifest,
+                    "--layout-core-manifest", layoutManifest,
+                    "--native-core-manifest", nativeManifest,
+                    "--native-output-core-manifest",
+                    nativeOutputManifest,
+                    "--library", "-o", artifact, "--runtime", "fail-fast",
+                    "--json",
+                ]).ConfigureAwait(true);
+            Assert.That(compileExit, Is.Zero,
+                compileOutput + compileError);
+            Assert.That(compileError, Is.Empty);
+            var artifactBytes = await File.ReadAllBytesAsync(artifact)
+                .ConfigureAwait(true);
+            var reference = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, artifactBytes),
+                providerIdentity, []);
+            Assert.That(reference.Interfaces.Select(static definition =>
+                    definition.QualifiedName),
+                Is.EqualTo(["IProbe"]));
+            Assert.That(reference.Structures.Single(static structure =>
+                structure.Name == "Point").DeclaredCopyEvidence,
+                Is.True);
+
+            await File.WriteAllBytesAsync(preservedOutput, retained)
+                .ConfigureAwait(true);
+            await File.WriteAllTextAsync(invalidExportManifest,
+                CreateExportMap(sourcePath,
+                    member.SourceDeclarationSpan.Start + 1))
+                .ConfigureAwait(true);
+            var (invalidExit, invalidOutput, invalidError)
+                = await RunAsync([], [
+                    "compile-trrm", sourcePath, "--identity",
+                    providerIdentity, "--trrm-schema", schemaIdentity,
+                    "--trrm-source-type-exports", invalidExportManifest,
+                    "--layout-core-manifest", layoutManifest,
+                    "--native-core-manifest", nativeManifest,
+                    "--native-output-core-manifest",
+                    nativeOutputManifest,
+                    "--library", "-o", preservedOutput, "--runtime",
+                    "fail-fast", "--json",
+                ]).ConfigureAwait(true);
+            Assert.That(invalidExit, Is.EqualTo(2),
+                invalidOutput + invalidError);
+            Assert.That(invalidError, Is.Empty);
+            using (var document = JsonDocument.Parse(invalidOutput))
+            {
+                Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM2001"));
+            }
+            Assert.That(await File.ReadAllBytesAsync(preservedOutput)
+                .ConfigureAwait(true), Is.EqualTo(retained));
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
+                .ConfigureAwait(false);
+        }
+    }
+
+    [Test]
+    public async Task CompileTrRmA2PublishesCopyTypeFromSourceTypeExportsV2Async()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
+        const string moduleIdentity = "cli-a2-source-type-exports";
+        const string source = """
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Point {
+                public int64 X;
+                public int64 Y;
+            }
+            """;
+        var directory = TestArtifactPaths.CreateDirectory(
+            "trrm-a2-source-type-exports-v2-");
+        var sourcePath = Path.Combine(directory, "point.terrum");
+        var exportsPath = Path.Combine(directory, "types.json");
+        var invalidExportsPath = Path.Combine(directory,
+            "invalid-types.json");
+        var layoutPath = Path.Combine(directory, "layout.json");
+        var nativePath = Path.Combine(directory, "native.json");
+        var artifactPath = Path.Combine(directory, "point.trrm");
+        try
+        {
+            await File.WriteAllTextAsync(sourcePath, source,
+                new UTF8Encoding(false)).ConfigureAwait(true);
+            var snapshot = SyntaxTree.Parse(source, sourcePath).Root
+                .ToFullString();
+            var exports = JsonSerializer.Serialize(new {
+                schemaVersion = 2,
+                sources = new[] {
+                    new {
+                        path = sourcePath,
+                        snapshotSha256 = LowercaseHex(SHA256.HashData(
+                            Encoding.Unicode.GetBytes(snapshot))),
+                    },
+                },
+                exports = new[] {
+                    new {
+                        kind = "struct",
+                        @namespace = "",
+                        name = "Point",
+                        exportKey = "provider/Point",
+                        fieldExports = Array.Empty<object>(),
+                    },
+                },
+            });
+            await File.WriteAllTextAsync(exportsPath, exports,
+                new UTF8Encoding(false)).ConfigureAwait(true);
+            await File.WriteAllTextAsync(layoutPath,
+                CreateLayoutCoreManifest(moduleIdentity))
+                .ConfigureAwait(true);
+            await File.WriteAllTextAsync(nativePath,
+                CreateNativeCoreManifest(moduleIdentity))
+                .ConfigureAwait(true);
+
+            var (exit, output, error) = await RunAsync([], "compile-trrm",
+                sourcePath, "--identity", moduleIdentity, "--trrm-schema",
+                schemaIdentity, "--trrm-source-type-exports", exportsPath,
+                "--layout-core-manifest", layoutPath,
+                "--native-core-manifest", nativePath, "--library", "-o",
+                artifactPath, "--runtime", "fail-fast", "--json")
+                .ConfigureAwait(true);
+            Assert.That(exit, Is.Zero, $"{output}{Environment.NewLine}{error}");
+            Assert.That(error, Is.Empty);
+
+            var tables = TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+                    TrRmArtifactIndex.ForForeignInvocationStorageFixedArrayCopyDraft(
+                        await File.ReadAllBytesAsync(artifactPath)
+                            .ConfigureAwait(true)));
+            Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+                "provider/Point", out var typeDefinition), Is.True);
+            Assert.That(typeDefinition >> 24, Is.EqualTo(0x13u));
+            Assert.That(tables.Fields.Count, Is.EqualTo(2));
+            Assert.That(tables.Layouts.Count, Is.EqualTo(2));
+            var typeRow = checked((int)(typeDefinition & 0x00FF_FFFF));
+            Assert.That(tables.TypeDefs.GetFlags(typeRow) & 0x20u,
+                Is.EqualTo(0x20u));
+            Assert.That(tables.Features.GetFeature(1).FeatureId,
+                Is.EqualTo(2u));
+            Assert.That(tables.Features.GetFeature(2).FeatureId,
+                Is.EqualTo(13u));
+
+            var invalidExports = JsonSerializer.Serialize(new {
+                schemaVersion = 2,
+                sources = new[] {
+                    new {
+                        path = sourcePath,
+                        snapshotSha256 = LowercaseHex(SHA256.HashData(
+                            Encoding.Unicode.GetBytes(snapshot))),
+                    },
+                },
+                exports = new[] {
+                    new {
+                        kind = "struct",
+                        @namespace = "",
+                        name = "Point",
+                        exportKey = "provider/Point",
+                        fieldExports = new[] {
+                            new { name = "X", exportKey = "provider/Point.X" },
+                        },
+                    },
+                },
+            });
+            await File.WriteAllTextAsync(invalidExportsPath, invalidExports,
+                new UTF8Encoding(false)).ConfigureAwait(true);
+            var retained = await File.ReadAllBytesAsync(artifactPath)
+                .ConfigureAwait(true);
+            var (invalidExit, invalidOutput, invalidError)
+                = await RunAsync([], "compile-trrm", sourcePath,
+                    "--identity", moduleIdentity, "--trrm-schema",
+                    schemaIdentity, "--trrm-source-type-exports",
+                    invalidExportsPath, "--layout-core-manifest",
+                    layoutPath, "--native-core-manifest", nativePath,
+                    "--library", "-o", artifactPath, "--runtime",
+                    "fail-fast", "--json").ConfigureAwait(true);
+            Assert.That(invalidExit, Is.EqualTo(2),
+                $"{invalidOutput}{Environment.NewLine}{invalidError}");
+            using var invalidDocument = JsonDocument.Parse(invalidOutput);
+            Assert.That(invalidDocument.RootElement.GetProperty("diagnostics")[0]
+                .GetProperty("code").GetString(), Is.EqualTo("TRM2000"));
+            Assert.That(await File.ReadAllBytesAsync(artifactPath)
+                .ConfigureAwait(true), Is.EqualTo(retained));
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
+                .ConfigureAwait(false);
         }
     }
 

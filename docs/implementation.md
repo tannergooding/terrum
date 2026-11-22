@@ -1386,17 +1386,25 @@ The artifact `build-trrm-library` route now admits an explicitly selected AC1
 consumer with AC1, PS1 and A2 providers. Its regression separates a PS1 FNI
 method provider from an A2 Copy-positive TypeDef provider and checks that the
 PS1 expected view remains Copy-unknown; it is unverified under the hold.
-`compile-trrm` source FNI export/provider transport remains open under the
-unapproved, provisionally actionable version-2/version-4 CLI proposal.
+The provisional `compile-trrm` source route now implements type-export v2
+pairings for AC1, PS1 and A2, plus provider v4 for AC1 with an AC1/PS1 FNI
+Module root and AC1/PS1/A2 dependencies, or an A2 aggregate-type root. It
+validates captured source paths, UTF-16 snapshots and FNI member spans before
+binding, dispatches to the existing reference factories, preserves selected
+PS1/A2 aggregate origins during source emission, and publishes A2 aggregate
+TypeDefs with Features 2/1 and 13/1. Public regressions cover AC1 source FNI
+publication with an A2 type root, malformed source spans and provider
+pairings, output-preservation failures, and A2's type-only export map. These
+changes and regressions remain unverified under the hold; formal proposal
+review and qualification remain open.
 Pointer output reads, other side-effecting argument expressions,
 defaults/constants, multiple calls, other condition expressions and Body
 control-flow shapes, nonreturning-call shapes beyond the terminal subset and
 reservation cancellation remain open.
-Supervised native
-execution, private persistence, source CLI transport and dependent runtime work
-remain open. NativeParameter is not admitted on these methods or anchors, and
-neither FNI proposal is approved. AC1 is also unapproved; native-interface
-execution remains incomplete.
+Supervised native execution, private persistence and dependent runtime work
+remain open. CLI qualification is still unverified. NativeParameter is not
+admitted on these methods or anchors, and neither FNI proposal is approved.
+AC1 is also unapproved; native-interface execution remains incomplete.
 [CG-004](implementation/conformance-gaps.md#cg-004) owns
 the detailed composition and qualification gates. Earlier TRRM NativeOutput
 clauses and ScalarInitOutput encoding are prototype artifacts, not a fallback

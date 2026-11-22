@@ -9,8 +9,14 @@ using System.Linq;
 using System.Text;
 using System.Text.Json;
 using Terrum.CodeAnalysis.Modules;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.Tools;
+
+internal sealed record TrRmSourceTypeExportsFile(
+    int SchemaVersion,
+    ImmutableArray<TrRmSourceSnapshotAssertion> Sources,
+    ImmutableArray<TrRmSourceTypeExport> Exports);
 
 internal static partial class Program
 {
@@ -19,7 +25,7 @@ internal static partial class Program
     private static readonly UTF8Encoding s_sourceTypeExportsStrictUtf8
         = new(false, true);
 
-    private static ImmutableArray<TrRmSourceTypeExport>
+    private static TrRmSourceTypeExportsFile
         ReadTrRmSourceTypeExports(string path)
     {
         var contents = File.ReadAllBytes(path);
@@ -55,16 +61,29 @@ internal static partial class Program
                 });
             ValidateSourceTypeExportsJsonText(document.RootElement, path,
                 "$");
-            var root = RequireSourceTypeExportsObject(
-                document.RootElement, path, "$",
-                "schemaVersion", "exports");
-            if (ReadSourceTypeExportsVersion(PropertySourceTypeExports(
-                    root, "schemaVersion", path, "$"), path,
-                    "$.schemaVersion") != 1)
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
             {
-                throw InvalidSourceTypeExports(path, "$.schemaVersion",
-                    "only schema version 1 is supported");
+                throw InvalidSourceTypeExports(path, "$",
+                    "expected an object");
             }
+            var version = ReadSourceTypeExportsVersion(
+                PropertySourceTypeExports(document.RootElement,
+                    "schemaVersion", path, "$"), path,
+                "$.schemaVersion");
+            var root = version switch {
+                1 => RequireSourceTypeExportsObject(
+                    document.RootElement, path, "$",
+                    "schemaVersion", "exports"),
+                2 => RequireSourceTypeExportsObject(
+                    document.RootElement, path, "$", "schemaVersion",
+                    "sources", "exports"),
+                _ => throw InvalidSourceTypeExports(path,
+                    "$.schemaVersion",
+                    "only schema versions 1 and 2 are supported"),
+            };
+            var sources = version == 2
+                ? ReadSourceTypeExportsSources(root, path)
+                : ImmutableArray<TrRmSourceSnapshotAssertion>.Empty;
 
             var exportArray = PropertySourceTypeExports(root, "exports",
                 path, "$");
@@ -73,115 +92,359 @@ internal static partial class Program
                 throw InvalidSourceTypeExports(path, "$.exports",
                     "expected an array");
             }
+            if (version == 2
+                && exportArray.GetArrayLength() > 0xFF_FFFF)
+            {
+                throw InvalidSourceTypeExports(path, "$.exports",
+                    "export count exceeds the TRRM table limit");
+            }
 
             var exports = ImmutableArray.CreateBuilder<
                 TrRmSourceTypeExport>(exportArray.GetArrayLength());
             var selectors = new HashSet<(string Namespace, string Name)>();
             var exportKeys = new HashSet<string>(StringComparer.Ordinal);
+            var methodSpans = new HashSet<(int Source, int Start, int Length)>();
             var exportIndex = 0;
             foreach (var exportElement in exportArray.EnumerateArray())
             {
                 var exportPath = $"$.exports[{exportIndex}]";
-                var exportObject = RequireSourceTypeExportsObject(
-                    exportElement, path, exportPath, "namespace", "name",
-                    "exportKey", "fieldExports");
-                var @namespace = ReadSourceTypeExportsText(
-                    PropertySourceTypeExports(exportObject, "namespace",
-                        path, exportPath), path,
-                    exportPath + ".namespace", allowEmpty: true);
-                var name = ReadSourceTypeExportsText(
-                    PropertySourceTypeExports(exportObject, "name", path,
-                        exportPath), path, exportPath + ".name");
-                if (name.Contains('.', StringComparison.Ordinal))
-                {
-                    throw InvalidSourceTypeExports(path,
-                        exportPath + ".name",
-                        "expected a simple declaration name");
-                }
-                if (!selectors.Add((@namespace, name)))
+                var export = version == 1
+                    ? ReadVersion1SourceTypeExport(exportElement, path,
+                        exportPath, exportKeys)
+                    : ReadVersion2SourceTypeExport(exportElement, path,
+                        exportPath, sources.Length, exportKeys,
+                        methodSpans);
+                if (!selectors.Add((export.Namespace, export.Name)))
                 {
                     throw InvalidSourceTypeExports(path, exportPath,
                         "duplicate declaration selector");
                 }
 
-                var exportKey = ReadSourceTypeExportsText(
-                    PropertySourceTypeExports(exportObject, "exportKey",
-                        path, exportPath), path,
-                    exportPath + ".exportKey");
-                if (!exportKeys.Add(exportKey))
-                {
-                    throw InvalidSourceTypeExports(path,
-                        exportPath + ".exportKey",
-                        "duplicate ExportKey");
-                }
-
-                var fieldArray = PropertySourceTypeExports(exportObject,
-                    "fieldExports", path, exportPath);
-                if (fieldArray.ValueKind != JsonValueKind.Array)
-                {
-                    throw InvalidSourceTypeExports(path,
-                        exportPath + ".fieldExports",
-                        "expected an array");
-                }
-
-                var fieldExports = ImmutableArray.CreateBuilder<
-                    TrRmSourceFieldExport>(fieldArray.GetArrayLength());
-                var fieldNames = new HashSet<string>(StringComparer.Ordinal);
-                var fieldIndex = 0;
-                foreach (var fieldElement in fieldArray.EnumerateArray())
-                {
-                    var fieldPath = exportPath + ".fieldExports["
-                        + fieldIndex.ToString(CultureInfo.InvariantCulture)
-                        + "]";
-                    var fieldObject = RequireSourceTypeExportsObject(
-                        fieldElement, path, fieldPath, "name",
-                        "exportKey");
-                    var fieldName = ReadSourceTypeExportsText(
-                        PropertySourceTypeExports(fieldObject, "name",
-                            path, fieldPath), path, fieldPath + ".name");
-                    if (fieldName.Contains('.', StringComparison.Ordinal))
-                    {
-                        throw InvalidSourceTypeExports(path,
-                            fieldPath + ".name",
-                            "expected a direct field name");
-                    }
-                    if (!fieldNames.Add(fieldName))
-                    {
-                        throw InvalidSourceTypeExports(path,
-                            fieldPath + ".name",
-                            "duplicate field selector");
-                    }
-
-                    var fieldExportKey = ReadSourceTypeExportsText(
-                        PropertySourceTypeExports(fieldObject,
-                            "exportKey", path, fieldPath), path,
-                        fieldPath + ".exportKey");
-                    if (!exportKeys.Add(fieldExportKey))
-                    {
-                        throw InvalidSourceTypeExports(path,
-                            fieldPath + ".exportKey",
-                            "duplicate ExportKey");
-                    }
-
-                    fieldExports.Add(new TrRmSourceFieldExport(fieldName,
-                        fieldExportKey));
-                    fieldIndex++;
-                }
-
-                exports.Add(new TrRmSourceTypeExport(@namespace, name,
-                    exportKey) {
-                    FieldExports = fieldExports.MoveToImmutable(),
-                });
+                exports.Add(export);
                 exportIndex++;
             }
 
-            return exports.MoveToImmutable();
+            return new TrRmSourceTypeExportsFile(version, sources,
+                exports.MoveToImmutable());
         }
         catch (JsonException exception)
         {
             throw InvalidSourceTypeExports(path,
                 exception.Path ?? "$", exception.Message);
         }
+    }
+
+    private static ImmutableArray<TrRmSourceSnapshotAssertion>
+        ReadSourceTypeExportsSources(JsonElement root, string path)
+    {
+        var sourceArray = PropertySourceTypeExports(root, "sources", path,
+            "$");
+        if (sourceArray.ValueKind != JsonValueKind.Array
+            || sourceArray.GetArrayLength() is < 1 or > 256)
+        {
+            throw InvalidSourceTypeExports(path, "$.sources",
+                "expected one through 256 source assertions");
+        }
+
+        var sources = ImmutableArray.CreateBuilder<
+            TrRmSourceSnapshotAssertion>(sourceArray.GetArrayLength());
+        var sourceIndex = 0;
+        foreach (var sourceElement in sourceArray.EnumerateArray())
+        {
+            var sourcePath = $"$.sources[{sourceIndex}]";
+            var sourceObject = RequireSourceTypeExportsObject(
+                sourceElement, path, sourcePath, "path", "snapshotSha256");
+            var operand = ReadSourceTypeExportsText(
+                PropertySourceTypeExports(sourceObject, "path", path,
+                    sourcePath), path, sourcePath + ".path");
+            var digest = ReadSourceTypeExportsText(
+                PropertySourceTypeExports(sourceObject, "snapshotSha256",
+                    path, sourcePath), path,
+                sourcePath + ".snapshotSha256");
+            if (digest.Length != 64
+                || digest.Any(static character =>
+                    character is not (>= '0' and <= '9'
+                        or >= 'a' and <= 'f')))
+            {
+                throw InvalidSourceTypeExports(path,
+                    sourcePath + ".snapshotSha256",
+                    "expected 64 lowercase hexadecimal digits");
+            }
+
+            sources.Add(new TrRmSourceSnapshotAssertion(operand, digest));
+            sourceIndex++;
+        }
+        return sources.MoveToImmutable();
+    }
+
+    private static TrRmSourceTypeExport ReadVersion1SourceTypeExport(
+        JsonElement element, string path, string jsonPath,
+        HashSet<string> exportKeys)
+    {
+        var exportObject = RequireSourceTypeExportsObject(element, path,
+            jsonPath, "namespace", "name", "exportKey", "fieldExports");
+        var @namespace = ReadSourceTypeExportsText(
+            PropertySourceTypeExports(exportObject, "namespace", path,
+                jsonPath), path, jsonPath + ".namespace", allowEmpty: true);
+        var name = ReadSourceTypeExportsTypeName(exportObject, path,
+            jsonPath);
+        var exportKey = ReadSourceTypeExportsText(
+            PropertySourceTypeExports(exportObject, "exportKey", path,
+                jsonPath), path, jsonPath + ".exportKey");
+        if (!exportKeys.Add(exportKey))
+        {
+            throw InvalidSourceTypeExports(path, jsonPath + ".exportKey",
+                "duplicate ExportKey");
+        }
+
+        return new TrRmSourceTypeExport(@namespace, name, exportKey) {
+            FieldExports = ReadSourceTypeFieldExports(exportObject, path,
+                jsonPath, exportKeys, validateExportKey: false),
+        };
+    }
+
+    private static TrRmSourceTypeExport ReadVersion2SourceTypeExport(
+        JsonElement element, string path, string jsonPath, int sourceCount,
+        HashSet<string> exportKeys,
+        HashSet<(int Source, int Start, int Length)> methodSpans)
+    {
+        if (element.ValueKind != JsonValueKind.Object)
+        {
+            throw InvalidSourceTypeExports(path, jsonPath,
+                "expected an object");
+        }
+        var kind = ReadSourceTypeExportsText(
+            PropertySourceTypeExports(element, "kind", path, jsonPath),
+            path, jsonPath + ".kind");
+        var expectedProperties = kind switch {
+            "struct" => new[] {
+                "kind", "namespace", "name", "exportKey", "fieldExports",
+            },
+            "foreign-native-interface" => new[] {
+                "kind", "namespace", "name", "exportKey",
+                "interfaceMethodExports",
+            },
+            _ => throw InvalidSourceTypeExports(path,
+                jsonPath + ".kind", "unknown declaration kind"),
+        };
+        var exportObject = RequireSourceTypeExportsObject(element, path,
+            jsonPath, expectedProperties);
+        var @namespace = ReadSourceTypeExportsText(
+            PropertySourceTypeExports(exportObject, "namespace", path,
+                jsonPath), path, jsonPath + ".namespace", allowEmpty: true);
+        var name = ReadSourceTypeExportsTypeName(exportObject, path,
+            jsonPath);
+        var exportKey = ReadSourceTypeExportKey(
+            PropertySourceTypeExports(exportObject, "exportKey", path,
+                jsonPath), path, jsonPath + ".exportKey");
+        if (!exportKeys.Add(exportKey))
+        {
+            throw InvalidSourceTypeExports(path, jsonPath + ".exportKey",
+                "duplicate ExportKey");
+        }
+
+        if (kind == "struct")
+        {
+            return new TrRmSourceTypeExport(@namespace, name, exportKey) {
+                FieldExports = ReadSourceTypeFieldExports(exportObject,
+                    path, jsonPath, exportKeys, validateExportKey: true),
+            };
+        }
+
+        return new TrRmSourceTypeExport(@namespace, name, exportKey) {
+            GenericArity = 0,
+            InterfaceMethodExports =
+                ReadSourceInterfaceMethodExports(exportObject, path,
+                    jsonPath, sourceCount, exportKeys, methodSpans),
+        };
+    }
+
+    private static string ReadSourceTypeExportsTypeName(
+        JsonElement exportObject, string path, string jsonPath)
+    {
+        var name = ReadSourceTypeExportsText(
+            PropertySourceTypeExports(exportObject, "name", path,
+                jsonPath), path, jsonPath + ".name");
+        if (name.Contains('.', StringComparison.Ordinal))
+        {
+            throw InvalidSourceTypeExports(path, jsonPath + ".name",
+                "expected a simple declaration name");
+        }
+        return name;
+    }
+
+    private static ImmutableArray<TrRmSourceFieldExport>
+        ReadSourceTypeFieldExports(JsonElement exportObject, string path,
+            string jsonPath, HashSet<string> exportKeys,
+            bool validateExportKey)
+    {
+        var fieldArray = PropertySourceTypeExports(exportObject,
+            "fieldExports", path, jsonPath);
+        if (fieldArray.ValueKind != JsonValueKind.Array
+            || (validateExportKey
+                && fieldArray.GetArrayLength() > 0xFF_FFFF))
+        {
+            throw InvalidSourceTypeExports(path,
+                jsonPath + ".fieldExports",
+                validateExportKey
+                    ? "expected an array within the TRRM FieldDef limit"
+                    : "expected an array");
+        }
+
+        var fieldExports = ImmutableArray.CreateBuilder<
+            TrRmSourceFieldExport>(fieldArray.GetArrayLength());
+        var fieldNames = new HashSet<string>(StringComparer.Ordinal);
+        var fieldIndex = 0;
+        foreach (var fieldElement in fieldArray.EnumerateArray())
+        {
+            var fieldPath = jsonPath + ".fieldExports["
+                + fieldIndex.ToString(CultureInfo.InvariantCulture) + "]";
+            var fieldObject = RequireSourceTypeExportsObject(
+                fieldElement, path, fieldPath, "name", "exportKey");
+            var fieldName = ReadSourceTypeExportsText(
+                PropertySourceTypeExports(fieldObject, "name", path,
+                    fieldPath), path, fieldPath + ".name");
+            if (fieldName.Contains('.', StringComparison.Ordinal)
+                || !fieldNames.Add(fieldName))
+            {
+                throw InvalidSourceTypeExports(path,
+                    fieldPath + ".name",
+                    "expected a unique direct field name");
+            }
+
+            var fieldExportKey = validateExportKey
+                ? ReadSourceTypeExportKey(
+                    PropertySourceTypeExports(fieldObject, "exportKey",
+                        path, fieldPath), path,
+                    fieldPath + ".exportKey")
+                : ReadSourceTypeExportsText(
+                    PropertySourceTypeExports(fieldObject, "exportKey",
+                        path, fieldPath), path,
+                    fieldPath + ".exportKey");
+            if (!exportKeys.Add(fieldExportKey))
+            {
+                throw InvalidSourceTypeExports(path,
+                    fieldPath + ".exportKey", "duplicate ExportKey");
+            }
+
+            fieldExports.Add(new TrRmSourceFieldExport(fieldName,
+                fieldExportKey));
+            fieldIndex++;
+        }
+        return fieldExports.MoveToImmutable();
+    }
+
+    private static ImmutableArray<TrRmSourceInterfaceMethodExport>
+        ReadSourceInterfaceMethodExports(JsonElement exportObject,
+            string path, string jsonPath, int sourceCount,
+            HashSet<string> exportKeys,
+            HashSet<(int Source, int Start, int Length)> methodSpans)
+    {
+        var methodArray = PropertySourceTypeExports(exportObject,
+            "interfaceMethodExports", path, jsonPath);
+        if (methodArray.ValueKind != JsonValueKind.Array
+            || methodArray.GetArrayLength() is < 1 or > 0xFF_FFFF)
+        {
+            throw InvalidSourceTypeExports(path,
+                jsonPath + ".interfaceMethodExports",
+                "expected a nonempty array within the InterfaceMethod limit");
+        }
+
+        var methods = ImmutableArray.CreateBuilder<
+            TrRmSourceInterfaceMethodExport>(
+                methodArray.GetArrayLength());
+        var methodIndex = 0;
+        foreach (var methodElement in methodArray.EnumerateArray())
+        {
+            var methodPath = jsonPath + ".interfaceMethodExports["
+                + methodIndex.ToString(CultureInfo.InvariantCulture) + "]";
+            var methodObject = RequireSourceTypeExportsObject(methodElement,
+                path, methodPath, "sourceInputOrdinal", "declarationStart",
+                "declarationLength", "exportKey");
+            var sourceInputOrdinal = ReadSourceTypeExportsInteger(
+                PropertySourceTypeExports(methodObject,
+                    "sourceInputOrdinal", path, methodPath), path,
+                methodPath + ".sourceInputOrdinal", allowZero: true);
+            var declarationStart = ReadSourceTypeExportsInteger(
+                PropertySourceTypeExports(methodObject,
+                    "declarationStart", path, methodPath), path,
+                methodPath + ".declarationStart", allowZero: true);
+            var declarationLength = ReadSourceTypeExportsInteger(
+                PropertySourceTypeExports(methodObject,
+                    "declarationLength", path, methodPath), path,
+                methodPath + ".declarationLength", allowZero: false);
+            if (sourceInputOrdinal >= sourceCount)
+            {
+                throw InvalidSourceTypeExports(path,
+                    methodPath + ".sourceInputOrdinal",
+                    "source ordinal is outside the asserted source list");
+            }
+            if ((long)declarationStart + declarationLength > int.MaxValue)
+            {
+                throw InvalidSourceTypeExports(path,
+                    methodPath + ".declarationLength",
+                    "declaration span end exceeds Int32.MaxValue");
+            }
+            if (!methodSpans.Add((sourceInputOrdinal, declarationStart,
+                    declarationLength)))
+            {
+                throw InvalidSourceTypeExports(path, methodPath,
+                    "duplicate interface member span");
+            }
+
+            var exportKey = ReadSourceTypeExportKey(
+                PropertySourceTypeExports(methodObject, "exportKey", path,
+                    methodPath), path, methodPath + ".exportKey");
+            if (!exportKeys.Add(exportKey))
+            {
+                throw InvalidSourceTypeExports(path,
+                    methodPath + ".exportKey", "duplicate ExportKey");
+            }
+
+            methods.Add(new TrRmSourceInterfaceMethodExport(
+                sourceInputOrdinal, new TextSpan(declarationStart,
+                    declarationLength), exportKey));
+            methodIndex++;
+        }
+        return methods.MoveToImmutable();
+    }
+
+    private static string ReadSourceTypeExportKey(JsonElement element,
+        string path, string jsonPath)
+    {
+        var key = ReadSourceTypeExportsText(element, path, jsonPath);
+        try
+        {
+            if (s_sourceTypeExportsStrictUtf8.GetByteCount(key) > 0xFF_FFFF)
+            {
+                throw InvalidSourceTypeExports(path, jsonPath,
+                    "ExportKey exceeds the Standard String limit");
+            }
+        }
+        catch (EncoderFallbackException)
+        {
+            throw InvalidSourceTypeExports(path, jsonPath,
+                "ExportKey contains malformed Unicode");
+        }
+        return key;
+    }
+
+    private static int ReadSourceTypeExportsInteger(JsonElement element,
+        string path, string jsonPath, bool allowZero)
+    {
+        var token = element.ValueKind == JsonValueKind.Number
+            ? element.GetRawText() : "";
+        if (token.Length == 0
+            || !int.TryParse(token, NumberStyles.None,
+                CultureInfo.InvariantCulture, out var value)
+            || value < (allowZero ? 0 : 1))
+        {
+            throw InvalidSourceTypeExports(path, jsonPath,
+                allowZero
+                    ? "expected an unsigned Int32 integer token"
+                    : "expected a positive unsigned Int32 integer token");
+        }
+        return value;
     }
 
     private static JsonElement RequireSourceTypeExportsObject(
@@ -241,19 +504,17 @@ internal static partial class Program
         return value;
     }
 
-    private static uint ReadSourceTypeExportsVersion(JsonElement element,
+    private static int ReadSourceTypeExportsVersion(JsonElement element,
         string path, string jsonPath)
     {
         var token = element.ValueKind == JsonValueKind.Number
             ? element.GetRawText() : "";
-        if (token.Length == 0
-            || !uint.TryParse(token, NumberStyles.None,
-                CultureInfo.InvariantCulture, out var value))
+        if (token is not ("1" or "2"))
         {
             throw InvalidSourceTypeExports(path, jsonPath,
-                "expected an exact unsigned integer token");
+                "only exact version tokens 1 and 2 are supported");
         }
-        return value;
+        return token == "1" ? 1 : 2;
     }
 
     private static void ValidateSourceTypeExportsJsonText(

@@ -26,6 +26,8 @@ internal sealed record TrRmSourceProviderReference(
 {
     internal ImmutableArray<string> MethodExportKeys { get; init; }
 
+    internal string? Kind { get; init; }
+
     internal ImmutableArray<TrRmSourceProviderExportKeySelection>
         ModuleQualifiedTypeExportKeys { get; init; }
 
@@ -119,10 +121,11 @@ internal static class TrRmSourceProvidersReader
                 throw Invalid(path, "$.references",
                     "expected a nonempty array");
             }
-            if (version == 3 && referenceArray.GetArrayLength() != 1)
+            if (version is 3 or 4
+                && referenceArray.GetArrayLength() != 1)
             {
                 throw Invalid(path, "$.references",
-                    "version 3 requires exactly one combined reference");
+                    $"version {version} requires exactly one combined reference");
             }
 
             var references = ImmutableArray.CreateBuilder<
@@ -133,6 +136,70 @@ internal static class TrRmSourceProvidersReader
             foreach (var referenceElement in referenceArray.EnumerateArray())
             {
                 var referencePath = $"$.references[{referenceIndex}]";
+                if (version == 4)
+                {
+                    if (referenceElement.ValueKind
+                        != JsonValueKind.Object)
+                    {
+                        throw Invalid(path, referencePath,
+                            "expected an object");
+                    }
+                    var kind = ReadText(Property(
+                        referenceElement, "kind", path, referencePath),
+                        path, referencePath + ".kind");
+                    var version4Reference = kind switch {
+                        "foreign-native-interface" =>
+                            RequireObject(referenceElement, path,
+                                referencePath, "kind",
+                                "providerInputOrdinal", "moduleIdentity"),
+                        "aggregate-types" =>
+                            RequireObject(referenceElement, path,
+                                referencePath, "kind",
+                                "providerInputOrdinal", "moduleIdentity",
+                                "typeExportKeys"),
+                        _ => throw Invalid(path,
+                            referencePath + ".kind",
+                            "unknown version 4 reference kind"),
+                    };
+                    var providerOrdinal = ReadOrdinal(Property(
+                        version4Reference, "providerInputOrdinal", path,
+                        referencePath), path,
+                        referencePath + ".providerInputOrdinal");
+                    if (providerOrdinal >= providers.Count)
+                    {
+                        throw Invalid(path,
+                            referencePath + ".providerInputOrdinal",
+                            "ordinal is outside the provider array");
+                    }
+
+                    var moduleIdentity = ReadText(Property(
+                        version4Reference, "moduleIdentity", path,
+                        referencePath), path,
+                        referencePath + ".moduleIdentity",
+                        maximumUtf8Bytes: 0xFF_FFFF);
+                    if (!selectors.Add((providerOrdinal, moduleIdentity)))
+                    {
+                        throw Invalid(path, referencePath,
+                            "duplicate provider Module selection");
+                    }
+
+                    var typeKeys = kind == "aggregate-types"
+                        ? ReadKeys(Property(version4Reference,
+                                "typeExportKeys", path, referencePath), path,
+                            referencePath + ".typeExportKeys",
+                            allowEmpty: false,
+                            seenKeys: new HashSet<string>(
+                                StringComparer.Ordinal),
+                            maximumCount: 0xFF_FFFF)
+                        : ImmutableArray<string>.Empty;
+                    references.Add(new TrRmSourceProviderReference(
+                        providerOrdinal, moduleIdentity, typeKeys, []) {
+                        Kind = kind,
+                    });
+                    referenceIndex++;
+                    continue;
+                }
+
                 var reference = version == 3
                     ? RequireObject(referenceElement, path, referencePath,
                         "providerInputOrdinal", "moduleIdentity",
@@ -182,6 +249,7 @@ internal static class TrRmSourceProvidersReader
                     references.Add(new TrRmSourceProviderReference(
                         providerOrdinal, moduleIdentity, [], []) {
                         MethodExportKeys = methodKeys,
+                        Kind = null,
                         ModuleQualifiedTypeExportKeys = typeSelections,
                         ModuleQualifiedFieldExportKeys = fieldSelections,
                     });
@@ -253,13 +321,20 @@ internal static class TrRmSourceProvidersReader
 
     private static ImmutableArray<string> ReadKeys(JsonElement element,
         string path, string jsonPath, bool allowEmpty,
-        HashSet<string> seenKeys)
+        HashSet<string> seenKeys, int maximumCount = int.MaxValue)
     {
         if (element.ValueKind != JsonValueKind.Array
-            || (!allowEmpty && element.GetArrayLength() == 0))
+            || (!allowEmpty && element.GetArrayLength() == 0)
+            || element.GetArrayLength() > maximumCount)
         {
-            throw Invalid(path, jsonPath,
-                allowEmpty ? "expected an array" : "expected a nonempty array");
+            var message = allowEmpty
+                ? "expected an array" : "expected a nonempty array";
+            if (maximumCount != int.MaxValue)
+            {
+                message += " within the supported row limit";
+            }
+
+            throw Invalid(path, jsonPath, message);
         }
 
         var keys = ImmutableArray.CreateBuilder<string>(
@@ -372,15 +447,16 @@ internal static class TrRmSourceProvidersReader
     {
         var token = element.ValueKind == JsonValueKind.Number
             ? element.GetRawText() : "";
-        if (token is not ("1" or "2" or "3"))
+        if (token is not ("1" or "2" or "3" or "4"))
         {
             throw Invalid(path, jsonPath,
-                "only exact version tokens 1, 2 and 3 are supported");
+                "only exact version tokens 1, 2, 3 and 4 are supported");
         }
         return token switch {
             "1" => 1,
             "2" => 2,
-            _ => 3,
+            "3" => 3,
+            _ => 4,
         };
     }
 

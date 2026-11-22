@@ -6710,9 +6710,9 @@ public static partial class TrRmExecutableCompiler
                     continue;
                 }
                 if (standardSchemaIdentity is null
-                    || !StringComparer.Ordinal.Equals(
-                        origin.Provider.SchemaIdentity,
-                        standardSchemaIdentity)
+                    || !IsSelectedFniAggregateOriginSchemaIdentity(
+                        standardSchemaIdentity,
+                        origin.Provider.SchemaIdentity)
                     || origin.ExportKeys.IsDefaultOrEmpty
                     || !foreignNativeStructureTypeDefRows.TryGetValue(
                         structureIndex, out var typeDefRow))

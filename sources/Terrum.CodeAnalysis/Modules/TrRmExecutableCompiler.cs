@@ -392,6 +392,30 @@ public static partial class TrRmExecutableCompiler
             || schema.UsesLocalAggregateLayout();
     }
 
+    internal static bool IsSelectedFniAggregateOriginSchemaIdentity(
+        string outputSchemaIdentity, string originSchemaIdentity)
+    {
+        if (StringComparer.Ordinal.Equals(outputSchemaIdentity,
+                StandardForeignNativeInterfaceAggregateOutputConsumptionSchemaIdentity))
+        {
+            return originSchemaIdentity is
+                StandardForeignNativeInterfaceAggregateOutputConsumptionSchemaIdentity
+                or StandardForeignNativeInterfaceParameterSurfaceSchemaIdentity
+                or StandardForeignInvocationStorageFixedArraySchemaIdentity;
+        }
+
+        if (StringComparer.Ordinal.Equals(outputSchemaIdentity,
+                StandardForeignNativeInterfaceParameterSurfaceSchemaIdentity))
+        {
+            return originSchemaIdentity is
+                StandardForeignNativeInterfaceParameterSurfaceSchemaIdentity
+                or StandardForeignInvocationStorageFixedArraySchemaIdentity;
+        }
+
+        return StringComparer.Ordinal.Equals(outputSchemaIdentity,
+            originSchemaIdentity);
+    }
+
     private static bool
         IsSelectedInitializationReferenceLocalFieldLayoutSchemaIdentity(
             string schemaIdentity)

@@ -75,8 +75,63 @@ internal static partial class Program
                 NestedFieldDestinationsSchemaIdentity),
             2 => IsC1SourceProviderSchemaIdentity(schemaIdentity),
             3 => IsMethodTypeSourceProviderSchemaIdentity(schemaIdentity),
+            4 => StringComparer.Ordinal.Equals(schemaIdentity,
+                ForeignNativeInterfaceAggregateOutputSchemaIdentity),
             _ => false,
         };
+
+    private static bool IsSourceTypeExportsSchemaIdentity(int schemaVersion,
+        string schemaIdentity)
+        => schemaVersion switch
+        {
+            1 => StringComparer.Ordinal.Equals(schemaIdentity,
+                NestedFieldDestinationsSchemaIdentity),
+            2 => schemaIdentity is
+                ForeignNativeInterfaceAggregateOutputSchemaIdentity
+                or ForeignNativeInterfaceParameterSurfaceSchemaIdentity
+                or ForeignInvocationStorageFixedArraySchemaIdentity,
+            _ => false,
+        };
+
+    private static bool IsSourceProviderPairing(
+        TrRmSourceProvidersFile configuration, string outputSchemaIdentity)
+    {
+        if (configuration.SchemaVersion != 4)
+        {
+            return configuration.Providers.All(provider =>
+                StringComparer.Ordinal.Equals(provider.SchemaIdentity,
+                    outputSchemaIdentity));
+        }
+
+        if (!StringComparer.Ordinal.Equals(outputSchemaIdentity,
+                ForeignNativeInterfaceAggregateOutputSchemaIdentity)
+            || configuration.References.Length != 1)
+        {
+            return false;
+        }
+
+        var reference = configuration.References[0];
+        var rootSchemaIdentity = configuration.Providers[
+            reference.ProviderInputOrdinal].SchemaIdentity;
+        return reference.Kind switch {
+            "foreign-native-interface" =>
+                (rootSchemaIdentity is
+                    ForeignNativeInterfaceAggregateOutputSchemaIdentity
+                    or ForeignNativeInterfaceParameterSurfaceSchemaIdentity)
+                && configuration.Providers.All(static provider =>
+                    provider.SchemaIdentity is
+                        ForeignNativeInterfaceAggregateOutputSchemaIdentity
+                        or ForeignNativeInterfaceParameterSurfaceSchemaIdentity
+                        or ForeignInvocationStorageFixedArraySchemaIdentity),
+            "aggregate-types" =>
+                StringComparer.Ordinal.Equals(rootSchemaIdentity,
+                    ForeignInvocationStorageFixedArraySchemaIdentity)
+                && configuration.Providers.All(static provider =>
+                    StringComparer.Ordinal.Equals(provider.SchemaIdentity,
+                        ForeignInvocationStorageFixedArraySchemaIdentity)),
+            _ => false,
+        };
+    }
 
     private static bool IsMethodTypeSourceProviderSchemaIdentity(
         string schemaIdentity)
@@ -111,6 +166,7 @@ internal static partial class Program
         string? sourceGenericMethodExportsPath = null;
         string? sourceProvidersPath = null;
         IReadOnlyList<TrRmSourceTypeExport>? sourceTypeExports = null;
+        TrRmSourceTypeExportsFile? sourceTypeExportsFile = null;
         TrRmSourceGenericMethodExportsFile? sourceMethodExportsFile = null;
         TrRmSourceProvidersFile? sourceProvidersFile = null;
         CompilationReference? sourceProvidersReference = null;
@@ -393,8 +449,12 @@ internal static partial class Program
                 return 2;
             }
             if (sourceTypeExportsPath is not null
-                && (!StringComparer.Ordinal.Equals(schemaIdentity,
-                        NestedFieldDestinationsSchemaIdentity)
+                && (schemaIdentity is null
+                    || !(schemaIdentity is
+                        NestedFieldDestinationsSchemaIdentity
+                        or ForeignNativeInterfaceAggregateOutputSchemaIdentity
+                        or ForeignNativeInterfaceParameterSurfaceSchemaIdentity
+                        or ForeignInvocationStorageFixedArraySchemaIdentity)
                     || sourceEnumExportsPath is not null
                     || sourceGenericMethodExportsPath is not null))
             {
@@ -405,6 +465,8 @@ internal static partial class Program
                 && (schemaIdentity is null
                     || (!StringComparer.Ordinal.Equals(schemaIdentity,
                             NestedFieldDestinationsSchemaIdentity)
+                        && !StringComparer.Ordinal.Equals(schemaIdentity,
+                            ForeignNativeInterfaceAggregateOutputSchemaIdentity)
                         && !IsC1SourceProviderSchemaIdentity(schemaIdentity)
                         && !IsMethodTypeSourceProviderSchemaIdentity(
                             schemaIdentity))
@@ -740,9 +802,28 @@ internal static partial class Program
                     }
                     if (configurationFile.IsSourceTypeExports)
                     {
-                        sourceTypeExports
+                        sourceTypeExportsFile
                             = ReadTrRmSourceTypeExports(
                                 configurationFile.Path);
+                        if (!IsSourceTypeExportsSchemaIdentity(
+                                sourceTypeExportsFile.SchemaVersion,
+                                schemaIdentity ?? "")
+                            || (sourceTypeExportsFile.SchemaVersion == 2
+                                && StringComparer.Ordinal.Equals(
+                                    schemaIdentity,
+                                    ForeignInvocationStorageFixedArraySchemaIdentity)
+                                && sourceTypeExportsFile.Exports.Any(
+                                    static export =>
+                                        !export.FieldExports.IsDefaultOrEmpty
+                                        || !export.InterfaceMethodExports
+                                            .IsDefaultOrEmpty))
+                        {
+                            WriteInputError(json, "TRM2000",
+                                "The source type export version must explicitly pair the exact output schema and declaration kinds.");
+                            return 2;
+                        }
+                        sourceTypeExports
+                            = sourceTypeExportsFile.Exports;
                         continue;
                     }
                     if (configurationFile.IsSourceProviders)
@@ -754,10 +835,8 @@ internal static partial class Program
                             || !IsSourceProviderSchemaIdentity(
                                 sourceProvidersFile.SchemaVersion,
                                 schemaIdentity)
-                            || sourceProvidersFile.Providers.Any(provider =>
-                                !StringComparer.Ordinal.Equals(
-                                    provider.SchemaIdentity,
-                                    schemaIdentity)))
+                            || !IsSourceProviderPairing(
+                                sourceProvidersFile, schemaIdentity))
                         {
                             WriteInputError(json, "TRM2000",
                                 "The source-provider schema version must explicitly pair the exact consumer and provider schemas.");
@@ -807,6 +886,13 @@ internal static partial class Program
                     ValidateSourceGenericMethodInputPaths(
                         sourceMethodExportsFile, paths,
                         sourceGenericMethodExportsPath!);
+                }
+                if (sourceTypeExportsFile is {
+                        SchemaVersion: 2,
+                    } typeExportsFile)
+                {
+                    ValidateSourceTypeExportsInputPaths(typeExportsFile,
+                        paths, sourceTypeExportsPath!);
                 }
 
                 var usingModuleIdentity = identity
@@ -949,6 +1035,18 @@ internal static partial class Program
                             selection.ProviderInputOrdinal];
                         references[referenceIndex]
                             = sourceProvidersFile.SchemaVersion switch {
+                            4 when selection.Kind
+                                    == "foreign-native-interface"
+                                => TrRmExecutableCompiler
+                                    .CreateStandardReference(input,
+                                        selection.ModuleIdentity,
+                                        providersForReference),
+                            4 when selection.Kind == "aggregate-types"
+                                => TrRmExecutableCompiler
+                                    .CreateStandardReference(input,
+                                        selection.ModuleIdentity,
+                                        providersForReference,
+                                        selection.TypeExportKeys),
                                 3 => TrRmExecutableCompiler
                                     .CreateStandardReference(input,
                                         selection.ModuleIdentity,
@@ -1010,6 +1108,13 @@ internal static partial class Program
                     ValidateSourceGenericMethodSnapshots(
                         sourceMethodExportsFile, snapshots,
                         sourceGenericMethodExportsPath!);
+                }
+                if (sourceTypeExportsFile is {
+                        SchemaVersion: 2,
+                    } typeExportsFile)
+                {
+                    ValidateSourceTypeExportsSnapshots(typeExportsFile,
+                        snapshots, sourceTypeExportsPath!);
                 }
                 var options = new CompilationOptions {
                     SourceArithmeticProfile = sourceArithmeticProfile,
@@ -1451,6 +1556,55 @@ internal static partial class Program
             {
                 throw new FormatException(
                     $"Invalid source generic method exports '{configurationPath}' at $.sources[{index}].snapshotSha256: source snapshot does not match.");
+            }
+        }
+    }
+
+    private static void ValidateSourceTypeExportsInputPaths(
+        TrRmSourceTypeExportsFile configuration,
+        List<string> sourcePaths, string configurationPath)
+    {
+        if (configuration.Sources.Length != sourcePaths.Count)
+        {
+            throw new FormatException(
+                $"Invalid source type exports '{configurationPath}': source count does not match compile-trrm inputs.");
+        }
+
+        for (var index = 0; index < sourcePaths.Count; index++)
+        {
+            var assertedPath = configuration.Sources[index].Path;
+            var sourcePath = sourcePaths[index];
+            var matches = assertedPath == "-"
+                ? sourcePath == "-"
+                : sourcePath != "-"
+                    && PathsAlias(assertedPath, sourcePath);
+            if (!matches)
+            {
+                throw new FormatException(
+                    $"Invalid source type exports '{configurationPath}' at $.sources[{index}].path: source path does not match the ordered compile-trrm input.");
+            }
+        }
+    }
+
+    private static void ValidateSourceTypeExportsSnapshots(
+        TrRmSourceTypeExportsFile configuration,
+        ImmutableArray<SyntaxTree> snapshots, string configurationPath)
+    {
+        if (configuration.Sources.Length != snapshots.Length)
+        {
+            throw new FormatException(
+                $"Invalid source type exports '{configurationPath}': source count changed during source acquisition.");
+        }
+
+        for (var index = 0; index < snapshots.Length; index++)
+        {
+            var text = snapshots[index].Root.ToFullString();
+            var digest = ComputeLowercaseSha256Utf16(text);
+            if (!StringComparer.Ordinal.Equals(digest,
+                    configuration.Sources[index].SnapshotSha256))
+            {
+                throw new FormatException(
+                    $"Invalid source type exports '{configurationPath}' at $.sources[{index}].snapshotSha256: source snapshot does not match.");
             }
         }
     }

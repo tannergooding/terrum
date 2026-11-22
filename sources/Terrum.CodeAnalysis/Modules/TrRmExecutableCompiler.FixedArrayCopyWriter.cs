@@ -425,6 +425,13 @@ public static partial class TrRmExecutableCompiler
         {
             featureRows.Add(TrRmFeatureRow.RootlessNativeValues);
         }
+        if (schema
+                == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+            && exportRows.Any(static export =>
+                (export.Definition >> 24) == 0x13))
+        {
+            featureRows.Add(TrRmFeatureRow.LayoutQueries);
+        }
         if (fixedArrayLayoutRows.Count != 0)
         {
             featureRows.Add(TrRmFeatureRow.FixedInlineArrayStorageCandidate);

@@ -135,8 +135,8 @@ public static partial class TrRmExecutableCompiler
             if (structure.StandardTypeOrigin is
                 BoundStandardTypeOrigin origin)
             {
-                if (!StringComparer.Ordinal.Equals(
-                        origin.Provider.SchemaIdentity, schemaIdentity)
+                if (!IsSelectedFniAggregateOriginSchemaIdentity(
+                        schemaIdentity, origin.Provider.SchemaIdentity)
                     || origin.ExportKeys.IsDefaultOrEmpty
                     || origin.Provider.TargetRequirement
                         != TrRmModuleTableReader
