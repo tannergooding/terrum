@@ -33,6 +33,14 @@ internal sealed class NativeCoreRegistrationTests
     private delegate NativeAggregatePoint NativeAggregatePointFunction(
         IntPtr receiver, IntPtr source, NativeAggregatePoint fallback);
 
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int NativePointerOutputCallback(IntPtr receiver,
+        IntPtr source, int tag, out IntPtr value);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate IntPtr NativePointerOutputFunction(IntPtr receiver,
+        IntPtr source, int tag, IntPtr fallback);
+
     [StructLayout(LayoutKind.Sequential)]
     private struct NativeAggregatePoint
     {
@@ -2091,6 +2099,30 @@ internal sealed class NativeCoreRegistrationTests
     [Test]
     public void StandardForeignNativeInterfaceReadsPointerOutputUnderPs1()
     {
+        var program = CreatePointerOutputConsumerProgram();
+        var function = program.Functions.Single(
+            static function => function.Name == "InvokePointer");
+        Assert.That(NativePointerTypes.IsType(function.ReturnType), Is.True);
+    }
+
+    [Test]
+    public async Task StandardForeignNativeInterfacePointerOutputExecutesOnWindowsX64()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+
+        var program = CreatePointerOutputConsumerProgram();
+        var image = NativeEmitter.EmitLibrary(program, ["InvokePointer"],
+            NativeRuntimePolicy.FailFast);
+        Assert.That(image[..2], Is.EqualTo(new byte[] {
+            (byte)'M', (byte)'Z',
+        }));
+        await AssertPointerOutputAsync(image, "InvokePointer")
+            .ConfigureAwait(true);
+    }
+
+    private static BoundProgram CreatePointerOutputConsumerProgram()
+    {
         const string schemaIdentity
             = "trrm/1-draft-foreign-native-interface-parameter-surface-1";
         const string providerIdentity = "pointer-output-provider";
@@ -2222,6 +2254,7 @@ internal sealed class NativeCoreRegistrationTests
         Assert.That(reloaded.NativePointerTypes[NativePointerTypes.Index(
             reloadedFunction.ReturnType)].PointeeType,
             Is.EqualTo(PrimitiveType.Int32));
+        return reloaded;
     }
 
     [Test]
@@ -5978,6 +6011,84 @@ internal sealed class NativeCoreRegistrationTests
             if (module != IntPtr.Zero)
             {
                 NativeLibrary.Free(module);
+            }
+            if (source != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(source);
+            }
+            if (vtable != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(vtable);
+            }
+            if (receiver != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(receiver);
+            }
+            await TestFileCleanup.DeleteWithRetryAsync(path)
+                .ConfigureAwait(true);
+        }
+    }
+
+    private static async Task AssertPointerOutputAsync(byte[] image,
+        string functionName)
+    {
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"native-fni-pointer-output-{Guid.NewGuid():N}.dll");
+        var module = IntPtr.Zero;
+        var receiver = IntPtr.Zero;
+        var vtable = IntPtr.Zero;
+        var source = IntPtr.Zero;
+        var fallback = IntPtr.Zero;
+        NativePointerOutputCallback? callback = null;
+        try
+        {
+            await File.WriteAllBytesAsync(path, image).ConfigureAwait(true);
+            module = NativeLibrary.Load(path);
+            receiver = Marshal.AllocHGlobal(IntPtr.Size);
+            vtable = Marshal.AllocHGlobal(IntPtr.Size);
+            source = Marshal.AllocHGlobal(sizeof(int));
+            fallback = Marshal.AllocHGlobal(sizeof(int));
+            var succeed = true;
+            callback = (IntPtr actualReceiver, IntPtr actualSource, int tag,
+                out IntPtr value) => {
+                if (actualReceiver != receiver || actualSource != source
+                    || tag != 7)
+                {
+                    value = IntPtr.Zero;
+                    return 0;
+                }
+
+                value = source;
+                return succeed ? 1 : 0;
+            };
+            Marshal.WriteIntPtr(vtable,
+                Marshal.GetFunctionPointerForDelegate(callback));
+            Marshal.WriteIntPtr(receiver, vtable);
+            Marshal.WriteInt32(source, 17);
+            Marshal.WriteInt32(fallback, 42);
+
+            var invoke = Marshal.GetDelegateForFunctionPointer<
+                NativePointerOutputFunction>(
+                    NativeLibrary.GetExport(module, functionName));
+            var result = invoke(receiver, source, 7, fallback);
+            Assert.That(result, Is.EqualTo(source));
+            Assert.That(Marshal.ReadInt32(result), Is.EqualTo(17));
+
+            succeed = false;
+            result = invoke(receiver, source, 7, fallback);
+            Assert.That(result, Is.EqualTo(fallback));
+            Assert.That(Marshal.ReadInt32(result), Is.EqualTo(42));
+            GC.KeepAlive(callback);
+        }
+        finally
+        {
+            if (module != IntPtr.Zero)
+            {
+                NativeLibrary.Free(module);
+            }
+            if (fallback != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(fallback);
             }
             if (source != IntPtr.Zero)
             {
