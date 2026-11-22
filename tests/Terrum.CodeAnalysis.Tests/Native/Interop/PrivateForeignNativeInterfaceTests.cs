@@ -196,6 +196,191 @@ internal sealed class PrivateForeignNativeInterfaceTests
     }
 
     [Test]
+    public async Task PrivateFniGraphJitDispatchesNativeOutputAndPreservesFailureAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string schemaIdentity
+            = "terrum/private-semantic-111-foreign-native-interfaces-1";
+        const string leafIdentity = "PrivateFniGraphRuntimeLeaf";
+        const string providerIdentity = "PrivateFniGraphRuntimeProvider";
+        const string consumerIdentity = "PrivateFniGraphRuntimeConsumer";
+        const string ownerKey = "abi.iprobe";
+        const string memberKey = "abi.iprobe.try-read";
+        const NativeRuntimePolicy policy = NativeRuntimePolicy.FailFast;
+
+        var leafCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public int32 Identity(int32 value) { return value; }
+            """), new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+        });
+        Assert.That(leafCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, leafCompilation.Diagnostics));
+        var leaf = NativeModuleCompiler.CreateProducerWithSchema(
+            leafCompilation.Program!, ["Identity"], leafIdentity,
+            schemaIdentity, policy);
+        var leafReference = NativeModuleCompiler.CreateReferenceWithSchema(
+            leaf, schemaIdentity);
+
+        var providerSource = SyntaxTree.Parse("""
+            using Terrum.Interop;
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Payload {
+                public int32 Value;
+            }
+            [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+            [ForeignNativeInterface(VTableByteOffset: uint32(0))]
+            public interface IProbe {
+                [param(value): NativeOutput(
+                    When: NativeOutputCondition.NonZero)]
+                public unsafe int32 TryRead(int32 failure,
+                    write ptr<Payload> value);
+            }
+            [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+            public unsafe int32 ProbeCallback(ptr<void> receiver,
+                int32 failure, write ptr<Payload> value) {
+                init Payload payload;
+                payload.Value = Identity(failure == 0 ? 42 : 99);
+                unsafe { *value = payload; }
+                return Identity(failure == 0 ? 1 : 0);
+            }
+            """);
+        var (sourceNativeRegistration, sourceOutputRegistration)
+            = NativeOutputCoreRegistrationTests
+                .CreateCombinedRegistrations(
+                    includeForeignNativeInterface: true);
+        var moduleBindings = CoreProviderModuleBindings.Create(
+            providerIdentity,
+            sourceNativeRegistration.ModuleBindings.Providers,
+            sourceNativeRegistration.ModuleBindings.Declarations);
+        var nativeRegistration = NativeCoreRegistrationSet.Create(
+            moduleBindings, sourceNativeRegistration.CallingConventions,
+            sourceNativeRegistration.ResolutionModes,
+            sourceNativeRegistration.ResolutionPolicies,
+            sourceNativeRegistration.NativeImport,
+            sourceNativeRegistration.NativeCallable,
+            sourceNativeRegistration.NativeCallConv,
+            sourceNativeRegistration.NativeExport,
+            sourceNativeRegistration.ForeignNativeInterface);
+        var nativeOutputRegistration = NativeOutputCoreRegistrationSet.Create(
+            moduleBindings, sourceOutputRegistration.OutputConditions,
+            sourceOutputRegistration.NativeOutput);
+        var sourceLayoutRegistration
+            = NativeCoreRegistrationTests.CreateLayoutRegistration(
+                sourceNativeRegistration);
+        var layoutRegistration = LayoutCoreRegistrationSet.Create(
+            moduleBindings, sourceLayoutRegistration.LayoutKinds,
+            sourceLayoutRegistration.Layout,
+            sourceLayoutRegistration.Blittable);
+        var providerCompilation = Compilation.CreateLibrary(providerSource,
+            leafReference, new CompilationOptions {
+                NativeCoreRegistration = nativeRegistration,
+                LayoutCoreRegistration = layoutRegistration,
+                NativeOutputCoreRegistration = nativeOutputRegistration,
+                RuntimePolicy = BoundRuntimePolicy.FailFast,
+            });
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+        var providerProgram = providerCompilation.Program!;
+        var providerInputs = PrivateModuleIdentityInputs
+            .CreateFromSelectors(providerProgram, providerIdentity, [
+                new PrivateNominalDefinitionSelection(
+                    new PrivateNominalDeclarationSelector(
+                        PrivateNominalDeclarationKind.Struct, "Payload"),
+                    "abi.payload", true),
+            ], [], [], [], [
+                new PrivateForeignInterfaceDefinitionAssignment(0,
+                    ownerKey, true, [
+                        new PrivateForeignInterfaceMemberDefinitionAssignment(
+                            0, memberKey),
+                    ]),
+            ], []);
+        var graphProvider = NativeModuleCompiler
+            .CreateGraphProducerWithSchema(providerProgram,
+                ["ProbeCallback"], providerIdentity, [leaf], schemaIdentity,
+                policy, providerInputs);
+        var graphReference = NativeModuleCompiler
+            .CreateGraphReferenceWithSchema(
+                [graphProvider, leaf], schemaIdentity);
+
+        var consumerSource = SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            struct ProbeVTable {
+                public [Terrum.Interop.NativeCallConv(
+                    Terrum.Interop.NativeCallingConvention.Cdecl)]
+                    fnptr<ptr<void>, int32, write ptr<Payload>, int32>
+                    TryRead;
+                public ProbeVTable(
+                    [Terrum.Interop.NativeCallConv(
+                        Terrum.Interop.NativeCallingConvention.Cdecl)]
+                    fnptr<ptr<void>, int32, write ptr<Payload>, int32>
+                    tryRead) {
+                    TryRead = tryRead;
+                }
+            }
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            struct ProbeObject {
+                public ptr<ProbeVTable> VTable;
+                public ProbeObject(ptr<ProbeVTable> vtable) {
+                    VTable = vtable;
+                }
+            }
+            int32 Invoke(ptr<void> receiver, int32 failure) {
+                init Payload value;
+                unsafe {
+                    int32 status = IProbe.TryRead(
+                        receiver, failure, &init value);
+                    if (status != 0) { return value.Value; }
+                }
+                return -1;
+            }
+            int32 Main() {
+                unsafe {
+                    ProbeVTable vtable
+                        = new ProbeVTable(&ProbeCallback);
+                    ProbeObject instance = new ProbeObject(&vtable);
+                    ptr<void> receiver = &instance;
+                    if (Invoke(receiver, 0) != 42) { return -1; }
+                    if (Invoke(receiver, 1) != -1) { return -2; }
+                }
+                return 42;
+            }
+            """);
+        var consumerOptions = NativeCoreRegistrationTests
+            .CreateRegisteredCompilationOptions(
+                BoundRuntimePolicy.FailFast);
+        var consumerCompilation = Compilation.Create(consumerSource,
+            graphReference, consumerOptions);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumerProgram = consumerCompilation.Program!;
+        var consumerInputs = PrivateModuleIdentityInputs
+            .CreateFromSelectors(consumerProgram, consumerIdentity, [], [
+                new PrivateNominalImportSelection(
+                    new PrivateNominalDeclarationSelector(
+                        PrivateNominalDeclarationKind.Struct, "Payload"),
+                    "consumer.payload", providerIdentity, "abi.payload"),
+            ], [], [], [], [
+                new PrivateForeignNativeInterfaceImportAssignment(0,
+                    "consumer.iprobe", providerIdentity, ownerKey, [
+                        new PrivateForeignNativeInterfaceMemberImportAssignment(
+                            0, "consumer.iprobe.try-read", memberKey),
+                    ]),
+            ]);
+        var graphConsumer = NativeModuleCompiler
+            .CreateGraphConsumerWithSchema(consumerProgram,
+                [graphProvider, leaf], schemaIdentity, policy,
+                consumerInputs);
+
+        Assert.That(await NativeModuleCompiler.RunGraphJitAsync(
+            graphConsumer, [graphProvider, leaf], CompilerApphost(),
+            TimeSpan.FromSeconds(15), policy).ConfigureAwait(true),
+            Is.EqualTo(42));
+    }
+
+    [Test]
     public void PrivateFniGraphProducerRetainsSemanticOwnerWithoutReexportingIt()
     {
         const string schemaIdentity
@@ -950,6 +1135,18 @@ internal sealed class PrivateForeignNativeInterfaceTests
             source.ResolutionPolicies, source.NativeImport,
             source.NativeCallable, source.NativeCallConv,
             source.NativeExport, source.ForeignNativeInterface);
+    }
+
+    private static string CompilerApphost()
+    {
+        var framework = new DirectoryInfo(AppContext.BaseDirectory);
+        var configuration = framework.Parent?.Name
+            ?? throw new InvalidOperationException(
+                "Missing test configuration directory.");
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", ".."));
+        return Path.Combine(root, "artifacts", "bin", "sources", "terrumc",
+            configuration, framework.Name, "terrumc.exe");
     }
 
     private static byte[] CreateTwoMemberFniProvider(
