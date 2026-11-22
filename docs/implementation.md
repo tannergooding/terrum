@@ -1382,12 +1382,18 @@ AC1 root, including A2 Copy-bearing TypeDef providers; a missing-Copy A2
 replacement and changed-layout regression, plus malformed D5/Home rejection,
 are added but remain unverified. Broader provider composition/remapping,
 native lowering and qualification remain open.
+The artifact `build-trrm-library` route now admits an explicitly selected AC1
+consumer with AC1, PS1 and A2 providers. Its regression separates a PS1 FNI
+method provider from an A2 Copy-positive TypeDef provider and checks that the
+PS1 expected view remains Copy-unknown; it is unverified under the hold.
+`compile-trrm` source FNI export/provider transport remains open under the
+unapproved, provisionally actionable version-2/version-4 CLI proposal.
 Pointer output reads, other side-effecting argument expressions,
 defaults/constants, multiple calls, other condition expressions and Body
 control-flow shapes, nonreturning-call shapes beyond the terminal subset and
 reservation cancellation remain open.
 Supervised native
-execution, private persistence, CLI transport and dependent runtime work
+execution, private persistence, source CLI transport and dependent runtime work
 remain open. NativeParameter is not admitted on these methods or anchors, and
 neither FNI proposal is approved. AC1 is also unapproved; native-interface
 execution remains incomplete.
