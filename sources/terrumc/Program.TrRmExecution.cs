@@ -41,6 +41,12 @@ internal static partial class Program
         = "trrm/1-draft-generic-method-calls-parameter-labels-1";
     private const string NestedFieldDestinationsSchemaIdentity
         = "trrm/1-draft-init-reference-bodies-local-field-layout-2";
+    private const string ForeignNativeInterfaceParameterSurfaceSchemaIdentity
+        = "trrm/1-draft-foreign-native-interface-parameter-surface-1";
+    private const string ForeignNativeInterfaceAggregateOutputSchemaIdentity
+        = "trrm/1-draft-foreign-native-interface-aggregate-output-consumption-1";
+    private const string ForeignInvocationStorageFixedArraySchemaIdentity
+        = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
 
     private static bool IsC1SourceProviderSchemaIdentity(
         string schemaIdentity)
@@ -426,7 +432,17 @@ internal static partial class Program
                 WriteInputError(json, "TRM2000", Usage);
                 return 2;
             }
+            var isAc1LibrarySelection
+                = command == "build-trrm-library"
+                    && StringComparer.Ordinal.Equals(schemaIdentity,
+                        ForeignNativeInterfaceAggregateOutputSchemaIdentity)
+                    && providers.All(static provider =>
+                        provider.SchemaIdentity is
+                            ForeignNativeInterfaceAggregateOutputSchemaIdentity
+                            or ForeignNativeInterfaceParameterSurfaceSchemaIdentity
+                            or ForeignInvocationStorageFixedArraySchemaIdentity);
             if (isArtifactCommand && schemaIdentity is not null
+                && !isAc1LibrarySelection
                 && (schemaIdentity is not (
                         "trrm/1-draft-foreign-invocation-contracts-1"
                         or "trrm/1-draft-foreign-invocation-storage-addresses-1"

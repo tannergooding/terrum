@@ -2777,14 +2777,44 @@ internal sealed partial class CliTests
         const string ps1SchemaIdentity
             = "trrm/1-draft-foreign-native-interface-parameter-surface-1";
         const string providerIdentity = "cli-ac1-ps1-provider";
+        const string pointProviderIdentity = "cli-ac1-a2-point-provider";
+        const string a2SchemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
         const string consumerIdentity = "cli-ac1-consumer";
-        const string providerSource = """
-            using Terrum.Interop;
+        var pointNativeRegistration
+            = NativeCoreRegistrationTests.CreateRegistration();
+        var pointCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
             [Blittable] [Layout(LayoutKind.Sequential)]
             public struct Point {
                 public int64 X;
                 public int64 Y;
             }
+            """), new CompilationOptions {
+                NativeCoreRegistration = pointNativeRegistration,
+                LayoutCoreRegistration =
+                    NativeCoreRegistrationTests.CreateLayoutRegistration(
+                        pointNativeRegistration),
+            });
+        Assert.That(pointCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                pointCompilation.Diagnostics));
+        var pointProgram = pointCompilation.Program
+            ?? throw new AssertionException("Expected an A2 Point provider.");
+        var pointArtifact = TrRmExecutableCompiler.EmitStandard(
+            pointProgram, pointProviderIdentity, a2SchemaIdentity, 1, [
+                new TrRmSourceTypeExport("", "Point", "provider/Point"),
+            ]);
+        var pointReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(a2SchemaIdentity, pointArtifact),
+            pointProviderIdentity, [], ["provider/Point"]);
+        var point = pointReference.Structures.Single(
+            static structure => structure.Name == "Point");
+        Assert.That(point.DeclaredCopyEvidence, Is.True);
+        Assert.That(point.StandardTypeOrigin!.Provider.SchemaIdentity,
+            Is.EqualTo(a2SchemaIdentity));
+
+        const string providerSource = """
+            using Terrum.Interop;
             [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
             [ForeignNativeInterface(VTableByteOffset: uint32(0))]
             public interface IProbe {
@@ -2808,7 +2838,7 @@ internal sealed partial class CliTests
             NativeOutputCoreRegistration = output,
         };
         var providerCompilation = Compilation.CreateLibrary(
-            SyntaxTree.Parse(providerSource), options);
+            SyntaxTree.Parse(providerSource), pointReference, options);
         Assert.That(providerCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine,
                 providerCompilation.Diagnostics));
@@ -2818,12 +2848,6 @@ internal sealed partial class CliTests
             = providerProgram.Interfaces.Single().Members.Single();
         var providerArtifact = TrRmExecutableCompiler.EmitStandard(
             providerProgram, providerIdentity, ps1SchemaIdentity, 1, [
-                new TrRmSourceTypeExport("", "Point", "provider/Point") {
-                    FieldExports = [
-                        new TrRmSourceFieldExport("X", "provider/Point.X"),
-                        new TrRmSourceFieldExport("Y", "provider/Point.Y"),
-                    ],
-                },
                 new TrRmSourceTypeExport("", "IProbe",
                     "provider/IProbe") {
                     GenericArity = 0,
@@ -2838,7 +2862,23 @@ internal sealed partial class CliTests
         var providerInput = new TrRmStandardArtifactInput(
             ps1SchemaIdentity, providerArtifact);
         var providerReference = TrRmExecutableCompiler
-            .CreateStandardReference(providerInput, providerIdentity, []);
+            .CreateStandardReference(providerInput, providerIdentity, [
+                new TrRmStandardArtifactInput(a2SchemaIdentity,
+                    pointArtifact),
+            ]);
+        var importedPoint = providerReference.Structures.Single(
+            static structure => structure.Name == "Point");
+        Assert.That(importedPoint.DeclaredCopyEvidence, Is.True);
+        Assert.That(importedPoint.StandardTypeOrigin!.Provider.SchemaIdentity,
+            Is.EqualTo(a2SchemaIdentity));
+        Assert.That(importedPoint.StandardTypeOrigin.Provider.ModuleIdentity,
+            Is.EqualTo(pointProviderIdentity));
+        Assert.That(importedPoint.StandardTypeOrigin.ExpectedDeclaration!
+            .DeclaredCopyEvidence, Is.Null);
+        Assert.That(importedPoint.StandardTypeOrigin.Expectations.Any(
+            expectation => expectation.UsingModule.ModuleIdentity
+                    == providerIdentity
+                && expectation.ExportKey == "provider/Point"), Is.True);
         var consumerCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse("""
                 Point InvokeImportedPoint(ptr<void> receiver,
@@ -2863,6 +2903,7 @@ internal sealed partial class CliTests
         var prefix = Path.Combine(TestArtifactPaths.DirectoryPath,
             $"trrm-ac1-ps1-provider-{Guid.NewGuid():N}");
         var providerPath = prefix + "-provider.trrm";
+        var pointProviderPath = prefix + "-point-provider.trrm";
         var consumerPath = prefix + "-consumer.trrm";
         var invalidLibraryPath = prefix + "-invalid.dll";
         var libraryPath = prefix + ".dll";
@@ -2870,6 +2911,8 @@ internal sealed partial class CliTests
         try
         {
             await File.WriteAllBytesAsync(providerPath, providerArtifact)
+                .ConfigureAwait(true);
+            await File.WriteAllBytesAsync(pointProviderPath, pointArtifact)
                 .ConfigureAwait(true);
             await File.WriteAllBytesAsync(consumerPath, consumerArtifact)
                 .ConfigureAwait(true);
@@ -2880,7 +2923,8 @@ internal sealed partial class CliTests
                 "InvokeImportedPoint", "-o", invalidLibraryPath, "--runtime",
                 "fail-fast", "--trrm-schema", ac1SchemaIdentity,
                 "--trrm-module", consumerIdentity, "--trrm-provider",
-                ac1SchemaIdentity, providerPath, "--json")
+                ac1SchemaIdentity, providerPath, "--trrm-provider",
+                a2SchemaIdentity, pointProviderPath, "--json")
                 .ConfigureAwait(true);
             Assert.That(invalidBuild, Is.EqualTo(1),
                 $"{invalidOutput}{Environment.NewLine}{invalidError}");
@@ -2899,7 +2943,8 @@ internal sealed partial class CliTests
                 "InvokeImportedPoint", "-o", libraryPath, "--runtime",
                 "fail-fast", "--trrm-schema", ac1SchemaIdentity,
                 "--trrm-module", consumerIdentity, "--trrm-provider",
-                ps1SchemaIdentity, providerPath, "--json")
+                ps1SchemaIdentity, providerPath, "--trrm-provider",
+                a2SchemaIdentity, pointProviderPath, "--json")
                 .ConfigureAwait(true);
             Assert.That(built, Is.Zero,
                 $"{buildOutput}{Environment.NewLine}{buildError}");
@@ -2922,6 +2967,8 @@ internal sealed partial class CliTests
         finally
         {
             await TestFileCleanup.DeleteWithRetryAsync(providerPath)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(pointProviderPath)
                 .ConfigureAwait(true);
             await TestFileCleanup.DeleteWithRetryAsync(consumerPath)
                 .ConfigureAwait(true);

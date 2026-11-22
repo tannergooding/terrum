@@ -783,13 +783,13 @@ public static partial class TrRmExecutableCompiler
                     && !StringComparer.Ordinal.Equals(
                         inputs[index].SchemaIdentity, SchemaIdentity)
                     && (!Schema
-                            .UsesForeignNativeInterfaceAggregateOutputConsumption()
+                            .UsesForeignNativeInterfaceParameterSurface()
                         || !SupportsForeignNativeInterfaceProviderSchema(
                             inputs[index].SchemaIdentity,
                             Schemas[index])))
                 {
                     throw Unsupported(
-                        "The selected FNI provider schema is not supported by this exact AC1 source-reference operation.");
+                        "The selected FNI provider schema is not supported by this exact parameterized FNI source-reference operation.");
                 }
 
                 Artifacts[index] = inputs[index].Artifact.ToArray();
