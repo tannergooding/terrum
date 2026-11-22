@@ -27,6 +27,7 @@ internal sealed partial class NativeManagedClassModuleTests
                 mut int32 value = int32(42);
                 {
                     require Owner.TryCreate(ref value, out var owner);
+                    var duplicate = owner;
                 }
                 return value;
             }
