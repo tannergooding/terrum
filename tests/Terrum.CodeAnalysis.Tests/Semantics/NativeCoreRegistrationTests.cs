@@ -11061,8 +11061,13 @@ internal sealed class NativeCoreRegistrationTests
         var expectedRead = expectedView.Definition.Members.Single(
             static member => member.Name == "Read");
         var alternateExpectedRead = expectedRead with {
-            Parameters = expectedRead.Parameters.SetItem(0,
-                expectedRead.Parameters[0] with { Name = "input" }),
+            Parameters = expectedRead.Parameters
+                .SetItem(0, expectedRead.Parameters[0] with {
+                    Name = "input",
+                })
+                .SetItem(1, expectedRead.Parameters[1] with {
+                    DefaultValue = null,
+                }),
         };
         var alternateExpectedDefinition = expectedView.Definition with {
             Members = expectedView.Definition.Members.SetItem(
@@ -11084,8 +11089,8 @@ internal sealed class NativeCoreRegistrationTests
         var multipleViewArtifact = TrRmExecutableCompiler.EmitStandard(
             multipleViewProgram, "multiple-view.module", schemaIdentity, 1,
             []);
-        AssertReadSurfaceRows(multipleViewArtifact, schema, "source",
-            "input");
+        AssertReadSurfaceRows(multipleViewArtifact, schema,
+            ("source", (byte?)1), ("input", null));
         var multipleViewReference
             = TrRmExecutableCompiler.CreateStandardReference(
                 new TrRmStandardArtifactInput(schemaIdentity,
@@ -11101,6 +11106,13 @@ internal sealed class NativeCoreRegistrationTests
                     static member => member.Name == "Read")
                     .Parameters[0].Name),
             Is.EqualTo(new[] { "source", "input" }));
+        Assert.That(retainedViews[0].Definition.Members
+                .Single(static member => member.Name == "Read")
+                .Parameters[1].DefaultValue?.Value,
+            Is.EqualTo(1L));
+        Assert.That(retainedViews[1].Definition.Members
+            .Single(static member => member.Name == "Read")
+            .Parameters[1].DefaultValue, Is.Null);
 
         var multipleViewCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse(""), multipleViewReference, options);
@@ -11117,8 +11129,8 @@ internal sealed class NativeCoreRegistrationTests
             = TrRmExecutableCompiler.EmitStandard(
                 multipleViewProgramForEmission, "multiple-view-forwarder.module",
                 schemaIdentity, 1, []);
-        AssertReadSurfaceRows(multipleViewReemittedArtifact, schema, "source",
-            "input");
+        AssertReadSurfaceRows(multipleViewReemittedArtifact, schema,
+            ("source", (byte?)1), ("input", null));
         var multipleViewReloadedReference
             = TrRmExecutableCompiler.CreateStandardReference(
                 new TrRmStandardArtifactInput(schemaIdentity,
@@ -11166,7 +11178,9 @@ internal sealed class NativeCoreRegistrationTests
         }
 
         static void AssertReadSurfaceRows(byte[] artifact,
-            TrRmArtifactSchema schema, params string[] expectedLabels)
+            TrRmArtifactSchema schema,
+            params (string FirstParameter, byte? ExtraDefault)[]
+                expectedSurfaces)
         {
             var tables = TrRmStructuralMetadataValidator
                 .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
@@ -11175,7 +11189,7 @@ internal sealed class NativeCoreRegistrationTests
                 .Where(row => tables.Methods.GetName(row) == "Read")
                 .ToArray();
             Assert.That(readRows, Has.Length.EqualTo(
-                expectedLabels.Length));
+                expectedSurfaces.Length));
             for (var index = 0; index < readRows.Length; index++)
             {
                 var methodRow = readRows[index];
@@ -11183,7 +11197,7 @@ internal sealed class NativeCoreRegistrationTests
                     .TryGetNameStringRow(methodRow, 0,
                         out var nameStringRow), Is.True);
                 Assert.That(tables.Strings.DecodeName(nameStringRow),
-                    Is.EqualTo(expectedLabels[index]));
+                    Is.EqualTo(expectedSurfaces[index].FirstParameter));
                 Assert.That(tables.MethodParameterLabels
                     .TryGetNameStringRow(methodRow, 1,
                         out var defaultParameterNameRow), Is.True);
@@ -11193,7 +11207,16 @@ internal sealed class NativeCoreRegistrationTests
                 Assert.That(tables.MethodParameterLabels
                     .TryGetDefaultConstantSourceRow(methodRow, 1,
                         out var defaultConstantSourceRow), Is.True);
-                AssertDefaultPayload(tables, defaultConstantSourceRow, 1);
+                if (expectedSurfaces[index].ExtraDefault is byte expectedDefault)
+                {
+                    Assert.That(defaultConstantSourceRow, Is.Not.Zero);
+                    AssertDefaultPayload(tables, defaultConstantSourceRow,
+                        expectedDefault);
+                }
+                else
+                {
+                    Assert.That(defaultConstantSourceRow, Is.Zero);
+                }
             }
         }
 
