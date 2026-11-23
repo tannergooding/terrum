@@ -5482,11 +5482,7 @@ int32 ParseStandaloneSourceWhileBody(int32 localCallableId,
                 {
                     cursor = cursor + 1;
                 }
-                if (cursor == blockClose)
-                {
-                    break;
-                }
-                return 2;
+                continue;
             }
             if (IsStandaloneSourceIfKeyword(cursor))
             {
