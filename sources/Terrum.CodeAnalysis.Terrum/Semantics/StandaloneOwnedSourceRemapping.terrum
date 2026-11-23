@@ -1690,6 +1690,44 @@ int32 VerifyStandaloneRewrittenSourceArenas()
                 = controlStatementKind == 7
                     || controlStatementKind == 10
                     || controlStatementKind == 11;
+            if (controlIsLoop && currentChildKind == 12)
+            {
+                int32 conditionExpressionId
+                    = Host.StandaloneSourceStatements[
+                        childStatementOffset + 1];
+                if (childOrdinal != 0 || trueCount != 1
+                    || Host.StandaloneSourceStatements[
+                        childStatementOffset + 2] != ifNodeId
+                    || conditionExpressionId < 0
+                    || conditionExpressionId >= bodyExpressionCount)
+                {
+                    return 3;
+                }
+                int32 conditionExpressionOffset
+                    = (bodyExpressionFirst
+                        + conditionExpressionId) * 8;
+                int32 conditionTypeId
+                    = Host.StandaloneSourceExpressions[
+                        conditionExpressionOffset + 1];
+                int32 conditionKind
+                    = Host.StandaloneSourceExpressions[
+                        conditionExpressionOffset];
+                init bool conditionDoesNotReturn;
+                int32 conditionStatus
+                    = TryGetStandaloneSourceExpressionDoesNotReturn(
+                        bodyId, conditionExpressionId,
+                        ref init conditionDoesNotReturn);
+                if (!IsStandaloneLogicalNotType(conditionTypeId)
+                    || conditionKind == 34
+                    || conditionKind == 35
+                    || conditionKind == 36
+                    || conditionStatus != 0
+                    || conditionDoesNotReturn)
+                {
+                    return 3;
+                }
+                continue;
+            }
             if (controlIsLoop
                 && (currentChildKind == 8 || currentChildKind == 9))
             {
@@ -2593,7 +2631,8 @@ int32 VerifyStandaloneRewrittenSourceArenas()
         else if (Host.StandaloneSourceStatements[offset] == 6
             || Host.StandaloneSourceStatements[offset] == 7
             || Host.StandaloneSourceStatements[offset] == 10
-            || Host.StandaloneSourceStatements[offset] == 11)
+            || Host.StandaloneSourceStatements[offset] == 11
+            || Host.StandaloneSourceStatements[offset] == 12)
         {
             int32 ifNodeId
                 = Host.StandaloneSourceStatements[offset + 2];

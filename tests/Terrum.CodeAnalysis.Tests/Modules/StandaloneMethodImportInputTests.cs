@@ -1724,6 +1724,24 @@ internal sealed class StandaloneMethodImportInputTests
         0, 212, false)]
     [TestCase(BoundRuntimePolicy.FailFast,
         "namespace client { int32 Main(int32 limit) { "
+            + "mut int32 counter = 0; "
+            + "while (counter < limit) { "
+            + "if (counter == 0) break; } return counter; } }",
+        0, 213, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { int32 Main(int32 limit) { "
+            + "mut int32 counter = 0; "
+            + "do { if (counter == 0) break; } "
+            + "while (counter < limit); return counter; } }",
+        0, 214, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { int32 Main(int32 limit) { "
+            + "mut int32 counter = 0; "
+            + "for (mut int32 index = 0; index < limit; "
+            + "index = index + 1) { if (index == 0) break; } "
+            + "return counter; } }", 0, 215, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { int32 Main(int32 limit) { "
             + "for (mut int32 index = 0; index < limit; "
             + "index = index + 1) { } return index; } }",
         2, 0, false)]
@@ -7413,6 +7431,76 @@ internal sealed class StandaloneMethodImportInputTests
                 return 0;
             }
             """;
+        var conditionalLoopBreakVerificationSource = $$"""
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                if (Scan() < 1) { return 87; }
+                int32 status = BindStandaloneOwnedSourceProgram();
+                int32 expectedLoopKind
+                    = {{verificationMode == 213 ? 7
+                        : verificationMode == 214 ? 10 : 11}};
+                int32 expectedBlockCount
+                    = {{verificationMode == 215 ? 5 : 4}};
+                int32 bodyBlockId
+                    = {{verificationMode == 214 ? 1 : 2}};
+                int32 exitBlockId
+                    = {{verificationMode == 215 ? 4 : 3}};
+                int32 continueTarget
+                    = {{verificationMode == 213 ? 1
+                        : verificationMode == 214 ? 2 : 3}};
+                int32 edgeRecordIndex
+                    = {{verificationMode == 215 ? 6 : 5}};
+                int32 expectedConstantCount
+                    = {{verificationMode == 215 ? 4 : 2}};
+                if (status != 0
+                    || Host.StandaloneSourceBodyCount[0] != 1
+                    || Host.StandaloneSourceLocalCount[0]
+                        != {{verificationMode == 215 ? 2 : 1}}
+                    || Host.StandaloneSourceLexicalScopeCount[0]
+                        != {{verificationMode == 215 ? 2 : 1}}
+                    || Host.StandaloneSourceIfNodeCount[0] != 1
+                    || Host.StandaloneSourceStatements[3]
+                        != expectedLoopKind
+                    || Host.StandaloneSourceStatements[6] != 12
+                    || Host.StandaloneSourceStatements[8] != 0
+                    || Host.StandaloneSourceStatementParentIds[2] != 1
+                    || Host.StandaloneSourceIfNodes[2] != 1
+                    || Host.StandaloneSourceIfNodes[4]
+                        != {{verificationMode == 215 ? 1 : 0}}) {
+                    return 88;
+                }
+                status = NormalizeStandaloneOwnedSourceProgram();
+                int32 bodyBlockOffset = bodyBlockId * 16;
+                if (status != 0
+                    || Host.StandaloneNormalizedBlockCount[0]
+                        != expectedBlockCount
+                    || Host.StandaloneNormalizedBodyBlockRanges[0] != 0
+                    || Host.StandaloneNormalizedBodyBlockRanges[1]
+                        != expectedBlockCount
+                    || Host.StandaloneNormalizedConstantCount[0]
+                        != expectedConstantCount
+                    || Host.StandaloneNormalizedBlocks[
+                        bodyBlockOffset + 4] != 4
+                    || Host.StandaloneNormalizedBlocks[
+                        bodyBlockOffset + 8] != exitBlockId
+                    || Host.StandaloneNormalizedBlocks[
+                        bodyBlockOffset + 9] != continueTarget
+                    || Host.StandaloneNormalizedBlocks[
+                        bodyBlockOffset + 13] != edgeRecordIndex
+                    || Host.StandaloneNormalizedBodies[11] != 0) {
+                    return 89;
+                }
+                status = RewriteStandaloneOwnedCallNodes();
+                if (status != 0) { return status; }
+                status = WriteStandaloneScalarModule();
+                if (status != 0
+                    || Host.StandaloneWriterStatus[0] != 0
+                    || Host.StandaloneWriterBodyPlanCount[0] != 1) {
+                    return 90;
+                }
+                return 0;
+            }
+            """;
         var verificationSource = expectedSourceStatus != 0
             ? $$"""
                 namespace Terrum.CodeAnalysis;
@@ -7467,6 +7555,8 @@ internal sealed class StandaloneMethodImportInputTests
                 ? nestedImportedCallArithmeticVerificationSource
             : verificationMode == 212
                 ? noReturnCallOperandVerificationSource
+            : verificationMode is 213 or 214 or 215
+                ? conditionalLoopBreakVerificationSource
             : verificationMode == 161
                 ? importedCallInConditionalReturnVerificationSource
             : verificationMode is 162 or 163 or 164
@@ -7951,7 +8041,7 @@ internal sealed class StandaloneMethodImportInputTests
                     or 188 or 189 or 190 or 191 or 192 or 193 or 194
                     or 195 or 196 or 197 or 198 or 199 or 200 or 201
                     or 202 or 203 or 204 or 205 or 206 or 207
-                    or 208 or 209)
+                    or 208 or 209 or 213 or 214 or 215)
             {
                 var expectedBlockCount
                     = verificationMode is 159 or 160 or 165 or 166
@@ -7974,6 +8064,8 @@ internal sealed class StandaloneMethodImportInputTests
                         : verificationMode is 206 or 207 ? 8
                         : verificationMode == 208 ? 7
                         : verificationMode == 209 ? 8
+                        : verificationMode is 213 or 214 ? 4
+                        : verificationMode == 215 ? 5
                         : verificationMode == 211 ? 1
                         : verificationMode == 212 ? 1
                         : verificationMode == 199 ? 3
@@ -8010,6 +8102,7 @@ internal sealed class StandaloneMethodImportInputTests
                             : verificationMode is 208 or 209 ? 2
                             : verificationMode == 211 ? 2
                             : verificationMode == 212 ? 1
+                            : verificationMode is 213 or 214 or 215 ? 2
                             : verificationMode == 189 ? 1
                             : verificationMode == 190 ? 1
                             : verificationMode == 191 ? 1
@@ -8043,7 +8136,9 @@ internal sealed class StandaloneMethodImportInputTests
                     and not 194 and not 195 and not 196 and not 197
                     and not 198 and not 199 and not 200 and not 201
                     and not 202 and not 203 and not 204 and not 205
-                    and not 206 and not 207 and not 208 and not 209)
+                    and not 206 and not 207 and not 208 and not 209
+                    and not 211 and not 212
+                    and not 213 and not 214 and not 215)
                 {
                     Assert.That(bodyReader.GetBlockCode(0)
                         .IndexOf((byte)0xB1),
@@ -8640,6 +8735,8 @@ internal sealed class StandaloneMethodImportInputTests
                         and not 198 and not 199 and not 200 and not 201
                         and not 202 and not 203 and not 204 and not 205
                         and not 206 and not 207 and not 208 and not 209
+                        and not 210 and not 211 and not 212
+                        and not 213 and not 214 and not 215
                         and not 170 and not 171)
                 {
                     var edgeRecord
@@ -8772,6 +8869,14 @@ internal sealed class StandaloneMethodImportInputTests
             {
                 expectedDecoderConstantMapCount = 6;
             }
+            if (verificationMode is 213 or 214)
+            {
+                expectedDecoderConstantMapCount = 2;
+            }
+            if (verificationMode == 215)
+            {
+                expectedDecoderConstantMapCount = 4;
+            }
             if (verificationMode is 195 or 196)
             {
                 expectedDecoderConstantMapCount = 2;
@@ -8832,6 +8937,11 @@ internal sealed class StandaloneMethodImportInputTests
                     + "Host.StandaloneDecoderBodies[21] != 3",
                 212 => "Host.StandaloneDecoderBodies[19] != 1 || "
                     + "Host.StandaloneDecoderBodies[21] != 2",
+                213 or 214
+                    => "Host.StandaloneDecoderBodies[19] != 4 || "
+                        + "Host.StandaloneDecoderBodies[21] != 6",
+                215 => "Host.StandaloneDecoderBodies[19] != 5 || "
+                    + "Host.StandaloneDecoderBodies[21] != 7",
                 159 or 160 => "Host.StandaloneDecoderBodies[19] != 5 || "
                     + "Host.StandaloneDecoderBodies[21] != 7",
                 162 or 163 or 164
@@ -9013,7 +9123,7 @@ internal sealed class StandaloneMethodImportInputTests
                     or 188 or 189 or 190 or 191 or 192 or 193 or 194
                     or 195 or 196 or 197 or 198 or 199 or 200 or 201
                     or 202 or 203 or 204 or 205 or 206 or 207
-                    or 208 or 209)
+                    or 208 or 209 or 213 or 214 or 215)
             {
                 var artifactIndex = new TrRmArtifactIndex(artifact);
                 Assert.That(artifactIndex.TryGetSection(0x0020,
@@ -9178,6 +9288,7 @@ internal sealed class StandaloneMethodImportInputTests
                     158 => 2,
                     210 => 2,
                     212 => 1,
+                    213 or 214 or 215 => 1,
                     161 => 2,
                     162 => 3,
                     149 => 3,
@@ -9743,6 +9854,13 @@ internal sealed class StandaloneMethodImportInputTests
                         Assert.That(Execute(-3), Is.EqualTo(-6));
                         break;
                     case 212:
+                        break;
+                    case 213:
+                    case 214:
+                    case 215:
+                        Assert.That(Execute(-1), Is.EqualTo(0));
+                        Assert.That(Execute(0), Is.EqualTo(0));
+                        Assert.That(Execute(1), Is.EqualTo(0));
                         break;
                 }
             }

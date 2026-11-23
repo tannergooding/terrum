@@ -1047,7 +1047,8 @@ int32 NormalizeStandaloneSourceLoopCondition(int32 bodyId,
 int32 NormalizeStandaloneSourceLoopBody(int32 bodyId,
     int32 statementId, int32 loopNodeId, int32 bodyBlockId,
     int32 continueTarget, int32 exitBlockId,
-    int32 expectedBlockCountBeforeBody)
+    int32 expectedBlockCountBeforeBody,
+    int32 conditionBlockCount, int32 finalBodyBlockCount)
 {
     int32 bodyBlockFirst
         = Host.StandaloneNormalizedBodyBlockRanges[bodyId * 2];
@@ -1100,9 +1101,87 @@ int32 NormalizeStandaloneSourceLoopBody(int32 bodyId,
                 childStatementOffset];
         if (Host.StandaloneSourceStatementParentIds[
                 childStatementId] != statementId
-            || (childKind != 5 && childKind != 8 && childKind != 9))
+            || (childKind != 5 && childKind != 8 && childKind != 9
+                && childKind != 12))
         {
             return 3;
+        }
+        if (childKind == 12)
+        {
+            int32 conditionExpressionId
+                = Host.StandaloneSourceStatements[
+                    childStatementOffset + 1];
+            if (childCount != 1 || childIndex != 0
+                || Host.StandaloneSourceStatements[
+                    childStatementOffset + 2] != loopNodeId
+                || conditionExpressionId < 0
+                || conditionExpressionId
+                    >= Host.StandaloneSourceBodies[bodyId * 12 + 4])
+            {
+                return 3;
+            }
+            int32 conditionExpressionOffset
+                = (Host.StandaloneSourceBodies[bodyId * 12 + 3]
+                    + conditionExpressionId) * 8;
+            int32 conditionTypeId
+                = Host.StandaloneSourceExpressions[
+                    conditionExpressionOffset + 1];
+            int32 conditionKind
+                = Host.StandaloneSourceExpressions[
+                    conditionExpressionOffset];
+            int32 edgeRecordIndex
+                = finalBodyBlockCount + conditionBlockCount;
+            if (!IsStandaloneLogicalNotType(conditionTypeId)
+                || conditionKind == 34
+                || conditionKind == 35
+                || conditionKind == 36
+                || edgeRecordIndex < 0
+                || edgeRecordIndex > 0xFFFF)
+            {
+                return 3;
+            }
+            int32 conditionOperationFirst
+                = Host.StandaloneNormalizedOperationCount[0];
+            init int32 conditionSelectorKind;
+            init int32 conditionSourceUse;
+            init int32 conditionSelectorIndex;
+            init bool conditionTerminated;
+            int32 conditionStatus
+                = NormalizeStandaloneSourceExpression(
+                    bodyId, conditionExpressionId, 1,
+                    ref init conditionSelectorKind,
+                    ref init conditionSourceUse,
+                    ref init conditionSelectorIndex,
+                    ref init conditionTerminated);
+            if (conditionStatus != 0)
+            {
+                return conditionStatus;
+            }
+            if (conditionTerminated
+                || conditionSelectorKind != 2
+                || conditionSourceUse != 1
+                || conditionSelectorIndex < 0)
+            {
+                return 2;
+            }
+            int32 conditionOperationCount
+                = Host.StandaloneNormalizedOperationCount[0]
+                    - conditionOperationFirst;
+            init int32 conditionalBlockIndex;
+            int32 conditionalBlockStatus
+                = AppendStandaloneNormalizedBlock(
+                    bodyId, bodyBlockId, conditionOperationFirst,
+                    conditionOperationCount,
+                    4, 0, 0, 0, exitBlockId, continueTarget,
+                    2, conditionSelectorIndex, conditionTypeId,
+                    edgeRecordIndex, -1, 0,
+                    ref init conditionalBlockIndex);
+            if (conditionalBlockStatus != 0)
+            {
+                return conditionalBlockStatus;
+            }
+            return conditionalBlockIndex
+                == bodyBlockFirst + bodyBlockId ? 0 : 3;
         }
         if (childKind == 8 || childKind == 9)
         {
@@ -1347,7 +1426,8 @@ int32 NormalizeStandaloneSourceLoop(int32 bodyId,
     int32 continueTarget = conditionBlockStart;
     int32 bodyStatus = NormalizeStandaloneSourceLoopBody(
         bodyId, statementId, loopNodeId, bodyBlockId,
-        continueTarget, exitBlockId, expectedBlockCountBeforeBody);
+        continueTarget, exitBlockId, expectedBlockCountBeforeBody,
+        conditionBlockCount, finalBodyBlockCount);
     if (bodyStatus != 0)
     {
         return bodyStatus;
@@ -1571,7 +1651,8 @@ int32 NormalizeStandaloneSourceForLoop(int32 bodyId,
     int32 bodyStatus = NormalizeStandaloneSourceLoopBody(
         bodyId, statementId, loopNodeId, bodyBlockId,
         bodyContinueTarget, exitBlockId,
-        expectedBlockCountBeforeBody);
+        expectedBlockCountBeforeBody, conditionBlockCount,
+        finalBodyBlockCount);
     if (bodyStatus != 0)
     {
         return bodyStatus;

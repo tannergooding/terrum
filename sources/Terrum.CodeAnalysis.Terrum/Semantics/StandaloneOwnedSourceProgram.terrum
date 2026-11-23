@@ -5001,6 +5001,105 @@ int32 ParseStandaloneSourceIfBranch(int32 localCallableId,
     return 0;
 }
 
+int32 ParseStandaloneSourceConditionalLoopBreak(
+    int32 localCallableId, int32 expressionFirst,
+    int32 controlNodeId, int32 loopStatementId,
+    int32 tokenStart, int32 tokenEnd,
+    ref<init int32> nextTokenResult)
+    ensure return == 0 ? *nextTokenResult is init : true
+{
+    if (!IsStandaloneSourceIfKeyword(tokenStart)
+        || tokenStart + 1 >= tokenEnd
+        || Host.Tokens[(tokenStart + 1) * 3] != 46
+        || controlNodeId < 0
+        || controlNodeId >= Host.StandaloneSourceIfNodeCount[0]
+        || loopStatementId < 0
+        || loopStatementId >= Host.StandaloneSourceStatementCount[0]
+        || Host.StandaloneSourceIfNodes[
+            controlNodeId * 5 + 2] != 0)
+    {
+        return 2;
+    }
+
+    init int32 conditionClose;
+    if (!FindStandaloneMatchingClose(
+            tokenStart + 1, tokenEnd, 46, 47,
+            ref init conditionClose)
+        || conditionClose + 1 >= tokenEnd)
+    {
+        return 1;
+    }
+    init int32 boolTypeId;
+    int32 boolTypeStatus = InternStandaloneCallableTypeFact(
+        0, 1, false, ref init boolTypeId);
+    if (boolTypeStatus != 0)
+    {
+        return boolTypeStatus;
+    }
+    init int32 conditionExpressionId;
+    init int32 nextConditionToken;
+    int32 conditionStatus = ParseStandaloneSourceExpression(
+        localCallableId, localCallableId, expressionFirst,
+        boolTypeId, tokenStart + 2, conditionClose, 1,
+        ref init conditionExpressionId,
+        ref init nextConditionToken);
+    if (conditionStatus != 0)
+    {
+        return conditionStatus;
+    }
+    if (nextConditionToken != conditionClose)
+    {
+        return 1;
+    }
+    init bool conditionDoesNotReturn;
+    int32 doesNotReturnStatus
+        = TryGetStandaloneSourceExpressionDoesNotReturn(
+            localCallableId, conditionExpressionId,
+            ref init conditionDoesNotReturn);
+    if (doesNotReturnStatus != 0 || conditionDoesNotReturn)
+    {
+        return doesNotReturnStatus != 0
+            ? doesNotReturnStatus : 2;
+    }
+
+    int32 breakToken = conditionClose + 1;
+    init int32 semicolonToken;
+    int32 semicolonStatus
+        = FindStandaloneSourceStatementSemicolon(
+            breakToken, tokenEnd, ref init semicolonToken);
+    if (semicolonStatus != 0)
+    {
+        return semicolonStatus;
+    }
+    if (!IsStandaloneSourceBreakKeyword(breakToken)
+        || semicolonToken != breakToken + 1
+        || (semicolonToken + 1 < tokenEnd
+            && IsStandaloneSourceElseKeyword(semicolonToken + 1)))
+    {
+        return 1;
+    }
+
+    // Kind 12 carries an eager conditional break under its owning loop.
+    int32 statementStatus = AppendStandaloneSourceStatement(
+        localCallableId, expressionFirst, 12,
+        conditionExpressionId, controlNodeId);
+    if (statementStatus != 0)
+    {
+        return statementStatus;
+    }
+    int32 conditionalBreakStatementId
+        = Host.StandaloneSourceStatementCount[0] - 1;
+    int32 childStatus = AppendStandaloneSourceIfChild(
+        localCallableId, controlNodeId, loopStatementId, true,
+        conditionalBreakStatementId);
+    if (childStatus != 0)
+    {
+        return childStatus;
+    }
+    *nextTokenResult = semicolonToken + 1;
+    return 0;
+}
+
 int32 ParseStandaloneSourceWhileBody(int32 localCallableId,
     int32 expressionFirst, int32 controlNodeId,
     int32 loopStatementId,
@@ -5041,6 +5140,30 @@ int32 ParseStandaloneSourceWhileBody(int32 localCallableId,
             {
                 cursor = cursor + 1;
                 continue;
+            }
+            if (IsStandaloneSourceIfKeyword(cursor))
+            {
+                init int32 afterConditionalBreak;
+                int32 conditionalBreakStatus
+                    = ParseStandaloneSourceConditionalLoopBreak(
+                        localCallableId, expressionFirst, controlNodeId,
+                        loopStatementId, cursor, blockClose,
+                        ref init afterConditionalBreak);
+                if (conditionalBreakStatus != 0)
+                {
+                    return conditionalBreakStatus;
+                }
+                cursor = afterConditionalBreak;
+                while (cursor < blockClose
+                    && Host.Tokens[cursor * 3] == 52)
+                {
+                    cursor = cursor + 1;
+                }
+                if (cursor != blockClose)
+                {
+                    return 2;
+                }
+                break;
             }
             init int32 semicolonToken;
             int32 semicolonStatus
@@ -5124,6 +5247,22 @@ int32 ParseStandaloneSourceWhileBody(int32 localCallableId,
             }
         }
         *nextTokenResult = blockClose + 1;
+        return 0;
+    }
+
+    if (IsStandaloneSourceIfKeyword(tokenStart))
+    {
+        init int32 afterConditionalBreak;
+        int32 conditionalBreakStatus
+            = ParseStandaloneSourceConditionalLoopBreak(
+                localCallableId, expressionFirst, controlNodeId,
+                loopStatementId, tokenStart, tokenEnd,
+                ref init afterConditionalBreak);
+        if (conditionalBreakStatus != 0)
+        {
+            return conditionalBreakStatus;
+        }
+        *nextTokenResult = afterConditionalBreak;
         return 0;
     }
 
@@ -10633,6 +10772,57 @@ int32 VerifyStandaloneDirectCalls()
                     int32 childKind
                         = Host.StandaloneSourceStatements[
                             childStatementOffset];
+                    if (childKind == 12)
+                    {
+                        int32 conditionExpressionId
+                            = Host.StandaloneSourceStatements[
+                                childStatementOffset + 1];
+                        if (childCount != 1 || childIndex != 0
+                            || sawLoopTransfer
+                            || Host.StandaloneSourceStatements[
+                                childStatementOffset + 2] != loopNodeId
+                            || conditionExpressionId < 0
+                            || conditionExpressionId
+                                >= bodyExpressionCount)
+                        {
+                            return 3;
+                        }
+                        int32 conditionExpressionIndex
+                            = bodyExpressionFirst
+                                + conditionExpressionId;
+                        int32 conditionExpressionOffset
+                            = conditionExpressionIndex * 8;
+                        int32 conditionKind
+                            = Host.StandaloneSourceExpressions[
+                                conditionExpressionOffset];
+                        int32 conditionTypeId
+                            = Host.StandaloneSourceExpressions[
+                                conditionExpressionOffset + 1];
+                        if (!IsStandaloneLogicalNotType(
+                                conditionTypeId)
+                            || conditionKind == 34
+                            || conditionKind == 35
+                            || conditionKind == 36
+                            || Host.StandaloneSourceExpressionUseCounts[
+                                conditionExpressionIndex] != 0)
+                        {
+                            return 3;
+                        }
+                        init bool conditionDoesNotReturn;
+                        int32 conditionStatus
+                            = TryGetStandaloneSourceExpressionDoesNotReturn(
+                                bodyId, conditionExpressionId,
+                                ref init conditionDoesNotReturn);
+                        if (conditionStatus != 0
+                            || conditionDoesNotReturn)
+                        {
+                            return conditionStatus != 0
+                                ? conditionStatus : 3;
+                        }
+                        Host.StandaloneSourceExpressionUseCounts[
+                            conditionExpressionIndex] = 1;
+                        continue;
+                    }
                     if (childKind == 8 || childKind == 9)
                     {
                         if (sawLoopTransfer
