@@ -1155,8 +1155,9 @@ int32 NormalizeStandaloneSourceLoop(int32 bodyId,
 {
     int32 bodyBlockFirst
         = Host.StandaloneNormalizedBodyBlockRanges[bodyId * 2];
-    if (bodyBlockFirst < 0
-        || Host.StandaloneNormalizedBlockCount[0] != bodyBlockFirst
+    int32 bodyBlockLocalFirst
+        = Host.StandaloneNormalizedBlockCount[0] - bodyBlockFirst;
+    if (bodyBlockFirst < 0 || bodyBlockLocalFirst < 0
         || statementId < 0
         || statementId >= Host.StandaloneSourceStatementCount[0])
     {
@@ -1273,30 +1274,56 @@ int32 NormalizeStandaloneSourceLoop(int32 bodyId,
         conditionBlockCount = conditionLeafCount;
     }
 
-    int32 conditionBlockStart = doWhile ? 2 : 1;
-    int32 bodyBlockId = doWhile ? 1 : conditionBlockCount + 1;
+    int32 conditionBlockStart
+        = bodyBlockLocalFirst + (doWhile ? 2 : 1);
+    int32 bodyBlockId = doWhile
+        ? bodyBlockLocalFirst + 1
+        : bodyBlockLocalFirst + conditionBlockCount + 1;
     int32 exitBlockId = doBodyBreaksImmediately
-        ? 2 : conditionBlockCount + 2;
+        ? bodyBlockLocalFirst + 2
+        : bodyBlockLocalFirst + conditionBlockCount + 2;
     int32 finalBodyBlockCount = doBodyBreaksImmediately
-        ? 3 : conditionBlockCount + 3;
-    int32 operationFirst
+        ? bodyBlockLocalFirst + 3
+        : bodyBlockLocalFirst + conditionBlockCount + 3;
+    int32 bodyOperationFirst
         = Host.StandaloneNormalizedBodies[bodyId * 12 + 9];
+    mut int32 operationFirst = bodyOperationFirst;
+    if (bodyBlockLocalFirst > 0)
+    {
+        int32 previousBlockIndex
+            = bodyBlockFirst + bodyBlockLocalFirst - 1;
+        int32 previousBlockOffset = previousBlockIndex * 16;
+        if (Host.StandaloneNormalizedBlocks[
+                previousBlockOffset] != bodyId
+            || Host.StandaloneNormalizedBlocks[
+                previousBlockOffset + 1]
+                != bodyBlockLocalFirst - 1)
+        {
+            return 3;
+        }
+        operationFirst
+            = Host.StandaloneNormalizedBlocks[
+                previousBlockOffset + 2]
+                + Host.StandaloneNormalizedBlocks[
+                    previousBlockOffset + 3];
+    }
     int32 operationCount
         = Host.StandaloneNormalizedOperationCount[0] - operationFirst;
-    if (operationCount < 0)
+    if (operationFirst < bodyOperationFirst || operationCount < 0)
     {
         return 3;
     }
     init int32 entryBlockIndex;
     int32 entryBlockStatus = AppendStandaloneNormalizedBlock(
-        bodyId, 0, operationFirst, operationCount,
-        3, 0, 0, 0, 1, -1, 0, 0, 0, -1, -1, 0,
+        bodyId, bodyBlockLocalFirst, operationFirst, operationCount,
+        3, 0, 0, 0, bodyBlockLocalFirst + 1,
+        -1, 0, 0, 0, -1, -1, 0,
         ref init entryBlockIndex);
     if (entryBlockStatus != 0)
     {
         return entryBlockStatus;
     }
-    if (entryBlockIndex != bodyBlockFirst)
+    if (entryBlockIndex != bodyBlockFirst + bodyBlockLocalFirst)
     {
         return 3;
     }
@@ -1314,8 +1341,9 @@ int32 NormalizeStandaloneSourceLoop(int32 bodyId,
     }
 
     int32 expectedBlockCountBeforeBody = doWhile
-        ? bodyBlockFirst + 1
-        : bodyBlockFirst + conditionBlockCount + 1;
+        ? bodyBlockFirst + bodyBlockLocalFirst + 1
+        : bodyBlockFirst + bodyBlockLocalFirst
+            + conditionBlockCount + 1;
     int32 continueTarget = conditionBlockStart;
     int32 bodyStatus = NormalizeStandaloneSourceLoopBody(
         bodyId, statementId, loopNodeId, bodyBlockId,
@@ -1337,7 +1365,8 @@ int32 NormalizeStandaloneSourceLoop(int32 bodyId,
         }
     }
     return Host.StandaloneNormalizedBlockCount[0]
-        == bodyBlockFirst + conditionBlockCount + 2 ? 0 : 3;
+        == bodyBlockFirst + bodyBlockLocalFirst
+            + conditionBlockCount + 2 ? 0 : 3;
 }
 
 int32 NormalizeStandaloneSourceForLoop(int32 bodyId,
