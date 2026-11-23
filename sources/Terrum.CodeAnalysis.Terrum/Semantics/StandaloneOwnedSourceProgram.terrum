@@ -5201,6 +5201,161 @@ int32 ParseStandaloneSourceConditionalLoopTransfer(
     return 0;
 }
 
+int32 ParseStandaloneSourceNestedWhile(
+    int32 localCallableId, int32 expressionFirst,
+    int32 parentControlNodeId, int32 parentStatementId,
+    int32 tokenStart, int32 tokenEnd,
+    ref<init int32> nextTokenResult)
+    ensure return == 0 ? *nextTokenResult is init : true
+{
+    if (!IsStandaloneSourceWhileKeyword(tokenStart)
+        || tokenStart + 1 >= tokenEnd
+        || Host.Tokens[(tokenStart + 1) * 3] != 46
+        || parentControlNodeId < 0
+        || parentControlNodeId
+            >= Host.StandaloneSourceIfNodeCount[0]
+        || parentStatementId < 0
+        || parentStatementId
+            >= Host.StandaloneSourceStatementCount[0]
+        || Host.StandaloneSourceIfNodes[
+            parentControlNodeId * 5 + 2] != 0)
+    {
+        return 2;
+    }
+
+    init int32 conditionClose;
+    if (!FindStandaloneMatchingClose(
+            tokenStart + 1, tokenEnd, 46, 47,
+            ref init conditionClose)
+        || conditionClose + 1 >= tokenEnd)
+    {
+        return 1;
+    }
+    init int32 boolTypeId;
+    int32 boolTypeStatus = InternStandaloneCallableTypeFact(
+        0, 1, false, ref init boolTypeId);
+    if (boolTypeStatus != 0)
+    {
+        return boolTypeStatus;
+    }
+    init int32 conditionExpressionId;
+    init int32 nextConditionToken;
+    int32 conditionStatus = ParseStandaloneSourceExpression(
+        localCallableId, localCallableId, expressionFirst,
+        boolTypeId, tokenStart + 2, conditionClose, 1,
+        ref init conditionExpressionId,
+        ref init nextConditionToken);
+    if (conditionStatus != 0)
+    {
+        return conditionStatus;
+    }
+    if (nextConditionToken != conditionClose)
+    {
+        return 1;
+    }
+    int32 bodyExpressionCount
+        = Host.StandaloneSourceBodies[
+            localCallableId * 12 + 4];
+    if (conditionExpressionId < 0
+        || conditionExpressionId >= bodyExpressionCount)
+    {
+        return 3;
+    }
+    int32 conditionExpressionOffset
+        = (Host.StandaloneSourceBodies[
+            localCallableId * 12 + 3]
+            + conditionExpressionId) * 8;
+    int32 conditionKind
+        = Host.StandaloneSourceExpressions[
+            conditionExpressionOffset];
+    int32 conditionTypeId
+        = Host.StandaloneSourceExpressions[
+            conditionExpressionOffset + 1];
+    if (!IsStandaloneLogicalNotType(conditionTypeId)
+        || conditionKind == 34 || conditionKind == 35
+        || conditionKind == 36)
+    {
+        return 2;
+    }
+    init bool conditionDoesNotReturn;
+    int32 doesNotReturnStatus
+        = TryGetStandaloneSourceExpressionDoesNotReturn(
+            localCallableId, conditionExpressionId,
+            ref init conditionDoesNotReturn);
+    if (doesNotReturnStatus != 0 || conditionDoesNotReturn)
+    {
+        return doesNotReturnStatus != 0
+            ? doesNotReturnStatus : 2;
+    }
+
+    init int32 nestedControlNodeId;
+    int32 nodeStatus = AppendStandaloneSourceIfNode(
+        localCallableId, ref init nestedControlNodeId);
+    if (nodeStatus != 0)
+    {
+        return nodeStatus;
+    }
+    int32 nestedStatementStatus
+        = AppendStandaloneSourceStatement(
+            localCallableId, expressionFirst, 7,
+            conditionExpressionId, nestedControlNodeId);
+    if (nestedStatementStatus != 0)
+    {
+        return nestedStatementStatus;
+    }
+    int32 nestedStatementId
+        = Host.StandaloneSourceStatementCount[0] - 1;
+    init int32 afterNestedBody;
+    int32 nestedBodyStatus = ParseStandaloneSourceWhileBody(
+        localCallableId, expressionFirst, nestedControlNodeId,
+        nestedStatementId, conditionClose + 1, tokenEnd,
+        ref init afterNestedBody);
+    if (nestedBodyStatus != 0)
+    {
+        return nestedBodyStatus;
+    }
+    int32 nestedNodeOffset = nestedControlNodeId * 5;
+    int32 nestedChildFirst
+        = Host.StandaloneSourceIfNodes[nestedNodeOffset + 1];
+    int32 nestedChildCount
+        = Host.StandaloneSourceIfNodes[nestedNodeOffset + 2];
+    if (nestedChildFirst < 0 || nestedChildCount != 1
+        || nestedChildFirst
+            >= Host.StandaloneSourceIfChildCount[0])
+    {
+        return 2;
+    }
+    int32 breakStatementId
+        = Host.StandaloneSourceIfChildren[nestedChildFirst];
+    if (breakStatementId < 0
+        || breakStatementId
+            >= Host.StandaloneSourceStatementCount[0]
+        || Host.StandaloneSourceStatementParentIds[
+            breakStatementId] != nestedStatementId
+        || Host.StandaloneSourceStatements[
+            breakStatementId * 3] != 8
+        || Host.StandaloneSourceStatements[
+            breakStatementId * 3 + 1] != -1
+        || Host.StandaloneSourceStatements[
+            breakStatementId * 3 + 2] != nestedControlNodeId)
+    {
+        return 2;
+    }
+    Host.StandaloneSourceIfNodes[nestedNodeOffset + 3]
+        = Host.StandaloneSourceIfChildCount[0];
+    Host.StandaloneSourceIfNodes[nestedNodeOffset + 4] = 0;
+
+    int32 childStatus = AppendStandaloneSourceIfChild(
+        localCallableId, parentControlNodeId, parentStatementId,
+        true, nestedStatementId);
+    if (childStatus != 0)
+    {
+        return childStatus;
+    }
+    *nextTokenResult = afterNestedBody;
+    return 0;
+}
+
 int32 ParseStandaloneSourceWhileBody(int32 localCallableId,
     int32 expressionFirst, int32 controlNodeId,
     int32 loopStatementId,
@@ -5241,6 +5396,29 @@ int32 ParseStandaloneSourceWhileBody(int32 localCallableId,
             if (Host.Tokens[cursor * 3] == 52)
             {
                 cursor = cursor + 1;
+                continue;
+            }
+            if (IsStandaloneSourceWhileKeyword(cursor))
+            {
+                init int32 afterNestedWhile;
+                int32 nestedWhileStatus = ParseStandaloneSourceNestedWhile(
+                    localCallableId, expressionFirst, controlNodeId,
+                    loopStatementId, cursor, blockClose,
+                    ref init afterNestedWhile);
+                if (nestedWhileStatus != 0)
+                {
+                    return nestedWhileStatus;
+                }
+                cursor = afterNestedWhile;
+                while (cursor < blockClose
+                    && Host.Tokens[cursor * 3] == 52)
+                {
+                    cursor = cursor + 1;
+                }
+                if (cursor == blockClose)
+                {
+                    break;
+                }
                 continue;
             }
             if (IsStandaloneSourceIfKeyword(cursor))
@@ -5374,6 +5552,21 @@ int32 ParseStandaloneSourceWhileBody(int32 localCallableId,
             }
         }
         *nextTokenResult = blockClose + 1;
+        return 0;
+    }
+
+    if (IsStandaloneSourceWhileKeyword(tokenStart))
+    {
+        init int32 afterNestedWhile;
+        int32 nestedWhileStatus = ParseStandaloneSourceNestedWhile(
+            localCallableId, expressionFirst, controlNodeId,
+            loopStatementId, tokenStart, tokenEnd,
+            ref init afterNestedWhile);
+        if (nestedWhileStatus != 0)
+        {
+            return nestedWhileStatus;
+        }
+        *nextTokenResult = afterNestedWhile;
         return 0;
     }
 
@@ -10879,6 +11072,7 @@ int32 VerifyStandaloneDirectCalls()
 
                 mut bool sawLoopTransfer = false;
                 mut int32 loopTransferKind = 0;
+                mut int32 previousLoopChildId = statementId;
                 for (mut int32 childIndex = 0;
                     childIndex < childCount;
                     childIndex = childIndex + 1)
@@ -10886,7 +11080,7 @@ int32 VerifyStandaloneDirectCalls()
                     int32 childStatementId
                         = Host.StandaloneSourceIfChildren[
                             childFirst + childIndex];
-                    if (childStatementId != statementId + childIndex + 1
+                    if (childStatementId <= previousLoopChildId
                         || childStatementId < bodyStatementFirst
                         || childStatementId
                             >= bodyStatementFirst + bodyStatementCount
@@ -10895,10 +11089,103 @@ int32 VerifyStandaloneDirectCalls()
                     {
                         return 3;
                     }
+                    previousLoopChildId = childStatementId;
                     int32 childStatementOffset = childStatementId * 3;
                     int32 childKind
                         = Host.StandaloneSourceStatements[
                             childStatementOffset];
+                    if (childKind == 7)
+                    {
+                        int32 nestedConditionExpressionId
+                            = Host.StandaloneSourceStatements[
+                                childStatementOffset + 1];
+                        int32 nestedLoopNodeId
+                            = Host.StandaloneSourceStatements[
+                                childStatementOffset + 2];
+                        if (nestedConditionExpressionId < 0
+                            || nestedConditionExpressionId
+                                >= bodyExpressionCount
+                            || nestedLoopNodeId < 0
+                            || nestedLoopNodeId
+                                >= Host.StandaloneSourceIfNodeCount[0]
+                            || Host.StandaloneSourceIfNodes[
+                                nestedLoopNodeId * 5] != bodyId)
+                        {
+                            return 3;
+                        }
+                        int32 nestedExpressionIndex
+                            = bodyExpressionFirst
+                                + nestedConditionExpressionId;
+                        int32 nestedExpressionOffset
+                            = nestedExpressionIndex * 8;
+                        int32 nestedConditionKind
+                            = Host.StandaloneSourceExpressions[
+                                nestedExpressionOffset];
+                        int32 nestedConditionTypeId
+                            = Host.StandaloneSourceExpressions[
+                                nestedExpressionOffset + 1];
+                        int32 nestedNodeOffset
+                            = nestedLoopNodeId * 5;
+                        int32 nestedChildFirst
+                            = Host.StandaloneSourceIfNodes[
+                                nestedNodeOffset + 1];
+                        int32 nestedChildCount
+                            = Host.StandaloneSourceIfNodes[
+                                nestedNodeOffset + 2];
+                        int32 nestedFalseFirst
+                            = Host.StandaloneSourceIfNodes[
+                                nestedNodeOffset + 3];
+                        int32 nestedFalseCount
+                            = Host.StandaloneSourceIfNodes[
+                                nestedNodeOffset + 4];
+                        if (!IsStandaloneLogicalNotType(
+                                nestedConditionTypeId)
+                            || nestedConditionKind == 34
+                            || nestedConditionKind == 35
+                            || nestedConditionKind == 36
+                            || Host.StandaloneSourceExpressionUseCounts[
+                                nestedExpressionIndex] != 0
+                            || nestedChildFirst < 0
+                            || nestedChildCount != 1
+                            || nestedFalseCount != 0
+                            || nestedFalseFirst
+                                != nestedChildFirst + nestedChildCount)
+                        {
+                            return 3;
+                        }
+                        init bool nestedConditionDoesNotReturn;
+                        int32 nestedConditionStatus
+                            = TryGetStandaloneSourceExpressionDoesNotReturn(
+                                bodyId, nestedConditionExpressionId,
+                                ref init nestedConditionDoesNotReturn);
+                        if (nestedConditionStatus != 0
+                            || nestedConditionDoesNotReturn)
+                        {
+                            return nestedConditionStatus != 0
+                                ? nestedConditionStatus : 3;
+                        }
+                        int32 nestedBreakStatementId
+                            = Host.StandaloneSourceIfChildren[
+                                nestedChildFirst];
+                        if (nestedBreakStatementId < 0
+                            || nestedBreakStatementId
+                                >= Host.StandaloneSourceStatementCount[0]
+                            || Host.StandaloneSourceStatementParentIds[
+                                nestedBreakStatementId] != childStatementId
+                            || Host.StandaloneSourceStatements[
+                                nestedBreakStatementId * 3] != 8
+                            || Host.StandaloneSourceStatements[
+                                nestedBreakStatementId * 3 + 1] != -1
+                            || Host.StandaloneSourceStatements[
+                                nestedBreakStatementId * 3 + 2]
+                                != nestedLoopNodeId)
+                        {
+                            return 3;
+                        }
+                        Host.StandaloneSourceExpressionUseCounts[
+                            nestedExpressionIndex] = 1;
+                        continue;
+                    }
                     if (childKind == 12 || childKind == 13)
                     {
                         int32 conditionExpressionId
@@ -11054,7 +11341,7 @@ int32 VerifyStandaloneDirectCalls()
                 {
                     int32 stepStatementId
                         = Host.StandaloneSourceIfChildren[falseFirst];
-                    if (stepStatementId != statementId + childCount + 1
+                    if (stepStatementId <= previousLoopChildId
                         || stepStatementId < bodyStatementFirst
                         || stepStatementId
                             >= bodyStatementFirst + bodyStatementCount

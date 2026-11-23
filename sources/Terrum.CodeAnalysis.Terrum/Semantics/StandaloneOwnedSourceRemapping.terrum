@@ -1575,9 +1575,7 @@ int32 VerifyStandaloneRewrittenSourceArenas()
                 int32 candidateKind
                     = Host.StandaloneSourceStatements[
                         candidateOffset];
-                if (Host.StandaloneSourceStatementParentIds[
-                        candidateStatementId] == -1
-                    && (candidateKind == 6 || candidateKind == 7
+                if ((candidateKind == 6 || candidateKind == 7
                         || candidateKind == 10 || candidateKind == 11)
                     && Host.StandaloneSourceStatements[
                         candidateOffset + 2] == ifNodeId)
@@ -1599,6 +1597,89 @@ int32 VerifyStandaloneRewrittenSourceArenas()
                 || (controlStatementKind == 11 && falseCount > 1))
             {
                 return 3;
+            }
+            int32 controlParentId
+                = Host.StandaloneSourceStatementParentIds[
+                    controlStatementId];
+            if (controlParentId < -1)
+            {
+                return 3;
+            }
+            if (controlParentId >= 0)
+            {
+                if (controlParentId < bodyStatementFirst
+                    || controlParentId
+                        >= bodyStatementFirst + bodyStatementCount)
+                {
+                    return 3;
+                }
+                int32 parentOffset = controlParentId * 3;
+                int32 parentKind
+                    = Host.StandaloneSourceStatements[parentOffset];
+                int32 parentNodeId
+                    = Host.StandaloneSourceStatements[
+                        parentOffset + 2];
+                if ((parentKind != 7 && parentKind != 10
+                        && parentKind != 11)
+                    || parentNodeId < 0 || parentNodeId >= ifNodeCount
+                    || Host.StandaloneSourceIfNodes[
+                        parentNodeId * 5] != bodyId)
+                {
+                    return 3;
+                }
+                int32 parentNodeOffset = parentNodeId * 5;
+                int32 parentTrueFirst
+                    = Host.StandaloneSourceIfNodes[
+                        parentNodeOffset + 1];
+                int32 parentTrueCount
+                    = Host.StandaloneSourceIfNodes[
+                        parentNodeOffset + 2];
+                int32 parentFalseFirst
+                    = Host.StandaloneSourceIfNodes[
+                        parentNodeOffset + 3];
+                int32 parentFalseCount
+                    = Host.StandaloneSourceIfNodes[
+                        parentNodeOffset + 4];
+                if (parentTrueFirst < 0 || parentTrueCount < 0
+                    || parentTrueFirst
+                        > ifChildCount - parentTrueCount
+                    || parentFalseFirst < 0 || parentFalseCount < 0
+                    || parentTrueFirst + parentTrueCount
+                        != parentFalseFirst
+                    || parentFalseFirst
+                        > ifChildCount - parentFalseCount)
+                {
+                    return 3;
+                }
+                mut bool controlIsParented = false;
+                for (mut int32 childOrdinal = 0;
+                    childOrdinal
+                        < parentTrueCount + parentFalseCount;
+                    childOrdinal = childOrdinal + 1)
+                {
+                    int32 parentChildId = childOrdinal < parentTrueCount
+                        ? parentTrueFirst + childOrdinal
+                        : parentFalseFirst + childOrdinal
+                            - parentTrueCount;
+                    if (parentChildId < 0
+                        || parentChildId >= ifChildCount)
+                    {
+                        return 3;
+                    }
+                    if (Host.StandaloneSourceIfChildren[
+                            parentChildId] == controlStatementId)
+                    {
+                        if (controlIsParented)
+                        {
+                            return 3;
+                        }
+                        controlIsParented = true;
+                    }
+                }
+                if (!controlIsParented)
+                {
+                    return 3;
+                }
             }
 
             int32 bodyExpressionFirst
@@ -1660,6 +1741,7 @@ int32 VerifyStandaloneRewrittenSourceArenas()
             mut bool sameAssignedLocal = true;
             mut bool allAssignedLocalsMutable = true;
             mut bool sawLoopTransfer = false;
+            mut int32 previousControlChildId = controlStatementId;
             for (mut int32 childOrdinal = 0;
             childOrdinal < trueCount + falseCount;
             childOrdinal = childOrdinal + 1)
@@ -1677,11 +1759,11 @@ int32 VerifyStandaloneRewrittenSourceArenas()
             }
             if (Host.StandaloneSourceStatementParentIds[
                     childStatementId] != controlStatementId
-                || childStatementId
-                    != controlStatementId + childOrdinal + 1)
+                || childStatementId <= previousControlChildId)
             {
                 return 3;
             }
+            previousControlChildId = childStatementId;
             int32 childStatementOffset = childStatementId * 3;
             int32 currentChildKind
                 = Host.StandaloneSourceStatements[
@@ -1690,6 +1772,21 @@ int32 VerifyStandaloneRewrittenSourceArenas()
                 = controlStatementKind == 7
                     || controlStatementKind == 10
                     || controlStatementKind == 11;
+            if (controlIsLoop && currentChildKind == 7)
+            {
+                int32 nestedLoopNodeId
+                    = Host.StandaloneSourceStatements[
+                        childStatementOffset + 2];
+                if (childOrdinal >= trueCount
+                    || nestedLoopNodeId < 0
+                    || nestedLoopNodeId >= ifNodeCount
+                    || Host.StandaloneSourceIfNodes[
+                        nestedLoopNodeId * 5] != bodyId)
+                {
+                    return 3;
+                }
+                continue;
+            }
             if (controlIsLoop
                 && (currentChildKind == 12 || currentChildKind == 13))
             {

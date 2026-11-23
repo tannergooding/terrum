@@ -1102,10 +1102,117 @@ int32 NormalizeStandaloneSourceLoopBody(int32 bodyId,
                 childStatementOffset];
         if (Host.StandaloneSourceStatementParentIds[
                 childStatementId] != statementId
-            || (childKind != 5 && childKind != 8 && childKind != 9
+            || (childKind != 5 && childKind != 7
+                && childKind != 8 && childKind != 9
                 && childKind != 12 && childKind != 13))
         {
             return 3;
+        }
+        if (childKind == 7)
+        {
+            int32 nestedConditionExpressionId
+                = Host.StandaloneSourceStatements[
+                    childStatementOffset + 1];
+            int32 nestedControlNodeId
+                = Host.StandaloneSourceStatements[
+                    childStatementOffset + 2];
+            int32 bodyExpressionFirst
+                = Host.StandaloneSourceBodies[bodyId * 12 + 3];
+            int32 bodyExpressionCount
+                = Host.StandaloneSourceBodies[bodyId * 12 + 4];
+            if (nestedConditionExpressionId < 0
+                || nestedConditionExpressionId >= bodyExpressionCount
+                || nestedControlNodeId < 0
+                || nestedControlNodeId
+                    >= Host.StandaloneSourceIfNodeCount[0]
+                || Host.StandaloneSourceIfNodes[
+                    nestedControlNodeId * 5] != bodyId)
+            {
+                return 3;
+            }
+            int32 nestedConditionExpressionOffset
+                = (bodyExpressionFirst
+                    + nestedConditionExpressionId) * 8;
+            int32 nestedConditionTypeId
+                = Host.StandaloneSourceExpressions[
+                    nestedConditionExpressionOffset + 1];
+            int32 nestedConditionKind
+                = Host.StandaloneSourceExpressions[
+                    nestedConditionExpressionOffset];
+            int32 nestedNodeOffset = nestedControlNodeId * 5;
+            int32 nestedChildFirst
+                = Host.StandaloneSourceIfNodes[
+                    nestedNodeOffset + 1];
+            int32 nestedChildCount
+                = Host.StandaloneSourceIfNodes[
+                    nestedNodeOffset + 2];
+            int32 nestedFalseFirst
+                = Host.StandaloneSourceIfNodes[
+                    nestedNodeOffset + 3];
+            if (!IsStandaloneLogicalNotType(nestedConditionTypeId)
+                || nestedConditionKind == 34
+                || nestedConditionKind == 35
+                || nestedConditionKind == 36
+                || nestedChildFirst < 0 || nestedChildCount != 1
+                || nestedFalseFirst
+                    != nestedChildFirst + nestedChildCount)
+            {
+                return 3;
+            }
+            int32 nestedBreakStatementId
+                = Host.StandaloneSourceIfChildren[
+                    nestedChildFirst];
+            if (nestedBreakStatementId < 0
+                || nestedBreakStatementId
+                    >= Host.StandaloneSourceStatementCount[0]
+                || Host.StandaloneSourceStatementParentIds[
+                    nestedBreakStatementId] != childStatementId
+                || Host.StandaloneSourceStatements[
+                    nestedBreakStatementId * 3] != 8
+                || Host.StandaloneSourceStatements[
+                    nestedBreakStatementId * 3 + 1] != -1
+                || Host.StandaloneSourceStatements[
+                    nestedBreakStatementId * 3 + 2]
+                    != nestedControlNodeId)
+            {
+                return 3;
+            }
+            init bool nestedConditionDoesNotReturn;
+            int32 nestedConditionDoesNotReturnStatus
+                = TryGetStandaloneSourceExpressionDoesNotReturn(
+                    bodyId, nestedConditionExpressionId,
+                    ref init nestedConditionDoesNotReturn);
+            if (nestedConditionDoesNotReturnStatus != 0
+                || nestedConditionDoesNotReturn)
+            {
+                return nestedConditionDoesNotReturnStatus != 0
+                    ? nestedConditionDoesNotReturnStatus : 2;
+            }
+            init int32 nestedConditionSelectorKind;
+            init int32 nestedConditionSourceUse;
+            init int32 nestedConditionSelectorIndex;
+            init bool nestedConditionTerminated;
+            int32 nestedConditionStatus
+                = NormalizeStandaloneSourceExpression(
+                    bodyId, nestedConditionExpressionId, 1,
+                    ref init nestedConditionSelectorKind,
+                    ref init nestedConditionSourceUse,
+                    ref init nestedConditionSelectorIndex,
+                    ref init nestedConditionTerminated);
+            if (nestedConditionStatus != 0)
+            {
+                return nestedConditionStatus;
+            }
+            if (nestedConditionTerminated
+                || nestedConditionSelectorKind != 2
+                || nestedConditionSourceUse != 1
+                || nestedConditionSelectorIndex < 0
+                || Host.StandaloneNormalizedBlockCount[0]
+                    != expectedBlockCountBeforeBody)
+            {
+                return 2;
+            }
+            continue;
         }
         if (childKind == 12 || childKind == 13)
         {
