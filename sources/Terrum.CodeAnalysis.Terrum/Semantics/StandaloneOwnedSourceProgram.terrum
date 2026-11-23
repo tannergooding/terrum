@@ -5266,12 +5266,20 @@ int32 ParseStandaloneSourceNestedWhile(
         = Host.StandaloneSourceIfNodes[parentNodeOffset + 3];
     int32 parentFalseCount
         = Host.StandaloneSourceIfNodes[parentNodeOffset + 4];
-    if (parentChildFirst < 0 || parentChildCount < 0
-        || parentChildFirst
-            > Host.StandaloneSourceIfChildCount[0]
-                - parentChildCount
+    int32 sourceIfChildCount
+        = Host.StandaloneSourceIfChildCount[0];
+    if (parentChildCount < 0
+        || (parentChildCount == 0
+            ? parentChildFirst != -1
+                && parentChildFirst != sourceIfChildCount
+            : parentChildFirst < 0
+                || parentChildFirst
+                    > sourceIfChildCount - parentChildCount
+                || parentChildFirst + parentChildCount
+                    != sourceIfChildCount)
         || parentFalseCount != 0
-        || parentFalseFirst != parentChildFirst + parentChildCount)
+        || (parentFalseFirst != -1
+            && parentFalseFirst != sourceIfChildCount))
     {
         return 2;
     }
