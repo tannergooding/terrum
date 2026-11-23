@@ -535,6 +535,26 @@ internal sealed class StandaloneMethodImportInputTests
         "using api; int32 Main(int32 value) { "
             + "return Imported(value); }", 4, 0, true)]
     [TestCase(BoundRuntimePolicy.FailFast,
+        "using api; int32 Main(int32 value) { "
+            + "int32 copy = value; return Imported(copy); }",
+        0, 15, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { int32 Main() { "
+            + "return later; int32 later = 1; } }",
+        2, 0, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { int32 Main() { "
+            + "init int32 result; return result; } }",
+        2, 0, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { int32 Main() { "
+            + "int32 value = 1; int32 value = 2; return value; } }",
+        2, 0, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { int32 Main(int32 value) { "
+            + "int32 value = 1; return value; } }",
+        2, 0, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
         "namespace client; namespace inner { "
             + "int32 Main(int32 value) { return value; } }", 1, 0, false)]
     public async Task TerrumOwnedSourceBinderValidatesOrderedCallUsesAsync(
@@ -744,6 +764,62 @@ internal sealed class StandaloneMethodImportInputTests
                 return 0;
             }
             """;
+        const string localSourceArenaVerificationSource = """
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                if (Scan() < 1) { return 60; }
+                int32 status = BindStandaloneOwnedSourceProgram();
+                if (status != 0
+                    || Host.StandaloneSourceProgramStatus[0] != 0
+                    || Host.StandaloneSourceBodyCount[0] != 1
+                    || Host.StandaloneSourceExpressionCount[0] != 3
+                    || Host.StandaloneSourceStatementCount[0] != 2
+                    || Host.StandaloneSourceLocalCount[0] != 1
+                    || Host.StandaloneSourcePlaceCount[0] != 1
+                    || Host.StandaloneSourceLexicalScopeCount[0] != 1
+                    || Host.StandaloneSourceBodyScopeIds[0] != 0
+                    || Host.StandaloneSourceBodyLocalRanges[0] != 0
+                    || Host.StandaloneSourceBodyLocalRanges[1] != 1
+                    || Host.StandaloneSourceBodyPlaceRanges[0] != 0
+                    || Host.StandaloneSourceBodyPlaceRanges[1] != 1
+                    || Host.StandaloneSourceLexicalScopes[0] != -1
+                    || Host.StandaloneSourceLexicalScopes[1] != 0
+                    || Host.StandaloneSourceLexicalScopes[2] != 0
+                    || Host.StandaloneSourceLexicalScopes[3] != 1
+                    || Host.StandaloneSourceLocals[0] != 0
+                    || Host.StandaloneSourceLocals[1] != 0
+                    || Host.StandaloneSourceLocals[3] != 0
+                    || Host.StandaloneSourceLocalStates[0] != 1
+                    || Host.StandaloneSourceLocalDeclarationUseCounts[0]
+                        != 1
+                    || Host.StandaloneSourcePlaces[0] != 0
+                    || Host.StandaloneSourcePlaces[2] != 1
+                    || Host.StandaloneSourcePlaces[3] != 0
+                    || Host.StandaloneSourcePlaces[4] != -1
+                    || Host.StandaloneSourcePlaceUseCounts[0] != 1
+                    || Host.StandaloneSourceExpressions[0] != 1
+                    || Host.StandaloneSourceExpressions[8] != 5
+                    || Host.StandaloneSourceExpressions[16] != 3
+                    || Host.StandaloneSourceExpressions[9]
+                        != Host.StandaloneSourceLocals[2]
+                    || Host.StandaloneSourceExpressions[10] != 0
+                    || Host.StandaloneSourceCallArgumentCount[0] != 1
+                    || Host.StandaloneSourceCallArguments[0] != 1
+                    || Host.StandaloneSourceCallArgumentOwners[0] != 1
+                    || Host.StandaloneSourceStatements[0] != 4
+                    || Host.StandaloneSourceStatements[1] != 0
+                    || Host.StandaloneSourceStatements[2] != 0
+                    || Host.StandaloneSourceStatements[3] != 1
+                    || Host.StandaloneSourceStatements[4] != 2
+                    || Host.StandaloneSourceStatements[5] != -1
+                    || Host.StandaloneSourceExpressionUseCounts[0] != 1
+                    || Host.StandaloneSourceExpressionUseCounts[1] != 1
+                    || Host.StandaloneSourceExpressionUseCounts[2] != 1) {
+                    return 61;
+                }
+                return 0;
+            }
+            """;
         const string localNamespaceCallVerificationSource = """
             namespace Terrum.CodeAnalysis;
             int32 Main() {
@@ -912,9 +988,11 @@ internal sealed class StandaloneMethodImportInputTests
                     ? nestedLocalOverloadCallVerificationSource
                     : verificationMode == 4
                         ? genericSourceCallVerificationSource
-                        : verificationMode == 1
-                            ? localNamespaceCallVerificationSource
-                            : successfulVerificationSource;
+                        : verificationMode == 15
+                            ? localSourceArenaVerificationSource
+                            : verificationMode == 1
+                                ? localNamespaceCallVerificationSource
+                                : successfulVerificationSource;
 
         var root = RepositoryRoot();
         var components = new List<SyntaxTree>(sourcePaths.Length + 1);
@@ -942,6 +1020,10 @@ internal sealed class StandaloneMethodImportInputTests
             (NativeRuntimePolicy)policy);
         Assert.That(execution.ExitCode, Is.EqualTo(0));
         if (expectedSourceStatus != 0)
+        {
+            return;
+        }
+        if (verificationMode == 15)
         {
             return;
         }
