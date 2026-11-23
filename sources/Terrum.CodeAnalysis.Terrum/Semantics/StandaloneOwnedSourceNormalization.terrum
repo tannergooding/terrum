@@ -1477,6 +1477,35 @@ int32 NormalizeStandaloneSourceLoopBody(int32 bodyId,
                 return nestedDoStatus != 0
                     ? nestedDoStatus : 3;
             }
+            int32 nestedDoNodeId
+                = Host.StandaloneSourceStatements[
+                    childStatementOffset + 2];
+            int32 nestedDoNodeOffset = nestedDoNodeId * 5;
+            int32 nestedDoChildFirst
+                = Host.StandaloneSourceIfNodes[
+                    nestedDoNodeOffset + 1];
+            int32 nestedDoChildCount
+                = Host.StandaloneSourceIfNodes[
+                    nestedDoNodeOffset + 2];
+            for (mut int32 childOrdinal = 0;
+                childOrdinal < nestedDoChildCount - 1;
+                childOrdinal = childOrdinal + 1)
+            {
+                int32 assignmentStatementId
+                    = Host.StandaloneSourceIfChildren[
+                        nestedDoChildFirst + childOrdinal];
+                init int32 assignmentTerminalKind;
+                int32 assignmentStatus
+                    = NormalizeStandaloneSourceStatement(
+                        bodyId, assignmentStatementId * 3,
+                        ref init assignmentTerminalKind);
+                if (assignmentStatus != 0
+                    || assignmentTerminalKind != 0)
+                {
+                    return assignmentStatus != 0
+                        ? assignmentStatus : 2;
+                }
+            }
             continue;
         }
         if (childKind == 12 || childKind == 13)
@@ -1867,16 +1896,35 @@ int32 GetStandaloneSourceNestedDoBodyBlockCount(int32 bodyId,
     int32 falseCount
         = Host.StandaloneSourceIfNodes[nodeOffset + 4];
     if (!IsStandaloneLogicalNotType(conditionTypeId)
-        || childFirst < 0 || childCount != 1
+        || childFirst < 0 || childCount < 1
         || falseCount != 0
         || childFirst
-            > Host.StandaloneSourceIfChildCount[0] - 1
-        || falseFirst != childFirst + 1)
+            > Host.StandaloneSourceIfChildCount[0] - childCount
+        || falseFirst != childFirst + childCount)
     {
         return 3;
     }
+    for (mut int32 childOrdinal = 0;
+        childOrdinal < childCount - 1;
+        childOrdinal = childOrdinal + 1)
+    {
+        int32 assignmentStatementId
+            = Host.StandaloneSourceIfChildren[
+                childFirst + childOrdinal];
+        if (assignmentStatementId < 0
+            || assignmentStatementId
+                >= Host.StandaloneSourceStatementCount[0]
+            || Host.StandaloneSourceStatementParentIds[
+                assignmentStatementId] != statementId
+            || Host.StandaloneSourceStatements[
+                assignmentStatementId * 3] != 5)
+        {
+            return 3;
+        }
+    }
     int32 breakStatementId
-        = Host.StandaloneSourceIfChildren[childFirst];
+        = Host.StandaloneSourceIfChildren[
+            childFirst + childCount - 1];
     if (breakStatementId < 0
         || breakStatementId
             >= Host.StandaloneSourceStatementCount[0]
