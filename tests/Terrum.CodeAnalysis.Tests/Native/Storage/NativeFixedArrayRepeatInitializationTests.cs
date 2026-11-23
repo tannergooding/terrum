@@ -1844,11 +1844,13 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
         var withinLimit = CompileSparseUnionUpdates(150);
         Assert.That(withinLimit.HasErrors, Is.False,
             string.Join(Environment.NewLine, withinLimit.Diagnostics));
+        Assert.That(withinLimit.Program, Is.Not.Null);
 
         var overLimit = CompileSparseUnionUpdates(151);
 
         Assert.That(overLimit.HasErrors, Is.True,
             string.Join(Environment.NewLine, overLimit.Diagnostics));
+        Assert.That(overLimit.Program, Is.Null);
         var workLimitDiagnostics = overLimit.Diagnostics.Where(
             static diagnostic => diagnostic.Code == "TRM3016"
                 && diagnostic.Message
@@ -1857,7 +1859,9 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
         Assert.That(workLimitDiagnostics, Has.Length.EqualTo(1),
             string.Join(Environment.NewLine, overLimit.Diagnostics));
 
-        var repeated = CompileSparseUnionUpdates(151);
+        var repeated = Compilation.CreateLibrary(overLimit.SyntaxTree,
+            LayoutOptions(BoundRuntimePolicy.FailFast));
+        Assert.That(repeated.Program, Is.Null);
         var repeatedWorkLimitDiagnostics = repeated.Diagnostics.Where(
             static diagnostic => diagnostic.Code == "TRM3016"
                 && diagnostic.Message
