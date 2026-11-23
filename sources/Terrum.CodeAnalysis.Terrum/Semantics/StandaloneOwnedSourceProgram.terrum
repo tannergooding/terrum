@@ -2939,6 +2939,19 @@ bool CanBindStandaloneSourceArgument(int32 localCallableId,
     }
 
     int32 kind = Host.Tokens[tokenStart * 3];
+    if (kind == 46)
+    {
+        init int32 closingToken;
+        if (!FindStandaloneMatchingClose(tokenStart, tokenEnd,
+                46, 47, ref init closingToken)
+            || closingToken + 1 != tokenEnd
+            || closingToken == tokenStart + 1)
+        {
+            return false;
+        }
+        return CanBindStandaloneSourceArgument(localCallableId,
+            tokenStart + 1, closingToken, expectedTypeId, depth + 1);
+    }
     if (kind == 57)
     {
         return tokenStart + 1 < tokenEnd
@@ -3830,6 +3843,34 @@ int32 ParseStandaloneSourceExpression(int32 localCallableId,
     int32 kind = Host.Tokens[tokenIndex * 3];
     int32 tokenStart = Host.Tokens[tokenIndex * 3 + 1];
     int32 tokenLength = Host.Tokens[tokenIndex * 3 + 2];
+    if (kind == 46)
+    {
+        init int32 closingToken;
+        if (!FindStandaloneMatchingClose(tokenIndex, tokenEnd,
+                46, 47, ref init closingToken)
+            || closingToken == tokenIndex + 1)
+        {
+            return 1;
+        }
+        init int32 childExpressionId;
+        init int32 nextChildToken;
+        int32 childStatus = ParseStandaloneSourceExpression(
+            localCallableId, bodyId, expressionFirst,
+            expectedTypeId, tokenIndex + 1, closingToken,
+            depth + 1, ref init childExpressionId,
+            ref init nextChildToken);
+        if (childStatus != 0)
+        {
+            return childStatus;
+        }
+        if (nextChildToken != closingToken)
+        {
+            return 1;
+        }
+        *expressionIdResult = childExpressionId;
+        *nextTokenResult = closingToken + 1;
+        return 0;
+    }
     if (kind == 57)
     {
         if (tokenIndex + 1 >= tokenEnd)
