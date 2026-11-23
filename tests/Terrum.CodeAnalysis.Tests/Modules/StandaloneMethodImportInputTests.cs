@@ -1023,6 +1023,55 @@ internal sealed class StandaloneMethodImportInputTests
     [TestCase(BoundRuntimePolicy.FailFast,
         "namespace client { "
             + "int32 Main(int32 initial) { "
+            + "mut int32 value = initial; value += 1; "
+            + "return value; } }", 0, 96, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "int32 Main(int32 initial) { "
+            + "mut int32 value = initial; value -= 1; "
+            + "return value; } }", 0, 97, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "int32 Main(int32 initial) { "
+            + "mut int32 value = initial; value *= 2; "
+            + "return value; } }", 0, 98, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "int32 Main(int32 initial) { "
+            + "mut int32 value = initial; value /= 2; "
+            + "return value; } }", 0, 99, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "int32 Main(int32 initial) { "
+            + "mut int32 value = initial; value %= 2; "
+            + "return value; } }", 0, 100, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "int32 Main(int32 initial) { "
+            + "mut int32 value = initial; value &= 1; "
+            + "return value; } }", 0, 101, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "int32 Main(int32 initial) { "
+            + "mut int32 value = initial; value |= 1; "
+            + "return value; } }", 0, 102, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "int32 Main(int32 initial) { "
+            + "mut int32 value = initial; value ^= 1; "
+            + "return value; } }", 0, 103, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "int32 Main(int32 initial) { "
+            + "int32 value = initial; value += 1; "
+            + "return value; } }", 2, 0, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "int32 Main() { init mut int32 value; "
+            + "value += 1; return value; } }", 2, 0, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "int32 Main(int32 initial) { "
             + "int32 value = initial; value = 1; "
             + "return value; } }", 2, 0, false)]
     [TestCase(BoundRuntimePolicy.FailFast,
@@ -1053,6 +1102,12 @@ internal sealed class StandaloneMethodImportInputTests
             + "int32 Main(int32 initial) { "
             + "init mut int32 value; value = initial; "
             + "value = value + 1; return value; } }",
+        0, 82, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "int32 Main(int32 initial) { "
+            + "init mut int32 value; value = initial; "
+            + "value += 1; return value; } }",
         0, 82, false)]
     [TestCase(BoundRuntimePolicy.FailFast,
         "namespace client { "
@@ -3504,7 +3559,29 @@ internal sealed class StandaloneMethodImportInputTests
                 return 0;
             }
             """;
-        var mutableLocalVerificationSource = """
+        var mutableCompoundExpressionKind = verificationMode switch
+        {
+            97 => 22,
+            98 => 23,
+            99 => 24,
+            100 => 25,
+            101 => 12,
+            102 => 13,
+            103 => 14,
+            _ => 21,
+        };
+        var mutableCompoundOperationKind = verificationMode switch
+        {
+            97 => 18,
+            98 => 19,
+            99 => 23,
+            100 => 24,
+            101 => 10,
+            102 => 11,
+            103 => 12,
+            _ => 17,
+        };
+        var mutableLocalVerificationSource = $$"""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
                 if (Scan() < 1) { return 290; }
@@ -3518,7 +3595,8 @@ internal sealed class StandaloneMethodImportInputTests
                     || Host.StandaloneSourceLocalStates[0] != 1
                     || Host.StandaloneSourceStatements[3] != 5
                     || Host.StandaloneSourceStatements[5] != 0
-                    || Host.StandaloneSourceExpressions[24] != 21
+                    || Host.StandaloneSourceExpressions[24]
+                        != {{mutableCompoundExpressionKind}}
                     || Host.StandaloneSourceExpressions[32] != 5) {
                     return 291;
                 }
@@ -3547,7 +3625,8 @@ internal sealed class StandaloneMethodImportInputTests
                     || Host.StandaloneNormalizedOperations[6] != 1
                     || Host.StandaloneNormalizedOperations[7] != 2
                     || Host.StandaloneNormalizedOperations[8] != 0
-                    || Host.StandaloneNormalizedOperations[20] != 17
+                    || Host.StandaloneNormalizedOperations[20]
+                        != {{mutableCompoundOperationKind}}
                     || Host.StandaloneNormalizedOperations[21] != 2
                     || Host.StandaloneNormalizedOperations[22] != 3
                     || Host.StandaloneNormalizedOperations[23] != 4
@@ -4046,6 +4125,7 @@ internal sealed class StandaloneMethodImportInputTests
                                                     : verificationMode is 81 or 82
                                                         ? initializationLocalVerificationSource
                                                     : verificationMode is 75 or 77
+                                                        or >= 96 and <= 103
                                                         ? mutableLocalVerificationSource
                                                     : verificationMode is >= 60 and <= 74
                                                         ? scalarArithmeticVerificationSource
@@ -4150,7 +4230,7 @@ internal sealed class StandaloneMethodImportInputTests
             or 45 or 46 or 47 or 48 or 49 or 50 or 51 or 52 or 53
             or 54 or 55 or 56 or 57 or 58 or 59
             or >= 60 and <= 74 or 75 or 77 or 81 or 82
-            or >= 90 and <= 95)
+            or >= 90 and <= 95 or >= 96 and <= 103)
         {
             var artifactIndex = new TrRmArtifactIndex(artifact);
             Assert.That(artifactIndex.TryGetSection(0x0020,
@@ -4275,7 +4355,8 @@ internal sealed class StandaloneMethodImportInputTests
                 Assert.That(bodyReader.Code.IndexOf((byte)0xC3),
                     Is.EqualTo(-1));
             }
-            else if (verificationMode is >= 60 and <= 74 or 75 or 77 or 81 or 82)
+            else if (verificationMode is >= 60 and <= 74 or 75 or 77
+                or 81 or 82 or >= 96 and <= 100)
             {
                 var code = bodyReader.Code;
                 var arithmeticOffset = code.IndexOf((byte)0xC0);
@@ -4295,6 +4376,11 @@ internal sealed class StandaloneMethodImportInputTests
                 var expectedControl = verificationMode switch
                 {
                     60 or 71 or 72 or 73 or 75 or 77 or 82 => 0x01,
+                    96 => 0x01,
+                    97 => 0x02,
+                    98 => 0x03,
+                    99 => 0x0C,
+                    100 => 0x0D,
                     61 => 0x05,
                     62 => 0x06,
                     63 => 0x07,
@@ -4321,13 +4407,32 @@ internal sealed class StandaloneMethodImportInputTests
                     Assert.That(code[addOffset + 1],
                         Is.EqualTo((byte)0x01));
                 }
-                if (verificationMode is 75 or 77 or 82)
+                if (verificationMode is 75 or 77 or 82
+                    or >= 96 and <= 100)
                 {
                     Assert.That(code.IndexOf((byte)0xD5),
                         Is.GreaterThanOrEqualTo(0));
                     Assert.That(code.IndexOf((byte)0xD6),
                         Is.GreaterThanOrEqualTo(0));
                 }
+            }
+            else if (verificationMode is >= 101 and <= 103)
+            {
+                var code = bodyReader.Code;
+                var bitwiseOffset = code.IndexOf((byte)0xC1);
+                Assert.That(bitwiseOffset, Is.GreaterThanOrEqualTo(0));
+                var expectedControl = verificationMode switch
+                {
+                    101 => 0x01,
+                    102 => 0x02,
+                    _ => 0x03,
+                };
+                Assert.That(code[bitwiseOffset + 1],
+                    Is.EqualTo((byte)expectedControl));
+                Assert.That(code.IndexOf((byte)0xD5),
+                    Is.GreaterThanOrEqualTo(0));
+                Assert.That(code.IndexOf((byte)0xD6),
+                    Is.GreaterThanOrEqualTo(0));
             }
             else if (verificationMode is >= 90 and <= 95)
             {
@@ -4378,6 +4483,7 @@ internal sealed class StandaloneMethodImportInputTests
                     or 29 or 30 or 31 or 32 or 33 or 34 or 35 or 36 or 37
                     or 52 or 53 or 58 or 59 or 71 or 72 or 73
                     or 75 or 77 or 82 or >= 90 and <= 95
+                    or >= 96 and <= 103
                     ? 1 : 0;
             if (verificationMode == 71)
             {
