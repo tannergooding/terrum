@@ -1676,7 +1676,9 @@ int32 TryGetStandaloneSourceExpressionDoesNotReturn(int32 bodyId,
         || expressionKind == 14 || expressionKind == 15
         || expressionKind == 16 || expressionKind == 17
         || expressionKind == 18 || expressionKind == 19
-        || expressionKind == 20)
+        || expressionKind == 20 || expressionKind == 21
+        || expressionKind == 22 || expressionKind == 23
+        || expressionKind == 24 || expressionKind == 25)
     {
         int32 leftExpressionId
             = Host.StandaloneSourceExpressions[
@@ -3326,11 +3328,45 @@ bool IsStandaloneComparisonDataType(int32 typeId)
         || typeCode == 0x15;
 }
 
+bool IsStandaloneArithmeticType(int32 typeId)
+{
+    if (typeId <= 0 || typeId > Host.StandaloneTypeFactCount[0]
+        || Host.StandaloneTypeFacts[typeId * 3] != 0)
+    {
+        return false;
+    }
+
+    int32 typeCode
+        = Host.StandaloneTypeFacts[typeId * 3 + 1];
+    return typeCode == 0x08 || typeCode == 0x0D
+        || typeCode == 0x09 || typeCode == 0x0E
+        || typeCode == 0x14 || typeCode == 0x15;
+}
+
+bool IsStandaloneIntegerArithmeticType(int32 typeId)
+{
+    if (typeId <= 0 || typeId > Host.StandaloneTypeFactCount[0]
+        || Host.StandaloneTypeFacts[typeId * 3] != 0)
+    {
+        return false;
+    }
+    int32 typeCode
+        = Host.StandaloneTypeFacts[typeId * 3 + 1];
+    return typeCode == 0x08 || typeCode == 0x0D
+        || typeCode == 0x09 || typeCode == 0x0E;
+}
+
 bool IsStandaloneComparisonEqualityType(int32 typeId)
 {
     return IsStandaloneLogicalNotType(typeId)
         || IsStandaloneComparisonDataType(typeId)
         || IsStandaloneUnitType(typeId);
+}
+
+bool IsStandaloneSourceOperandEndKind(int32 kind)
+{
+    return kind == 2 || kind == 3 || kind == 20
+        || kind == 21 || kind == 47;
 }
 
 int32 FindStandaloneBinaryOperator(int32 tokenStart,
@@ -3344,7 +3380,7 @@ int32 FindStandaloneBinaryOperator(int32 tokenStart,
 
     mut int32 parenthesisDepth = 0;
     mut int32 selectedIndex = -1;
-    mut int32 selectedPrecedence = 6;
+    mut int32 selectedPrecedence = 9;
     for (mut int32 tokenIndex = tokenStart;
         tokenIndex < tokenEnd;
         tokenIndex = tokenIndex + 1)
@@ -3368,8 +3404,13 @@ int32 FindStandaloneBinaryOperator(int32 tokenStart,
                 : kind == 75 ? 2
                     : kind == 71 ? 3
                         : (kind == 65 || kind == 66) ? 4
-                            : (kind >= 67 && kind <= 70) ? 5 : 0;
-            if (precedence != 0
+                            : (kind >= 67 && kind <= 70) ? 5
+                                : (kind == 57 || kind == 58) ? 7
+                                    : (kind >= 59 && kind <= 61) ? 8 : 0;
+            bool hasLeftOperand = tokenIndex > tokenStart
+                && IsStandaloneSourceOperandEndKind(
+                    Host.Tokens[(tokenIndex - 1) * 3]);
+            if (precedence != 0 && hasLeftOperand
                 && precedence <= selectedPrecedence)
             {
                 selectedIndex = tokenIndex;
@@ -3394,7 +3435,7 @@ bool IsStandaloneBinaryOperatorSeparated(int32 tokenIndex)
             tokenIndex, tokenIndex + 1);
 }
 
-bool HasStandaloneComparisonTypeEvidence(int32 tokenStart,
+bool HasStandaloneSourceTypeEvidence(int32 tokenStart,
     int32 tokenEnd)
 {
     for (mut int32 tokenIndex = tokenStart;
@@ -3422,8 +3463,8 @@ int32 FindStandaloneComparisonOperandType(int32 localCallableId,
         || rightStart < 0 || rightStart >= rightEnd
         || leftEnd > Host.Tokens.Length / 3
         || rightEnd > Host.Tokens.Length / 3
-        || !HasStandaloneComparisonTypeEvidence(leftStart, leftEnd)
-            && !HasStandaloneComparisonTypeEvidence(
+        || !HasStandaloneSourceTypeEvidence(leftStart, leftEnd)
+            && !HasStandaloneSourceTypeEvidence(
                 rightStart, rightEnd))
     {
         return 2;
@@ -3439,6 +3480,50 @@ int32 FindStandaloneComparisonOperandType(int32 localCallableId,
         if ((equality
                 ? !IsStandaloneComparisonEqualityType(typeId)
                 : !IsStandaloneComparisonDataType(typeId))
+            || !CanBindStandaloneSourceArgument(localCallableId,
+                leftStart, leftEnd, typeId, depth + 1)
+            || !CanBindStandaloneSourceArgument(localCallableId,
+                rightStart, rightEnd, typeId, depth + 1))
+        {
+            continue;
+        }
+        if (selectedTypeId != 0)
+        {
+            return 2;
+        }
+        selectedTypeId = typeId;
+    }
+
+    if (selectedTypeId == 0)
+    {
+        return 2;
+    }
+    *typeIdResult = selectedTypeId;
+    return 0;
+}
+
+int32 FindStandaloneArithmeticOperandType(int32 localCallableId,
+    int32 leftStart, int32 leftEnd, int32 rightStart, int32 rightEnd,
+    int32 depth, ref<init int32> typeIdResult)
+    ensure return == 0 ? *typeIdResult is init : true
+{
+    if (depth > 64 || leftStart < 0 || leftStart >= leftEnd
+        || rightStart < 0 || rightStart >= rightEnd
+        || leftEnd > Host.Tokens.Length / 3
+        || rightEnd > Host.Tokens.Length / 3
+        || !HasStandaloneSourceTypeEvidence(leftStart, leftEnd)
+            && !HasStandaloneSourceTypeEvidence(rightStart,
+                rightEnd))
+    {
+        return 2;
+    }
+
+    mut int32 selectedTypeId = 0;
+    for (mut int32 typeId = 1;
+        typeId <= Host.StandaloneTypeFactCount[0];
+        typeId = typeId + 1)
+    {
+        if (!IsStandaloneArithmeticType(typeId)
             || !CanBindStandaloneSourceArgument(localCallableId,
                 leftStart, leftEnd, typeId, depth + 1)
             || !CanBindStandaloneSourceArgument(localCallableId,
@@ -3509,6 +3594,19 @@ bool CanBindStandaloneSourceArgument(int32 localCallableId,
                 localCallableId, operatorKind, tokenStart,
                 binaryOperator, binaryOperator + 1, tokenEnd,
                 depth + 1, ref init operandTypeId) == 0;
+        }
+        if (operatorKind >= 57 && operatorKind <= 61)
+        {
+            if (!IsStandaloneArithmeticType(expectedTypeId))
+            {
+                return false;
+            }
+            return CanBindStandaloneSourceArgument(localCallableId,
+                    tokenStart, binaryOperator, expectedTypeId,
+                    depth + 1)
+                && CanBindStandaloneSourceArgument(localCallableId,
+                    binaryOperator + 1, tokenEnd, expectedTypeId,
+                    depth + 1);
         }
         if (!IsStandaloneNotType(expectedTypeId))
         {
@@ -4515,6 +4613,7 @@ int32 ParseStandaloneSourceExpression(int32 localCallableId,
         int32 operatorKind
             = Host.Tokens[binaryOperator * 3];
         bool comparison = operatorKind >= 65 && operatorKind <= 70;
+        bool arithmetic = operatorKind >= 57 && operatorKind <= 61;
         mut int32 resultTypeId = expectedTypeId;
         mut int32 operandTypeId = expectedTypeId;
         if (comparison)
@@ -4544,6 +4643,28 @@ int32 ParseStandaloneSourceExpression(int32 localCallableId,
                 return typeStatus;
             }
             operandTypeId = inferredOperandTypeId;
+        }
+        else if (arithmetic)
+        {
+            if (resultTypeId >= 0)
+            {
+                if (!IsStandaloneArithmeticType(resultTypeId))
+                {
+                    return 2;
+                }
+            }
+            else
+            {
+                int32 typeStatus = FindStandaloneArithmeticOperandType(
+                    localCallableId, tokenIndex, binaryOperator,
+                    binaryOperator + 1, tokenEnd, depth + 1,
+                    ref init operandTypeId);
+                if (typeStatus != 0)
+                {
+                    return typeStatus;
+                }
+                resultTypeId = operandTypeId;
+            }
         }
         else if (!IsStandaloneNotType(operandTypeId))
         {
@@ -4603,7 +4724,12 @@ int32 ParseStandaloneSourceExpression(int32 localCallableId,
                         : operatorKind == 66 ? 16
                             : operatorKind == 67 ? 17
                                 : operatorKind == 68 ? 18
-                                    : operatorKind == 69 ? 19 : 20;
+                                    : operatorKind == 69 ? 19
+                                        : operatorKind == 70 ? 20
+                                            : operatorKind == 57 ? 21
+                                                : operatorKind == 58 ? 22
+                                                    : operatorKind == 59 ? 23
+                                                        : operatorKind == 60 ? 24 : 25;
         init int32 expressionId;
         int32 appendStatus = AppendStandaloneSourceExpression(
             bodyId, expressionKind, resultTypeId,
@@ -6209,7 +6335,10 @@ int32 VerifyStandaloneDirectCalls()
                 || expressionKind == 13 || expressionKind == 14
                 || expressionKind == 15 || expressionKind == 16
                 || expressionKind == 17 || expressionKind == 18
-                || expressionKind == 19 || expressionKind == 20)
+                || expressionKind == 19 || expressionKind == 20
+                || expressionKind == 21 || expressionKind == 22
+                || expressionKind == 23 || expressionKind == 24
+                || expressionKind == 25)
             {
                 int32 rightExpressionId
                     = Host.StandaloneSourceExpressions[
@@ -6240,11 +6369,16 @@ int32 VerifyStandaloneDirectCalls()
                 bool bitwise = expressionKind <= 14;
                 bool equality
                     = expressionKind == 15 || expressionKind == 16;
-                if ((bitwise
-                        ? !IsStandaloneNotType(expressionTypeId)
-                        : !IsStandaloneLogicalNotType(
-                            expressionTypeId))
-                    || (bitwise
+                bool arithmetic
+                    = expressionKind >= 21 && expressionKind <= 25;
+                bool sameTypeBinary = bitwise || arithmetic;
+                bool validResultType = bitwise
+                    ? IsStandaloneNotType(expressionTypeId)
+                    : arithmetic
+                        ? IsStandaloneArithmeticType(expressionTypeId)
+                        : IsStandaloneLogicalNotType(expressionTypeId);
+                if (!validResultType
+                    || (sameTypeBinary
                         ? leftTypeId != expressionTypeId
                             || rightTypeId != expressionTypeId
                         : leftTypeId != rightTypeId

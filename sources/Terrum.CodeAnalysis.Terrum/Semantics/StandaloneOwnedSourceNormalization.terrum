@@ -487,7 +487,9 @@ int32 VisitStandaloneSourceExpression(int32 bodyId,
         || expressionKind == 14 || expressionKind == 15
         || expressionKind == 16 || expressionKind == 17
         || expressionKind == 18 || expressionKind == 19
-        || expressionKind == 20)
+        || expressionKind == 20 || expressionKind == 21
+        || expressionKind == 22 || expressionKind == 23
+        || expressionKind == 24 || expressionKind == 25)
     {
         int32 leftExpressionId
             = Host.StandaloneSourceExpressions[
@@ -978,7 +980,9 @@ int32 NormalizeStandaloneSourceExpression(int32 bodyId,
         || expressionKind == 14 || expressionKind == 15
         || expressionKind == 16 || expressionKind == 17
         || expressionKind == 18 || expressionKind == 19
-        || expressionKind == 20)
+        || expressionKind == 20 || expressionKind == 21
+        || expressionKind == 22 || expressionKind == 23
+        || expressionKind == 24 || expressionKind == 25)
     {
         int32 leftExpressionId
             = Host.StandaloneSourceExpressions[
@@ -986,10 +990,16 @@ int32 NormalizeStandaloneSourceExpression(int32 bodyId,
         int32 rightExpressionId
             = Host.StandaloneSourceExpressions[
                 expressionOffset + 3];
-        bool comparison = expressionKind >= 15;
+        bool comparison
+            = expressionKind >= 15 && expressionKind <= 20;
+        bool arithmetic
+            = expressionKind >= 21 && expressionKind <= 25;
         if ((comparison
                 && !IsStandaloneLogicalNotType(typeId))
-            || (!comparison && !IsStandaloneNotType(typeId))
+            || (arithmetic
+                && !IsStandaloneArithmeticType(typeId))
+            || (!comparison && !arithmetic
+                && !IsStandaloneNotType(typeId))
             || leftExpressionId < 0
             || leftExpressionId >= expressionId
             || rightExpressionId < 0
@@ -1144,6 +1154,14 @@ int32 NormalizeStandaloneSourceExpression(int32 bodyId,
         bool booleanEquality
             = equality
                 && IsStandaloneLogicalNotType(operandTypeId);
+        bool validOperandTypes
+            = comparison
+                ? (equality
+                    ? IsStandaloneComparisonEqualityType(
+                        operandTypeId)
+                    : IsStandaloneComparisonDataType(
+                        operandTypeId))
+                : operandTypeId == typeId;
         if (Host.StandaloneNormalizedHomes[
                 leftHomeOffset] != bodyId
             || Host.StandaloneNormalizedHomes[
@@ -1152,13 +1170,7 @@ int32 NormalizeStandaloneSourceExpression(int32 bodyId,
                 leftHomeOffset + 3] != operandTypeId
             || Host.StandaloneNormalizedHomes[
                 rightHomeOffset + 3] != operandTypeId
-            || (comparison
-                ? equality
-                    ? !IsStandaloneComparisonEqualityType(
-                        operandTypeId)
-                    : !IsStandaloneComparisonDataType(
-                        operandTypeId)
-                : operandTypeId != typeId)
+            || !validOperandTypes
         {
             return 3;
         }
@@ -1166,7 +1178,7 @@ int32 NormalizeStandaloneSourceExpression(int32 bodyId,
         init int32 resultHomeId;
         int32 resultHomeStatus;
         int32 operationStatus;
-        if (!comparison)
+        if (!comparison && !arithmetic)
         {
             resultHomeStatus = AppendStandaloneNormalizedHome(
                 bodyId, homeFirst, 3, typeId, 0,
@@ -1177,6 +1189,52 @@ int32 NormalizeStandaloneSourceExpression(int32 bodyId,
             }
             int32 operationKind = expressionKind == 12 ? 10
                 : expressionKind == 13 ? 11 : 12;
+            operationStatus = AppendStandaloneNormalizedOperation(
+                bodyId, operationKind, leftSelectorIndex,
+                rightSelectorIndex, resultHomeId);
+            if (operationStatus != 0)
+            {
+                return operationStatus;
+            }
+        }
+        else if (arithmetic)
+        {
+            resultHomeStatus = AppendStandaloneNormalizedHome(
+                bodyId, homeFirst, 3, typeId, 0,
+                ref init resultHomeId);
+            if (resultHomeStatus != 0)
+            {
+                return resultHomeStatus;
+            }
+            int32 typeCode
+                = Host.StandaloneTypeFacts[
+                    operandTypeId * 3 + 1];
+            int32 operationKind;
+            if (typeCode == 0x14 || typeCode == 0x15)
+            {
+                operationKind = expressionKind == 21 ? 25
+                    : expressionKind == 22 ? 26
+                        : expressionKind == 23 ? 27
+                            : expressionKind == 24 ? 28 : 29;
+            }
+            else if (expressionKind == 24)
+            {
+                operationKind = 23;
+            }
+            else if (expressionKind == 25)
+            {
+                operationKind = 24;
+            }
+            else if (Host.StandaloneSourceArithmeticProfile[0] == 0)
+            {
+                operationKind = expressionKind == 21 ? 17
+                    : expressionKind == 22 ? 18 : 19;
+            }
+            else
+            {
+                operationKind = expressionKind == 21 ? 20
+                    : expressionKind == 22 ? 21 : 22;
+            }
             operationStatus = AppendStandaloneNormalizedOperation(
                 bodyId, operationKind, leftSelectorIndex,
                 rightSelectorIndex, resultHomeId);
@@ -2470,6 +2528,69 @@ int32 VerifyStandaloneNormalizedProgram()
                     || !IsStandaloneLogicalNotType(resultTypeId)
                     || Host.StandaloneNormalizedHomes[
                         relationHomeOffset + 2] != 0
+                    || Host.StandaloneNormalizedHomes[
+                        resultHomeOffset + 1] != 3
+                    || Host.StandaloneNormalizedHomes[
+                        resultHomeOffset + 2] != 0)
+                {
+                    return 3;
+                }
+            }
+            else if (kind >= 17 && kind <= 29)
+            {
+                if (operand0 < 0 || operand0 >= bodyHomeCount
+                    || operand1 < 0 || operand1 >= bodyHomeCount
+                    || operand2 < 0 || operand2 >= bodyHomeCount
+                    || operand2 == operand0 || operand2 == operand1)
+                {
+                    return 3;
+                }
+                int32 leftHomeOffset
+                    = (homeFirst + operand0) * 5;
+                int32 rightHomeOffset
+                    = (homeFirst + operand1) * 5;
+                int32 resultHomeOffset
+                    = (homeFirst + operand2) * 5;
+                int32 typeId
+                    = Host.StandaloneNormalizedHomes[
+                        leftHomeOffset + 3];
+                if (typeId <= 0
+                    || typeId > Host.StandaloneTypeFactCount[0])
+                {
+                    return 3;
+                }
+                int32 typeCode
+                    = Host.StandaloneTypeFacts[typeId * 3 + 1];
+                bool integerType
+                    = IsStandaloneIntegerArithmeticType(typeId);
+                bool floatingType
+                    = IsStandaloneArithmeticType(typeId)
+                        && IsStandaloneFloatingSourceType(typeCode);
+                bool checkedInteger = kind >= 17 && kind <= 19;
+                bool wrappingInteger = kind >= 20 && kind <= 22;
+                if ((kind <= 24
+                        ? !integerType : !floatingType)
+                    || (checkedInteger
+                        && Host.StandaloneSourceArithmeticProfile[0]
+                            != 0)
+                    || (wrappingInteger
+                        && Host.StandaloneSourceArithmeticProfile[0]
+                            != 1)
+                    || GetStandaloneSourceUse(typeId) != 1
+                    || Host.StandaloneNormalizedHomes[
+                        leftHomeOffset] != bodyId
+                    || Host.StandaloneNormalizedHomes[
+                        rightHomeOffset] != bodyId
+                    || Host.StandaloneNormalizedHomes[
+                        resultHomeOffset] != bodyId
+                    || Host.StandaloneNormalizedHomes[
+                        rightHomeOffset + 3] != typeId
+                    || Host.StandaloneNormalizedHomes[
+                        resultHomeOffset + 3] != typeId
+                    || Host.StandaloneNormalizedHomes[
+                        leftHomeOffset + 2] != 0
+                    || Host.StandaloneNormalizedHomes[
+                        rightHomeOffset + 2] != 0
                     || Host.StandaloneNormalizedHomes[
                         resultHomeOffset + 1] != 3
                     || Host.StandaloneNormalizedHomes[

@@ -3948,57 +3948,102 @@ int32 ValidateStandaloneBodyCode(int32 bodyId, int32 bodyOffset,
                 = int32((registerPayload >> 8) & 0x0F);
             int32 unusedSource
                 = int32((registerPayload >> 12) & 0x0F);
-            if (resultRegister > 13
-                || resultRegister != sourceRegister
-                || unusedResult != 15 || unusedSource != 15)
+            bool binaryOperation
+                = (control >= 0x01 && control <= 0x03)
+                    || (control >= 0x05 && control <= 0x07)
+                    || control == 0x0C || control == 0x0D
+                    || (control >= 0x20 && control <= 0x24);
+            bool unaryOperation
+                = control == 0x04 || control == 0x08
+                    || control == 0x25;
+            if (!binaryOperation && !unaryOperation)
+            {
+                return (control >= 0x01 && control <= 0x0F)
+                    || (control >= 0x20 && control <= 0x25)
+                    ? 2 : 3;
+            }
+            if (resultRegister > 13 || unusedResult != 15)
             {
                 return 3;
             }
-            int32 registerTypeId
-                = Host.StandaloneDecoderRegisterTypeIds[
-                    bodyId * 14 + sourceRegister];
-            if (registerTypeId <= 0
-                || registerTypeId
-                    > Host.StandaloneTypeFactCount[0]
-                || Host.StandaloneTypeFacts[
-                    registerTypeId * 3] != 0)
+
+            int32 resultTypeId;
+            if (binaryOperation)
             {
-                return 3;
-            }
-            int32 typeCode
-                = Host.StandaloneTypeFacts[
-                    registerTypeId * 3 + 1];
-            bool integerType
-                = (typeCode >= 0x06 && typeCode <= 0x0F)
-                    || typeCode == 0x10 || typeCode == 0x11;
-            bool floatingType
-                = typeCode == 0x14 || typeCode == 0x15;
-            if (control == 0x04 || control == 0x08)
-            {
-                if (!integerType)
+                if (sourceRegister > 13 || unusedSource > 13)
                 {
                     return 3;
                 }
-            }
-            else if (control == 0x25)
-            {
-                if (!floatingType)
+                int32 leftTypeId
+                    = Host.StandaloneDecoderRegisterTypeIds[
+                        bodyId * 14 + sourceRegister];
+                int32 rightTypeId
+                    = Host.StandaloneDecoderRegisterTypeIds[
+                        bodyId * 14 + unusedSource];
+                if (leftTypeId <= 0
+                    || leftTypeId
+                        > Host.StandaloneTypeFactCount[0]
+                    || rightTypeId != leftTypeId
+                    || Host.StandaloneTypeFacts[
+                        leftTypeId * 3] != 0)
                 {
                     return 3;
                 }
-            }
-            else if ((control >= 1 && control <= 0x0F)
-                || (control >= 0x20 && control <= 0x25))
-            {
-                return 2;
+                int32 typeCode
+                    = Host.StandaloneTypeFacts[
+                        leftTypeId * 3 + 1];
+                bool integerOperation
+                    = (control >= 0x01 && control <= 0x03)
+                        || (control >= 0x05 && control <= 0x07)
+                        || control == 0x0C || control == 0x0D;
+                bool floatingOperation
+                    = control >= 0x20 && control <= 0x24;
+                if ((integerOperation
+                        && !IsStandaloneIntegerArithmeticType(
+                            leftTypeId))
+                    || (floatingOperation
+                        && !IsStandaloneFloatingSourceType(typeCode)))
+                {
+                    return 3;
+                }
+                resultTypeId = leftTypeId;
             }
             else
             {
-                return 3;
+                if (resultRegister != sourceRegister
+                    || sourceRegister > 13 || unusedSource != 15)
+                {
+                    return 3;
+                }
+                int32 registerTypeId
+                    = Host.StandaloneDecoderRegisterTypeIds[
+                        bodyId * 14 + sourceRegister];
+                if (registerTypeId <= 0
+                    || registerTypeId
+                        > Host.StandaloneTypeFactCount[0]
+                    || Host.StandaloneTypeFacts[
+                        registerTypeId * 3] != 0)
+                {
+                    return 3;
+                }
+                int32 typeCode
+                    = Host.StandaloneTypeFacts[
+                        registerTypeId * 3 + 1];
+                bool integerType
+                    = (typeCode >= 0x06 && typeCode <= 0x0F)
+                        || typeCode == 0x10 || typeCode == 0x11;
+                bool floatingType
+                    = typeCode == 0x14 || typeCode == 0x15;
+                if ((control == 0x04 || control == 0x08)
+                    ? !integerType : !floatingType)
+                {
+                    return 3;
+                }
+                resultTypeId = registerTypeId;
             }
             int32 registerTypeStatus
                 = SetStandaloneDecoderRegisterType(
-                    bodyId, resultRegister, registerTypeId);
+                    bodyId, resultRegister, resultTypeId);
             if (registerTypeStatus != 0)
             {
                 return registerTypeStatus;

@@ -935,6 +935,85 @@ internal sealed class StandaloneMethodImportInputTests
     [TestCase(BoundRuntimePolicy.FailFast,
         "namespace client; namespace inner { "
             + "int32 Main(int32 value) { return value; } }", 1, 0, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "int32 Main(int32 left, int32 right) { "
+            + "return left + right; } }", 0, 60, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "int32 Main(int32 left, int32 right) { "
+            + "return left + right; } }", 0, 61, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "int64 Main(int64 left, int64 right) { "
+            + "return left - right; } }", 0, 62, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "uint32 Main(uint32 left, uint32 right) { "
+            + "return left * right; } }", 0, 63, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "int32 Main(int32 left, int32 right) { "
+            + "return left / right; } }", 0, 64, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "uint64 Main(uint64 left, uint64 right) { "
+            + "return left % right; } }", 0, 65, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "float32 Main(float32 left, float32 right) { "
+            + "return left + right; } }", 0, 66, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "float64 Main(float64 left, float64 right) { "
+            + "return left - right; } }", 0, 67, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "float32 Main(float32 left, float32 right) { "
+            + "return left * right; } }", 0, 68, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "float64 Main(float64 left, float64 right) { "
+            + "return left / right; } }", 0, 69, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "float32 Main(float32 left, float32 right) { "
+            + "return left % right; } }", 0, 70, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "int32 Main() { return 1 + 2; } }", 0, 71, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "int32 Main(int32 value) { return value + 1; } }",
+        0, 72, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "int32 Main(int32 value) { return 1 + value; } }",
+        0, 73, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "int32 Main(int32 a, int32 b, int32 c) { "
+            + "return a + b * c; } }", 0, 74, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "int32 Main(int32 left, uint32 right) { "
+            + "return left + right; } }", 2, 0, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "int32 Main(int32 left, float32 right) { "
+            + "return left + right; } }", 2, 0, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "int32 Main() { var value = 1 + 2; return value; } }",
+        2, 0, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "int32 Main(int32 left, int32 right) { "
+            + "return left +right; } }", 1, 0, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "int32 Main(int32 left, int32 right) { "
+            + "return left+ right; } }", 1, 0, false)]
     public async Task TerrumOwnedSourceBinderValidatesOrderedCallUsesAsync(
         BoundRuntimePolicy policy, string sourceText,
         int expectedSourceStatus, int verificationMode,
@@ -3119,6 +3198,238 @@ internal sealed class StandaloneMethodImportInputTests
                 return 0;
             }
             """;
+        var expectedArithmeticExpressionKind = verificationMode switch
+        {
+            62 or 67 => 22,
+            63 or 68 => 23,
+            64 or 69 => 24,
+            65 or 70 => 25,
+            _ => 21,
+        };
+        var expectedArithmeticOperationKind = verificationMode switch
+        {
+            60 or 71 or 72 or 73 => 17,
+            61 => 20,
+            62 => 21,
+            63 => 22,
+            64 => 23,
+            65 => 24,
+            66 => 25,
+            67 => 26,
+            68 => 27,
+            69 => 28,
+            70 => 29,
+            74 => 19,
+            _ => 0,
+        };
+        var expectedArithmeticTypeCode = verificationMode switch
+        {
+            62 => 0x09,
+            63 => 0x0D,
+            65 => 0x0E,
+            66 or 68 or 70 => 0x14,
+            67 or 69 => 0x15,
+            _ => 0x08,
+        };
+        var expectedArithmeticMappedTypeCode
+            = verificationMode == 70 ? 0x15
+                : expectedArithmeticTypeCode;
+        var arithmeticRemapping = verificationMode == 70;
+        var arithmeticSourceProfile
+            = verificationMode is 61 or 62 or 63 ? 1 : 0;
+        var arithmeticOperationCount = verificationMode switch
+        {
+            71 => 6,
+            72 or 73 => 4,
+            74 => 3,
+            _ => 2,
+        };
+        var arithmeticOperationFirst = verificationMode switch
+        {
+            71 => 4,
+            72 or 73 => 2,
+            _ => 0,
+        };
+        var arithmeticConstantCount = verificationMode switch
+        {
+            71 => 2,
+            72 or 73 => 1,
+            _ => 0,
+        };
+        var arithmeticLeftHome = verificationMode switch
+        {
+            73 => 1,
+            74 => 1,
+            _ => 0,
+        };
+        var arithmeticRightHome = verificationMode switch
+        {
+            73 => 0,
+            74 => 2,
+            _ => 1,
+        };
+        var arithmeticResultHome = verificationMode == 74 ? 3 : 2;
+        var scalarArithmeticVerificationSource = $$"""
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                if (Scan() < 1) { return 280; }
+                int32 status = BindStandaloneOwnedSourceProgram();
+                int32 expectedExpressionCount
+                    = {{verificationMode == 74 ? 5 : 3}};
+                int32 rootExpressionId
+                    = Host.StandaloneSourceExpressionCount[0] - 1;
+                int32 rootOffset = rootExpressionId * 8;
+                if (status != 0
+                    || Host.StandaloneSourceExpressionCount[0]
+                        != expectedExpressionCount
+                    || Host.StandaloneSourceExpressions[rootOffset]
+                        != {{expectedArithmeticExpressionKind}}
+                    || Host.StandaloneSourceExpressions[
+                        rootOffset + 6] != -1
+                    || Host.StandaloneSourceArithmeticProfile[0]
+                        != {{arithmeticSourceProfile}}) {
+                    return 281;
+                }
+                int32 rootTypeId
+                    = Host.StandaloneSourceExpressions[rootOffset + 1];
+                int32 leftExpressionId
+                    = Host.StandaloneSourceExpressions[rootOffset + 2];
+                int32 rightExpressionId
+                    = Host.StandaloneSourceExpressions[rootOffset + 3];
+                if (rootTypeId <= 0
+                    || rootTypeId > Host.StandaloneTypeFactCount[0]
+                    || Host.StandaloneTypeFacts[
+                        rootTypeId * 3 + 1]
+                        != {{expectedArithmeticTypeCode}}
+                    || leftExpressionId < 0
+                    || rightExpressionId < 0) {
+                    return 282;
+                }
+                if ({{verificationMode == 74 ? "true" : "false"}}
+                    && (Host.StandaloneSourceExpressions[
+                            rightExpressionId * 8] != 23
+                        || Host.StandaloneSourceExpressions[
+                            rightExpressionId * 8 + 2] != 1
+                        || Host.StandaloneSourceExpressions[
+                            rightExpressionId * 8 + 3] != 2)) {
+                    return 283;
+                }
+                status = NormalizeStandaloneOwnedSourceProgram();
+                int32 expectedHomeCount
+                    = {{verificationMode == 74 ? 5 : 3}};
+                if (status != 0
+                    || Host.StandaloneNormalizedHomeCount[0]
+                        != expectedHomeCount
+                    || Host.StandaloneNormalizedOperationCount[0]
+                        != {{arithmeticOperationCount}}
+                    || Host.StandaloneNormalizedConstantCount[0]
+                        != {{arithmeticConstantCount}}) {
+                    return 284;
+                }
+                int32 arithmeticOffset
+                    = {{arithmeticOperationFirst}} * 5;
+                if (Host.StandaloneNormalizedOperations[
+                        arithmeticOffset]
+                        != {{expectedArithmeticOperationKind}}
+                    || Host.StandaloneNormalizedOperations[
+                        arithmeticOffset + 1]
+                        != {{arithmeticLeftHome}}
+                    || Host.StandaloneNormalizedOperations[
+                        arithmeticOffset + 2]
+                        != {{arithmeticRightHome}}
+                    || Host.StandaloneNormalizedOperations[
+                        arithmeticOffset + 3]
+                        != {{arithmeticResultHome}}
+                    || Host.StandaloneNormalizedOperations[
+                        ({{arithmeticOperationCount}} - 1) * 5] != 4
+                    || Host.StandaloneNormalizedOperations[
+                        ({{arithmeticOperationCount}} - 1) * 5 + 1]
+                        != {{verificationMode == 74 ? 4 : 2}}) {
+                    return 285;
+                }
+                if ({{verificationMode == 74 ? "true" : "false"}}
+                    && (Host.StandaloneNormalizedOperations[5] != 17
+                        || Host.StandaloneNormalizedOperations[6] != 0
+                        || Host.StandaloneNormalizedOperations[7] != 3
+                        || Host.StandaloneNormalizedOperations[8] != 4)) {
+                    return 286;
+                }
+                int32 callableBase
+                    = Host.StandaloneResolvedRootCount[0]
+                        + Host.StandaloneResolvedImports.Length / 32
+                        + Host.StandaloneResolvedProviderGroupCount[0];
+                int32 callableCount
+                    = callableBase + Host.StandaloneLocalCallableCount[0];
+                Host.StandaloneRewriteCallableCount[0] = callableCount;
+                for (mut int32 id = 0;
+                    id < Host.StandaloneModuleCount[0];
+                    id = id + 1) {
+                    Host.StandaloneRewriteModuleIds[id] = id;
+                }
+                for (mut int32 id = 0;
+                    id < Host.StandaloneLocalCallableCount[0];
+                    id = id + 1) {
+                    Host.StandaloneRewriteLocalCallableIds[id] = id;
+                }
+                for (mut int32 id = 0;
+                    id < Host.StandaloneSourceImportedCallableCount[0];
+                    id = id + 1) {
+                    Host.StandaloneRewriteImportedCallableIds[id] = id;
+                }
+                for (mut int32 id = 0;
+                    id < callableCount;
+                    id = id + 1) {
+                    Host.StandaloneRewriteCallableIds[id] = id;
+                }
+                Host.StandaloneRewriteTypeIds[0] = 0;
+                mut int32 float32TypeId = 0;
+                mut int32 float64TypeId = 0;
+                for (mut int32 id = 1;
+                    id <= Host.StandaloneTypeFactCount[0];
+                    id = id + 1) {
+                    Host.StandaloneRewriteTypeIds[id] = id;
+                    if (Host.StandaloneTypeFacts[id * 3] == 0
+                        && Host.StandaloneTypeFacts[id * 3 + 1] == 0x14) {
+                        float32TypeId = id;
+                    }
+                    if (Host.StandaloneTypeFacts[id * 3] == 0
+                        && Host.StandaloneTypeFacts[id * 3 + 1] == 0x15) {
+                        float64TypeId = id;
+                    }
+                }
+                if ({{arithmeticRemapping ? "true" : "false"}}) {
+                    if (float32TypeId <= 0 || float64TypeId <= 0) {
+                        return 287;
+                    }
+                    Host.StandaloneRewriteTypeIds[float32TypeId]
+                        = float64TypeId;
+                    Host.StandaloneRewriteTypeIds[float64TypeId]
+                        = float32TypeId;
+                }
+                Host.StandaloneRewriteBodyIds[0] = 0;
+                for (mut int32 id = 0;
+                    id < Host.StandaloneSourceExpressionCount[0];
+                    id = id + 1) {
+                    Host.StandaloneRewriteExpressionIds[id] = id;
+                }
+                status = RewriteStandaloneOwnedCallNodes();
+                if (status != 0) { return status; }
+                if ({{arithmeticRemapping ? "true" : "false"}}
+                    && Host.StandaloneRewrittenTypeFacts[
+                        Host.StandaloneRewrittenNormalizedHomes[
+                            2 * 5 + 3] * 3 + 1]
+                        != {{expectedArithmeticMappedTypeCode}}) {
+                    return 288;
+                }
+                status = WriteStandaloneScalarModule();
+                if (status != 0
+                    || Host.StandaloneWriterStatus[0] != 0
+                    || Host.StandaloneWriterBodyPlanCount[0] != 1) {
+                    return 289;
+                }
+                return 0;
+            }
+            """;
         var verificationSource = expectedSourceStatus != 0
             ? $$"""
                 namespace Terrum.CodeAnalysis;
@@ -3182,6 +3493,8 @@ internal sealed class StandaloneMethodImportInputTests
                                                         ? numericComparisonVerificationSource
                                                     : verificationMode == 54
                                                         ? comparisonPrecedenceVerificationSource
+                                                    : verificationMode is >= 60 and <= 74
+                                                        ? scalarArithmeticVerificationSource
                                                     : verificationMode is 58 or 59
                                                         ? unitEqualityVerificationSource
                                                 : verificationMode == 29
@@ -3217,7 +3530,7 @@ internal sealed class StandaloneMethodImportInputTests
         components.Add(SyntaxTree.Parse(verificationSource,
             "standalone-owned-source-program-tests.terrum"));
 
-        var sourceArithmeticProfile = verificationMode == 22
+        var sourceArithmeticProfile = verificationMode is 22 or 61 or 62 or 63
             ? SourceArithmeticProfile.Release
             : SourceArithmeticProfile.Development;
         var buffers = ScannerHost.CreateBuffers(source).AddRange(
@@ -3281,7 +3594,8 @@ internal sealed class StandaloneMethodImportInputTests
             or 27 or 28 or 29 or 30 or 31 or 32 or 33 or 34 or 35
             or 36 or 37 or 38 or 39 or 40 or 41 or 42 or 43 or 44
             or 45 or 46 or 47 or 48 or 49 or 50 or 51 or 52 or 53
-            or 54 or 55 or 56 or 57 or 58 or 59)
+            or 54 or 55 or 56 or 57 or 58 or 59
+            or >= 60 and <= 74)
         {
             var artifactIndex = new TrRmArtifactIndex(artifact);
             Assert.That(artifactIndex.TryGetSection(0x0020,
@@ -3406,6 +3720,38 @@ internal sealed class StandaloneMethodImportInputTests
                 Assert.That(bodyReader.Code.IndexOf((byte)0xC3),
                     Is.EqualTo(-1));
             }
+            else if (verificationMode is >= 60 and <= 74)
+            {
+                var code = bodyReader.Code;
+                var arithmeticOffset = code.IndexOf((byte)0xC0);
+                Assert.That(arithmeticOffset, Is.GreaterThanOrEqualTo(0));
+                var expectedControl = verificationMode switch
+                {
+                    60 or 71 or 72 or 73 => 0x01,
+                    61 => 0x05,
+                    62 => 0x06,
+                    63 => 0x07,
+                    64 => 0x0C,
+                    65 => 0x0D,
+                    66 => 0x20,
+                    67 => 0x21,
+                    68 => 0x22,
+                    69 => 0x23,
+                    70 => 0x24,
+                    _ => 0x03,
+                };
+                Assert.That(code[arithmeticOffset + 1],
+                    Is.EqualTo((byte)expectedControl));
+                if (verificationMode == 74)
+                {
+                    var addOffset = code.IndexOf((byte)0xC0,
+                        arithmeticOffset + 4);
+                    Assert.That(addOffset,
+                        Is.GreaterThan(arithmeticOffset));
+                    Assert.That(code[addOffset + 1],
+                        Is.EqualTo((byte)0x01));
+                }
+            }
             else
             {
                 Assert.That(bodyReader.Code.IndexOf((byte)0x07),
@@ -3444,8 +3790,12 @@ internal sealed class StandaloneMethodImportInputTests
             var expectedDecoderConstantMapCount
                 = verificationMode is 4 or 23 or 25 or 26
                     or 29 or 30 or 31 or 32 or 33 or 34 or 35 or 36 or 37
-                    or 52 or 53 or 58 or 59
+                    or 52 or 53 or 58 or 59 or 71 or 72 or 73
                     ? 1 : 0;
+            if (verificationMode == 71)
+            {
+                expectedDecoderConstantMapCount = 2;
+            }
             var decoderVerificationSource = $$"""
                 namespace Terrum.CodeAnalysis;
                 int32 Main() {
@@ -3489,6 +3839,94 @@ internal sealed class StandaloneMethodImportInputTests
             var decoderExecution = NativeJit.ExecuteWithData(
                 decoderProgram, (NativeRuntimePolicy)policy);
             Assert.That(decoderExecution.ExitCode, Is.EqualTo(0));
+            if (verificationMode == 60)
+            {
+                var malformedArtifact = artifact.ToArray();
+                var sectionCount = checked((int)BinaryPrimitives
+                    .ReadUInt32LittleEndian(
+                        malformedArtifact.AsSpan(12)));
+                var bodySectionStart = -1;
+                var malformedBodyCount = 0;
+                for (var section = 0; section < sectionCount; section++)
+                {
+                    var entryOffset = checked(32 + (section * 16));
+                    if (BinaryPrimitives.ReadUInt16LittleEndian(
+                            malformedArtifact.AsSpan(entryOffset)) == 0x0020)
+                    {
+                        malformedBodyCount = checked((int)BinaryPrimitives
+                            .ReadUInt32LittleEndian(
+                                malformedArtifact.AsSpan(entryOffset + 4)));
+                        bodySectionStart = checked((int)BinaryPrimitives
+                            .ReadUInt32LittleEndian(
+                                malformedArtifact.AsSpan(entryOffset + 8)));
+                        break;
+                    }
+                }
+                Assert.That(bodySectionStart, Is.GreaterThanOrEqualTo(32));
+                var bodyIndexLength
+                    = checked((malformedBodyCount + 1) * sizeof(uint));
+                var bodyDataStart
+                    = bodySectionStart + bodyIndexLength;
+                var bodyRowOffset = checked((int)BinaryPrimitives
+                    .ReadUInt32LittleEndian(
+                        malformedArtifact.AsSpan(bodySectionStart + 4)));
+                var bodyRowStart = bodyDataStart + bodyRowOffset;
+                var bodyRow = bodyTable.GetRow(1);
+                var malformedBodyReader
+                    = new TrRmRegisterBodyReader(bodyRow);
+                var arithmeticCodeOffset
+                    = malformedBodyReader.Code.IndexOf((byte)0xC0);
+                Assert.That(arithmeticCodeOffset,
+                    Is.GreaterThanOrEqualTo(0));
+                var codeStart
+                    = bodyRow.Length - malformedBodyReader.Code.Length;
+                malformedArtifact[bodyRowStart + codeStart
+                    + arithmeticCodeOffset + 1] = 0x09;
+                var malformedArtifactValues = decoderBuffers
+                    .Single(buffer => buffer.Name == "StandaloneArtifacts")
+                    .Values.ToArray();
+                Assert.That(malformedArtifactValues.Length,
+                    Is.GreaterThanOrEqualTo(malformedArtifact.Length));
+                for (var index = 0;
+                    index < malformedArtifact.Length;
+                    index++)
+                {
+                    malformedArtifactValues[index]
+                        = malformedArtifact[index];
+                }
+                var malformedDecoderBuffers = decoderBuffers.Select(buffer =>
+                    buffer.Name == "StandaloneArtifacts"
+                        ? buffer with {
+                            Values = [.. malformedArtifactValues],
+                        }
+                        : buffer).ToImmutableArray();
+                decoderComponents[^1] = SyntaxTree.Parse("""
+                    namespace Terrum.CodeAnalysis;
+                    int32 Main() {
+                        int32 status = DecodeStandaloneModuleMetadata();
+                        if (status != 2
+                            || Host.StandaloneDecoderStatus[0] != 2) {
+                            return 81;
+                        }
+                        return 0;
+                    }
+                    """, "standalone-source-call-decoder-tests.terrum");
+                var malformedDecoderCompilation
+                    = Compilation.Create(decoderComponents,
+                        malformedDecoderBuffers, policy);
+                Assert.That(malformedDecoderCompilation.HasErrors, Is.False,
+                    string.Join(Environment.NewLine,
+                        malformedDecoderCompilation.Diagnostics));
+                var malformedDecoderProgram
+                    = malformedDecoderCompilation.Program
+                        ?? throw new AssertionException(
+                            "Expected the malformed Body decoder validator.");
+                var malformedDecoderExecution
+                    = NativeJit.ExecuteWithData(malformedDecoderProgram,
+                        (NativeRuntimePolicy)policy);
+                Assert.That(malformedDecoderExecution.ExitCode,
+                    Is.EqualTo(0));
+            }
         }
 
         var contractSource = SourceText.From(
