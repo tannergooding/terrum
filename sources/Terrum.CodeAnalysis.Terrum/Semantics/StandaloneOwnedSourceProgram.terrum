@@ -2858,6 +2858,118 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
             continue;
         }
 
+        if (IsStandaloneSourceDoKeyword(tokenIndex))
+        {
+            if (sawReturn)
+            {
+                return 1;
+            }
+            init int32 controlNodeId;
+            int32 controlNodeStatus = AppendStandaloneSourceIfNode(
+                localCallableId, ref init controlNodeId);
+            if (controlNodeStatus != 0)
+            {
+                return controlNodeStatus;
+            }
+            int32 doStatementStatus
+                = AppendStandaloneSourceStatement(
+                    localCallableId, expressionFirst, 10, -1,
+                    controlNodeId);
+            if (doStatementStatus != 0)
+            {
+                return doStatementStatus;
+            }
+            int32 loopStatementId
+                = Host.StandaloneSourceStatementCount[0] - 1;
+            init int32 afterBodyToken;
+            int32 bodyStatus = ParseStandaloneSourceWhileBody(
+                localCallableId, expressionFirst, controlNodeId,
+                loopStatementId, tokenIndex + 1, bodyTokenEnd,
+                ref init afterBodyToken);
+            if (bodyStatus != 0)
+            {
+                return bodyStatus;
+            }
+            if (!IsStandaloneSourceWhileKeyword(afterBodyToken)
+                || afterBodyToken + 1 >= bodyTokenEnd
+                || Host.Tokens[(afterBodyToken + 1) * 3] != 46)
+            {
+                return 1;
+            }
+            init int32 conditionClose;
+            if (!FindStandaloneMatchingClose(
+                    afterBodyToken + 1, bodyTokenEnd, 46, 47,
+                    ref init conditionClose)
+                || conditionClose + 1 >= bodyTokenEnd
+                || Host.Tokens[(conditionClose + 1) * 3] != 52)
+            {
+                return 1;
+            }
+            init int32 boolTypeId;
+            int32 boolTypeStatus = InternStandaloneCallableTypeFact(
+                0, 1, false, ref init boolTypeId);
+            if (boolTypeStatus != 0)
+            {
+                return boolTypeStatus;
+            }
+            init int32 conditionExpressionId;
+            init int32 nextConditionToken;
+            int32 conditionStatus = ParseStandaloneSourceExpression(
+                localCallableId, localCallableId, expressionFirst,
+                boolTypeId, afterBodyToken + 2, conditionClose, 1,
+                ref init conditionExpressionId,
+                ref init nextConditionToken);
+            if (conditionStatus != 0)
+            {
+                return conditionStatus;
+            }
+            if (nextConditionToken != conditionClose)
+            {
+                return 1;
+            }
+            init bool conditionDoesNotReturn;
+            int32 conditionDoesNotReturnStatus
+                = TryGetStandaloneSourceExpressionDoesNotReturn(
+                    localCallableId, conditionExpressionId,
+                    ref init conditionDoesNotReturn);
+            if (conditionDoesNotReturnStatus != 0
+                || conditionDoesNotReturn)
+            {
+                return conditionDoesNotReturnStatus != 0
+                    ? conditionDoesNotReturnStatus : 2;
+            }
+            int32 conditionGlobalExpressionId
+                = expressionFirst + conditionExpressionId;
+            if (conditionGlobalExpressionId < expressionFirst
+                || conditionGlobalExpressionId
+                    >= Host.StandaloneSourceExpressionCount[0]
+                || Host.StandaloneSourceExpressionUseCounts[
+                    conditionGlobalExpressionId] != 0)
+            {
+                return 3;
+            }
+            Host.StandaloneSourceStatements[
+                loopStatementId * 3 + 1] = conditionExpressionId;
+            Host.StandaloneSourceExpressionUseCounts[
+                conditionGlobalExpressionId] = 1;
+
+            int32 controlNodeOffset = controlNodeId * 5;
+            if (Host.StandaloneSourceIfNodes[
+                    controlNodeOffset + 2] == 0)
+            {
+                Host.StandaloneSourceIfNodes[
+                    controlNodeOffset + 1]
+                    = Host.StandaloneSourceIfChildCount[0];
+            }
+            Host.StandaloneSourceIfNodes[
+                controlNodeOffset + 3]
+                = Host.StandaloneSourceIfChildCount[0];
+            Host.StandaloneSourceIfNodes[
+                controlNodeOffset + 4] = 0;
+            tokenIndex = conditionClose + 2;
+            continue;
+        }
+
         if (IsStandaloneSourceWhileKeyword(tokenIndex))
         {
             if (sawReturn || tokenIndex + 1 >= bodyTokenEnd
@@ -4127,7 +4239,7 @@ int32 ValidateStandaloneSourceWhileAssignment(int32 bodyId,
     return 0;
 }
 
-// Structured statement nodes share ranges; while stores its body in the first.
+// Structured statement nodes share ranges; loops store their body in the first.
 int32 AppendStandaloneSourceIfNode(int32 bodyId,
     ref<init int32> ifNodeIdResult)
     ensure return == 0 ? *ifNodeIdResult is init : true
@@ -4168,7 +4280,9 @@ int32 AppendStandaloneSourceIfChild(int32 bodyId, int32 ifNodeId,
         || (Host.StandaloneSourceStatements[
                 parentStatementId * 3] != 6
             && Host.StandaloneSourceStatements[
-                parentStatementId * 3] != 7)
+                parentStatementId * 3] != 7
+            && Host.StandaloneSourceStatements[
+                parentStatementId * 3] != 10)
         || Host.StandaloneSourceStatements[
             parentStatementId * 3 + 2] != ifNodeId
         || Host.StandaloneSourceIfNodes[ifNodeId * 5] != bodyId
@@ -5356,6 +5470,18 @@ bool IsStandaloneSourceWhileKeyword(int32 tokenIndex)
         && Host.Source[start + 2] == char16(105)
         && Host.Source[start + 3] == char16(108)
         && Host.Source[start + 4] == char16(101);
+}
+
+bool IsStandaloneSourceDoKeyword(int32 tokenIndex)
+{
+    init int32 kind;
+    init int32 start;
+    init int32 length;
+    return TryReadStandaloneSourceToken(tokenIndex,
+            ref init kind, ref init start, ref init length)
+        && length == 2
+        && Host.Source[start] == char16(100)
+        && Host.Source[start + 1] == char16(111);
 }
 
 bool IsStandaloneSourceBreakKeyword(int32 tokenIndex)
@@ -9227,7 +9353,9 @@ int32 VerifyStandaloneDirectCalls()
                     || (Host.StandaloneSourceStatements[
                             parentStatementId * 3] != 6
                         && Host.StandaloneSourceStatements[
-                            parentStatementId * 3] != 7)
+                            parentStatementId * 3] != 7
+                        && Host.StandaloneSourceStatements[
+                            parentStatementId * 3] != 10)
                     || Host.StandaloneSourceStatementParentIds[
                         parentStatementId] != -1)
                 {
@@ -9236,7 +9364,8 @@ int32 VerifyStandaloneDirectCalls()
                 continue;
             }
             if (parentStatementId != -1
-                || statementKind < 1 || statementKind > 7)
+                || statementKind < 1
+                || (statementKind > 7 && statementKind != 10))
             {
                 return 3;
             }
@@ -9342,7 +9471,7 @@ int32 VerifyStandaloneDirectCalls()
                 }
                 continue;
             }
-            if (statementKind == 7)
+            if (statementKind == 7 || statementKind == 10)
             {
                 int32 loopNodeId = statementLocationId;
                 if (sawReturn

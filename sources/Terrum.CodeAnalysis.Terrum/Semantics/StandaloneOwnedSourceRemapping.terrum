@@ -1475,7 +1475,8 @@ int32 VerifyStandaloneRewrittenSourceArenas()
                         candidateOffset];
                 if (Host.StandaloneSourceStatementParentIds[
                         candidateStatementId] == -1
-                    && (candidateKind == 6 || candidateKind == 7)
+                    && (candidateKind == 6 || candidateKind == 7
+                        || candidateKind == 10)
                     && Host.StandaloneSourceStatements[
                         candidateOffset + 2] == ifNodeId)
                 {
@@ -1490,7 +1491,8 @@ int32 VerifyStandaloneRewrittenSourceArenas()
             if (controlStatementId < 0
                 || Host.StandaloneRewrittenSourceStatements[
                     controlStatementId * 3 + 2] != ifNodeId
-                || (controlStatementKind == 7
+                || ((controlStatementKind == 7
+                        || controlStatementKind == 10)
                     && falseCount != 0))
             {
                 return 3;
@@ -1516,7 +1518,9 @@ int32 VerifyStandaloneRewrittenSourceArenas()
                 = Host.StandaloneSourceExpressions[
                     (bodyExpressionFirst
                         + conditionExpressionId) * 8];
-            if (controlStatementKind == 7 && conditionKind == 34)
+            if ((controlStatementKind == 7
+                    || controlStatementKind == 10)
+                && conditionKind == 34)
             {
                 return 3;
             }
@@ -1570,7 +1574,8 @@ int32 VerifyStandaloneRewrittenSourceArenas()
             int32 currentChildKind
                 = Host.StandaloneSourceStatements[
                     childStatementOffset];
-            if (controlStatementKind == 7
+            if ((controlStatementKind == 7
+                    || controlStatementKind == 10)
                 && (currentChildKind == 8 || currentChildKind == 9))
             {
                 if (sawLoopTransfer
@@ -1585,9 +1590,11 @@ int32 VerifyStandaloneRewrittenSourceArenas()
                 sawLoopTransfer = true;
                 continue;
             }
-            if ((controlStatementKind == 7
+            if (((controlStatementKind == 7
+                        || controlStatementKind == 10)
                     && (sawLoopTransfer || currentChildKind != 5))
-                || (controlStatementKind != 7
+                || ((controlStatementKind != 7
+                        && controlStatementKind != 10)
                     && currentChildKind != 1
                     && currentChildKind != 5))
             {
@@ -1693,7 +1700,8 @@ int32 VerifyStandaloneRewrittenSourceArenas()
             }
         }
 
-            if (controlStatementKind == 7)
+            if (controlStatementKind == 7
+                || controlStatementKind == 10)
             {
                 if (falseCount != 0
                     || !allAssignedLocalsMutable)
@@ -2332,7 +2340,8 @@ int32 VerifyStandaloneRewrittenSourceArenas()
             }
         }
         else if (Host.StandaloneSourceStatements[offset] == 6
-            || Host.StandaloneSourceStatements[offset] == 7)
+            || Host.StandaloneSourceStatements[offset] == 7
+            || Host.StandaloneSourceStatements[offset] == 10)
         {
             int32 ifNodeId
                 = Host.StandaloneSourceStatements[offset + 2];
