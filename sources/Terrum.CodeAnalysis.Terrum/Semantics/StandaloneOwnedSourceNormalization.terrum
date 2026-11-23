@@ -1483,13 +1483,13 @@ int32 NormalizeStandaloneSourceStatement(int32 bodyId,
             int32 returnOperationCount
                 = Host.StandaloneNormalizedOperationCount[0]
                     - returnOperationFirst;
-            if (bodyBlockCount != 3 || returnOperationCount != 1)
+            if (bodyBlockCount < 3 || returnOperationCount != 1)
             {
                 return 3;
             }
             init int32 returnBlockIndex;
             return AppendStandaloneNormalizedReturnBlock(
-                bodyId, 3, returnOperationFirst,
+                bodyId, bodyBlockCount, returnOperationFirst,
                 returnOperationCount, 0,
                 ref init returnBlockIndex);
         }
@@ -1709,6 +1709,378 @@ int32 NormalizeStandaloneSourceConditionalValue(int32 bodyId,
     return 0;
 }
 
+int32 CountStandaloneSourceLazyBooleanOperands(int32 bodyId,
+    int32 expressionId, int32 expressionKind, int32 depth,
+    ref<init int32> operandCountResult,
+    ref<init int32> lastOperandIdResult)
+    ensure return == 0 ? (*operandCountResult is init
+        && *lastOperandIdResult is init) : true
+{
+    if (depth > 64 || bodyId < 0
+        || bodyId >= Host.StandaloneSourceBodyCount[0]
+        || expressionId < 0
+        || expressionId
+            >= Host.StandaloneSourceBodies[bodyId * 12 + 4]
+        || (expressionKind != 35 && expressionKind != 36))
+    {
+        return 3;
+    }
+
+    int32 expressionOffset
+        = (Host.StandaloneSourceBodies[bodyId * 12 + 3]
+            + expressionId) * 8;
+    if (Host.StandaloneSourceExpressions[expressionOffset]
+        != expressionKind)
+    {
+        *operandCountResult = 1;
+        *lastOperandIdResult = expressionId;
+        return 0;
+    }
+
+    int32 leftExpressionId
+        = Host.StandaloneSourceExpressions[expressionOffset + 2];
+    int32 rightExpressionId
+        = Host.StandaloneSourceExpressions[expressionOffset + 3];
+    if (leftExpressionId < 0 || leftExpressionId >= expressionId
+        || rightExpressionId < 0 || rightExpressionId >= expressionId)
+    {
+        return 3;
+    }
+
+    init int32 leftOperandCount;
+    init int32 leftLastOperandId;
+    int32 leftStatus = CountStandaloneSourceLazyBooleanOperands(
+        bodyId, leftExpressionId, expressionKind, depth + 1,
+        ref init leftOperandCount, ref init leftLastOperandId);
+    if (leftStatus != 0)
+    {
+        return leftStatus;
+    }
+    init int32 rightOperandCount;
+    init int32 rightLastOperandId;
+    int32 rightStatus = CountStandaloneSourceLazyBooleanOperands(
+        bodyId, rightExpressionId, expressionKind, depth + 1,
+        ref init rightOperandCount, ref init rightLastOperandId);
+    if (rightStatus != 0)
+    {
+        return rightStatus;
+    }
+    if (leftOperandCount > 32767 - rightOperandCount)
+    {
+        return 3;
+    }
+
+    *operandCountResult = leftOperandCount + rightOperandCount;
+    *lastOperandIdResult = rightLastOperandId;
+    return 0;
+}
+
+int32 NormalizeStandaloneSourceLazyBooleanConditions(int32 bodyId,
+    int32 expressionId, int32 expressionKind, int32 operandCount,
+    int32 lastOperandId, int32 boolTypeId,
+    int32 finalBodyBlockCount, int32 shortCircuitBlockId,
+    int32 rightValueBlockId, int32 depth, int32 operandOrdinal,
+    ref<init int32> nextOperandOrdinalResult)
+    ensure return == 0 ? *nextOperandOrdinalResult is init : true
+{
+    if (depth > 64 || bodyId < 0
+        || bodyId >= Host.StandaloneSourceBodyCount[0]
+        || expressionId < 0
+        || expressionId
+            >= Host.StandaloneSourceBodies[bodyId * 12 + 4])
+    {
+        return 3;
+    }
+
+    int32 expressionOffset
+        = (Host.StandaloneSourceBodies[bodyId * 12 + 3]
+            + expressionId) * 8;
+    int32 currentKind
+        = Host.StandaloneSourceExpressions[expressionOffset];
+    if (currentKind == expressionKind)
+    {
+        if (Host.StandaloneSourceExpressions[
+                expressionOffset + 1] != boolTypeId)
+        {
+            return 3;
+        }
+        int32 leftExpressionId
+            = Host.StandaloneSourceExpressions[expressionOffset + 2];
+        int32 rightExpressionId
+            = Host.StandaloneSourceExpressions[expressionOffset + 3];
+        if (leftExpressionId < 0 || leftExpressionId >= expressionId
+            || rightExpressionId < 0 || rightExpressionId >= expressionId)
+        {
+            return 3;
+        }
+
+        init int32 afterLeftOrdinal;
+        int32 leftStatus
+            = NormalizeStandaloneSourceLazyBooleanConditions(
+                bodyId, leftExpressionId, expressionKind, operandCount,
+                lastOperandId, boolTypeId, finalBodyBlockCount,
+                shortCircuitBlockId, rightValueBlockId, depth + 1,
+                operandOrdinal, ref init afterLeftOrdinal);
+        if (leftStatus != 0)
+        {
+            return leftStatus;
+        }
+        return NormalizeStandaloneSourceLazyBooleanConditions(
+            bodyId, rightExpressionId, expressionKind, operandCount,
+            lastOperandId, boolTypeId, finalBodyBlockCount,
+            shortCircuitBlockId, rightValueBlockId, depth + 1,
+            afterLeftOrdinal, ref init *nextOperandOrdinalResult);
+    }
+
+    if (expressionId == lastOperandId)
+    {
+        *nextOperandOrdinalResult = operandOrdinal;
+        return 0;
+    }
+    if (operandOrdinal < 0 || operandOrdinal >= operandCount - 1
+        || Host.StandaloneSourceExpressions[
+            expressionOffset + 1] != boolTypeId)
+    {
+        return 3;
+    }
+
+    int32 operationFirst
+        = Host.StandaloneNormalizedOperationCount[0];
+    if (Host.StandaloneSourceExpressions[expressionOffset + 1]
+        != boolTypeId)
+    {
+        return 3;
+    }
+    init int32 selectorKind;
+    init int32 sourceUse;
+    init int32 selectorIndex;
+    init bool terminated;
+    int32 expressionStatus = NormalizeStandaloneSourceExpression(
+        bodyId, expressionId, depth + 1,
+        ref init selectorKind, ref init sourceUse,
+        ref init selectorIndex, ref init terminated);
+    if (expressionStatus != 0)
+    {
+        return expressionStatus;
+    }
+    if (terminated || selectorKind != 2 || sourceUse != 1
+        || selectorIndex < 0)
+    {
+        return 2;
+    }
+
+    int32 operationCount
+        = Host.StandaloneNormalizedOperationCount[0] - operationFirst;
+    int32 nextTarget = operandOrdinal + 1 < operandCount - 1
+        ? operandOrdinal + 1 : rightValueBlockId;
+    int32 trueTarget = expressionKind == 35
+        ? nextTarget : shortCircuitBlockId;
+    int32 falseTarget = expressionKind == 35
+        ? shortCircuitBlockId : nextTarget;
+    init int32 blockIndex;
+    int32 blockStatus = AppendStandaloneNormalizedBlock(
+        bodyId, operandOrdinal, operationFirst, operationCount,
+        4, 0, 0, 0, trueTarget, falseTarget, 2, selectorIndex,
+        boolTypeId, finalBodyBlockCount + operandOrdinal, -1, 0,
+        ref init blockIndex);
+    if (blockStatus != 0)
+    {
+        return blockStatus;
+    }
+
+    *nextOperandOrdinalResult = operandOrdinal + 1;
+    return 0;
+}
+
+int32 AppendStandaloneNormalizedLazyBooleanConstantBlock(int32 bodyId,
+    int32 boolTypeId, int32 constantFirst, int32 resultHomeId,
+    int32 constantValue, int32 blockId, int32 returnBlockId)
+{
+    int32 operationFirst
+        = Host.StandaloneNormalizedOperationCount[0];
+    init int32 constantId;
+    int32 constantStatus = AppendStandaloneNormalizedConstant(
+        bodyId, constantFirst, boolTypeId, constantValue, 0,
+        ref init constantId);
+    if (constantStatus != 0)
+    {
+        return constantStatus;
+    }
+    int32 operationStatus = AppendStandaloneNormalizedOperation(
+        bodyId, 1, constantId, 0, 0);
+    if (operationStatus != 0)
+    {
+        return operationStatus;
+    }
+    operationStatus = AppendStandaloneNormalizedOperation(
+        bodyId, 2, resultHomeId, 0, 0);
+    if (operationStatus != 0)
+    {
+        return operationStatus;
+    }
+    int32 operationCount
+        = Host.StandaloneNormalizedOperationCount[0] - operationFirst;
+    init int32 blockIndex;
+    return AppendStandaloneNormalizedBlock(
+        bodyId, blockId, operationFirst, operationCount, 3,
+        0, 0, 0, returnBlockId, -1, 0, 0, 0, -1, -1, 0,
+        ref init blockIndex);
+}
+
+int32 NormalizeStandaloneSourceLazyBooleanChainValue(int32 bodyId,
+    int32 expressionId, int32 expressionKind, int32 operandCount,
+    int32 lastOperandId, int32 boolTypeId, int32 resultHomeId,
+    ref<init int32> selectorKindResult,
+    ref<init int32> sourceUseResult,
+    ref<init int32> selectorIndexResult,
+    ref<init bool> terminatedResult)
+    ensure return == 0 ? (*selectorKindResult is init
+        && *sourceUseResult is init
+        && *selectorIndexResult is init
+        && *terminatedResult is init) : true
+{
+    int32 bodyBlockFirst
+        = Host.StandaloneNormalizedBodyBlockRanges[bodyId * 2];
+    if (operandCount < 3 || operandCount > 32767
+        || bodyBlockFirst < 0
+        || (expressionKind != 35 && expressionKind != 36)
+        || Host.StandaloneNormalizedBlockCount[0] != bodyBlockFirst)
+    {
+        return 2;
+    }
+
+    int32 rightValueBlockId = expressionKind == 35
+        ? operandCount - 1 : operandCount;
+    int32 shortCircuitBlockId = expressionKind == 35
+        ? operandCount : operandCount - 1;
+    int32 returnBlockId = operandCount + 1;
+    int32 finalBodyBlockCount = operandCount + 2;
+    int32 initialBlockCount
+        = Host.StandaloneNormalizedBlockCount[0];
+    init int32 nextOperandOrdinal;
+    int32 conditionStatus
+        = NormalizeStandaloneSourceLazyBooleanConditions(
+            bodyId, expressionId,
+            expressionKind, operandCount, lastOperandId, boolTypeId,
+            finalBodyBlockCount, shortCircuitBlockId,
+            rightValueBlockId, 0, 0,
+            ref init nextOperandOrdinal);
+    if (conditionStatus != 0)
+    {
+        return conditionStatus;
+    }
+    if (nextOperandOrdinal != operandCount - 1
+        || Host.StandaloneNormalizedBlockCount[0]
+            != initialBlockCount + operandCount - 1)
+    {
+        return 3;
+    }
+
+    int32 constantFirst
+        = Host.StandaloneNormalizedBodies[bodyId * 12 + 3];
+    if (expressionKind == 36)
+    {
+        int32 constantStatus
+            = AppendStandaloneNormalizedLazyBooleanConstantBlock(
+                bodyId, boolTypeId, constantFirst,
+                resultHomeId,
+                1, shortCircuitBlockId, returnBlockId);
+        if (constantStatus != 0)
+        {
+            return constantStatus;
+        }
+    }
+
+    int32 operationFirst
+        = Host.StandaloneNormalizedOperationCount[0];
+    init int32 resultSelectorKind;
+    init int32 resultSourceUse;
+    init int32 resultSelectorIndex;
+    init bool resultTerminated;
+    int32 resultStatus = NormalizeStandaloneSourceExpression(
+        bodyId, lastOperandId, 1,
+        ref init resultSelectorKind, ref init resultSourceUse,
+        ref init resultSelectorIndex, ref init resultTerminated);
+    if (resultStatus != 0)
+    {
+        return resultStatus;
+    }
+    int32 lastOperandOffset
+        = (Host.StandaloneSourceBodies[bodyId * 12 + 3]
+            + lastOperandId) * 8;
+    if (Host.StandaloneSourceExpressions[lastOperandOffset + 1]
+        != boolTypeId)
+    {
+        return 3;
+    }
+    int32 resultOperationCount
+        = Host.StandaloneNormalizedOperationCount[0] - operationFirst;
+    if (resultTerminated)
+    {
+        init int32 noReturnBlockIndex;
+        int32 noReturnStatus = AppendStandaloneNormalizedReturnBlock(
+            bodyId, rightValueBlockId, operationFirst,
+            resultOperationCount, 1,
+            ref init noReturnBlockIndex);
+        if (noReturnStatus != 0)
+        {
+            return noReturnStatus;
+        }
+    }
+    else
+    {
+        if (resultSelectorKind != 2 || resultSourceUse != 1
+            || resultSelectorIndex < 0)
+        {
+            return 2;
+        }
+        int32 copyStatus = AppendStandaloneNormalizedOperation(
+            bodyId, 38, resultSelectorIndex,
+            resultHomeId, 0);
+        if (copyStatus != 0)
+        {
+            return copyStatus;
+        }
+        resultOperationCount
+            = Host.StandaloneNormalizedOperationCount[0] - operationFirst;
+        init int32 resultBlockIndex;
+        int32 resultBlockStatus
+            = AppendStandaloneNormalizedBlock(
+                bodyId, rightValueBlockId, operationFirst,
+                resultOperationCount, 3, 0, 0, 0,
+                returnBlockId, -1, 0, 0, 0, -1, -1, 0,
+                ref init resultBlockIndex);
+        if (resultBlockStatus != 0)
+        {
+            return resultBlockStatus;
+        }
+    }
+
+    if (expressionKind == 35)
+    {
+        int32 constantStatus
+            = AppendStandaloneNormalizedLazyBooleanConstantBlock(
+                bodyId, boolTypeId, constantFirst,
+                resultHomeId,
+                0, shortCircuitBlockId, returnBlockId);
+        if (constantStatus != 0)
+        {
+            return constantStatus;
+        }
+    }
+
+    if (Host.StandaloneNormalizedBlockCount[0]
+        != initialBlockCount + operandCount + 1)
+    {
+        return 3;
+    }
+    *selectorKindResult = 2;
+    *sourceUseResult = 1;
+    *selectorIndexResult = resultHomeId;
+    *terminatedResult = false;
+    return 0;
+}
+
 int32 NormalizeStandaloneSourceLazyBooleanValue(int32 bodyId,
     int32 expressionId, int32 depth,
     ref<init int32> selectorKindResult,
@@ -1749,6 +2121,41 @@ int32 NormalizeStandaloneSourceLazyBooleanValue(int32 bodyId,
         || leftExpressionId >= expressionId
         || rightExpressionId < 0
         || rightExpressionId >= expressionId)
+    {
+        return 2;
+    }
+
+    init int32 operandCount;
+    init int32 lastOperandId;
+    int32 operandCountStatus
+        = CountStandaloneSourceLazyBooleanOperands(
+            bodyId, expressionId, expressionKind, 0,
+            ref init operandCount, ref init lastOperandId);
+    if (operandCountStatus != 0)
+    {
+        return operandCountStatus;
+    }
+    if (operandCount > 2)
+    {
+        int32 homeFirst
+            = Host.StandaloneNormalizedBodies[bodyId * 12 + 1];
+        init int32 resultHomeId;
+        int32 resultHomeStatus = AppendStandaloneNormalizedHome(
+            bodyId, homeFirst, 3, boolTypeId, 0,
+            ref init resultHomeId);
+        if (resultHomeStatus != 0)
+        {
+            return resultHomeStatus;
+        }
+        return NormalizeStandaloneSourceLazyBooleanChainValue(
+            bodyId, expressionId, expressionKind, operandCount,
+            lastOperandId, boolTypeId, resultHomeId,
+            ref init *selectorKindResult,
+            ref init *sourceUseResult,
+            ref init *selectorIndexResult,
+            ref init *terminatedResult);
+    }
+    if (operandCount != 2)
     {
         return 2;
     }
@@ -1806,7 +2213,7 @@ int32 NormalizeStandaloneSourceLazyBooleanValue(int32 bodyId,
 
     int32 constantFirst
         = Host.StandaloneNormalizedBodies[bodyId * 12 + 3];
-    int32 rightBranch = expressionKind == 35 ? 1 : 2;
+    int32 rightBranch = expressionKind == 35 ? 0 : 1;
     for (mut int32 branchIndex = 0;
         branchIndex < 2;
         branchIndex = branchIndex + 1)
