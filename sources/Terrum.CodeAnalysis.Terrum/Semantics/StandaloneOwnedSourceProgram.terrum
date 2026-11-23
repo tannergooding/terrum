@@ -1582,7 +1582,8 @@ int32 TryGetStandaloneSourceExpressionDoesNotReturn(int32 bodyId,
     int32 expressionKind
         = Host.StandaloneSourceExpressions[expressionIndex * 8];
     if (expressionKind == 6 || expressionKind == 8
-        || expressionKind == 9)
+        || expressionKind == 9 || expressionKind == 10
+        || expressionKind == 11)
     {
         int32 childExpressionId
             = Host.StandaloneSourceExpressions[
@@ -3028,6 +3029,32 @@ bool IsStandaloneUnaryPlusType(int32 typeId)
 bool IsStandaloneUnaryMinusType(int32 typeId)
     => IsStandaloneUnaryPlusType(typeId);
 
+bool IsStandaloneLogicalNotType(int32 typeId)
+{
+    return typeId > 0
+        && typeId <= Host.StandaloneTypeFactCount[0]
+        && Host.StandaloneTypeFacts[typeId * 3] == 0
+        && Host.StandaloneTypeFacts[typeId * 3 + 1] == 1;
+}
+
+bool IsStandaloneBitwiseNotType(int32 typeId)
+{
+    if (typeId <= 0 || typeId > Host.StandaloneTypeFactCount[0]
+        || Host.StandaloneTypeFacts[typeId * 3] != 0)
+    {
+        return false;
+    }
+    int32 typeCode = Host.StandaloneTypeFacts[typeId * 3 + 1];
+    return typeCode == 0x08 || typeCode == 0x0D
+        || typeCode == 0x09 || typeCode == 0x0E;
+}
+
+bool IsStandaloneNotType(int32 typeId)
+{
+    return IsStandaloneLogicalNotType(typeId)
+        || IsStandaloneBitwiseNotType(typeId);
+}
+
 bool IsStandaloneSourceConstructionType(int32 typeId)
 {
     if (typeId <= 0 || typeId > Host.StandaloneTypeFactCount[0]
@@ -3115,6 +3142,20 @@ bool CanBindStandaloneSourceArgument(int32 localCallableId,
         }
         return tokenStart + 1 < tokenEnd
             && IsStandaloneUnaryMinusType(expectedTypeId)
+            && CanBindStandaloneSourceArgument(localCallableId,
+                tokenStart + 1, tokenEnd, expectedTypeId, depth + 1);
+    }
+    if (kind == 62)
+    {
+        return tokenStart + 1 < tokenEnd
+            && IsStandaloneLogicalNotType(expectedTypeId)
+            && CanBindStandaloneSourceArgument(localCallableId,
+                tokenStart + 1, tokenEnd, expectedTypeId, depth + 1);
+    }
+    if (kind == 63)
+    {
+        return tokenStart + 1 < tokenEnd
+            && IsStandaloneBitwiseNotType(expectedTypeId)
             && CanBindStandaloneSourceArgument(localCallableId,
                 tokenStart + 1, tokenEnd, expectedTypeId, depth + 1);
     }
@@ -4302,6 +4343,69 @@ int32 ParseStandaloneSourceExpression(int32 localCallableId,
         *nextTokenResult = nextOperandToken;
         return 0;
     }
+    if (kind == 62 || kind == 63)
+    {
+        if (tokenIndex + 1 >= tokenEnd)
+        {
+            return 1;
+        }
+        bool logicalNot = kind == 62;
+        if ((logicalNot && !IsStandaloneLogicalNotType(
+                expectedTypeId))
+            || (!logicalNot && !IsStandaloneBitwiseNotType(
+                expectedTypeId)))
+        {
+            return 2;
+        }
+        init int32 operandExpressionId;
+        init int32 nextOperandToken;
+        int32 operandStatus = ParseStandaloneSourceExpression(
+            localCallableId, bodyId, expressionFirst,
+            expectedTypeId, tokenIndex + 1, tokenEnd, depth + 1,
+            ref init operandExpressionId,
+            ref init nextOperandToken);
+        if (operandStatus != 0)
+        {
+            return operandStatus;
+        }
+        int32 operandGlobalId
+            = expressionFirst + operandExpressionId;
+        if (operandGlobalId < expressionFirst
+            || operandGlobalId
+                >= Host.StandaloneSourceExpressionCount[0])
+        {
+            return 3;
+        }
+        int32 typeId
+            = Host.StandaloneSourceExpressions[
+                operandGlobalId * 8 + 1];
+        if ((logicalNot && !IsStandaloneLogicalNotType(typeId))
+            || (!logicalNot
+                && !IsStandaloneBitwiseNotType(typeId))
+            || (expectedTypeId >= 0
+                && typeId != expectedTypeId))
+        {
+            return 2;
+        }
+        init int32 expressionId;
+        int32 appendStatus = AppendStandaloneSourceExpression(
+            bodyId, logicalNot ? 10 : 11, typeId,
+            operandExpressionId, 0, 0, 0, -1,
+            expressionFirst, ref init expressionId);
+        if (appendStatus != 0)
+        {
+            return appendStatus;
+        }
+        if (Host.StandaloneSourceExpressionUseCounts[
+                operandGlobalId] != 0)
+        {
+            return 3;
+        }
+        Host.StandaloneSourceExpressionUseCounts[operandGlobalId] = 1;
+        *expressionIdResult = expressionId;
+        *nextTokenResult = nextOperandToken;
+        return 0;
+    }
     if (kind == 3)
     {
         if (expectedTypeId <= 0
@@ -5436,7 +5540,8 @@ int32 VerifyStandaloneDirectCalls()
                     return 3;
                 }
             }
-            else if (expressionKind == 9)
+            else if (expressionKind == 9
+                || expressionKind == 10 || expressionKind == 11)
             {
                 int32 operand1
                     = Host.StandaloneSourceExpressions[
@@ -5447,7 +5552,15 @@ int32 VerifyStandaloneDirectCalls()
                 }
                 int32 childGlobalId
                     = bodyExpressionFirst + operand0;
-                if (!IsStandaloneUnaryMinusType(expressionTypeId)
+                if ((expressionKind == 9
+                        && !IsStandaloneUnaryMinusType(
+                            expressionTypeId))
+                    || (expressionKind == 10
+                        && !IsStandaloneLogicalNotType(
+                            expressionTypeId))
+                    || (expressionKind == 11
+                        && !IsStandaloneBitwiseNotType(
+                            expressionTypeId))
                     || operand1 != 0
                     || Host.StandaloneSourceExpressions[
                         expressionOffset + 4] != 0

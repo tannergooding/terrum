@@ -1170,7 +1170,8 @@ int32 VerifyStandaloneRewrittenSourceArenas()
             }
         }
         else if (expressionKind == 6 || expressionKind == 8
-            || expressionKind == 9)
+            || expressionKind == 9 || expressionKind == 10
+            || expressionKind == 11)
         {
             int32 childExpressionId
                 = Host.StandaloneSourceExpressions[oldOffset + 2];
@@ -1201,7 +1202,13 @@ int32 VerifyStandaloneRewrittenSourceArenas()
                 : expressionKind == 8
                     ? IsStandaloneSourceConstructionType(
                         expressionTypeId)
-                    : IsStandaloneUnaryMinusType(expressionTypeId);
+                    : expressionKind == 9
+                        ? IsStandaloneUnaryMinusType(expressionTypeId)
+                        : expressionKind == 10
+                            ? IsStandaloneLogicalNotType(
+                                expressionTypeId)
+                            : IsStandaloneBitwiseNotType(
+                                expressionTypeId);
             if (!supportedIdentity
                 || Host.StandaloneSourceExpressions[
                     childGlobalId * 8 + 1] != expressionTypeId

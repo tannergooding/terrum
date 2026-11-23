@@ -2995,7 +2995,7 @@ int32 GetStandaloneWriterOperationCodeLength(int32 bodyId,
     {
         return 2;
     }
-    if (kind == 6 || kind == 7 || kind == 8)
+    if (kind == 6 || kind == 7 || kind == 8 || kind == 9)
     {
         int32 bodyOffset = bodyId * 12;
         int32 homeCount
@@ -3647,7 +3647,8 @@ int32 WriteStandaloneWriterBodyCode(int32 bodyId,
             status = AppendStandaloneWriterByte(0);
             if (status != 0) { return status; }
         }
-        else if (kind == 6 || kind == 7 || kind == 8)
+        else if (kind == 6 || kind == 7 || kind == 8
+            || kind == 9)
         {
             int32 homeCount
                 = Host.StandaloneRewrittenNormalizedBodies[
@@ -3666,10 +3667,12 @@ int32 WriteStandaloneWriterBodyCode(int32 bodyId,
             status = AppendStandaloneWriterHalfWord(
                 uint32(operand0));
             if (status != 0) { return status; }
-            status = AppendStandaloneWriterByte(0xC0);
+            status = AppendStandaloneWriterByte(
+                kind == 9 ? 0xC1 : 0xC0);
             if (status != 0) { return status; }
-            int32 control = kind == 6 ? 0x04
-                : kind == 7 ? 0x08 : 0x25;
+            int32 control = kind == 9 ? 0x04
+                : kind == 6 ? 0x04
+                    : kind == 7 ? 0x08 : 0x25;
             status = AppendStandaloneWriterByte(control);
             if (status != 0) { return status; }
             status = AppendStandaloneWriterHalfWord(
