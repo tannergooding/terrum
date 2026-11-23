@@ -23,10 +23,14 @@ transition.
 `StandaloneOwnedSourceProgram` is a separate, bounded method-import prototype
 over the original scanner snapshot. It resolves local and selected imported
 calls across file-scoped and block namespaces while keeping namespace identity
-separate from lexical `using` scope. This does not change the selected compiler
-architecture or establish general source binding; overload applicability,
-broader expression/control-flow coverage, and authored effects/initialization
-verification remain separate work.
+separate from lexical `using` scope. The current scalar/init-reference subset
+maps local argument labels before applicability, checks supported input types,
+does not rank contextual integer literals by range or overloads by result type,
+and keeps colliding imported views ambiguous; imported roots remain positional
+and label-free. This does not change the selected compiler architecture or
+establish general source binding; direct conversions, defaults/`params`,
+generic/nominal calls, broader expression/control-flow coverage, and authored
+effects/initialization verification remain separate work.
 
 The existing `TokenCursor`, v87/v88 scalar projection and private
 `Span<Token>` module paths are implementation prototypes, not selected

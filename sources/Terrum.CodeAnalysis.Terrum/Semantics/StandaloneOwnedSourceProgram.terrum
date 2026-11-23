@@ -88,7 +88,7 @@ bool ValidateStandaloneSourceCallBuffers()
         return false;
     }
     int32 tokenCapacity = Host.Source.Length + 1;
-    if (tokenCapacity > int32.MaxValue / 4)
+    if (tokenCapacity > int32.MaxValue / 12)
     {
         return false;
     }
@@ -126,6 +126,8 @@ bool ValidateStandaloneSourceCallBuffers()
             == tokenCapacity
         && Host.StandaloneSourceCallFormalSeen.Length
             == tokenCapacity
+        && Host.StandaloneSourceCallCandidateCache.Length
+            == tokenCapacity * 6
         && Host.StandaloneSourceUsingCount.Length == 1
         && Host.StandaloneSourceNamespaceScopeCount.Length == 1
         && Host.StandaloneSourceNamespaceIdentityCount.Length == 1
@@ -232,6 +234,12 @@ void ClearStandaloneSourceCallProgram()
         index = index + 1)
     {
         Host.StandaloneSourceCallFormalSeen[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneSourceCallCandidateCache.Length;
+        index = index + 1)
+    {
+        Host.StandaloneSourceCallCandidateCache[index] = 0;
     }
     for (mut int32 index = 0;
         index < Host.StandaloneSourceUsings.Length;
@@ -2033,8 +2041,363 @@ int32 CountStandaloneCallArguments(int32 openingParen,
     return -1;
 }
 
+bool TryFindStandaloneCallArgumentEnd(int32 argumentStart,
+    int32 closingParen, ref<init int32> tokenEndResult)
+    ensure return ? *tokenEndResult is init : true
+{
+    if (argumentStart < 0 || argumentStart > closingParen
+        || closingParen >= Host.Tokens.Length / 3
+        || Host.Tokens[closingParen * 3] != 47)
+    {
+        return false;
+    }
+
+    mut int32 nestedParenDepth = 0;
+    for (mut int32 tokenIndex = argumentStart;
+        tokenIndex < closingParen;
+        tokenIndex = tokenIndex + 1)
+    {
+        int32 kind = Host.Tokens[tokenIndex * 3];
+        if (kind == 46)
+        {
+            nestedParenDepth = nestedParenDepth + 1;
+        }
+        else if (kind == 47)
+        {
+            if (nestedParenDepth == 0)
+            {
+                return false;
+            }
+            nestedParenDepth = nestedParenDepth - 1;
+        }
+        else if (kind == 53 && nestedParenDepth == 0)
+        {
+            *tokenEndResult = tokenIndex;
+            return true;
+        }
+    }
+    if (nestedParenDepth != 0)
+    {
+        return false;
+    }
+    *tokenEndResult = closingParen;
+    return true;
+}
+
+bool IsStandaloneCallArgumentMappingApplicable(int32 targetKind,
+    int32 targetIndex, int32 openingParen, int32 closingParen,
+    int32 argumentCount)
+{
+    init int32 expectedCallableId;
+    init int32 resultTypeId;
+    init int32 parameterCount;
+    if (TryGetStandaloneCallableSignature(targetKind, targetIndex,
+            ref init expectedCallableId, ref init resultTypeId,
+            ref init parameterCount) != 0
+        || expectedCallableId < 0 || resultTypeId <= 0
+        || parameterCount < 0
+        || parameterCount != argumentCount
+        || parameterCount > Host.StandaloneSourceCallFormalSeen.Length)
+    {
+        return false;
+    }
+
+    for (mut int32 ordinal = 0; ordinal < parameterCount;
+        ordinal = ordinal + 1)
+    {
+        Host.StandaloneSourceCallFormalSeen[ordinal] = 0;
+    }
+
+    mut int32 nextPositionalParameter = 0;
+    mut bool hasOutOfPositionNamedArgument = false;
+    mut int32 argumentStart = openingParen + 1;
+    for (mut int32 sourceOrdinal = 0;
+        sourceOrdinal < argumentCount;
+        sourceOrdinal = sourceOrdinal + 1)
+    {
+        init int32 argumentEnd;
+        if (!TryFindStandaloneCallArgumentEnd(argumentStart,
+                closingParen, ref init argumentEnd)
+            || argumentStart >= argumentEnd)
+        {
+            return false;
+        }
+        if (sourceOrdinal + 1 < argumentCount)
+        {
+            if (argumentEnd >= closingParen
+                || Host.Tokens[argumentEnd * 3] != 53)
+            {
+                return false;
+            }
+        }
+        else if (argumentEnd != closingParen)
+        {
+            return false;
+        }
+
+        int32 parameterOrdinal = nextPositionalParameter;
+        if (argumentStart + 1 < argumentEnd
+            && Host.Tokens[argumentStart * 3] == 2
+            && Host.Tokens[(argumentStart + 1) * 3] == 55)
+        {
+            if (targetKind != 1)
+            {
+                return false;
+            }
+            init int32 namedParameterOrdinal;
+            init int32 namedParameterTypeId;
+            if (!TryFindStandaloneSourceParameter(targetIndex,
+                    argumentStart, ref init namedParameterOrdinal,
+                    ref init namedParameterTypeId))
+            {
+                return false;
+            }
+            parameterOrdinal = namedParameterOrdinal;
+            if (parameterOrdinal == nextPositionalParameter)
+            {
+                nextPositionalParameter
+                    = nextPositionalParameter + 1;
+            }
+            else if (parameterOrdinal > nextPositionalParameter)
+            {
+                hasOutOfPositionNamedArgument = true;
+            }
+        }
+        else
+        {
+            if (hasOutOfPositionNamedArgument)
+            {
+                return false;
+            }
+            parameterOrdinal = nextPositionalParameter;
+            nextPositionalParameter = nextPositionalParameter + 1;
+        }
+
+        if (parameterOrdinal < 0
+            || parameterOrdinal >= parameterCount
+            || Host.StandaloneSourceCallFormalSeen[
+                parameterOrdinal] != 0)
+        {
+            return false;
+        }
+        Host.StandaloneSourceCallFormalSeen[parameterOrdinal] = 1;
+        argumentStart = argumentEnd + 1;
+    }
+
+    for (mut int32 ordinal = 0; ordinal < parameterCount;
+        ordinal = ordinal + 1)
+    {
+        if (Host.StandaloneSourceCallFormalSeen[ordinal] != 1)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool IsStandaloneIntegerSourceType(int32 typeCode)
+    => typeCode == 0x08 || typeCode == 0x0D
+        || typeCode == 0x09 || typeCode == 0x0E
+        || typeCode == 0x03;
+
+bool CanBindStandaloneSourceArgument(int32 localCallableId,
+    int32 tokenStart, int32 tokenEnd, int32 expectedTypeId,
+    int32 depth)
+{
+    if (depth > 64 || tokenStart < 0 || tokenStart >= tokenEnd
+        || tokenEnd > Host.Tokens.Length / 3
+        || expectedTypeId <= 0
+        || expectedTypeId > Host.StandaloneTypeFactCount[0])
+    {
+        return false;
+    }
+
+    int32 kind = Host.Tokens[tokenStart * 3];
+    if (kind == 3)
+    {
+        return tokenEnd == tokenStart + 1
+            && Host.StandaloneTypeFacts[expectedTypeId * 3] == 0
+            && IsStandaloneIntegerSourceType(
+                Host.StandaloneTypeFacts[expectedTypeId * 3 + 1]);
+    }
+    if (kind == 20 || kind == 21)
+    {
+        return tokenEnd == tokenStart + 1
+            && Host.StandaloneTypeFacts[expectedTypeId * 3] == 0
+            && Host.StandaloneTypeFacts[expectedTypeId * 3 + 1] == 1;
+    }
+    if (kind == 14)
+    {
+        if (tokenEnd != tokenStart + 3
+            || Host.StandaloneTypeFacts[expectedTypeId * 3] != 1
+            || !IsStandaloneSourceInitKeyword(tokenStart + 1)
+            || Host.Tokens[(tokenStart + 2) * 3] != 2)
+        {
+            return false;
+        }
+        init int32 parameterOrdinal;
+        init int32 parameterTypeId;
+        return TryFindStandaloneSourceParameter(localCallableId,
+                tokenStart + 2, ref init parameterOrdinal,
+                ref init parameterTypeId)
+            && parameterTypeId == expectedTypeId;
+    }
+    if (kind != 2)
+    {
+        return false;
+    }
+
+    init int32 nameTokenEnd;
+    init int32 openingParen;
+    int32 nameStatus = FindStandaloneSourceCallNameEnd(
+        tokenStart, tokenEnd, ref init nameTokenEnd,
+        ref init openingParen);
+    if (nameStatus < 0)
+    {
+        return false;
+    }
+    if (nameStatus == 1)
+    {
+        if (nameTokenEnd != tokenStart + 1
+            || nameTokenEnd != tokenEnd)
+        {
+            return false;
+        }
+        init int32 parameterOrdinal;
+        init int32 parameterTypeId;
+        return TryFindStandaloneSourceParameter(localCallableId,
+                tokenStart, ref init parameterOrdinal,
+                ref init parameterTypeId)
+            && parameterTypeId == expectedTypeId
+            && GetStandaloneSourceUse(parameterTypeId) != 5;
+    }
+
+    init int32 closingParen;
+    int32 argumentCount = CountStandaloneCallArguments(
+        openingParen, tokenEnd, ref init closingParen);
+    if (argumentCount < 0 || closingParen + 1 != tokenEnd)
+    {
+        return false;
+    }
+    init int32 targetKind;
+    init int32 targetIndex;
+    init int32 expectedCallableId;
+    init int32 resultTypeId;
+    init int32 parameterCount;
+    if (FindStandaloneCallCandidate(localCallableId, tokenStart,
+            nameTokenEnd, openingParen, closingParen, argumentCount,
+            depth, ref init targetKind, ref init targetIndex,
+            ref init expectedCallableId, ref init resultTypeId,
+            ref init parameterCount) != 0
+        || expectedCallableId < 0 || parameterCount < 0
+        || resultTypeId != expectedTypeId)
+    {
+        return false;
+    }
+    return !StandaloneCallableRequiresUnsafe(targetKind, targetIndex)
+        || (Host.StandaloneSourceBodies[localCallableId * 12 + 11]
+            & 1) != 0;
+}
+
+bool IsStandaloneCallCandidateApplicable(int32 localCallableId,
+    int32 targetKind, int32 targetIndex, int32 openingParen,
+    int32 closingParen, int32 argumentCount, int32 depth)
+{
+    if (depth > 64
+        || !IsStandaloneCallArgumentMappingApplicable(targetKind,
+            targetIndex, openingParen, closingParen, argumentCount)
+        || (StandaloneCallableRequiresUnsafe(targetKind, targetIndex)
+            && (Host.StandaloneSourceBodies[
+                    localCallableId * 12 + 11] & 1) == 0))
+    {
+        return false;
+    }
+
+    mut int32 argumentStart = openingParen + 1;
+    mut int32 nextPositionalParameter = 0;
+    mut bool hasOutOfPositionNamedArgument = false;
+    for (mut int32 sourceOrdinal = 0;
+        sourceOrdinal < argumentCount;
+        sourceOrdinal = sourceOrdinal + 1)
+    {
+        init int32 argumentEnd;
+        if (!TryFindStandaloneCallArgumentEnd(argumentStart,
+                closingParen, ref init argumentEnd)
+            || argumentStart >= argumentEnd)
+        {
+            return false;
+        }
+        if (sourceOrdinal + 1 < argumentCount)
+        {
+            if (argumentEnd >= closingParen
+                || Host.Tokens[argumentEnd * 3] != 53)
+            {
+                return false;
+            }
+        }
+        else if (argumentEnd != closingParen)
+        {
+            return false;
+        }
+
+        int32 parameterOrdinal = nextPositionalParameter;
+        if (argumentStart + 1 < argumentEnd
+            && Host.Tokens[argumentStart * 3] == 2
+            && Host.Tokens[(argumentStart + 1) * 3] == 55)
+        {
+            if (targetKind != 1)
+            {
+                return false;
+            }
+            init int32 namedParameterOrdinal;
+            init int32 namedParameterTypeId;
+            if (!TryFindStandaloneSourceParameter(targetIndex,
+                    argumentStart, ref init namedParameterOrdinal,
+                    ref init namedParameterTypeId))
+            {
+                return false;
+            }
+            parameterOrdinal = namedParameterOrdinal;
+            if (parameterOrdinal == nextPositionalParameter)
+            {
+                nextPositionalParameter
+                    = nextPositionalParameter + 1;
+            }
+            else if (parameterOrdinal > nextPositionalParameter)
+            {
+                hasOutOfPositionNamedArgument = true;
+            }
+            argumentStart = argumentStart + 2;
+        }
+        else
+        {
+            if (hasOutOfPositionNamedArgument)
+            {
+                return false;
+            }
+            parameterOrdinal = nextPositionalParameter;
+            nextPositionalParameter = nextPositionalParameter + 1;
+        }
+
+        init int32 parameterTypeId;
+        if (argumentStart >= argumentEnd
+            || GetStandaloneCallParameterTypeId(targetKind,
+                targetIndex, parameterOrdinal,
+                ref init parameterTypeId) != 0
+            || !CanBindStandaloneSourceArgument(localCallableId,
+                argumentStart, argumentEnd, parameterTypeId,
+                depth + 1))
+        {
+            return false;
+        }
+        argumentStart = argumentEnd + 1;
+    }
+    return true;
+}
+
 int32 FindStandaloneLocalCandidateAtNamespace(int32 namespaceIdentityId,
-    int32 nameToken, int32 argumentCount,
+    int32 localCallableId, int32 nameToken, int32 openingParen,
+    int32 closingParen, int32 argumentCount, int32 depth,
     ref<init int32> candidateResult,
     ref<init bool> nameFoundResult)
     ensure return == 0 ? (*candidateResult is init
@@ -2058,8 +2421,9 @@ int32 FindStandaloneLocalCandidateAtNamespace(int32 namespaceIdentityId,
         }
 
         nameFound = true;
-        if (Host.StandaloneSourceCallableInfo[infoOffset + 6]
-            == argumentCount)
+        if (IsStandaloneCallCandidateApplicable(localCallableId,
+                1, candidate, openingParen, closingParen,
+                argumentCount, depth))
         {
             matchingCandidates = matchingCandidates + 1;
             candidateResultValue = candidate;
@@ -2079,14 +2443,16 @@ int32 FindStandaloneLocalCandidateAtNamespace(int32 namespaceIdentityId,
     return matchingCandidates == 1 ? 0 : 4;
 }
 
-int32 FindStandaloneImportedCandidateAtScope(int32 nameTokenStart,
-    int32 nameTokenEnd, int32 argumentCount, int32 usingScopeId,
+int32 FindStandaloneImportedCandidateAtScope(int32 localCallableId,
+    int32 nameTokenStart, int32 nameTokenEnd, int32 openingParen,
+    int32 closingParen, int32 argumentCount, int32 usingScopeId,
+    int32 depth,
     ref<init int32> candidateResult,
     ref<init bool> nameFoundResult)
     ensure return == 0 ? (*candidateResult is init
         && *nameFoundResult is init) : true
 {
-    mut int32 matchingCandidates = 0;
+    mut int32 matchingNamedViews = 0;
     mut int32 candidateResultValue = -1;
     mut bool nameFound = false;
     for (mut int32 candidate = 0;
@@ -2100,15 +2466,8 @@ int32 FindStandaloneImportedCandidateAtScope(int32 nameTokenStart,
         }
 
         nameFound = true;
-        int32 resolvedRoot = Host.StandaloneSourceImportedCallables[
-            candidate * 8 + 4];
-        int32 rootOffset = resolvedRoot * 20;
-        if (int32(Host.StandaloneResolvedRoots[rootOffset + 11])
-            == argumentCount)
-        {
-            matchingCandidates = matchingCandidates + 1;
-            candidateResultValue = candidate;
-        }
+        matchingNamedViews = matchingNamedViews + 1;
+        candidateResultValue = candidate;
     }
 
     *candidateResult = candidateResultValue;
@@ -2117,11 +2476,17 @@ int32 FindStandaloneImportedCandidateAtScope(int32 nameTokenStart,
     {
         return 0;
     }
-    if (matchingCandidates == 0)
+    if (matchingNamedViews != 1)
+    {
+        return 4;
+    }
+    if (!IsStandaloneCallCandidateApplicable(localCallableId, 2,
+            candidateResultValue, openingParen, closingParen,
+            argumentCount, depth))
     {
         return 2;
     }
-    return matchingCandidates == 1 ? 0 : 4;
+    return 0;
 }
 
 int32 CompleteStandaloneCallCandidate(int32 targetKind,
@@ -2207,7 +2572,87 @@ bool TryResolveStandaloneQualifiedNamespaceIdentity(
 }
 
 int32 FindStandaloneCallCandidate(int32 localCallableId,
-    int32 nameTokenStart, int32 nameTokenEnd, int32 argumentCount,
+    int32 nameTokenStart, int32 nameTokenEnd, int32 openingParen,
+    int32 closingParen, int32 argumentCount, int32 depth,
+    ref<init int32> targetKindResult,
+    ref<init int32> targetIndexResult,
+    ref<init int32> expectedCallableIdResult,
+    ref<init int32> resultTypeIdResult,
+    ref<init int32> parameterCountResult)
+    ensure return == 0 ? (*targetKindResult is init
+        && *targetIndexResult is init
+        && *expectedCallableIdResult is init
+        && *resultTypeIdResult is init
+        && *parameterCountResult is init) : true
+{
+    if (localCallableId < 0
+        || localCallableId >= Host.StandaloneLocalCallableCount[0]
+        || nameTokenStart < 0
+        || nameTokenStart >= Host.Tokens.Length / 3
+        || depth < 0)
+    {
+        return 3;
+    }
+    if (depth > 64)
+    {
+        return 2;
+    }
+
+    int32 cacheOffset = nameTokenStart * 6;
+    if (cacheOffset < 0
+        || cacheOffset
+            > Host.StandaloneSourceCallCandidateCache.Length - 6)
+    {
+        return 3;
+    }
+    if (Host.StandaloneSourceCallCandidateCache[cacheOffset]
+        == localCallableId + 1)
+    {
+        int32 cachedStatus
+            = Host.StandaloneSourceCallCandidateCache[cacheOffset + 1];
+        if (cachedStatus != 0)
+        {
+            return cachedStatus;
+        }
+        return CompleteStandaloneCallCandidate(
+            Host.StandaloneSourceCallCandidateCache[cacheOffset + 2],
+            Host.StandaloneSourceCallCandidateCache[cacheOffset + 3],
+            Host.StandaloneSourceCallCandidateCache[cacheOffset + 4],
+            Host.StandaloneSourceCallCandidateCache[cacheOffset + 5],
+            ref init *targetKindResult,
+            ref init *targetIndexResult,
+            ref init *expectedCallableIdResult,
+            ref init *resultTypeIdResult,
+            ref init *parameterCountResult);
+    }
+
+    int32 status = FindStandaloneCallCandidateCore(localCallableId,
+        nameTokenStart, nameTokenEnd, openingParen, closingParen,
+        argumentCount, depth, ref init *targetKindResult,
+        ref init *targetIndexResult,
+        ref init *expectedCallableIdResult,
+        ref init *resultTypeIdResult,
+        ref init *parameterCountResult);
+    Host.StandaloneSourceCallCandidateCache[cacheOffset + 1] = status;
+    if (status == 0)
+    {
+        Host.StandaloneSourceCallCandidateCache[cacheOffset + 2]
+            = *targetKindResult;
+        Host.StandaloneSourceCallCandidateCache[cacheOffset + 3]
+            = *targetIndexResult;
+        Host.StandaloneSourceCallCandidateCache[cacheOffset + 4]
+            = *resultTypeIdResult;
+        Host.StandaloneSourceCallCandidateCache[cacheOffset + 5]
+            = *parameterCountResult;
+    }
+    Host.StandaloneSourceCallCandidateCache[cacheOffset]
+        = localCallableId + 1;
+    return status;
+}
+
+int32 FindStandaloneCallCandidateCore(int32 localCallableId,
+    int32 nameTokenStart, int32 nameTokenEnd, int32 openingParen,
+    int32 closingParen, int32 argumentCount, int32 depth,
     ref<init int32> targetKindResult,
     ref<init int32> targetIndexResult,
     ref<init int32> expectedCallableIdResult,
@@ -2222,9 +2667,17 @@ int32 FindStandaloneCallCandidate(int32 localCallableId,
     if (localCallableId < 0
         || localCallableId >= Host.StandaloneLocalCallableCount[0]
         || nameTokenStart < 0 || nameTokenStart >= nameTokenEnd
-        || nameTokenEnd > Host.Tokens.Length / 3)
+        || nameTokenEnd > Host.Tokens.Length / 3
+        || openingParen < nameTokenEnd
+        || closingParen <= openingParen
+        || closingParen >= Host.Tokens.Length / 3
+        || depth < 0)
     {
         return 3;
+    }
+    if (depth > 64)
+    {
+        return 2;
     }
 
     mut int32 lastDot = -1;
@@ -2248,6 +2701,16 @@ int32 FindStandaloneCallCandidate(int32 localCallableId,
 
     int32 callerScopeId
         = Host.StandaloneSourceCallableInfo[localCallableId * 12 + 2];
+    init int32 shadowingParameterOrdinal;
+    init int32 shadowingParameterTypeId;
+    if (TryFindStandaloneSourceParameter(localCallableId,
+            nameTokenStart, ref init shadowingParameterOrdinal,
+            ref init shadowingParameterTypeId))
+    {
+        return shadowingParameterOrdinal >= 0
+            && shadowingParameterTypeId > 0 ? 2 : 3;
+    }
+
     if (lastDot >= 0)
     {
         init int32 namespaceIdentityId;
@@ -2259,7 +2722,9 @@ int32 FindStandaloneCallCandidate(int32 localCallableId,
             init bool localNameFound;
             int32 localStatus
                 = FindStandaloneLocalCandidateAtNamespace(
-                    namespaceIdentityId, methodNameToken, argumentCount,
+                    namespaceIdentityId, localCallableId,
+                    methodNameToken, openingParen, closingParen,
+                    argumentCount, depth,
                     ref init localCandidate, ref init localNameFound);
             if (localNameFound)
             {
@@ -2282,8 +2747,9 @@ int32 FindStandaloneCallCandidate(int32 localCallableId,
         init int32 qualifiedImportedCandidate;
         init bool qualifiedImportedNameFound;
         int32 qualifiedImportStatus
-            = FindStandaloneImportedCandidateAtScope(nameTokenStart,
-                nameTokenEnd, argumentCount, -2,
+            = FindStandaloneImportedCandidateAtScope(localCallableId,
+                nameTokenStart, nameTokenEnd, openingParen,
+                closingParen, argumentCount, -2, depth,
                 ref init qualifiedImportedCandidate,
                 ref init qualifiedImportedNameFound);
         if (qualifiedImportedNameFound)
@@ -2325,7 +2791,8 @@ int32 FindStandaloneCallCandidate(int32 localCallableId,
         init int32 localCandidate;
         init bool localNameFound;
         int32 localStatus = FindStandaloneLocalCandidateAtNamespace(
-            namespaceIdentityId, methodNameToken, argumentCount,
+            namespaceIdentityId, localCallableId, methodNameToken,
+            openingParen, closingParen, argumentCount, depth,
             ref init localCandidate, ref init localNameFound);
         if (localNameFound)
         {
@@ -2350,9 +2817,10 @@ int32 FindStandaloneCallCandidate(int32 localCallableId,
             init int32 importedCandidate;
             init bool importedNameFound;
             int32 importedStatus
-                = FindStandaloneImportedCandidateAtScope(
-                    nameTokenStart, nameTokenEnd, argumentCount,
-                    usingScopeId, ref init importedCandidate,
+                = FindStandaloneImportedCandidateAtScope(localCallableId,
+                    nameTokenStart, nameTokenEnd, openingParen,
+                    closingParen, argumentCount, usingScopeId, depth,
+                    ref init importedCandidate,
                     ref init importedNameFound);
             if (importedNameFound)
             {
@@ -2724,7 +3192,8 @@ int32 ParseStandaloneSourceExpression(int32 localCallableId,
     init int32 resultTypeId;
     init int32 parameterCount;
     int32 candidateStatus = FindStandaloneCallCandidate(
-        localCallableId, tokenIndex, nameTokenEnd, argumentCount,
+        localCallableId, tokenIndex, nameTokenEnd, openingParen,
+        closeParen, argumentCount, depth,
         ref init targetKind, ref init targetIndex,
         ref init expectedCallableId, ref init resultTypeId,
         ref init parameterCount);
