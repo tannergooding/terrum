@@ -168,9 +168,9 @@ public static partial class TrRmExecutableCompiler
                 cast.Type);
     }
 
-    private static bool IsForeignInterfaceCheckedIntegerConversion(
+    private static bool IsForeignInterfaceCheckedNumericConversion(
         BoundCast cast)
-        => SemanticVerifier.IsSupportedCheckedIntegerConversion(
+        => SemanticVerifier.IsSupportedCheckedNumericConversion(
             cast.Operand.Type, cast.Type);
 
     private static bool IsStandardInitializationReferenceParameter(
@@ -2595,11 +2595,11 @@ public static partial class TrRmExecutableCompiler
             {
                 var isTotalConversion
                     = TryGetGeneralPredicateConversion(cast, out _, out _);
-                var isCheckedIntegerConversion
-                    = IsForeignInterfaceCheckedIntegerConversion(cast);
+                var isCheckedNumericConversion
+                    = IsForeignInterfaceCheckedNumericConversion(cast);
                 if (cast.Type != type
                     || (!isTotalConversion
-                        && !isCheckedIntegerConversion))
+                        && !isCheckedNumericConversion))
                 {
                     return (false, 0, false);
                 }
@@ -2922,7 +2922,7 @@ public static partial class TrRmExecutableCompiler
 
             if (candidate is BoundCast checkedCast
                 && checkedCast.Type == type
-                && IsForeignInterfaceCheckedIntegerConversion(checkedCast))
+                && IsForeignInterfaceCheckedNumericConversion(checkedCast))
             {
                 var operand = Emit(checkedCast.Operand,
                     checkedCast.Operand.Type);
@@ -2930,7 +2930,7 @@ public static partial class TrRmExecutableCompiler
                 if (typeMapIndex is < 0 or > ushort.MaxValue)
                 {
                     throw Unsupported(
-                        "A Standard F+I checked integer conversion exceeds the TypeMap index range.");
+                        "A Standard F+I checked numeric conversion exceeds the TypeMap index range.");
                 }
 
                 var destinationRegister = operand.OwnsRegister
@@ -10426,11 +10426,11 @@ public static partial class TrRmExecutableCompiler
                         nominalClassTypesByTypeSpecReference);
                     if (!body.Schema.UsesForeignNativeInterface()
                         || !SemanticVerifier
-                            .IsSupportedCheckedIntegerConversion(
+                            .IsSupportedCheckedNumericConversion(
                                 value.Type, destinationType))
                     {
                         throw Invalid(
-                            "A Standard F+I checked integer conversion is invalid for its complete types.");
+                            "A Standard F+I checked numeric conversion is invalid for its complete types.");
                     }
 
                     valueByRegister[conversionDestinationRegister]
@@ -12685,7 +12685,7 @@ public static partial class TrRmExecutableCompiler
                         out var sourceExpression))
                 {
                     throw Invalid(
-                        "The Standard F+I checked integer conversion has an invalid register mapping.");
+                        "The Standard F+I checked numeric conversion has an invalid register mapping.");
                 }
 
                 var destinationIsAvailable
@@ -12698,7 +12698,7 @@ public static partial class TrRmExecutableCompiler
                         conversionDestinationRegister))
                 {
                     throw Invalid(
-                        "The Standard F+I checked integer conversion overwrites a non-expression register.");
+                        "The Standard F+I checked numeric conversion overwrites a non-expression register.");
                 }
 
                 var destinationType = GetStandardInitializationBodyType(
@@ -12708,10 +12708,10 @@ public static partial class TrRmExecutableCompiler
                     nominalClassTypesByTypeSpecReference);
                 var conversion = new BoundCast(sourceExpression,
                     destinationType, default);
-                if (!IsForeignInterfaceCheckedIntegerConversion(conversion))
+                if (!IsForeignInterfaceCheckedNumericConversion(conversion))
                 {
                     throw Invalid(
-                        "The Standard F+I checked integer conversion is invalid for its complete types.");
+                        "The Standard F+I checked numeric conversion is invalid for its complete types.");
                 }
 
                 if (!destinationIsAvailable)

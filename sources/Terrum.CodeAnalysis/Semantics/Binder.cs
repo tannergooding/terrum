@@ -20843,8 +20843,7 @@ internal sealed partial class Binder
         if (operand.Type is PrimitiveType.Float32 or PrimitiveType.Float64)
         {
             if (target is PrimitiveType.Int32 or PrimitiveType.UInt32
-                or PrimitiveType.Int64 or PrimitiveType.UInt64
-                or PrimitiveType.NativeInt or PrimitiveType.NativeUInt)
+                or PrimitiveType.Int64 or PrimitiveType.UInt64)
             {
                 return new BoundCast(operand, target, node.Span);
             }

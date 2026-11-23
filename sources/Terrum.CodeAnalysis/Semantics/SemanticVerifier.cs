@@ -35792,9 +35792,7 @@ public static partial class SemanticVerifier
             || ((source is PrimitiveType.Float32 or PrimitiveType.Float64)
                 && (destination is PrimitiveType.Int32
                     or PrimitiveType.UInt32
-                    or PrimitiveType.Int64 or PrimitiveType.UInt64
-                    or PrimitiveType.NativeInt
-                    or PrimitiveType.NativeUInt))
+                    or PrimitiveType.Int64 or PrimitiveType.UInt64))
             || ((source is PrimitiveType.Float32 or PrimitiveType.Float64)
                 && (destination is PrimitiveType.Float32
                     or PrimitiveType.Float64));

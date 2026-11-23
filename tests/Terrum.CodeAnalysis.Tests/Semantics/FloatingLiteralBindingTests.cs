@@ -1317,6 +1317,21 @@ internal sealed class FloatingLiteralBindingTests
         Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(42));
     }
 
+    [TestCase("nint", "float32")]
+    [TestCase("nint", "float64")]
+    [TestCase("nuint", "float32")]
+    [TestCase("nuint", "float64")]
+    public void CheckedFloatingToNativeIntegerConversionsAreRejected(
+        string targetType, string sourceType)
+    {
+        var source = $"{targetType} Convert({sourceType} value) "
+            + $"{{ return {targetType}(value); }}";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+        Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3007"), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
     [Test]
     public void CheckedFloatingToIntegerRejectsNanAndInfinities()
     {

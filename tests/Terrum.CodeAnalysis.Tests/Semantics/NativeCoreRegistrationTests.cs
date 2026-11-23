@@ -1336,6 +1336,40 @@ internal sealed class NativeCoreRegistrationTests
                             first: int8(first));
                     }
                 }
+                int32 FloatConversionThenNested(ptr<void> receiver,
+                    float64 first, int32 value) {
+                    unsafe {
+                        return IProbe.Read(receiver,
+                            first: int32(first),
+                            second: IProbe.Nested(receiver, value));
+                    }
+                }
+                int32 NestedThenFloatConversion(ptr<void> receiver,
+                    float64 first, int32 value) {
+                    unsafe {
+                        return IProbe.Read(receiver,
+                            second: IProbe.Nested(receiver, value),
+                            first: int32(first));
+                    }
+                }
+                int32 SequenceFloatConversionThenNested(
+                    ptr<void> receiver, float64 first, int32 value) {
+                    unsafe {
+                        IProbe.Ping(receiver, value);
+                        return IProbe.Read(receiver,
+                            first: int32(first),
+                            second: IProbe.Nested(receiver, value));
+                    }
+                }
+                int32 SequenceNestedThenFloatConversion(
+                    ptr<void> receiver, float64 first, int32 value) {
+                    unsafe {
+                        IProbe.Ping(receiver, value);
+                        return IProbe.Read(receiver,
+                            second: IProbe.Nested(receiver, value),
+                            first: int32(first));
+                    }
+                }
                 int32 Identity(int32 value) { return value; }
                 """), reference, options);
         Assert.That(consumerCompilation.HasErrors, Is.False,
@@ -1369,6 +1403,18 @@ internal sealed class NativeCoreRegistrationTests
         AssertConversionInstructionOrder(consumerArtifact,
             "SequenceNestedThenConversion", conversionFirst: false,
             expectedCallCount: 3);
+        AssertConversionInstructionOrder(consumerArtifact,
+            "FloatConversionThenNested", conversionFirst: true,
+            expectedCallCount: 2);
+        AssertConversionInstructionOrder(consumerArtifact,
+            "NestedThenFloatConversion", conversionFirst: false,
+            expectedCallCount: 2);
+        AssertConversionInstructionOrder(consumerArtifact,
+            "SequenceFloatConversionThenNested", conversionFirst: true,
+            expectedCallCount: 3);
+        AssertConversionInstructionOrder(consumerArtifact,
+            "SequenceNestedThenFloatConversion", conversionFirst: false,
+            expectedCallCount: 3);
 
         var loaded = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(schemaIdentity, consumerArtifact),
@@ -1377,14 +1423,39 @@ internal sealed class NativeCoreRegistrationTests
         AssertArgumentOrder(loaded, "CheckedThenNested", 0, 1);
         AssertArgumentOrder(loaded, "SequenceNestedThenChecked", 1, 0);
         AssertArgumentOrder(loaded, "SequenceCheckedThenNested", 0, 1);
-        AssertIntegerConversionArgumentOrder(loaded,
-            "ConversionThenNested", conversionFirst: true);
-        AssertIntegerConversionArgumentOrder(loaded,
-            "NestedThenConversion", conversionFirst: false);
-        AssertIntegerConversionArgumentOrder(loaded,
-            "SequenceConversionThenNested", conversionFirst: true);
-        AssertIntegerConversionArgumentOrder(loaded,
-            "SequenceNestedThenConversion", conversionFirst: false);
+        AssertScalarConversionArgumentOrder(loaded, "ConversionThenNested",
+            "ReadNarrow", true, PrimitiveType.Int32,
+            PrimitiveType.Int8);
+        AssertScalarConversionArgumentOrder(loaded, "NestedThenConversion",
+            "ReadNarrow", false, PrimitiveType.Int32,
+            PrimitiveType.Int8);
+        AssertScalarConversionArgumentOrder(loaded,
+            "SequenceConversionThenNested", "ReadNarrow",
+            true, PrimitiveType.Int32, PrimitiveType.Int8);
+        AssertScalarConversionArgumentOrder(loaded,
+            "SequenceNestedThenConversion", "ReadNarrow",
+            false, PrimitiveType.Int32, PrimitiveType.Int8);
+        AssertScalarConversionArgumentOrder(loaded,
+            "FloatConversionThenNested", "Read",
+            true, PrimitiveType.Float64,
+            PrimitiveType.Int32);
+        AssertScalarConversionArgumentOrder(loaded,
+            "NestedThenFloatConversion", "Read",
+            false, PrimitiveType.Float64,
+            PrimitiveType.Int32);
+        AssertScalarConversionArgumentOrder(loaded,
+            "SequenceFloatConversionThenNested", "Read",
+            true, PrimitiveType.Float64,
+            PrimitiveType.Int32);
+        AssertScalarConversionArgumentOrder(loaded,
+            "SequenceNestedThenFloatConversion", "Read",
+            false, PrimitiveType.Float64,
+            PrimitiveType.Int32);
+        var image = NativeEmitter.EmitLibrary(loaded,
+            ["FloatConversionThenNested"], NativeRuntimePolicy.FailFast);
+        Assert.That(image[..2], Is.EqualTo(new byte[] {
+            (byte)'M', (byte)'Z',
+        }));
         var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
             "consumer.module", schemaIdentity, 1, []);
         var reloaded = TrRmExecutableCompiler.LoadStandard(
@@ -1394,14 +1465,34 @@ internal sealed class NativeCoreRegistrationTests
         AssertArgumentOrder(reloaded, "CheckedThenNested", 0, 1);
         AssertArgumentOrder(reloaded, "SequenceNestedThenChecked", 1, 0);
         AssertArgumentOrder(reloaded, "SequenceCheckedThenNested", 0, 1);
-        AssertIntegerConversionArgumentOrder(reloaded,
-            "ConversionThenNested", conversionFirst: true);
-        AssertIntegerConversionArgumentOrder(reloaded,
-            "NestedThenConversion", conversionFirst: false);
-        AssertIntegerConversionArgumentOrder(reloaded,
-            "SequenceConversionThenNested", conversionFirst: true);
-        AssertIntegerConversionArgumentOrder(reloaded,
-            "SequenceNestedThenConversion", conversionFirst: false);
+        AssertScalarConversionArgumentOrder(reloaded, "ConversionThenNested",
+            "ReadNarrow", true, PrimitiveType.Int32,
+            PrimitiveType.Int8);
+        AssertScalarConversionArgumentOrder(reloaded, "NestedThenConversion",
+            "ReadNarrow", false, PrimitiveType.Int32,
+            PrimitiveType.Int8);
+        AssertScalarConversionArgumentOrder(reloaded,
+            "SequenceConversionThenNested", "ReadNarrow",
+            true, PrimitiveType.Int32, PrimitiveType.Int8);
+        AssertScalarConversionArgumentOrder(reloaded,
+            "SequenceNestedThenConversion", "ReadNarrow",
+            false, PrimitiveType.Int32, PrimitiveType.Int8);
+        AssertScalarConversionArgumentOrder(reloaded,
+            "FloatConversionThenNested", "Read",
+            true, PrimitiveType.Float64,
+            PrimitiveType.Int32);
+        AssertScalarConversionArgumentOrder(reloaded,
+            "NestedThenFloatConversion", "Read",
+            false, PrimitiveType.Float64,
+            PrimitiveType.Int32);
+        AssertScalarConversionArgumentOrder(reloaded,
+            "SequenceFloatConversionThenNested", "Read",
+            true, PrimitiveType.Float64,
+            PrimitiveType.Int32);
+        AssertScalarConversionArgumentOrder(reloaded,
+            "SequenceNestedThenFloatConversion", "Read",
+            false, PrimitiveType.Float64,
+            PrimitiveType.Int32);
         AssertSequenceInstructionOrder(reemitted,
             "SequenceNestedThenChecked", nestedFirst: true,
             nestedCallCount: 2);
@@ -1419,6 +1510,18 @@ internal sealed class NativeCoreRegistrationTests
             expectedCallCount: 3);
         AssertConversionInstructionOrder(reemitted,
             "SequenceNestedThenConversion", conversionFirst: false,
+            expectedCallCount: 3);
+        AssertConversionInstructionOrder(reemitted,
+            "FloatConversionThenNested", conversionFirst: true,
+            expectedCallCount: 2);
+        AssertConversionInstructionOrder(reemitted,
+            "NestedThenFloatConversion", conversionFirst: false,
+            expectedCallCount: 2);
+        AssertConversionInstructionOrder(reemitted,
+            "SequenceFloatConversionThenNested", conversionFirst: true,
+            expectedCallCount: 3);
+        AssertConversionInstructionOrder(reemitted,
+            "SequenceNestedThenFloatConversion", conversionFirst: false,
             expectedCallCount: 3);
         var pointerInputCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse("""
@@ -1635,8 +1738,10 @@ internal sealed class NativeCoreRegistrationTests
                 Is.EqualTo(BoundIntegerOverflowBehavior.Checked));
         }
 
-        static void AssertIntegerConversionArgumentOrder(
-            BoundProgram program, string functionName, bool conversionFirst)
+        static void AssertScalarConversionArgumentOrder(
+            BoundProgram program, string functionName, string memberName,
+            bool conversionFirst, PrimitiveType sourceType,
+            PrimitiveType destinationType)
         {
             var function = program.Functions.Single(
                 candidate => candidate.Name == functionName);
@@ -1646,14 +1751,14 @@ internal sealed class NativeCoreRegistrationTests
                 {
                     if (expression is BoundCall call
                         && call.ForeignInterfaceCall?.Member.Name
-                            == "ReadNarrow")
+                            == memberName)
                     {
                         outerCall = call;
                     }
                 });
             var selectedCall = outerCall
                 ?? throw new AssertionException(
-                    "Expected the FNI ReadNarrow call.");
+                    $"Expected the FNI {memberName} call.");
             Assert.That(selectedCall.Arguments.Length, Is.EqualTo(2));
             Assert.That(selectedCall.ParameterIndex(0),
                 Is.EqualTo(conversionFirst ? 0 : 1));
@@ -1663,9 +1768,9 @@ internal sealed class NativeCoreRegistrationTests
             var conversion = selectedCall.Arguments[conversionIndex];
             Assert.That(conversion, Is.TypeOf<BoundCast>());
             var cast = (BoundCast)conversion;
-            Assert.That(cast.Type, Is.EqualTo(PrimitiveType.Int8));
+            Assert.That(cast.Type, Is.EqualTo(destinationType));
             Assert.That(cast.Operand, Is.TypeOf<BoundRead>());
-            Assert.That(cast.Operand.Type, Is.EqualTo(PrimitiveType.Int32));
+            Assert.That(cast.Operand.Type, Is.EqualTo(sourceType));
             var nestedIndex = conversionFirst ? 1 : 0;
             var nestedCallFound = false;
             _ = BoundTreeTraversal.VisitExpressions(
@@ -7656,7 +7761,7 @@ internal sealed class NativeCoreRegistrationTests
         var program = CreatePointerOutputConsumerProgram(
             functionPointerOutput: true,
             assertFunctionPointerProviderReplacement: true,
-            checkedInputConversion: true);
+            floatInputConversion: true);
         var function = program.Functions.Single(
             static function => function.Name == "InvokePointer");
         Assert.That(NativeFunctionPointerTypes.IsType(function.ReturnType),
@@ -7730,7 +7835,7 @@ internal sealed class NativeCoreRegistrationTests
         string successPredicate = "status != 0",
         bool functionPointerOutput = false,
         bool assertFunctionPointerProviderReplacement = false,
-        bool checkedInputConversion = false)
+        bool floatInputConversion = false)
     {
         const string schemaIdentity
             = "trrm/1-draft-foreign-native-interface-parameter-surface-1";
@@ -7753,8 +7858,8 @@ internal sealed class NativeCoreRegistrationTests
                 [return: Terrum.CodeAnalysis.ForwardsBacking(
                     nameof(source), nameof(fallback))]
                 """;
-        var tagType = checkedInputConversion ? "int8" : "int32";
-        var tagExpression = checkedInputConversion ? "int8(tag)" : "tag";
+        var tagSourceType = floatInputConversion ? "float64" : "int32";
+        var tagExpression = floatInputConversion ? "int32(tag)" : "tag";
         var providerSource = $$"""
             using Terrum.Interop;
             [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
@@ -7763,7 +7868,7 @@ internal sealed class NativeCoreRegistrationTests
                 [param(value): NativeOutput(
                     When: NativeOutputCondition.{{outputCondition}})]
                 public unsafe int32 TryGetPointer(ptr<int32> source,
-                    {{tagType}} tag,
+                    int32 tag,
                     {{outputParameterDependencies}}
                     write ptr<{{outputValueType}}> value);
             }
@@ -7771,7 +7876,7 @@ internal sealed class NativeCoreRegistrationTests
         var consumerSource = $$"""
             {{outputReturnDependencies}}
             {{outputValueType}} InvokePointer(ptr<void> receiver,
-                ptr<int32> source, int32 tag,
+                ptr<int32> source, {{tagSourceType}} tag,
                 {{outputValueType}} fallback) {
                 init {{outputValueType}} value;
                 unsafe {
@@ -7832,9 +7937,9 @@ internal sealed class NativeCoreRegistrationTests
             string.Join(Environment.NewLine,
                 consumerCompilation.Diagnostics));
         var consumerProgram = consumerCompilation.Program!;
-        if (checkedInputConversion)
+        if (floatInputConversion)
         {
-            AssertCheckedTagConversion(consumerProgram);
+            AssertFloatTagConversion(consumerProgram);
         }
         var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
             consumerProgram, consumerIdentity, schemaIdentity, 1, []);
@@ -7848,7 +7953,7 @@ internal sealed class NativeCoreRegistrationTests
             row => tables.Methods.GetName(row) == "InvokePointer");
         var body = tables.Bodies.GetRegisterBody(
             tables.Methods.GetBodyRow(methodRow), tables.Contracts.Count);
-        if (checkedInputConversion)
+        if (floatInputConversion)
         {
             Assert.That(body.GetBlockCode(0).ToArray().Contains((byte)0xD0),
                 Is.True);
@@ -7913,9 +8018,9 @@ internal sealed class NativeCoreRegistrationTests
         var loadedFunction = loaded.Functions.Single(
             static function => function.Name == "InvokePointer");
         AssertOutputType(loaded, loadedFunction.ReturnType);
-        if (checkedInputConversion)
+        if (floatInputConversion)
         {
-            AssertCheckedTagConversion(loaded);
+            AssertFloatTagConversion(loaded);
         }
         var successReturn = (BoundReturn)loadedFunction.Body.Statements
             .OfType<BoundIf>().Single().Then.Statements.Single();
@@ -7933,9 +8038,9 @@ internal sealed class NativeCoreRegistrationTests
         var reloadedFunction = reloaded.Functions.Single(
             static function => function.Name == "InvokePointer");
         AssertOutputType(reloaded, reloadedFunction.ReturnType);
-        if (checkedInputConversion)
+        if (floatInputConversion)
         {
-            AssertCheckedTagConversion(reloaded);
+            AssertFloatTagConversion(reloaded);
         }
         return reloaded;
 
@@ -7962,7 +8067,7 @@ internal sealed class NativeCoreRegistrationTests
             }
         }
 
-        static void AssertCheckedTagConversion(BoundProgram candidate)
+        static void AssertFloatTagConversion(BoundProgram candidate)
         {
             var function = candidate.Functions.Single(
                 static function => function.Name == "InvokePointer");
@@ -7986,9 +8091,9 @@ internal sealed class NativeCoreRegistrationTests
             Assert.That(selectedCall.Arguments[tagArgument],
                 Is.TypeOf<BoundCast>());
             var conversion = (BoundCast)selectedCall.Arguments[tagArgument];
-            Assert.That(conversion.Type, Is.EqualTo(PrimitiveType.Int8));
+            Assert.That(conversion.Type, Is.EqualTo(PrimitiveType.Int32));
             Assert.That(conversion.Operand.Type,
-                Is.EqualTo(PrimitiveType.Int32));
+                Is.EqualTo(PrimitiveType.Float64));
         }
     }
 
