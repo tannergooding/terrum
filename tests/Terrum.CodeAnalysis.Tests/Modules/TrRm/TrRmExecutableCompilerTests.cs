@@ -830,6 +830,11 @@ internal sealed class TrRmExecutableCompilerTests
                         public struct Payload {
                             public {{payloadFieldType}} Value;
                         }
+
+                        public int32 Describe(
+                            fnptr<int32, int32> callback) {
+                            return 0;
+                        }
                     }
                     """), layoutOptions);
             Assert.That(providerCompilation.HasErrors, Is.False,

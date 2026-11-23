@@ -5214,8 +5214,23 @@ public static partial class TrRmExecutableCompiler
                     }
                     else if (includesLayoutQueryProviderClosure)
                     {
-                        _ = LoadDevelopment(artifacts[index],
-                            TrRmArtifactSchema.Standard);
+                        var providerSchemaIdentity
+                            = schemaIdentities[index];
+                        if (TrRmArtifactSchemaFacts
+                            .IsSelectedTerrumFunctionPointerSchemaIdentity(
+                                providerSchemaIdentity))
+                        {
+                            _ = LoadDevelopment(artifacts[index],
+                                TrRmArtifactSchema.Standard,
+                                standardSchemaIdentity:
+                                    providerSchemaIdentity,
+                                selectedModuleRow: moduleRow);
+                        }
+                        else
+                        {
+                            _ = LoadDevelopment(artifacts[index],
+                                TrRmArtifactSchema.Standard);
+                        }
                     }
                     else
                     {
