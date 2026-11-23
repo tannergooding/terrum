@@ -5657,7 +5657,7 @@ int32 ParseStandaloneSourceNestedDo(
                 nestedBodyStatementId * 3];
         if (nestedBodyStatementKind == 12)
         {
-            if (nestedChildCount != 2 || childOrdinal != 0
+            if (nestedChildCount < 2 || childOrdinal != 0
                 || Host.StandaloneSourceStatements[
                     nestedBodyStatementId * 3 + 2]
                     != nestedControlNodeId)
@@ -5814,6 +5814,14 @@ int32 ParseStandaloneSourceWhileBody(int32 localCallableId,
                 cursor = cursor + 1;
                 continue;
             }
+            if (allowConditionalBreakThenBreak
+                && conditionalTransferKind != 0
+                && (IsStandaloneSourceWhileKeyword(cursor)
+                    || IsStandaloneSourceDoKeyword(cursor)
+                    || IsStandaloneSourceIfKeyword(cursor)))
+            {
+                return 2;
+            }
             if (IsStandaloneSourceWhileKeyword(cursor))
             {
                 init int32 afterNestedWhile;
@@ -5912,7 +5920,9 @@ int32 ParseStandaloneSourceWhileBody(int32 localCallableId,
                     break;
                 }
                 if (allowConditionalBreakThenBreak
-                    && !IsStandaloneSourceBreakKeyword(cursor))
+                    && (IsStandaloneSourceWhileKeyword(cursor)
+                        || IsStandaloneSourceDoKeyword(cursor)
+                        || IsStandaloneSourceIfKeyword(cursor)))
                 {
                     return 2;
                 }
@@ -11851,7 +11861,7 @@ int32 VerifyStandaloneDirectCalls()
                                 int32 conditionalExpressionId
                                     = Host.StandaloneSourceStatements[
                                         nestedDoBodyStatementId * 3 + 1];
-                                if (nestedDoChildCount != 2
+                                if (nestedDoChildCount < 2
                                     || childOrdinal != 0
                                     || Host.StandaloneSourceStatements[
                                         nestedDoBodyStatementId * 3 + 2]
