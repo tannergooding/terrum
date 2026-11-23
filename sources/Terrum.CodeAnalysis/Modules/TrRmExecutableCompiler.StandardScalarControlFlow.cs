@@ -33,11 +33,13 @@ public static partial class TrRmExecutableCompiler
     {
         if (body.BlockCount < 2 || body.HasExceptionDirectory
             || body.UsesNativePointerLoads || body.FieldCount != 0
-            || body.MethodCount != 0 || body.HomeCount < function.ParameterCount
+            || body.HomeCount < function.ParameterCount
             || body.RecordCount < body.BlockCount
             || function.DoesNotReturn
             || function.Variables.Length != function.ParameterCount
-            || (body.MapMask & ~0x13) != 0
+            || (body.MapMask & ~0x17) != 0
+            || (body.MethodCount != 0 && (body.MapMask & 0x04) == 0)
+            || (body.MethodCount == 0 && (body.MapMask & 0x04) != 0)
             || (function.ReturnType != PrimitiveType.Void
                 && !IsStandardScalarControlFlowType(function.ReturnType)))
         {
@@ -157,6 +159,7 @@ public static partial class TrRmExecutableCompiler
             = ImmutableArray.CreateBuilder<
                 StandardScalarControlFlowTerminator>(blockCount);
         var nextEdgeRecord = blockCount;
+        var callSiteRecordIndices = new HashSet<int>();
         var remainingWork = (long)SemanticVerifier.MaximumAnalysisVisits;
 
         void Visit()
@@ -227,6 +230,108 @@ public static partial class TrRmExecutableCompiler
                 var cell = Cell(blockIndex, homeIndex);
                 definitions[cell] = true;
                 written[homeIndex] = true;
+            }
+
+            void ReadCallSite(ReadOnlySpan<byte> instruction, byte opcode)
+            {
+                var callSiteRecordIndex = opcode switch {
+                    0x90 => instruction[1],
+                    0xE0 when instruction[1] == 0
+                        => BinaryPrimitives.ReadUInt16LittleEndian(
+                            instruction[2..]),
+                    0xE0 => throw Invalid(
+                        "A Standard scalar control-flow CallSite has reserved control bits."),
+                    _ => throw new InvalidOperationException(
+                        "A non-CallSite instruction was used as a CallSite reference."),
+                };
+                if (callSiteRecordIndex < blockCount
+                    || callSiteRecordIndex >= body.RecordCount
+                    || !callSiteRecordIndices.Add(callSiteRecordIndex))
+                {
+                    throw Invalid(
+                        "A Standard scalar control-flow CallSite index is duplicated or outside the record table.");
+                }
+
+                var callSite = body.GetRecord(callSiteRecordIndex);
+                if (callSite.Length < 20 || callSite[0] != 0x02
+                    || callSite[1] != 0
+                    || BinaryPrimitives.ReadUInt16LittleEndian(
+                        callSite[2..]) != 0
+                    || callSite[4] != 1
+                    || callSite[5] != 2
+                    || BinaryPrimitives.ReadUInt16LittleEndian(
+                        callSite[6..]) != 0
+                    || BinaryPrimitives.ReadUInt16LittleEndian(
+                        callSite[8..]) >= body.MethodCount
+                    || BinaryPrimitives.ReadUInt16LittleEndian(
+                        callSite[10..]) >= homeCount
+                    || BinaryPrimitives.ReadUInt32LittleEndian(
+                        callSite[16..]) != 0)
+                {
+                    throw Unsupported(
+                        "The Standard scalar control-flow subset requires direct scalar CallSites with Home results and no preparation.");
+                }
+
+                var resultHomeIndex
+                    = BinaryPrimitives.ReadUInt16LittleEndian(
+                        callSite[10..]);
+                if (homeRoles[resultHomeIndex] != 3)
+                {
+                    throw Invalid(
+                        "A Standard scalar control-flow CallSite result does not target a local Home.");
+                }
+                var inputCount = BinaryPrimitives.ReadUInt32LittleEndian(
+                    callSite[12..]);
+                if (inputCount
+                        > (uint)((callSite.Length - 20) / 4)
+                    || callSite.Length != 20 + (int)inputCount * 4)
+                {
+                    throw Invalid(
+                        "A Standard scalar control-flow CallSite input extent is invalid.");
+                }
+
+                for (var inputOrdinal = 0;
+                    inputOrdinal < (int)inputCount;
+                    inputOrdinal++)
+                {
+                    Visit();
+                    var inputOffset = 20 + (int)inputOrdinal * 4;
+                    var selectorKind = callSite[inputOffset];
+                    var sourceUse = callSite[inputOffset + 1];
+                    var selectorIndex
+                        = BinaryPrimitives.ReadUInt16LittleEndian(
+                            callSite[(inputOffset + 2)..]);
+                    if (sourceUse != 1)
+                    {
+                        throw Unsupported(
+                            "The Standard scalar control-flow CallSite requires completed scalar value inputs.");
+                    }
+                    if (selectorKind == 1)
+                    {
+                        if (selectorIndex >= 14)
+                        {
+                            throw Invalid(
+                                "A Standard scalar control-flow CallSite register input is outside the register map.");
+                        }
+                        continue;
+                    }
+                    if (selectorKind != 2
+                        || selectorIndex >= homeCount
+                        || homeRoles[selectorIndex] is not (2 or 3))
+                    {
+                        throw Invalid(
+                            "A Standard scalar control-flow CallSite Home input is invalid.");
+                    }
+                    if (homeRoles[selectorIndex] == 3
+                        && !written[selectorIndex])
+                    {
+                        uses[Cell(blockIndex, selectorIndex)] = true;
+                    }
+                }
+
+                var resultCell = Cell(blockIndex, resultHomeIndex);
+                definitions[resultCell] = true;
+                written[resultHomeIndex] = true;
             }
 
             for (var position = 0; position < code.Length;)
@@ -365,6 +470,11 @@ public static partial class TrRmExecutableCompiler
 
                 switch (opcode)
                 {
+                    case 0x90:
+                    case 0xE0:
+                        ReadCallSite(instruction, opcode);
+                        break;
+
                     case 0x07:
                     case 0x08:
                     case 0x14:
@@ -400,10 +510,22 @@ public static partial class TrRmExecutableCompiler
             terminators.Add(terminator);
         }
 
-        if (nextEdgeRecord != body.RecordCount)
+        if (nextEdgeRecord > body.RecordCount
+            || callSiteRecordIndices.Count
+                != body.RecordCount - nextEdgeRecord)
         {
             throw Invalid(
                 "A Standard scalar control-flow Body contains unused records.");
+        }
+        for (var recordIndex = nextEdgeRecord;
+            recordIndex < body.RecordCount;
+            recordIndex++)
+        {
+            if (!callSiteRecordIndices.Contains(recordIndex))
+            {
+                throw Invalid(
+                    "A Standard scalar control-flow Body contains an unreferenced CallSite record.");
+            }
         }
 
         for (var blockIndex = 0; blockIndex < blockCount; blockIndex++)
@@ -496,6 +618,8 @@ public static partial class TrRmExecutableCompiler
     private static TrRmScalarGraph DecodeStandardScalarControlFlowBody(
         TrRmRegisterBodyReader body, BoundFunction function,
         ImmutableArray<BoundVariable>.Builder variables,
+        ImmutableArray<BoundFunction>.Builder functions,
+        int[] functionIndexByMethodRow,
         TrRmTypeSpecTableReader typeSpecs, TrRmImportTableReader imports,
         List<NativePointerTypeDefinition> nativePointerTypes,
         int[] structureTypeByTypeDef,
@@ -712,6 +836,30 @@ public static partial class TrRmExecutableCompiler
                 }
 
                 homeValueVariables[homeIndex] = ReadRegister(sourceRegister);
+            }
+
+            void WriteHomeFromCall(int homeIndex, BoundExpression value)
+            {
+                if ((uint)homeIndex >= (uint)homeValueVariables.Length
+                    || homeRoles[homeIndex] != 3
+                    || homeValueVariables[homeIndex] >= 0
+                    || value.Type != homeTypes[homeIndex])
+                {
+                    throw Invalid(
+                        "A Standard scalar control-flow CallSite result does not match a fresh local Home.");
+                }
+
+                var variable = variables.Count;
+                if (variable >= SemanticVerifier.MaximumVariables)
+                {
+                    throw Unsupported(
+                        "The Standard scalar control-flow value inventory exceeds its limit.");
+                }
+                variables.Add(new BoundVariable(
+                    $"$trrm.callHome{homeIndex + 1}.block{blockIndex + 1}",
+                    value.Type, false, default));
+                operations.Add(new BoundLocal(variable, value, default));
+                homeValueVariables[homeIndex] = variable;
             }
 
             TrRmScalarEdge BuildEdge(int target)
@@ -996,6 +1144,152 @@ public static partial class TrRmExecutableCompiler
                         DecodeComparison(instruction, ReadRegisterValue,
                             WriteRegister);
                         break;
+
+                    case 0x90:
+                    case 0xE0:
+                    {
+                        var callSiteRecordIndex = opcode == 0x90
+                            ? instruction[1]
+                            : BinaryPrimitives.ReadUInt16LittleEndian(
+                                instruction[2..]);
+                        if (opcode == 0xE0 && instruction[1] != 0)
+                        {
+                            throw Invalid(
+                                "A Standard scalar control-flow CallSite has reserved control bits.");
+                        }
+
+                        var callSite = body.GetRecord(callSiteRecordIndex);
+                        if (callSite.Length < 20)
+                        {
+                            throw Invalid(
+                                "A Standard scalar control-flow CallSite is truncated.");
+                        }
+                        var methodMapIndex
+                            = BinaryPrimitives.ReadUInt16LittleEndian(
+                                callSite[8..]);
+                        var resultHomeIndex
+                            = BinaryPrimitives.ReadUInt16LittleEndian(
+                                callSite[10..]);
+                        var inputCount
+                            = BinaryPrimitives.ReadUInt32LittleEndian(
+                                callSite[12..]);
+                        if (callSite[0] != 0x02
+                            || callSite[1] != 0
+                            || BinaryPrimitives.ReadUInt16LittleEndian(
+                                callSite[2..]) != 0
+                            || callSite[4] != 1
+                            || callSite[5] != 2
+                            || BinaryPrimitives.ReadUInt16LittleEndian(
+                                callSite[6..]) != 0
+                            || methodMapIndex >= body.MethodCount
+                            || BinaryPrimitives.ReadUInt32LittleEndian(
+                                callSite[16..]) != 0
+                            || inputCount
+                                > (uint)((callSite.Length - 20) / 4)
+                            || callSite.Length
+                                != 20 + (int)inputCount * 4)
+                        {
+                            throw Invalid(
+                                "A Standard scalar control-flow CallSite has an invalid shape.");
+                        }
+
+                        var methodToken
+                            = BinaryPrimitives.ReadUInt32LittleEndian(
+                                body.MethodMap.Slice(
+                                    methodMapIndex * sizeof(uint),
+                                    sizeof(uint)));
+                        if ((methodToken >> 24) != 0x16)
+                        {
+                            throw Unsupported(
+                                "The Standard scalar control-flow CallSite subset requires local MethodDef targets.");
+                        }
+                        var targetFunction
+                            = ResolveStandardInitializationBodyMethodMapFunction(
+                                methodToken, imports,
+                                functionIndexByMethodRow, functions);
+                        var target = functions[targetFunction];
+                        if (target.IsExternal
+                            || target.ModuleImport is not null
+                            || target.DirectNativeImport is not null
+                            || target.NativeVTableMethod is not null
+                            || target.IsConstructor
+                            || target.IsClassConstructor
+                            || target.ClassConstructor != -1
+                            || target.DeclaringStruct is not null
+                            || target.IsStatic || target.IsCleanup
+                            || target.PropertyName is not null
+                            || target.Intrinsic != BoundIntrinsic.None
+                            || target.RequiresUnsafeCaller
+                            || target.DoesNotReturn
+                            || target.ReturnType == PrimitiveType.Void
+                            || !IsStandardScalarControlFlowType(
+                                target.ReturnType)
+                            || target.ParameterCount != (int)inputCount
+                            || target.Variables.Length
+                                < target.ParameterCount)
+                        {
+                            throw Unsupported(
+                                "The Standard scalar control-flow CallSite target is outside the safe local scalar-call subset.");
+                        }
+
+                        var arguments
+                            = ImmutableArray.CreateBuilder<BoundExpression>(
+                                target.ParameterCount);
+                        for (var formal = 0;
+                            formal < target.ParameterCount;
+                            formal++)
+                        {
+                            var inputOffset = 20 + formal * 4;
+                            var selectorKind = callSite[inputOffset];
+                            var sourceUse = callSite[inputOffset + 1];
+                            var selectorIndex
+                                = BinaryPrimitives
+                                    .ReadUInt16LittleEndian(
+                                        callSite[(inputOffset + 2)..]);
+                            var parameter = target.Variables[formal];
+                            if (sourceUse != 1 || parameter.IsOut
+                                || parameter.IsInit
+                                || parameter.IsImplicitRef
+                                || parameter.IsInitializationLocal
+                                || !IsStandardScalarControlFlowType(
+                                    parameter.Type))
+                            {
+                                throw Unsupported(
+                                    "The Standard scalar control-flow CallSite requires completed by-value scalar inputs.");
+                            }
+
+                            BoundExpression argument;
+                            if (selectorKind == 1)
+                            {
+                                argument
+                                    = ReadRegisterValue(selectorIndex);
+                            }
+                            else if (selectorKind == 2)
+                            {
+                                var homeVariable
+                                    = ReadHomeVariable(selectorIndex);
+                                argument = new BoundRead(homeVariable,
+                                    variables[homeVariable].Type, default);
+                            }
+                            else
+                            {
+                                throw Invalid(
+                                    "A Standard scalar control-flow CallSite input selector is invalid.");
+                            }
+                            if (argument.Type != parameter.Type)
+                            {
+                                throw Invalid(
+                                    "A Standard scalar control-flow CallSite input type differs from its formal.");
+                            }
+                            arguments.Add(argument);
+                        }
+
+                        WriteHomeFromCall(resultHomeIndex,
+                            new BoundCall(targetFunction,
+                                arguments.MoveToImmutable(),
+                                target.ReturnType, default));
+                        break;
+                    }
 
                     case 0xD3:
                     {

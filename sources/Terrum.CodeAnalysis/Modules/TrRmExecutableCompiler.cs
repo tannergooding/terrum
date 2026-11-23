@@ -9291,8 +9291,9 @@ public static partial class TrRmExecutableCompiler
                     else if (standardScalarControlFlowBody)
                     {
                         indexed = DecodeStandardScalarControlFlowBody(
-                            registerBody, declaration, variables, types,
-                            imports, nativePointerTypeDefinitions,
+                            registerBody, declaration, variables,
+                            functions, functionIndexByMethodRow,
+                            types, imports, nativePointerTypeDefinitions,
                             structureTypeByTypeDef,
                             checkedReferenceTypeDefinitions,
                             checkedReferenceTypeIndexes,
