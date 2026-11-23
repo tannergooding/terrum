@@ -2209,7 +2209,7 @@ int32 AppendStandaloneSourcePlace(int32 bodyId, int32 typeId,
         || count >= Host.StandaloneSourcePlaces.Length / 5
         || bodyId < 0 || bodyId >= Host.StandaloneSourceBodyCount[0]
         || typeId <= 0 || typeId > Host.StandaloneTypeFactCount[0]
-        || (placeKind != 1 && placeKind != 2)
+        || (placeKind < 1 || placeKind > 3)
         || targetIndex < 0
         || targetIndex >= Host.StandaloneSourceLocalCount[0])
     {
@@ -3670,6 +3670,79 @@ bool IsStandaloneSourceConstructionType(int32 typeId)
         || typeCode == 0x14 || typeCode == 0x15;
 }
 
+bool IsStandaloneSourceIsKeyword(int32 tokenIndex)
+{
+    init int32 kind;
+    init int32 start;
+    init int32 length;
+    return TryReadStandaloneSourceToken(tokenIndex,
+            ref init kind, ref init start, ref init length)
+        && kind == 2 && length == 2
+        && Host.Source[start] == char16(105)
+        && Host.Source[start + 1] == char16(115);
+}
+
+int32 TryGetStandaloneLocalInitTest(int32 localCallableId,
+    int32 tokenStart, int32 tokenEnd,
+    ref<init int32> localIdResult,
+    ref<init int32> stateResult)
+    ensure return == 0
+        ? (*localIdResult is init && *stateResult is init) : true
+{
+    if (tokenStart < 0 || tokenStart >= tokenEnd
+        || tokenEnd > Host.Tokens.Length / 3)
+    {
+        return 2;
+    }
+    if (tokenEnd - tokenStart < 3
+        || !IsStandaloneSourceIsKeyword(tokenEnd - 2)
+        || !IsStandaloneSourceInitKeyword(tokenEnd - 1))
+    {
+        return 1;
+    }
+
+    mut int32 localStart = tokenStart;
+    mut int32 localEnd = tokenEnd - 2;
+    while (localStart < localEnd
+        && Host.Tokens[localStart * 3] == 46)
+    {
+        init int32 closingToken;
+        if (!FindStandaloneMatchingClose(localStart, localEnd,
+                46, 47, ref init closingToken)
+            || closingToken + 1 != localEnd)
+        {
+            return 2;
+        }
+        localStart = localStart + 1;
+        localEnd = closingToken;
+    }
+    if (localEnd != localStart + 1
+        || Host.Tokens[localStart * 3] != 2)
+    {
+        return 2;
+    }
+    int32 localId
+        = FindStandaloneSourceLocal(localCallableId, localStart);
+    if (localId < 0)
+    {
+        return 2;
+    }
+    int32 localOffset = localId * 10;
+    int32 localState
+        = Host.StandaloneSourceLocalStates[localId];
+    if (localStart
+            < Host.StandaloneSourceLocals[localOffset + 6]
+        || localState < 0 || localState > 1
+        || GetStandaloneSourceUse(
+            Host.StandaloneSourceLocals[localOffset + 2]) == 5)
+    {
+        return 2;
+    }
+    *localIdResult = localId;
+    *stateResult = localState;
+    return 0;
+}
+
 bool CanBindStandaloneSourceArgument(int32 localCallableId,
     int32 tokenStart, int32 tokenEnd, int32 expectedTypeId,
     int32 depth)
@@ -3728,6 +3801,20 @@ bool CanBindStandaloneSourceArgument(int32 localCallableId,
             && CanBindStandaloneSourceArgument(localCallableId,
                 binaryOperator + 1, tokenEnd, expectedTypeId,
                 depth + 1);
+    }
+
+    init int32 initTestLocalId;
+    init int32 initTestState;
+    int32 initTestStatus = TryGetStandaloneLocalInitTest(
+        localCallableId, tokenStart, tokenEnd,
+        ref init initTestLocalId, ref init initTestState);
+    if (initTestStatus == 0)
+    {
+        return IsStandaloneLogicalNotType(expectedTypeId);
+    }
+    if (initTestStatus != 1)
+    {
+        return false;
     }
 
     int32 kind = Host.Tokens[tokenStart * 3];
@@ -4708,6 +4795,59 @@ int32 ParseStandaloneSourceExpression(int32 localCallableId,
     if (depth > 64 || tokenIndex < 0 || tokenIndex >= tokenEnd)
     {
         return 2;
+    }
+
+    init int32 initTestLocalId;
+    init int32 initTestState;
+    int32 initTestStatus = TryGetStandaloneLocalInitTest(
+        localCallableId, tokenIndex, tokenEnd,
+        ref init initTestLocalId, ref init initTestState);
+    if (initTestStatus == 0)
+    {
+        mut int32 resultTypeId = expectedTypeId;
+        if (resultTypeId >= 0)
+        {
+            if (!IsStandaloneLogicalNotType(resultTypeId))
+            {
+                return 2;
+            }
+        }
+        else
+        {
+            int32 boolTypeStatus
+                = InternStandaloneCallableTypeFact(
+                    0, 1, false, ref init resultTypeId);
+            if (boolTypeStatus != 0)
+            {
+                return boolTypeStatus;
+            }
+        }
+        int32 localTypeId
+            = Host.StandaloneSourceLocals[
+                initTestLocalId * 10 + 2];
+        init int32 placeId;
+        int32 placeStatus = AppendStandaloneSourcePlace(
+            localCallableId, localTypeId, 3,
+            initTestLocalId, -1, ref init placeId);
+        if (placeStatus != 0)
+        {
+            return placeStatus;
+        }
+        init int32 expressionId;
+        int32 appendStatus = AppendStandaloneSourceExpression(
+            bodyId, 26, resultTypeId, placeId, initTestState,
+            0, 0, -1, expressionFirst, ref init expressionId);
+        if (appendStatus != 0)
+        {
+            return appendStatus;
+        }
+        *expressionIdResult = expressionId;
+        *nextTokenResult = tokenEnd;
+        return 0;
+    }
+    if (initTestStatus != 1)
+    {
+        return initTestStatus;
     }
 
     int32 binaryOperator
@@ -6087,7 +6227,7 @@ int32 VerifyStandaloneDirectCalls()
             if (Host.StandaloneSourcePlaces[placeOffset] != bodyId
                 || placeTypeId <= 0
                 || placeTypeId > Host.StandaloneTypeFactCount[0]
-                || (placeKind != 1 && placeKind != 2)
+                || (placeKind < 1 || placeKind > 3)
                 || localId < bodyLocalFirst
                 || localId >= bodyLocalFirst + bodyLocalCount
                 || Host.StandaloneSourcePlaces[placeOffset + 4] != -1)
@@ -6330,6 +6470,54 @@ int32 VerifyStandaloneDirectCalls()
                     || Host.StandaloneSourcePlaces[
                         placeOffset + 2] != 1
                     || GetStandaloneSourceUse(expressionTypeId) == 5)
+                {
+                    return 3;
+                }
+                Host.StandaloneSourcePlaceUseCounts[operand0] = 1;
+            }
+            else if (expressionKind == 26)
+            {
+                int32 stateAtTest
+                    = Host.StandaloneSourceExpressions[
+                        expressionOffset + 3];
+                int32 localId
+                    = operand0 >= 0
+                        && operand0 < placeCount
+                        ? Host.StandaloneSourcePlaces[
+                            operand0 * 5 + 3] : -1;
+                if (Host.StandaloneTypeFacts[
+                        expressionTypeId * 3] != 0
+                    || Host.StandaloneTypeFacts[
+                        expressionTypeId * 3 + 1] != 1
+                    || operand0 < bodyPlaceFirst
+                    || operand0 >= bodyPlaceFirst + bodyPlaceCount
+                    || Host.StandaloneSourcePlaceUseCounts[
+                        operand0] != 0
+                    || (stateAtTest != 0 && stateAtTest != 1)
+                    || Host.StandaloneSourceExpressions[
+                        expressionOffset + 4] != 0
+                    || Host.StandaloneSourceExpressions[
+                        expressionOffset + 5] != 0
+                    || Host.StandaloneSourceExpressions[
+                        expressionOffset + 6] != -1)
+                {
+                    return 3;
+                }
+                int32 placeOffset = operand0 * 5;
+                if (Host.StandaloneSourcePlaces[placeOffset] != bodyId
+                    || Host.StandaloneSourcePlaces[
+                        placeOffset + 2] != 3
+                    || localId < bodyLocalFirst
+                    || localId >= bodyLocalFirst + bodyLocalCount
+                    || Host.StandaloneSourceLocals[localId * 10]
+                        != bodyId
+                    || Host.StandaloneSourceLocals[
+                        localId * 10 + 2]
+                        != Host.StandaloneSourcePlaces[
+                            placeOffset + 1]
+                    || GetStandaloneSourceUse(
+                        Host.StandaloneSourcePlaces[
+                            placeOffset + 1]) == 5)
                 {
                     return 3;
                 }

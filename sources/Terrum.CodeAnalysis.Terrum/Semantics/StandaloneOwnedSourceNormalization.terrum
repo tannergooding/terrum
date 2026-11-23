@@ -1112,6 +1112,91 @@ int32 NormalizeStandaloneSourceExpression(int32 bodyId,
         *terminatedResult = false;
         return 0;
     }
+    if (expressionKind == 26)
+    {
+        int32 placeId
+            = Host.StandaloneSourceExpressions[expressionOffset + 2];
+        int32 stateAtTest
+            = Host.StandaloneSourceExpressions[expressionOffset + 3];
+        int32 bodyPlaceRangeOffset = bodyId * 2;
+        int32 bodyPlaceFirst
+            = Host.StandaloneSourceBodyPlaceRanges[
+                bodyPlaceRangeOffset];
+        int32 bodyPlaceCount
+            = Host.StandaloneSourceBodyPlaceRanges[
+                bodyPlaceRangeOffset + 1];
+        if (!IsStandaloneLogicalNotType(typeId)
+            || placeId < bodyPlaceFirst
+            || placeId >= bodyPlaceFirst + bodyPlaceCount
+            || (stateAtTest != 0 && stateAtTest != 1)
+            || Host.StandaloneSourceExpressions[
+                expressionOffset + 4] != 0
+            || Host.StandaloneSourceExpressions[
+                expressionOffset + 5] != 0
+            || Host.StandaloneSourceExpressions[
+                expressionOffset + 6] != -1)
+        {
+            return 3;
+        }
+        int32 placeOffset = placeId * 5;
+        int32 localId
+            = Host.StandaloneSourcePlaces[placeOffset + 3];
+        int32 localRangeOffset = bodyId * 2;
+        int32 localFirst
+            = Host.StandaloneSourceBodyLocalRanges[
+                localRangeOffset];
+        int32 localCount
+            = Host.StandaloneSourceBodyLocalRanges[
+                localRangeOffset + 1];
+        if (Host.StandaloneSourcePlaces[placeOffset] != bodyId
+            || Host.StandaloneSourcePlaces[placeOffset + 2] != 3
+            || localId < localFirst
+            || localId >= localFirst + localCount
+            || Host.StandaloneSourceLocals[localId * 10 + 2]
+                != Host.StandaloneSourcePlaces[placeOffset + 1])
+        {
+            return 3;
+        }
+
+        int32 constantFirst
+            = Host.StandaloneNormalizedBodies[bodyId * 12 + 3];
+        int32 homeFirst
+            = Host.StandaloneNormalizedBodies[bodyId * 12 + 1];
+        init int32 constantId;
+        int32 constantStatus = AppendStandaloneNormalizedConstant(
+            bodyId, constantFirst, typeId,
+            stateAtTest == 0 ? 1 : 0, 0,
+            ref init constantId);
+        if (constantStatus != 0)
+        {
+            return constantStatus;
+        }
+        init int32 resultHomeId;
+        int32 homeStatus = AppendStandaloneNormalizedHome(
+            bodyId, homeFirst, 3, typeId, 0,
+            ref init resultHomeId);
+        if (homeStatus != 0)
+        {
+            return homeStatus;
+        }
+        int32 operationStatus = AppendStandaloneNormalizedOperation(
+            bodyId, 1, constantId, 0, 0);
+        if (operationStatus != 0)
+        {
+            return operationStatus;
+        }
+        operationStatus = AppendStandaloneNormalizedOperation(
+            bodyId, 2, resultHomeId, 0, 0);
+        if (operationStatus != 0)
+        {
+            return operationStatus;
+        }
+        *selectorKindResult = 2;
+        *sourceUseResult = 1;
+        *selectorIndexResult = resultHomeId;
+        *terminatedResult = false;
+        return 0;
+    }
     if (expressionKind == 6 || expressionKind == 8)
     {
         int32 operandExpressionId
