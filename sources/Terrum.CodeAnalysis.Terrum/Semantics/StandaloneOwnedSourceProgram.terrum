@@ -5389,20 +5389,22 @@ int32 ParseStandaloneSourceNestedWhile(
             return 2;
         }
     }
-    int32 breakStatementId
+    int32 transferStatementId
         = Host.StandaloneSourceIfChildren[
             nestedChildFirst + nestedChildCount - 1];
-    if (breakStatementId < 0
-        || breakStatementId
+    if (transferStatementId < 0
+        || transferStatementId
             >= Host.StandaloneSourceStatementCount[0]
         || Host.StandaloneSourceStatementParentIds[
-            breakStatementId] != nestedStatementId
+            transferStatementId] != nestedStatementId
+        || (Host.StandaloneSourceStatements[
+                transferStatementId * 3] != 8
+            && Host.StandaloneSourceStatements[
+                transferStatementId * 3] != 9)
         || Host.StandaloneSourceStatements[
-            breakStatementId * 3] != 8
+            transferStatementId * 3 + 1] != -1
         || Host.StandaloneSourceStatements[
-            breakStatementId * 3 + 1] != -1
-        || Host.StandaloneSourceStatements[
-            breakStatementId * 3 + 2] != nestedControlNodeId)
+            transferStatementId * 3 + 2] != nestedControlNodeId)
     {
         return 2;
     }
@@ -11348,20 +11350,23 @@ int32 VerifyStandaloneDirectCalls()
                                     = assignmentLocalUseCount + 1;
                             }
                         }
-                        int32 nestedBreakStatementId
+                        int32 nestedTransferStatementId
                             = Host.StandaloneSourceIfChildren[
                                 nestedChildFirst + nestedChildCount - 1];
-                        if (nestedBreakStatementId < 0
-                            || nestedBreakStatementId
+                        if (nestedTransferStatementId < 0
+                            || nestedTransferStatementId
                                 >= Host.StandaloneSourceStatementCount[0]
                             || Host.StandaloneSourceStatementParentIds[
-                                nestedBreakStatementId] != childStatementId
+                                nestedTransferStatementId]
+                                != childStatementId
+                            || (Host.StandaloneSourceStatements[
+                                    nestedTransferStatementId * 3] != 8
+                                && Host.StandaloneSourceStatements[
+                                    nestedTransferStatementId * 3] != 9)
                             || Host.StandaloneSourceStatements[
-                                nestedBreakStatementId * 3] != 8
+                                nestedTransferStatementId * 3 + 1] != -1
                             || Host.StandaloneSourceStatements[
-                                nestedBreakStatementId * 3 + 1] != -1
-                            || Host.StandaloneSourceStatements[
-                                nestedBreakStatementId * 3 + 2]
+                                nestedTransferStatementId * 3 + 2]
                                 != nestedLoopNodeId)
                         {
                             return 3;
