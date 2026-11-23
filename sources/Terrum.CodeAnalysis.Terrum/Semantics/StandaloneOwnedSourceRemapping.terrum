@@ -1545,6 +1545,7 @@ int32 VerifyStandaloneRewrittenSourceArenas()
             mut int32 assignedTypeId = -1;
             mut bool sameAssignedLocal = true;
             mut bool allAssignedLocalsMutable = true;
+            mut bool sawLoopTransfer = false;
             for (mut int32 childOrdinal = 0;
             childOrdinal < trueCount + falseCount;
             childOrdinal = childOrdinal + 1)
@@ -1571,8 +1572,25 @@ int32 VerifyStandaloneRewrittenSourceArenas()
             int32 currentChildKind
                 = Host.StandaloneSourceStatements[
                     childStatementOffset];
-            if ((currentChildKind != 1 && currentChildKind != 5)
-                || (controlStatementKind == 7
+            if (controlStatementKind == 7
+                && (currentChildKind == 8 || currentChildKind == 9))
+            {
+                if (sawLoopTransfer
+                    || childOrdinal != trueCount + falseCount - 1
+                    || Host.StandaloneSourceStatements[
+                        childStatementOffset + 1] != -1
+                    || Host.StandaloneSourceStatements[
+                        childStatementOffset + 2] != ifNodeId)
+                {
+                    return 3;
+                }
+                sawLoopTransfer = true;
+                continue;
+            }
+            if ((controlStatementKind == 7
+                    && (sawLoopTransfer || currentChildKind != 5))
+                || (controlStatementKind != 7
+                    && currentChildKind != 1
                     && currentChildKind != 5))
             {
                 return 3;

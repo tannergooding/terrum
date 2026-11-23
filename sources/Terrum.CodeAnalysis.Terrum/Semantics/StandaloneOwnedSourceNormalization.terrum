@@ -1059,6 +1059,7 @@ int32 NormalizeStandaloneSourceWhile(int32 bodyId,
     }
     int32 bodyOperationFirst
         = Host.StandaloneNormalizedOperationCount[0];
+    mut int32 bodyEndTarget = 1;
     for (mut int32 childIndex = 0;
         childIndex < childCount;
         childIndex = childIndex + 1)
@@ -1066,14 +1067,36 @@ int32 NormalizeStandaloneSourceWhile(int32 bodyId,
         int32 childStatementId
             = Host.StandaloneSourceIfChildren[
                 childFirst + childIndex];
-        int32 childStatementOffset = childStatementId * 3;
         if (childStatementId < 0
             || childStatementId
-                >= Host.StandaloneSourceStatementCount[0]
-            || Host.StandaloneSourceStatementParentIds[
+                >= Host.StandaloneSourceStatementCount[0])
+        {
+            return 3;
+        }
+        int32 childStatementOffset = childStatementId * 3;
+        int32 childKind
+            = Host.StandaloneSourceStatements[
+                childStatementOffset];
+        if (Host.StandaloneSourceStatementParentIds[
                 childStatementId] != statementId
-            || Host.StandaloneSourceStatements[
-                childStatementOffset] != 5)
+            || (childKind != 5 && childKind != 8 && childKind != 9))
+        {
+            return 3;
+        }
+        if (childKind == 8 || childKind == 9)
+        {
+            if (childIndex != childCount - 1
+                || Host.StandaloneSourceStatements[
+                    childStatementOffset + 1] != -1
+                || Host.StandaloneSourceStatements[
+                    childStatementOffset + 2] != loopNodeId)
+            {
+                return 3;
+            }
+            bodyEndTarget = childKind == 8 ? 3 : 1;
+            continue;
+        }
+        if (bodyEndTarget != 1)
         {
             return 3;
         }
@@ -1094,7 +1117,7 @@ int32 NormalizeStandaloneSourceWhile(int32 bodyId,
     init int32 bodyBlockIndex;
     int32 bodyBlockStatus = AppendStandaloneNormalizedBlock(
         bodyId, 2, bodyOperationFirst, bodyOperationCount,
-        3, 0, 0, 0, 1, -1, 0, 0, 0, -1, -1, 0,
+        3, 0, 0, 0, bodyEndTarget, -1, 0, 0, 0, -1, -1, 0,
         ref init bodyBlockIndex);
     if (bodyBlockStatus != 0)
     {
