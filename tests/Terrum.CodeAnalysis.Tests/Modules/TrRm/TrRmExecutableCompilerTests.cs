@@ -5194,6 +5194,42 @@ internal sealed class TrRmExecutableCompilerTests
         }
         Assert.DoesNotThrow(() => SemanticVerifier.VerifyLibrary(loaded));
 
+        var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(loaded,
+            "sample-reemitted", schemaIdentity, targetRequirement);
+        var reemitted = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, reemittedArtifact),
+            "sample-reemitted", Array.Empty<TrRmStandardArtifactInput>());
+        Assert.That(reemitted.Functions, Has.Length.EqualTo(2));
+        Assert.DoesNotThrow(() =>
+            SemanticVerifier.VerifyLibrary(reemitted));
+        foreach (var function in reemitted.Functions)
+        {
+            var loops = new List<BoundWhile>();
+            var breaks = new List<BoundBreak>();
+            Assert.That(BoundTreeTraversal.VisitStatements(function.Body,
+                statement => {
+                    if (statement is BoundWhile loop)
+                    {
+                        loops.Add(loop);
+                    }
+                    else if (statement is BoundBreak transfer)
+                    {
+                        breaks.Add(transfer);
+                    }
+                }), Is.True);
+            Assert.That(loops, Has.Count.EqualTo(2));
+            Assert.That(breaks, Has.Count.EqualTo(1));
+            Assert.That(breaks[0].TargetDepth, Is.EqualTo(1));
+            Assert.That(function.Variables.Any(variable =>
+                variable.Type == PrimitiveType.TypeIdentity), Is.False);
+            var returned = (BoundReturn)function.Body.Statements[^1];
+            var comparison = (BoundBinary)returned.Value!;
+            Assert.That(comparison.Left,
+                Is.TypeOf<BoundTypeIdentityQuery>());
+            Assert.That(comparison.Right,
+                Is.TypeOf<BoundTypeIdentityQuery>());
+        }
+
         var singleFunctionArtifact = TrRmExecutableCompiler.EmitStandard(
             Compile(sameTypeSource, library: true), "sample", schemaIdentity,
             targetRequirement);
@@ -5268,6 +5304,28 @@ internal sealed class TrRmExecutableCompilerTests
             Functions = functions.ToImmutable(),
         };
         Assert.That(NativeJit.Execute(programWithLoadedLoops,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(1));
+
+        var reemittedFunctionsByName = reemitted.Functions.ToDictionary(
+            function => function.Name);
+        var reemittedFunctions = programWithLoadedLoops.Functions.ToBuilder();
+        var reemittedFunctionCount = 0;
+        for (var functionIndex = 0;
+            functionIndex < reemittedFunctions.Count; functionIndex++)
+        {
+            if (reemittedFunctionsByName.TryGetValue(
+                    reemittedFunctions[functionIndex].Name,
+                    out var reemittedFunction))
+            {
+                reemittedFunctions[functionIndex] = reemittedFunction;
+                reemittedFunctionCount++;
+            }
+        }
+        Assert.That(reemittedFunctionCount, Is.EqualTo(2));
+        var programWithReemittedLoops = programWithLoadedLoops with {
+            Functions = reemittedFunctions.ToImmutable(),
+        };
+        Assert.That(NativeJit.Execute(programWithReemittedLoops,
             NativeRuntimePolicy.FailFast), Is.EqualTo(1));
     }
 
