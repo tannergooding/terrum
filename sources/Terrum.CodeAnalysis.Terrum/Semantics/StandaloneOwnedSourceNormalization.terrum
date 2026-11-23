@@ -322,6 +322,8 @@ bool ValidateStandaloneNormalizationBuffers()
         && Host.StandaloneDirectCallTraversalSeen.Length
             == tokenCapacity
         && Host.StandaloneDirectCallTraversalExpressionStates.Length
+            == tokenCapacity
+        && Host.StandaloneLazyBooleanLeafCounts.Length
             == tokenCapacity;
 }
 
@@ -437,6 +439,12 @@ void ClearStandaloneNormalizedProgram()
         index = index + 1)
     {
         Host.StandaloneDirectCallTraversalExpressionStates[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneLazyBooleanLeafCounts.Length;
+        index = index + 1)
+    {
+        Host.StandaloneLazyBooleanLeafCounts[index] = 0;
     }
 }
 
@@ -2231,6 +2239,99 @@ int32 CountStandaloneSourceLazyBooleanOperands(int32 bodyId,
     return 0;
 }
 
+int32 CountStandaloneSourceLazyBooleanTree(int32 bodyId,
+    int32 expressionId, int32 rootKind, int32 depth,
+    ref<init int32> leafCountResult,
+    ref<init bool> homogeneousResult)
+    ensure return == 0 ? (*leafCountResult is init
+        && *homogeneousResult is init) : true
+{
+    if (depth > 64 || bodyId < 0
+        || bodyId >= Host.StandaloneSourceBodyCount[0]
+        || expressionId < 0
+        || expressionId
+            >= Host.StandaloneSourceBodies[bodyId * 12 + 4]
+        || (rootKind != 35 && rootKind != 36))
+    {
+        return 3;
+    }
+
+    int32 expressionFirst
+        = Host.StandaloneSourceBodies[bodyId * 12 + 3];
+    int32 globalExpressionId = expressionFirst + expressionId;
+    if (globalExpressionId < expressionFirst
+        || globalExpressionId
+            >= Host.StandaloneSourceExpressionCount[0]
+        || globalExpressionId
+            >= Host.StandaloneLazyBooleanLeafCounts.Length)
+    {
+        return 3;
+    }
+    int32 expressionOffset = globalExpressionId * 8;
+    int32 expressionKind
+        = Host.StandaloneSourceExpressions[expressionOffset];
+    int32 typeId
+        = Host.StandaloneSourceExpressions[expressionOffset + 1];
+    if (!IsStandaloneLogicalNotType(typeId))
+    {
+        return 3;
+    }
+    if (expressionKind != 35 && expressionKind != 36)
+    {
+        if (expressionKind == 34)
+        {
+            return 2;
+        }
+        Host.StandaloneLazyBooleanLeafCounts[
+            globalExpressionId] = 1;
+        *leafCountResult = 1;
+        *homogeneousResult = true;
+        return 0;
+    }
+
+    int32 leftExpressionId
+        = Host.StandaloneSourceExpressions[expressionOffset + 2];
+    int32 rightExpressionId
+        = Host.StandaloneSourceExpressions[expressionOffset + 3];
+    if (leftExpressionId < 0 || leftExpressionId >= expressionId
+        || rightExpressionId < 0 || rightExpressionId >= expressionId
+        || leftExpressionId == rightExpressionId)
+    {
+        return 3;
+    }
+    init int32 leftLeafCount;
+    init bool leftHomogeneous;
+    int32 leftStatus = CountStandaloneSourceLazyBooleanTree(
+        bodyId, leftExpressionId, rootKind, depth + 1,
+        ref init leftLeafCount, ref init leftHomogeneous);
+    if (leftStatus != 0)
+    {
+        return leftStatus;
+    }
+    init int32 rightLeafCount;
+    init bool rightHomogeneous;
+    int32 rightStatus = CountStandaloneSourceLazyBooleanTree(
+        bodyId, rightExpressionId, rootKind, depth + 1,
+        ref init rightLeafCount, ref init rightHomogeneous);
+    if (rightStatus != 0)
+    {
+        return rightStatus;
+    }
+    if (leftLeafCount <= 0
+        || leftLeafCount > 32767 - rightLeafCount)
+    {
+        return 3;
+    }
+
+    int32 leafCount = leftLeafCount + rightLeafCount;
+    Host.StandaloneLazyBooleanLeafCounts[globalExpressionId]
+        = leafCount;
+    *leafCountResult = leafCount;
+    *homogeneousResult = expressionKind == rootKind
+        && leftHomogeneous && rightHomogeneous;
+    return 0;
+}
+
 int32 NormalizeStandaloneSourceLazyBooleanConditions(int32 bodyId,
     int32 expressionId, int32 expressionKind, int32 operandCount,
     int32 lastOperandId, int32 boolTypeId,
@@ -2381,6 +2482,243 @@ int32 AppendStandaloneNormalizedLazyBooleanConstantBlock(int32 bodyId,
         bodyId, blockId, operationFirst, operationCount, 3,
         0, 0, 0, returnBlockId, -1, 0, 0, 0, -1, -1, 0,
         ref init blockIndex);
+}
+
+int32 NormalizeStandaloneSourceLazyBooleanDecision(int32 bodyId,
+    int32 expressionId, int32 boolTypeId, int32 trueTarget,
+    int32 falseTarget, int32 finalBodyBlockCount, int32 depth,
+    int32 blockOrdinal, int32 edgeOrdinal,
+    ref<init int32> nextBlockOrdinalResult,
+    ref<init int32> nextEdgeOrdinalResult)
+    ensure return == 0 ? (*nextBlockOrdinalResult is init
+        && *nextEdgeOrdinalResult is init) : true
+{
+    if (depth > 64 || bodyId < 0
+        || bodyId >= Host.StandaloneSourceBodyCount[0]
+        || expressionId < 0
+        || expressionId
+            >= Host.StandaloneSourceBodies[bodyId * 12 + 4]
+        || trueTarget < 0 || trueTarget > 0xFFFF
+        || falseTarget < 0 || falseTarget > 0xFFFF
+        || finalBodyBlockCount <= 0
+        || finalBodyBlockCount > 0x1_0000
+        || blockOrdinal < 0
+        || blockOrdinal >= finalBodyBlockCount - 3
+        || edgeOrdinal < 0
+        || edgeOrdinal >= finalBodyBlockCount - 3)
+    {
+        return 3;
+    }
+
+    int32 expressionFirst
+        = Host.StandaloneSourceBodies[bodyId * 12 + 3];
+    int32 expressionOffset
+        = (expressionFirst + expressionId) * 8;
+    int32 expressionKind
+        = Host.StandaloneSourceExpressions[expressionOffset];
+    int32 expressionTypeId
+        = Host.StandaloneSourceExpressions[expressionOffset + 1];
+    if (expressionTypeId != boolTypeId)
+    {
+        return 3;
+    }
+    if (expressionKind == 35 || expressionKind == 36)
+    {
+        int32 leftExpressionId
+            = Host.StandaloneSourceExpressions[expressionOffset + 2];
+        int32 rightExpressionId
+            = Host.StandaloneSourceExpressions[expressionOffset + 3];
+        int32 leftGlobalExpressionId
+            = expressionFirst + leftExpressionId;
+        if (leftExpressionId < 0
+            || leftExpressionId >= expressionId
+            || rightExpressionId < 0
+            || rightExpressionId >= expressionId
+            || leftExpressionId == rightExpressionId
+            || leftGlobalExpressionId < expressionFirst
+            || leftGlobalExpressionId
+                >= Host.StandaloneLazyBooleanLeafCounts.Length)
+        {
+            return 3;
+        }
+        int32 leftLeafCount
+            = Host.StandaloneLazyBooleanLeafCounts[
+                leftGlobalExpressionId];
+        int32 rightEntry = blockOrdinal + leftLeafCount;
+        if (leftLeafCount <= 0
+            || rightEntry <= blockOrdinal
+            || rightEntry >= finalBodyBlockCount - 3)
+        {
+            return 3;
+        }
+
+        int32 leftTrueTarget = expressionKind == 35
+            ? rightEntry : trueTarget;
+        int32 leftFalseTarget = expressionKind == 35
+            ? falseTarget : rightEntry;
+        init int32 afterLeftBlock;
+        init int32 afterLeftEdge;
+        int32 leftStatus = NormalizeStandaloneSourceLazyBooleanDecision(
+            bodyId, leftExpressionId, boolTypeId,
+            leftTrueTarget, leftFalseTarget, finalBodyBlockCount,
+            depth + 1, blockOrdinal, edgeOrdinal,
+            ref init afterLeftBlock, ref init afterLeftEdge);
+        if (leftStatus != 0)
+        {
+            return leftStatus;
+        }
+        if (afterLeftBlock != rightEntry)
+        {
+            return 3;
+        }
+        return NormalizeStandaloneSourceLazyBooleanDecision(
+            bodyId, rightExpressionId, boolTypeId,
+            trueTarget, falseTarget, finalBodyBlockCount,
+            depth + 1, rightEntry, afterLeftEdge,
+            ref init *nextBlockOrdinalResult,
+            ref init *nextEdgeOrdinalResult);
+    }
+    if (expressionKind == 34)
+    {
+        return 2;
+    }
+
+    int32 bodyBlockFirst
+        = Host.StandaloneNormalizedBodyBlockRanges[bodyId * 2];
+    if (bodyBlockFirst < 0
+        || Host.StandaloneNormalizedBlockCount[0]
+            != bodyBlockFirst + blockOrdinal)
+    {
+        return 3;
+    }
+    int32 operationFirst
+        = Host.StandaloneNormalizedOperationCount[0];
+    init int32 selectorKind;
+    init int32 sourceUse;
+    init int32 selectorIndex;
+    init bool terminated;
+    int32 expressionStatus = NormalizeStandaloneSourceExpression(
+        bodyId, expressionId, depth + 1,
+        ref init selectorKind, ref init sourceUse,
+        ref init selectorIndex, ref init terminated);
+    if (expressionStatus != 0)
+    {
+        return expressionStatus;
+    }
+    if (Host.StandaloneNormalizedBlockCount[0]
+            != bodyBlockFirst + blockOrdinal
+        || terminated || selectorKind != 2 || sourceUse != 1
+        || selectorIndex < 0)
+    {
+        return 2;
+    }
+    int32 operationCount
+        = Host.StandaloneNormalizedOperationCount[0] - operationFirst;
+    int32 edgeRecordIndex = finalBodyBlockCount + edgeOrdinal;
+    if (operationCount < 0 || edgeRecordIndex > 0xFFFF)
+    {
+        return 3;
+    }
+    init int32 blockIndex;
+    int32 blockStatus = AppendStandaloneNormalizedBlock(
+        bodyId, blockOrdinal, operationFirst, operationCount,
+        4, 0, 0, 0, trueTarget, falseTarget, 2, selectorIndex,
+        boolTypeId, edgeRecordIndex, -1, 0,
+        ref init blockIndex);
+    if (blockStatus != 0)
+    {
+        return blockStatus;
+    }
+    if (blockIndex != bodyBlockFirst + blockOrdinal)
+    {
+        return 3;
+    }
+
+    *nextBlockOrdinalResult = blockOrdinal + 1;
+    *nextEdgeOrdinalResult = edgeOrdinal + 1;
+    return 0;
+}
+
+int32 NormalizeStandaloneSourceMixedLazyBooleanValue(int32 bodyId,
+    int32 expressionId, int32 leafCount, int32 boolTypeId,
+    ref<init int32> selectorKindResult,
+    ref<init int32> sourceUseResult,
+    ref<init int32> selectorIndexResult,
+    ref<init bool> terminatedResult)
+    ensure return == 0 ? (*selectorKindResult is init
+        && *sourceUseResult is init
+        && *selectorIndexResult is init
+        && *terminatedResult is init) : true
+{
+    int32 bodyBlockFirst
+        = Host.StandaloneNormalizedBodyBlockRanges[bodyId * 2];
+    int32 finalBodyBlockCount = leafCount + 3;
+    if (bodyBlockFirst < 0
+        || Host.StandaloneNormalizedBlockCount[0] != bodyBlockFirst
+        || leafCount < 3
+        || finalBodyBlockCount > 0x1_0000
+        || leafCount > 0x1_0000 - finalBodyBlockCount)
+    {
+        return 3;
+    }
+
+    int32 homeFirst
+        = Host.StandaloneNormalizedBodies[bodyId * 12 + 1];
+    init int32 resultHomeId;
+    int32 resultHomeStatus = AppendStandaloneNormalizedHome(
+        bodyId, homeFirst, 3, boolTypeId, 0,
+        ref init resultHomeId);
+    if (resultHomeStatus != 0)
+    {
+        return resultHomeStatus;
+    }
+
+    init int32 nextBlockOrdinal;
+    init int32 nextEdgeOrdinal;
+    int32 decisionStatus = NormalizeStandaloneSourceLazyBooleanDecision(
+        bodyId, expressionId, boolTypeId,
+        leafCount, leafCount + 1, finalBodyBlockCount,
+        0, 0, 0, ref init nextBlockOrdinal,
+        ref init nextEdgeOrdinal);
+    if (decisionStatus != 0)
+    {
+        return decisionStatus;
+    }
+    if (nextBlockOrdinal != leafCount
+        || nextEdgeOrdinal != leafCount)
+    {
+        return 3;
+    }
+
+    int32 constantFirst
+        = Host.StandaloneNormalizedBodies[bodyId * 12 + 3];
+    int32 trueStatus
+        = AppendStandaloneNormalizedLazyBooleanConstantBlock(
+            bodyId, boolTypeId, constantFirst, resultHomeId,
+            1, leafCount, leafCount + 2);
+    if (trueStatus != 0)
+    {
+        return trueStatus;
+    }
+    int32 falseStatus
+        = AppendStandaloneNormalizedLazyBooleanConstantBlock(
+            bodyId, boolTypeId, constantFirst, resultHomeId,
+            0, leafCount + 1, leafCount + 2);
+    if (falseStatus != 0)
+    {
+        return falseStatus;
+    }
+    if (Host.StandaloneNormalizedBlockCount[0]
+        != bodyBlockFirst + leafCount + 2)
+    {
+        return 3;
+    }
+
+    *selectorKindResult = 2;
+    *sourceUseResult = 1;
+    *selectorIndexResult = resultHomeId;
+    *terminatedResult = false;
+    return 0;
 }
 
 int32 NormalizeStandaloneSourceLazyBooleanChainValue(int32 bodyId,
@@ -2579,6 +2917,25 @@ int32 NormalizeStandaloneSourceLazyBooleanValue(int32 bodyId,
         || rightExpressionId >= expressionId)
     {
         return 2;
+    }
+
+    init int32 leafCount;
+    init bool homogeneous;
+    int32 treeStatus = CountStandaloneSourceLazyBooleanTree(
+        bodyId, expressionId, expressionKind, 0,
+        ref init leafCount, ref init homogeneous);
+    if (treeStatus != 0)
+    {
+        return treeStatus;
+    }
+    if (!homogeneous)
+    {
+        return NormalizeStandaloneSourceMixedLazyBooleanValue(
+            bodyId, expressionId, leafCount, boolTypeId,
+            ref init *selectorKindResult,
+            ref init *sourceUseResult,
+            ref init *selectorIndexResult,
+            ref init *terminatedResult);
     }
 
     init int32 operandCount;
