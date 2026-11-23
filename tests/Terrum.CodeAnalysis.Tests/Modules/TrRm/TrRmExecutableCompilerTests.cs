@@ -335,22 +335,27 @@ internal sealed class TrRmExecutableCompilerTests
     {
         var schemaIdentity = TrRmArtifactSchemaFacts
             .StandardTerrumFunctionPointerSchemaIdentity;
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
         var providerProgram = Compile(
             "public int32 Accept(fnptr<int32, int32> callback) { return 0; }",
             library: true);
         var providerArtifact = TrRmExecutableCompiler.EmitStandard(
             providerProgram, "terrum-fnptr-provider", schemaIdentity,
-            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+            targetRequirement);
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            providerArtifact);
         var providerReference = TrRmExecutableCompiler.CreateStandardReference(
-            new TrRmStandardArtifactInput(schemaIdentity, providerArtifact),
-            "terrum-fnptr-provider",
+            providerInput, "terrum-fnptr-provider",
             Array.Empty<TrRmStandardArtifactInput>());
 
-        var consumer = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        const string forwardSource = """
             int32 Forward(fnptr<int32, int32> callback) {
                 return Accept(callback);
             }
-            """), providerReference);
+            """;
+        var consumer = Compilation.CreateLibrary(
+            SyntaxTree.Parse(forwardSource), providerReference);
         Assert.That(consumer.HasErrors, Is.False,
             string.Join(Environment.NewLine, consumer.Diagnostics));
 
@@ -361,6 +366,87 @@ internal sealed class TrRmExecutableCompilerTests
                 }
                 """), providerReference);
         Assert.That(incompatibleConsumer.HasErrors, Is.True);
+
+        var shiftedProviderProgram = Compile("""
+            public int32 Precede(fnptr<int64, int64> callback) {
+                return 0;
+            }
+            public int32 Accept(fnptr<int32, int32> callback) {
+                return 0;
+            }
+            """, library: true);
+        var shiftedProviderArtifact = TrRmExecutableCompiler.EmitStandard(
+            shiftedProviderProgram, "terrum-fnptr-provider", schemaIdentity,
+            targetRequirement);
+        var shiftedProviderInput = new TrRmStandardArtifactInput(
+            schemaIdentity, shiftedProviderArtifact);
+        var originalProviderTables
+            = TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
+                TrRmExecutableCompiler.CreateForeignInvocationIndex(
+                    providerArtifact, schemaIdentity));
+        var shiftedProviderTables
+            = TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
+                TrRmExecutableCompiler.CreateForeignInvocationIndex(
+                    shiftedProviderArtifact, schemaIdentity));
+        var originalAcceptAnchor
+            = FindAnchorMethodRow(originalProviderTables, "Accept");
+        var shiftedAcceptAnchor
+            = FindAnchorMethodRow(shiftedProviderTables, "Accept");
+        Assert.That(shiftedAcceptAnchor,
+            Is.Not.EqualTo(originalAcceptAnchor));
+
+        var consumerProgram = consumer.Program
+            ?? throw new AssertionException(
+                "Expected a Standard function-pointer consumer.");
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            consumerProgram, "terrum-fnptr-consumer", schemaIdentity,
+            targetRequirement);
+        var consumerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            consumerArtifact);
+        var replacedReference
+            = TrRmExecutableCompiler.CreateStandardReference(consumerInput,
+                "terrum-fnptr-consumer", [shiftedProviderInput]);
+        var replacedCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(""), replacedReference);
+        Assert.That(replacedCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                replacedCompilation.Diagnostics));
+        var replacedProgram = replacedCompilation.Program
+            ?? throw new AssertionException(
+                "Expected a function-pointer consumer bound to the shifted provider.");
+        Assert.That(replacedProgram.Functions.Any(static function =>
+            function.Name == "Forward"), Is.True);
+
+        var sourceFreeArtifact = TrRmExecutableCompiler.EmitStandard(
+            replacedProgram, "terrum-fnptr-consumer-forwarded",
+            schemaIdentity, targetRequirement);
+        var sourceFreeReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    sourceFreeArtifact),
+                "terrum-fnptr-consumer-forwarded", [shiftedProviderInput]);
+        var reloadedCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(""), sourceFreeReference);
+        Assert.That(reloadedCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                reloadedCompilation.Diagnostics));
+
+        static int FindAnchorMethodRow(
+            TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+            string methodName)
+        {
+            var methodRow = Enumerable.Range(1, tables.Methods.Count)
+                .Single(row => tables.Methods.GetName(row) == methodName);
+            var signatureRow = tables.Methods.GetSignature(methodRow);
+            var (parameterFirst, parameterCount)
+                = tables.Signatures.GetParamRange(signatureRow);
+            Assert.That(parameterCount, Is.EqualTo(1));
+            var typeSpecRef = tables.Parameters.GetTypeSpec(parameterFirst);
+            Assert.That(tables.NativeFunctionPointerAnchors
+                .HasAnchorForTypeSpec(checked((int)typeSpecRef)), Is.True);
+            return tables.NativeFunctionPointerAnchors
+                .GetAnchorMethodDefRow(checked((int)typeSpecRef));
+        }
     }
 
     [TestCase("""
