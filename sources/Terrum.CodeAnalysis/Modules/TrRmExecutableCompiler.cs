@@ -2373,6 +2373,13 @@ public static partial class TrRmExecutableCompiler
             throw Unsupported(
                 "The Development function-pointer signature table does not persist complete invocation contracts.");
         }
+        if (standardTerrumFunctionPointerProfile
+            && program.Functions.Any(
+                HasNativeFunctionPointerBodyOperation))
+        {
+            throw Unsupported(
+                "The selected Standard function-pointer successor does not admit NativeAddress formation or call.value execution.");
+        }
         foreach (var function in program.Functions)
         {
             if (!BoundTreeTraversal.VisitExpressions(function.Body, expression => {

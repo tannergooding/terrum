@@ -363,6 +363,34 @@ internal sealed class TrRmExecutableCompilerTests
         Assert.That(incompatibleConsumer.HasErrors, Is.True);
     }
 
+    [TestCase("""
+        int32 Answer() { return 42; }
+
+        public int32 Expose() {
+            unsafe {
+                var address = &Answer;
+                return 0;
+            }
+        }
+        """)]
+    [TestCase("""
+        public int32 Invoke(fnptr<int32> callback) {
+            unsafe { return callback(); }
+        }
+        """)]
+    public void StandardTerrumFunctionPointerSuccessorRejectsAddressAndExecution(
+        string source)
+    {
+        var program = Compile(source, library: true);
+        Assert.That(program.Functions, Is.Not.Empty);
+        var schemaIdentity = TrRmArtifactSchemaFacts
+            .StandardTerrumFunctionPointerSchemaIdentity;
+        _ = Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.EmitStandard(program,
+                "terrum-fnptr-operations", schemaIdentity,
+                TrRmModuleTableReader.WindowsX64NativeTargetRequirement));
+    }
+
     [Test]
     public void StandardTerrumFunctionPointerMethodReferenceRetainsPointeeTypes()
     {

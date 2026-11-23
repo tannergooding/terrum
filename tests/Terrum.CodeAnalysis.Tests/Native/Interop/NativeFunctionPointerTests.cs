@@ -3137,6 +3137,30 @@ internal sealed class NativeFunctionPointerTests
         Assert.That(compilation.Program, Is.Null);
     }
 
+    [TestCase("Unmanaged")]
+    [TestCase("Cdecl")]
+    [TestCase("Stdcall")]
+    [TestCase("Vectorcall")]
+    public void NativeConventionAddressCannotProjectToForeignConvention(
+        string foreignConvention)
+    {
+        var compilation = Create(SyntaxTree.Parse($$"""
+            int32 Answer() { return 42; }
+
+            int32 Main() {
+                unsafe {
+                    [Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.{{foreignConvention}})] fnptr<int32> callback = &Answer;
+                    return 0;
+                }
+            }
+            """));
+
+        Assert.That(compilation.Diagnostics.Any(
+            static diagnostic => diagnostic.Code == "TRM3030"), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Program, Is.Null);
+    }
+
     [Test]
     public void NativeFunctionAddressRequiresUnsafeContext()
     {

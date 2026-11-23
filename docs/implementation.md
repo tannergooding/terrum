@@ -850,12 +850,15 @@ references now retain function-pointer field signatures through provider
 projection and composition. Provider replacement checks the complete anchor
 signature across TypeDef-row and anchor-MethodDef-row relocation; source,
 composition and replacement regressions are added but remain unverified under
-the active hold. Standard method references also retain hidden TypeDef closure
-and provider origins for pointer-to-structure signatures without making those
-types lookup roots; a consumer regression remains unverified under the hold.
-Other consumer routes, broader cross-Module anchor contexts, NativeAddress
-eligibility, independent ABI support and broader re-encoding/remapping remain
-open.
+the active hold. The successor remains metadata-only: Standard emission now
+rejects bodies with `NativeAddress` or `call.value`, and source regressions
+reject projecting the Terrum convention address to each foreign convention.
+These cases remain unverified under the active hold. Standard method references
+also retain hidden TypeDef closure and provider origins for pointer-to-structure
+signatures without making those types lookup roots; a consumer regression
+remains unverified under the hold. Other consumer routes, the separate
+NativeAddress carrier decision, independent ABI support and broader
+re-encoding/remapping remain open.
 Selected-module method, field and Body TypeMap references now discover anchors
 owned by another Module in the same artifact and append the defining-Module
 Blittable TypeDef/Import closure as hidden provider-origin structures. Standard
