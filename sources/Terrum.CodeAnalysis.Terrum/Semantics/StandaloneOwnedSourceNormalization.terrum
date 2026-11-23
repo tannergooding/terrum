@@ -1858,8 +1858,31 @@ int32 GetStandaloneSourceLoopBodyBlockCount(int32 statementId,
                 int32 childKind
                     = Host.StandaloneSourceStatements[childOffset];
                 if (Host.StandaloneSourceStatementParentIds[
-                        childId] != statementId
-                    || (childKind != 5
+                    childId] != statementId)
+                {
+                    return 3;
+                }
+                if (childKind == 7)
+                {
+                    init int32 followingNestedBlockCount;
+                    int32 followingNestedStatus
+                        = GetStandaloneSourceNestedWhileBodyBlockCount(
+                            Host.StandaloneSourceIfNodes[
+                                loopNodeOffset],
+                            childId,
+                            Host.StandaloneSourceStatements[
+                                childOffset + 2],
+                            true,
+                            ref init followingNestedBlockCount);
+                    if (followingNestedStatus != 0
+                        || followingNestedBlockCount != 1)
+                    {
+                        return followingNestedStatus != 0
+                            ? followingNestedStatus : 3;
+                    }
+                    continue;
+                }
+                if ((childKind != 5
                         && childKind != 8 && childKind != 9)
                     || (childKind != 5
                         && (Host.StandaloneSourceStatements[
