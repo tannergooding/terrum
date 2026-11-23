@@ -5662,7 +5662,8 @@ int32 ParseStandaloneSourceNestedDo(
                     nestedWhileNodeId, true,
                     ref init nestedWhileBlockCount);
             if (nestedWhileStatus != 0
-                || nestedWhileBlockCount != 1)
+                || (nestedWhileBlockCount != 1
+                    && nestedWhileBlockCount != 3))
             {
                 return nestedWhileStatus != 0
                     ? nestedWhileStatus : 2;
@@ -11749,7 +11750,8 @@ int32 VerifyStandaloneDirectCalls()
                                     childStatementOffset + 2],
                                 ref init nestedDoBlockCount);
                         if (nestedDoStatus != 0
-                            || nestedDoBlockCount != 1)
+                            || (nestedDoBlockCount != 1
+                                && nestedDoBlockCount != 3))
                         {
                             return nestedDoStatus != 0
                                 ? nestedDoStatus : 3;
@@ -11786,17 +11788,47 @@ int32 VerifyStandaloneDirectCalls()
                                         bodyId, nestedDoBodyStatementId,
                                         nestedWhileNodeId, true,
                                         ref init nestedWhileBlockCount);
+                                int32 nestedWhileNodeOffset
+                                    = nestedWhileNodeId * 5;
+                                int32 nestedWhileChildFirst
+                                    = Host.StandaloneSourceIfNodes[
+                                        nestedWhileNodeOffset + 1];
+                                int32 nestedWhileChildCount
+                                    = Host.StandaloneSourceIfNodes[
+                                        nestedWhileNodeOffset + 2];
                                 int32 nestedWhileConditionId
                                     = Host.StandaloneSourceStatements[
                                         nestedDoBodyStatementId * 3 + 1];
                                 if (nestedWhileStatus != 0
-                                    || nestedWhileBlockCount != 1
+                                    || (nestedWhileBlockCount != 1
+                                        && nestedWhileBlockCount != 3)
                                     || nestedWhileConditionId < 0
                                     || nestedWhileConditionId
-                                        >= bodyExpressionCount)
+                                        >= bodyExpressionCount
+                                    || nestedWhileChildFirst < 0
+                                    || nestedWhileChildCount < 1
+                                    || nestedWhileChildCount
+                                        > Host.StandaloneSourceIfChildCount[0]
+                                            - nestedWhileChildFirst)
                                 {
                                     return nestedWhileStatus != 0
                                         ? nestedWhileStatus : 3;
+                                }
+                                int32 nestedWhileTransferStatementId
+                                    = Host.StandaloneSourceIfChildren[
+                                        nestedWhileChildFirst
+                                            + nestedWhileChildCount - 1];
+                                if (nestedWhileTransferStatementId < 0
+                                    || nestedWhileTransferStatementId
+                                        >= Host.StandaloneSourceStatementCount[0]
+                                    || Host.StandaloneSourceStatementParentIds[
+                                        nestedWhileTransferStatementId]
+                                        != nestedDoBodyStatementId
+                                    || Host.StandaloneSourceStatements[
+                                        nestedWhileTransferStatementId * 3]
+                                        != 8)
+                                {
+                                    return 3;
                                 }
                                 int32 nestedWhileConditionIndex
                                     = bodyExpressionFirst
@@ -11832,6 +11864,102 @@ int32 VerifyStandaloneDirectCalls()
                                 }
                                 Host.StandaloneSourceExpressionUseCounts[
                                     nestedWhileConditionIndex] = 1;
+                                for (mut int32 nestedChildOrdinal = 0;
+                                    nestedChildOrdinal
+                                        < nestedWhileChildCount - 1;
+                                    nestedChildOrdinal
+                                        = nestedChildOrdinal + 1)
+                                {
+                                    int32 assignmentStatementId
+                                        = Host.StandaloneSourceIfChildren[
+                                            nestedWhileChildFirst
+                                                + nestedChildOrdinal];
+                                    if (assignmentStatementId < 0
+                                        || assignmentStatementId
+                                            >= Host.StandaloneSourceStatementCount[0]
+                                        || Host.StandaloneSourceStatementParentIds[
+                                            assignmentStatementId]
+                                            != nestedDoBodyStatementId
+                                        || Host.StandaloneSourceStatements[
+                                            assignmentStatementId * 3] != 5)
+                                    {
+                                        return 3;
+                                    }
+                                    int32 assignmentPlaceId
+                                        = Host.StandaloneSourceStatements[
+                                            assignmentStatementId * 3 + 2];
+                                    int32 assignmentExpressionId
+                                        = Host.StandaloneSourceStatements[
+                                            assignmentStatementId * 3 + 1];
+                                    if (assignmentPlaceId < bodyPlaceFirst
+                                        || assignmentPlaceId
+                                            >= bodyPlaceFirst
+                                                + bodyPlaceCount
+                                        || assignmentExpressionId < 0
+                                        || assignmentExpressionId
+                                            >= bodyExpressionCount
+                                        || Host.StandaloneSourcePlaceUseCounts[
+                                            assignmentPlaceId] != 0)
+                                    {
+                                        return 3;
+                                    }
+                                    int32 assignmentPlaceOffset
+                                        = assignmentPlaceId * 5;
+                                    int32 assignmentLocalId
+                                        = Host.StandaloneSourcePlaces[
+                                            assignmentPlaceOffset + 3];
+                                    int32 assignmentTypeId
+                                        = Host.StandaloneSourcePlaces[
+                                            assignmentPlaceOffset + 1];
+                                    int32 assignmentExpressionIndex
+                                        = bodyExpressionFirst
+                                            + assignmentExpressionId;
+                                    if (Host.StandaloneSourceExpressions[
+                                            assignmentExpressionIndex * 8 + 1]
+                                            != assignmentTypeId
+                                        || Host.StandaloneSourceExpressionUseCounts[
+                                            assignmentExpressionIndex] != 0)
+                                    {
+                                        return 3;
+                                    }
+                                    int32 assignmentValidationStatus
+                                        = ValidateStandaloneSourceWhileAssignment(
+                                            bodyId, assignmentStatementId,
+                                            false);
+                                    if (assignmentValidationStatus != 0)
+                                    {
+                                        return assignmentValidationStatus;
+                                    }
+                                    init bool assignmentDoesNotReturn;
+                                    int32 assignmentDoesNotReturnStatus
+                                        = TryGetStandaloneSourceExpressionDoesNotReturn(
+                                            bodyId, assignmentExpressionId,
+                                            ref init assignmentDoesNotReturn);
+                                    if (assignmentDoesNotReturnStatus != 0
+                                        || assignmentDoesNotReturn)
+                                    {
+                                        return assignmentDoesNotReturnStatus != 0
+                                            ? assignmentDoesNotReturnStatus : 3;
+                                    }
+                                    Host.StandaloneSourceExpressionUseCounts[
+                                        assignmentExpressionIndex] = 1;
+                                    Host.StandaloneSourcePlaceUseCounts[
+                                        assignmentPlaceId] = 1;
+                                    int32 assignmentLocalUseCount
+                                        = Host.StandaloneSourceLocalDeclarationUseCounts[
+                                            assignmentLocalId];
+                                    int32 assignmentBindingKind
+                                        = Host.StandaloneSourceLocals[
+                                            assignmentLocalId * 10 + 3];
+                                    if ((assignmentBindingKind == 2
+                                            || assignmentBindingKind == 3)
+                                        && assignmentLocalUseCount == 1)
+                                    {
+                                        Host.StandaloneSourceLocalDeclarationUseCounts[
+                                            assignmentLocalId]
+                                            = assignmentLocalUseCount + 1;
+                                    }
+                                }
                                 continue;
                             }
                             if (nestedDoBodyStatementKind != 5)
@@ -11941,11 +12069,6 @@ int32 VerifyStandaloneDirectCalls()
                         if (nestedDoConditionStatus != 0)
                         {
                             return nestedDoConditionStatus;
-                        }
-                        if (nestedDoConditionDoesNotReturn
-                            && nestedDoBlockCount != 1)
-                        {
-                            return 3;
                         }
                         continue;
                     }
