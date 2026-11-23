@@ -1253,7 +1253,7 @@ int32 NormalizeStandaloneSourceStatement(int32 bodyId,
         init int32 selectorIndex;
         init bool terminated;
         int32 expressionStatus = NormalizeStandaloneSourceExpression(
-            bodyId, expressionId, 1,
+            bodyId, expressionId, 0,
             ref init selectorKind, ref init sourceUse,
             ref init selectorIndex, ref init terminated);
         if (expressionStatus != 0)
