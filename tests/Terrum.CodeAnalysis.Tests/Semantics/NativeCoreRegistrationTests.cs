@@ -10823,8 +10823,8 @@ internal sealed class NativeCoreRegistrationTests
             [Terrum.Interop.ForeignNativeInterface(
                 VTableByteOffset: uint32(0))]
             public interface IProbe {
-                public unsafe int32 Read(ptr<int32> source,
-                    int32 extra = 1);
+                public unsafe int32 Read(ptr<int32> data,
+                    int32 extra = 2);
             }
             """;
         var options = new CompilationOptions {
@@ -10885,8 +10885,7 @@ internal sealed class NativeCoreRegistrationTests
             .TryGetNameStringRow(shiftedReadRow, 0,
                 out var shiftedNameRow), Is.True);
         Assert.That(shiftedProviderTables.Strings.DecodeName(shiftedNameRow),
-            Is.EqualTo("source"));
-        Assert.That(shiftedNameRow, Is.Not.EqualTo(providerNameRow));
+            Is.EqualTo("data"));
         Assert.That(shiftedNameRow, Is.Not.EqualTo(providerNameRow));
         Assert.That(providerTables.MethodParameterLabels
             .TryGetDefaultConstantSourceRow(providerReadRow, 1,
@@ -10896,10 +10895,8 @@ internal sealed class NativeCoreRegistrationTests
                 out var shiftedDefaultRow), Is.True);
         Assert.That(shiftedDefaultRow,
             Is.Not.EqualTo(providerDefaultRow));
-        Assert.That(shiftedDefaultRow,
-            Is.Not.EqualTo(providerDefaultRow));
-        AssertDefaultPayload(providerTables, providerDefaultRow);
-        AssertDefaultPayload(shiftedProviderTables, shiftedDefaultRow);
+        AssertDefaultPayload(providerTables, providerDefaultRow, 1);
+        AssertDefaultPayload(shiftedProviderTables, shiftedDefaultRow, 2);
 
         byte[] RewriteSection(byte[] source, ushort sectionKind,
             byte[] replacement, int replacementCount)
@@ -10971,6 +10968,16 @@ internal sealed class NativeCoreRegistrationTests
                 unsafe { return IProbe.Read(receiver, source); }
             }
             """;
+        const string replacementConsumerSource = """
+            int32 Invoke(ptr<void> receiver, ptr<int32> source) {
+                unsafe { return IProbe.Read(receiver, data: source); }
+            }
+            """;
+        const string staleLabelConsumerSource = """
+            int32 Invoke(ptr<void> receiver, ptr<int32> source) {
+                unsafe { return IProbe.Read(receiver, source: source); }
+            }
+            """;
         var consumerCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse(consumerSource), providerReference, options);
         Assert.That(consumerCompilation.HasErrors, Is.False,
@@ -10987,15 +10994,20 @@ internal sealed class NativeCoreRegistrationTests
             = TrRmExecutableCompiler.CreateStandardReference(
                 consumerInput, "consumer.module", [shiftedProviderInput]);
         var replacementCompilation = Compilation.CreateLibrary(
-            SyntaxTree.Parse(consumerSource), replacementReference, options);
+            SyntaxTree.Parse(replacementConsumerSource),
+            replacementReference, options);
         Assert.That(replacementCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine,
                 replacementCompilation.Diagnostics));
         var replacementProgram = replacementCompilation.Program
             ?? throw new AssertionException(
                 "Expected a provider-replaced FNI consumer.");
-        AssertReadSurface(replacementProgram);
-        AssertReadCallDefault(replacementProgram);
+        AssertReadSurface(replacementProgram, "data", 2);
+        AssertReadCallDefault(replacementProgram, 2);
+        var staleLabelCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(staleLabelConsumerSource),
+            replacementReference, options);
+        Assert.That(staleLabelCompilation.HasErrors, Is.True);
 
         var sourceFreeCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse(""), replacementReference, options);
@@ -11020,33 +11032,35 @@ internal sealed class NativeCoreRegistrationTests
         var reloadedProgram = reloadedCompilation.Program
             ?? throw new AssertionException(
                 "Expected the reloaded source-free FNI consumer.");
-        AssertReadSurface(reloadedProgram);
-        AssertReadCallDefault(reloadedProgram);
+        AssertReadSurface(reloadedProgram, "data", 2);
+        AssertReadCallDefault(reloadedProgram, 1);
 
-        static void AssertReadSurface(BoundProgram program)
+        static void AssertReadSurface(BoundProgram program,
+            string expectedLabel, long expectedDefault)
         {
             var member = program.Interfaces.Single(definition =>
                     definition.QualifiedName == "IProbe")
                 .Members.Single(candidate => candidate.Name == "Read");
             Assert.That(member.Parameters.Select(static parameter =>
                     parameter.Name),
-                Is.EqualTo(new[] { "source", "extra" }));
+                Is.EqualTo(new[] { expectedLabel, "extra" }));
             Assert.That(member.Parameters[1].DefaultValue?.Value,
-                Is.EqualTo(1L));
+                Is.EqualTo(expectedDefault));
         }
 
         static void AssertDefaultPayload(
             TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
-            uint constantSourceRow)
+            uint constantSourceRow, byte expectedValue)
         {
             var frozenValueNode = checked((int)tables.ConstantSources
                 .GetPayloadReference(checked((int)constantSourceRow)));
             Assert.That(tables.FrozenValueNodes.GetScalarPayload(
                     frozenValueNode, tables.Blobs).ToArray(),
-                Is.EqualTo(new byte[] { 1, 0, 0, 0 }));
+                Is.EqualTo(new byte[] { expectedValue, 0, 0, 0 }));
         }
 
-        static void AssertReadCallDefault(BoundProgram program)
+        static void AssertReadCallDefault(BoundProgram program,
+            long expectedDefault)
         {
             var invoke = program.Functions.Single(function =>
                 function.Name == "Invoke");
@@ -11064,7 +11078,7 @@ internal sealed class NativeCoreRegistrationTests
             Assert.That(calls, Has.Count.EqualTo(1));
             Assert.That(calls[0].Arguments, Has.Count.EqualTo(2));
             Assert.That(((BoundConstant)calls[0].Arguments[1]).Value,
-                Is.EqualTo(1L));
+                Is.EqualTo(expectedDefault));
         }
     }
 
