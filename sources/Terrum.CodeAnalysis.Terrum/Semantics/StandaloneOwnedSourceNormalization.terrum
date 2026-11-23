@@ -1018,6 +1018,7 @@ int32 NormalizeStandaloneSourceIfReturns(int32 bodyId,
     {
         int32 localId = -1;
         int32 localTypeId = -1;
+        mut bool sameLocal = true;
         int32 assignmentBranchIndex
             = trueReturns ? 1 : 0;
         for (mut int32 branchOrdinal = 0;
@@ -1053,18 +1054,42 @@ int32 NormalizeStandaloneSourceIfReturns(int32 bodyId,
                 int32 childTypeId
                     = Host.StandaloneSourcePlaces[
                         childPlaceOffset + 1];
+                int32 childLocalOffset = childLocalId * 10;
+                int32 bodyLocalRangeOffset = bodyId * 2;
+                int32 bodyLocalFirst
+                    = Host.StandaloneSourceBodyLocalRanges[
+                        bodyLocalRangeOffset];
+                int32 bodyLocalCount
+                    = Host.StandaloneSourceBodyLocalRanges[
+                        bodyLocalRangeOffset + 1];
+                if (childLocalId < 0
+                    || childLocalId < bodyLocalFirst
+                    || childLocalId >= bodyLocalFirst + bodyLocalCount
+                    || Host.StandaloneSourceLocals[
+                        childLocalOffset] != bodyId
+                    || Host.StandaloneSourceLocals[
+                        childLocalOffset + 2] != childTypeId)
+                {
+                    return 3;
+                }
                 if (Host.StandaloneSourcePlaces[
                         childPlaceOffset] != bodyId
                     || Host.StandaloneSourcePlaces[
                         childPlaceOffset + 2] != 2
-                    || (localId >= 0
-                        && (localId != childLocalId
-                            || localTypeId != childTypeId)))
+                    || (localId == childLocalId
+                        && localTypeId != childTypeId))
                 {
                     return 3;
                 }
-                localId = childLocalId;
-                localTypeId = childTypeId;
+                if (localId < 0)
+                {
+                    localId = childLocalId;
+                    localTypeId = childTypeId;
+                }
+                else if (localId != childLocalId)
+                {
+                    sameLocal = false;
+                }
             }
         }
         int32 localRangeOffset = bodyId * 2;
@@ -1079,20 +1104,63 @@ int32 NormalizeStandaloneSourceIfReturns(int32 bodyId,
         {
             return 3;
         }
-        int32 localOffset = localId * 10;
-        int32 bindingKind
-            = Host.StandaloneSourceLocals[localOffset + 3];
-        if (Host.StandaloneSourceLocals[localOffset] != bodyId
-            || (bindingKind != 1 && bindingKind != 2
-                && bindingKind != 3)
-            || (bindingKind == 2
-                && (falseCount == 0 || trueCount != 1
-                    || falseCount != 1))
-            || Host.StandaloneSourceLocalStates[localId] != 1
-            || Host.StandaloneSourceLocals[localOffset + 2]
-                != localTypeId)
+        if (sameLocal)
         {
-            return 3;
+            int32 localOffset = localId * 10;
+            int32 bindingKind
+                = Host.StandaloneSourceLocals[localOffset + 3];
+            if ((bindingKind != 1 && bindingKind != 2
+                    && bindingKind != 3)
+                || (bindingKind == 2
+                    && (falseCount == 0 || trueCount != 1
+                        || falseCount != 1))
+                || Host.StandaloneSourceLocalStates[localId] != 1
+                || Host.StandaloneSourceLocals[localOffset + 2]
+                    != localTypeId)
+            {
+                return 3;
+            }
+        }
+        else
+        {
+            for (mut int32 branchIndex = 0;
+                branchIndex < 2;
+                branchIndex = branchIndex + 1)
+            {
+                int32 childFirst = branchIndex == 0
+                    ? trueFirst : falseFirst;
+                int32 childCount = branchIndex == 0
+                    ? trueCount : falseCount;
+                for (mut int32 childIndex = 0;
+                    childIndex < childCount;
+                    childIndex = childIndex + 1)
+                {
+                    int32 childStatementId
+                        = Host.StandaloneSourceIfChildren[
+                            childFirst + childIndex];
+                    int32 childPlaceId
+                        = Host.StandaloneSourceStatements[
+                            childStatementId * 3 + 2];
+                    int32 childLocalId
+                        = Host.StandaloneSourcePlaces[
+                            childPlaceId * 5 + 3];
+                    int32 childLocalOffset = childLocalId * 10;
+                    int32 bindingKind
+                        = Host.StandaloneSourceLocals[
+                            childLocalOffset + 3];
+                    int32 childLocalTypeId
+                        = Host.StandaloneSourceLocals[
+                            childLocalOffset + 2];
+                    if ((bindingKind != 1 && bindingKind != 3)
+                        || GetStandaloneSourceUse(
+                            childLocalTypeId) != 1
+                        || Host.StandaloneSourceLocalStates[
+                            childLocalId] != 1)
+                    {
+                        return 3;
+                    }
+                }
+            }
         }
     }
 
