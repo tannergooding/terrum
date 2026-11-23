@@ -5663,6 +5663,7 @@ int32 ParseStandaloneSourceNestedDo(
                     ref init nestedWhileBlockCount);
             if (nestedWhileStatus != 0
                 || (nestedWhileBlockCount != 1
+                    && nestedWhileBlockCount != 2
                     && nestedWhileBlockCount != 3))
             {
                 return nestedWhileStatus != 0
@@ -11751,6 +11752,7 @@ int32 VerifyStandaloneDirectCalls()
                                 ref init nestedDoBlockCount);
                         if (nestedDoStatus != 0
                             || (nestedDoBlockCount != 1
+                                && nestedDoBlockCount != 2
                                 && nestedDoBlockCount != 3))
                         {
                             return nestedDoStatus != 0
@@ -11801,6 +11803,7 @@ int32 VerifyStandaloneDirectCalls()
                                         nestedDoBodyStatementId * 3 + 1];
                                 if (nestedWhileStatus != 0
                                     || (nestedWhileBlockCount != 1
+                                        && nestedWhileBlockCount != 2
                                         && nestedWhileBlockCount != 3)
                                     || nestedWhileConditionId < 0
                                     || nestedWhileConditionId
