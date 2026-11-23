@@ -632,6 +632,19 @@ public static int32 RewriteStandaloneOwnedCallNodes()
                 targetOffset + 2]
                 = Host.StandaloneRewriteLocalIds[localId];
         }
+        else if (Host.StandaloneSourceStatements[sourceOffset] == 5)
+        {
+            int32 placeId
+                = Host.StandaloneSourceStatements[sourceOffset + 2];
+            if (placeId < 0
+                || placeId >= Host.StandaloneSourcePlaceCount[0])
+            {
+                return FailStandaloneRewrite(3);
+            }
+            Host.StandaloneRewrittenSourceStatements[
+                targetOffset + 2]
+                = Host.StandaloneRewritePlaceIds[placeId];
+        }
         if (expressionId >= 0)
         {
             if (expressionId
@@ -806,6 +819,21 @@ public static int32 RewriteStandaloneOwnedCallNodes()
         Host.StandaloneRewrittenNormalizedOperations[
             targetOffset + 4]
             = Host.StandaloneRewriteBodyIds[bodyId];
+        int32 operationKind
+            = Host.StandaloneNormalizedOperations[sourceOffset];
+        if (operationKind == 30 || operationKind == 31)
+        {
+            int32 localId
+                = Host.StandaloneNormalizedOperations[
+                    sourceOffset + 3];
+            if (localId < 0 || localId >= localCount)
+            {
+                return FailStandaloneRewrite(3);
+            }
+            Host.StandaloneRewrittenNormalizedOperations[
+                targetOffset + 3]
+                = Host.StandaloneRewriteLocalIds[localId];
+        }
     }
 
     Host.StandaloneRewrittenModuleCount[0] = moduleCount;
@@ -1400,6 +1428,18 @@ int32 VerifyStandaloneRewrittenSourceArenas()
                 || Host.StandaloneRewrittenSourceStatements[
                     offset + 2]
                     != Host.StandaloneRewriteLocalIds[localId])
+            {
+                return 3;
+            }
+        }
+        else if (Host.StandaloneSourceStatements[offset] == 5)
+        {
+            int32 placeId
+                = Host.StandaloneSourceStatements[offset + 2];
+            if (placeId < 0 || placeId >= placeCount
+                || Host.StandaloneRewrittenSourceStatements[
+                    offset + 2]
+                    != Host.StandaloneRewritePlaceIds[placeId])
             {
                 return 3;
             }
@@ -2602,6 +2642,59 @@ int32 VerifyStandaloneRewrittenCallNodes()
                         resultHomeOffset + 1] != 3
                     || Host.StandaloneRewrittenNormalizedHomes[
                         resultHomeOffset + 2] != 0)
+                {
+                    return 3;
+                }
+                continue;
+            }
+            if (kind == 30 || kind == 31)
+            {
+                if (operand0 < 0 || operand0 >= bodyHomeCount
+                    || operand1 < 0 || operand1 >= bodyHomeCount
+                    || operand0 == operand1
+                    || operand2 < 0 || operand2 >= localCount)
+                {
+                    return 3;
+                }
+                int32 localOffset = operand2 * 10;
+                int32 typeId
+                    = Host.StandaloneRewrittenSourceLocals[
+                        localOffset + 2];
+                int32 sourceHomeOffset
+                    = (bodyHomeFirst + operand0) * 5;
+                int32 destinationHomeOffset
+                    = (bodyHomeFirst + operand1) * 5;
+                int32 localHomeId
+                    = Host.StandaloneRewrittenNormalizedSourceLocalHomeIds[
+                        operand2];
+                if (Host.StandaloneRewrittenSourceLocals[
+                        localOffset] != bodyId
+                    || Host.StandaloneRewrittenSourceLocals[
+                        localOffset + 3] != 1
+                    || Host.StandaloneRewrittenSourceLocalStates[
+                        operand2] != 1
+                    || typeId <= 0
+                    || typeId
+                        > Host.StandaloneRewrittenTypeFactCount[0]
+                    || Host.StandaloneRewrittenTypeFacts[
+                        typeId * 3] != 0
+                    || Host.StandaloneRewrittenTypeFacts[
+                        typeId * 3 + 1] == 0
+                    || Host.StandaloneRewrittenNormalizedHomes[
+                        sourceHomeOffset] != bodyId
+                    || Host.StandaloneRewrittenNormalizedHomes[
+                        destinationHomeOffset] != bodyId
+                    || Host.StandaloneRewrittenNormalizedHomes[
+                        sourceHomeOffset + 3] != typeId
+                    || Host.StandaloneRewrittenNormalizedHomes[
+                        destinationHomeOffset + 3] != typeId
+                    || Host.StandaloneRewrittenNormalizedHomes[
+                        destinationHomeOffset + 1] != 3
+                    || Host.StandaloneRewrittenNormalizedHomes[
+                        destinationHomeOffset + 2] != 0
+                    || (kind == 30
+                        ? localHomeId != operand1
+                        : localHomeId != operand0))
                 {
                     return 3;
                 }

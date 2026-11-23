@@ -624,6 +624,8 @@ int32 NormalizeStandaloneSourceStatement(int32 bodyId,
             = Host.StandaloneSourceLocals[localOffset + 3];
         int32 typeId
             = Host.StandaloneSourceLocals[localOffset + 2];
+        int32 homeFirst
+            = Host.StandaloneNormalizedBodies[bodyId * 12 + 1];
         if (Host.StandaloneSourceLocals[localOffset] != bodyId
             || typeId <= 0
             || typeId > Host.StandaloneTypeFactCount[0])
@@ -680,9 +682,103 @@ int32 NormalizeStandaloneSourceStatement(int32 bodyId,
         {
             return 2;
         }
+        if (bindingKind == 1)
+        {
+            init int32 mutableHomeId;
+            int32 mutableHomeStatus = AppendStandaloneNormalizedHome(
+                bodyId, homeFirst, 3, typeId, 0,
+                ref init mutableHomeId);
+            if (mutableHomeStatus != 0)
+            {
+                return mutableHomeStatus;
+            }
+            Host.StandaloneNormalizedSourceLocalHomeIds[localId]
+                = mutableHomeId;
+            int32 copyStatus = AppendStandaloneNormalizedOperation(
+                bodyId, 30, selectorIndex, mutableHomeId, localId);
+            if (copyStatus != 0)
+            {
+                return copyStatus;
+            }
+            return 0;
+        }
         Host.StandaloneNormalizedSourceLocalHomeIds[localId]
             = selectorIndex;
         return 0;
+    }
+    if (statementKind == 5)
+    {
+        int32 placeId
+            = Host.StandaloneSourceStatements[statementOffset + 2];
+        if (placeId < 0
+            || placeId >= Host.StandaloneSourcePlaceCount[0])
+        {
+            return 3;
+        }
+        int32 placeOffset = placeId * 5;
+        int32 localId
+            = Host.StandaloneSourcePlaces[placeOffset + 3];
+        int32 localRangeOffset = bodyId * 2;
+        int32 localFirst
+            = Host.StandaloneSourceBodyLocalRanges[
+                localRangeOffset];
+        int32 localCount
+            = Host.StandaloneSourceBodyLocalRanges[
+                localRangeOffset + 1];
+        if (localId < localFirst
+            || localId >= localFirst + localCount)
+        {
+            return 3;
+        }
+        int32 localOffset = localId * 10;
+        int32 typeId
+            = Host.StandaloneSourceLocals[localOffset + 2];
+        int32 bindingKind
+            = Host.StandaloneSourceLocals[localOffset + 3];
+        int32 destinationHomeId
+            = Host.StandaloneNormalizedSourceLocalHomeIds[localId];
+        if (Host.StandaloneSourcePlaces[placeOffset] != bodyId
+            || Host.StandaloneSourcePlaces[placeOffset + 2] != 1
+            || Host.StandaloneSourcePlaces[placeOffset + 1] != typeId
+            || Host.StandaloneSourceLocals[localOffset] != bodyId
+            || bindingKind != 1
+            || Host.StandaloneSourceLocalStates[localId] != 1
+            || expressionId < 0
+            || destinationHomeId < 0)
+        {
+            return 3;
+        }
+
+        init int32 selectorKind;
+        init int32 sourceUse;
+        init int32 selectorIndex;
+        init bool terminated;
+        int32 expressionStatus = NormalizeStandaloneSourceExpression(
+            bodyId, expressionId, 0, ref init selectorKind,
+            ref init sourceUse, ref init selectorIndex,
+            ref init terminated);
+        if (expressionStatus != 0)
+        {
+            return expressionStatus;
+        }
+        if (terminated)
+        {
+            *terminalKind = 1;
+            return 0;
+        }
+        int32 expectedUse = GetStandaloneSourceUse(typeId);
+        if (expectedUse == 0)
+        {
+            return selectorKind == 0 && sourceUse == 0
+                && selectorIndex == 0 ? 0 : 3;
+        }
+        if (expectedUse != 1 || selectorKind != 2
+            || sourceUse != 1 || selectorIndex < 0)
+        {
+            return 2;
+        }
+        return AppendStandaloneNormalizedOperation(
+            bodyId, 30, selectorIndex, destinationHomeId, localId);
     }
     if (statementKind == 1 && expressionId < 0)
     {
@@ -895,6 +991,8 @@ int32 NormalizeStandaloneSourceExpression(int32 bodyId,
             return 3;
         }
 
+        int32 bindingKind
+            = Host.StandaloneSourceLocals[localId * 10 + 3];
         int32 sourceUse = GetStandaloneSourceUse(typeId);
         int32 homeId
             = Host.StandaloneNormalizedSourceLocalHomeIds[localId];
@@ -926,6 +1024,31 @@ int32 NormalizeStandaloneSourceExpression(int32 bodyId,
                     homeOffset + 3] != typeId)
             {
                 return 3;
+            }
+            if (bindingKind == 1)
+            {
+                init int32 snapshotHomeId;
+                int32 snapshotStatus
+                    = AppendStandaloneNormalizedHome(
+                        bodyId, homeFirst, 3, typeId, 0,
+                        ref init snapshotHomeId);
+                if (snapshotStatus != 0)
+                {
+                    return snapshotStatus;
+                }
+                int32 copyStatus
+                    = AppendStandaloneNormalizedOperation(
+                        bodyId, 31, homeId, snapshotHomeId,
+                        localId);
+                if (copyStatus != 0)
+                {
+                    return copyStatus;
+                }
+                *selectorKindResult = 2;
+                *sourceUseResult = sourceUse;
+                *selectorIndexResult = snapshotHomeId;
+                *terminatedResult = false;
+                return 0;
             }
             *selectorKindResult = 2;
             *sourceUseResult = sourceUse;
@@ -1908,6 +2031,8 @@ int32 VerifyStandaloneNormalizedProgram()
             int32 localId = localFirst + localOrdinal;
             int32 localTypeId
                 = Host.StandaloneSourceLocals[localId * 10 + 2];
+            int32 bindingKind
+                = Host.StandaloneSourceLocals[localId * 10 + 3];
             int32 localState
                 = Host.StandaloneSourceLocalStates[localId];
             int32 homeId
@@ -1917,6 +2042,7 @@ int32 VerifyStandaloneNormalizedProgram()
                 = GetStandaloneSourceUse(localTypeId);
             if (Host.StandaloneSourceLocals[localId * 10] != bodyId
                 || localUse < 0
+                || bindingKind < 0 || bindingKind > 3
                 || (localState != 0 && localState != 1)
                 || (localState == 0 && homeId != -1))
             {
@@ -1948,7 +2074,10 @@ int32 VerifyStandaloneNormalizedProgram()
                 if (Host.StandaloneNormalizedHomes[
                         homeOffset] != bodyId
                     || Host.StandaloneNormalizedHomes[
-                        homeOffset + 3] != localTypeId)
+                        homeOffset + 3] != localTypeId
+                    || (bindingKind == 1
+                        && Host.StandaloneNormalizedHomes[
+                            homeOffset + 1] != 3))
                 {
                     return 3;
                 }
@@ -2595,6 +2724,50 @@ int32 VerifyStandaloneNormalizedProgram()
                         resultHomeOffset + 1] != 3
                     || Host.StandaloneNormalizedHomes[
                         resultHomeOffset + 2] != 0)
+                {
+                    return 3;
+                }
+            }
+            else if (kind == 30 || kind == 31)
+            {
+                if (operand0 < 0 || operand0 >= bodyHomeCount
+                    || operand1 < 0 || operand1 >= bodyHomeCount
+                    || operand0 == operand1
+                    || operand2 < localFirst
+                    || operand2 >= localFirst + localCount)
+                {
+                    return 3;
+                }
+                int32 localOffset = operand2 * 10;
+                int32 typeId
+                    = Host.StandaloneSourceLocals[localOffset + 2];
+                int32 localHomeId
+                    = Host.StandaloneNormalizedSourceLocalHomeIds[
+                        operand2];
+                int32 sourceHomeOffset
+                    = (homeFirst + operand0) * 5;
+                int32 destinationHomeOffset
+                    = (homeFirst + operand1) * 5;
+                if (Host.StandaloneSourceLocals[localOffset] != bodyId
+                    || Host.StandaloneSourceLocals[
+                        localOffset + 3] != 1
+                    || Host.StandaloneSourceLocalStates[operand2] != 1
+                    || GetStandaloneSourceUse(typeId) != 1
+                    || Host.StandaloneNormalizedHomes[
+                        sourceHomeOffset] != bodyId
+                    || Host.StandaloneNormalizedHomes[
+                        destinationHomeOffset] != bodyId
+                    || Host.StandaloneNormalizedHomes[
+                        sourceHomeOffset + 3] != typeId
+                    || Host.StandaloneNormalizedHomes[
+                        destinationHomeOffset + 3] != typeId
+                    || Host.StandaloneNormalizedHomes[
+                        destinationHomeOffset + 1] != 3
+                    || Host.StandaloneNormalizedHomes[
+                        destinationHomeOffset + 2] != 0
+                    || (kind == 30
+                        ? localHomeId != operand1
+                        : localHomeId != operand0))
                 {
                     return 3;
                 }
