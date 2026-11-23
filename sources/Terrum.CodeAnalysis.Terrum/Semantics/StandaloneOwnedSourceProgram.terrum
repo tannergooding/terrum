@@ -3909,6 +3909,22 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
             {
                 return 1;
             }
+            int32 bodyExpressionFirst
+                = Host.StandaloneSourceBodies[
+                    localCallableId * 12 + 3];
+            int32 bodyExpressionCount
+                = Host.StandaloneSourceBodies[
+                    localCallableId * 12 + 4];
+            int32 conditionGlobalExpressionId
+                = bodyExpressionFirst + conditionExpressionId;
+            if (conditionExpressionId < 0
+                || conditionExpressionId >= bodyExpressionCount
+                || conditionGlobalExpressionId < expressionFirst
+                || conditionGlobalExpressionId
+                    >= Host.StandaloneSourceExpressionCount[0])
+            {
+                return 3;
+            }
             init bool conditionDoesNotReturn;
             int32 conditionDoesNotReturnStatus
                 = TryGetStandaloneSourceExpressionDoesNotReturn(
