@@ -1708,11 +1708,60 @@ int32 VerifyStandaloneRewrittenSourceArenas()
                 sawLoopTransfer = true;
                 continue;
             }
+            bool unitForStep
+                = controlStatementKind == 11
+                    && childOrdinal >= trueCount
+                    && currentChildKind == 2;
+            if (unitForStep)
+            {
+                int32 stepExpressionId
+                    = Host.StandaloneSourceStatements[
+                        childStatementOffset + 1];
+                if (stepExpressionId < 0
+                    || stepExpressionId >= bodyExpressionCount)
+                {
+                    return 3;
+                }
+                int32 stepExpressionOffset
+                    = (bodyExpressionFirst + stepExpressionId) * 8;
+                int32 stepExpressionTypeId
+                    = Host.StandaloneSourceExpressions[
+                        stepExpressionOffset + 1];
+                int32 stepLocationId
+                    = Host.StandaloneSourceStatements[
+                        childStatementOffset + 2];
+                init bool stepDoesNotReturn;
+                int32 stepStatus
+                    = TryGetStandaloneSourceExpressionDoesNotReturn(
+                        bodyId, stepExpressionId,
+                        ref init stepDoesNotReturn);
+                if (stepLocationId != -1
+                    || stepExpressionTypeId <= 0
+                    || stepExpressionTypeId
+                        > Host.StandaloneTypeFactCount[0]
+                    || !IsStandaloneUnitType(stepExpressionTypeId)
+                    || Host.StandaloneSourceExpressions[
+                        stepExpressionOffset] != 7
+                    || Host.StandaloneSourceExpressions[
+                        stepExpressionOffset + 2] != 0
+                    || Host.StandaloneSourceExpressions[
+                        stepExpressionOffset + 3] != 0
+                    || Host.StandaloneSourceExpressions[
+                        stepExpressionOffset + 4] != 0
+                    || Host.StandaloneSourceExpressions[
+                        stepExpressionOffset + 5] != 0
+                    || Host.StandaloneSourceExpressions[
+                        stepExpressionOffset + 6] != -1
+                    || stepStatus != 0 || stepDoesNotReturn)
+                {
+                    return 3;
+                }
+            }
             if (controlIsLoop
                 ? (childOrdinal < trueCount
                     ? sawLoopTransfer || currentChildKind != 5
                     : controlStatementKind != 11
-                        || currentChildKind != 5)
+                        || (currentChildKind != 5 && !unitForStep))
                 : currentChildKind != 1 && currentChildKind != 5)
             {
                 return 3;

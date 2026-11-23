@@ -3442,26 +3442,71 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
             {
                 init int32 stepStatementId;
                 init int32 nextStepToken;
-                int32 stepStatus
-                    = ParseStandaloneSourceAssignmentBranch(
-                        localCallableId, localCallableId,
-                        expressionFirst, stepStart, headerClose, false,
-                        ref init stepStatementId,
-                        ref init nextStepToken);
-                if (stepStatus != 0)
+                bool unitStep
+                    = stepStart + 2 == headerClose
+                        && Host.Tokens[stepStart * 3] == 46
+                        && Host.Tokens[(stepStart + 1) * 3] == 47;
+                if (unitStep)
                 {
-                    return stepStatus;
+                    init int32 stepExpressionId;
+                    init int32 parsedNextStepToken;
+                    int32 expressionStatus
+                        = ParseStandaloneSourceExpression(
+                            localCallableId, localCallableId,
+                            expressionFirst, -1, stepStart, headerClose,
+                            1, ref init stepExpressionId,
+                            ref init parsedNextStepToken);
+                    if (expressionStatus != 0)
+                    {
+                        return expressionStatus;
+                    }
+                    int32 stepExpressionGlobalId
+                        = expressionFirst + stepExpressionId;
+                    if (parsedNextStepToken != headerClose
+                        || stepExpressionGlobalId < expressionFirst
+                        || stepExpressionGlobalId
+                            >= Host.StandaloneSourceExpressionCount[0]
+                        || !IsStandaloneUnitType(
+                            Host.StandaloneSourceExpressions[
+                                stepExpressionGlobalId * 8 + 1]))
+                    {
+                        return 2;
+                    }
+                    int32 stepStatementStatus
+                        = AppendStandaloneSourceStatement(
+                            localCallableId, expressionFirst, 2,
+                            stepExpressionId, -1);
+                    if (stepStatementStatus != 0)
+                    {
+                        return stepStatementStatus;
+                    }
+                    stepStatementId
+                        = Host.StandaloneSourceStatementCount[0] - 1;
+                    nextStepToken = headerClose;
                 }
-                if (nextStepToken != headerClose)
+                else
                 {
-                    return 1;
-                }
-                int32 stepValidationStatus
-                    = ValidateStandaloneSourceWhileAssignment(
-                        localCallableId, stepStatementId);
-                if (stepValidationStatus != 0)
-                {
-                    return stepValidationStatus;
+                    int32 stepStatus
+                        = ParseStandaloneSourceAssignmentBranch(
+                            localCallableId, localCallableId,
+                            expressionFirst, stepStart, headerClose,
+                            false, ref init stepStatementId,
+                            ref init nextStepToken);
+                    if (stepStatus != 0)
+                    {
+                        return stepStatus;
+                    }
+                    if (nextStepToken != headerClose)
+                    {
+                        return 1;
+                    }
+                    int32 stepValidationStatus
+                        = ValidateStandaloneSourceWhileAssignment(
+                            localCallableId, stepStatementId);
+                    if (stepValidationStatus != 0)
+                    {
+                        return stepValidationStatus;
+                    }
                 }
                 int32 stepAppendStatus = AppendStandaloneSourceIfChild(
                     localCallableId, controlNodeId, loopStatementId,
@@ -10515,13 +10560,19 @@ int32 VerifyStandaloneDirectCalls()
                         || stepStatementId
                             >= bodyStatementFirst + bodyStatementCount
                         || Host.StandaloneSourceStatementParentIds[
-                            stepStatementId] != statementId
-                        || Host.StandaloneSourceStatements[
-                            stepStatementId * 3] != 5)
+                            stepStatementId] != statementId)
                     {
                         return 3;
                     }
                     int32 stepStatementOffset = stepStatementId * 3;
+                    int32 stepStatementKind
+                        = Host.StandaloneSourceStatements[
+                            stepStatementOffset];
+                    if ((stepStatementKind != 5
+                            && stepStatementKind != 2))
+                    {
+                        return 3;
+                    }
                     int32 stepExpressionId
                         = Host.StandaloneSourceStatements[
                             stepStatementOffset + 1];
@@ -10529,51 +10580,93 @@ int32 VerifyStandaloneDirectCalls()
                         = Host.StandaloneSourceStatements[
                             stepStatementOffset + 2];
                     if (stepExpressionId < 0
-                        || stepExpressionId >= bodyExpressionCount
-                        || stepPlaceId < bodyPlaceFirst
-                        || stepPlaceId
-                            >= bodyPlaceFirst + bodyPlaceCount
-                        || Host.StandaloneSourcePlaceUseCounts[
-                            stepPlaceId] != 0)
+                        || stepExpressionId >= bodyExpressionCount)
                     {
                         return 3;
                     }
-                    int32 stepPlaceOffset = stepPlaceId * 5;
-                    int32 stepLocalId
-                        = Host.StandaloneSourcePlaces[
-                            stepPlaceOffset + 3];
-                    if (stepLocalId < bodyLocalFirst
-                        || stepLocalId
-                            >= bodyLocalFirst + bodyLocalCount)
-                    {
-                        return 3;
-                    }
-                    int32 stepLocalOffset = stepLocalId * 10;
-                    int32 stepTypeId
-                        = Host.StandaloneSourceLocals[
-                            stepLocalOffset + 2];
-                    int32 stepBindingKind
-                        = Host.StandaloneSourceLocals[
-                            stepLocalOffset + 3];
-                    if (Host.StandaloneSourcePlaces[
-                            stepPlaceOffset] != bodyId
-                        || Host.StandaloneSourcePlaces[
-                            stepPlaceOffset + 1] != stepTypeId
-                        || Host.StandaloneSourcePlaces[
-                            stepPlaceOffset + 2] != 2
-                        || Host.StandaloneSourceLocals[
-                            stepLocalOffset] != bodyId
-                        || (stepBindingKind != 1
-                            && stepBindingKind != 3)
-                        || Host.StandaloneSourceLocalStates[
-                            stepLocalId] != 1
-                        || GetStandaloneSourceUse(stepTypeId) != 1
-                        || Host.StandaloneSourceExpressions[
+                    int32 stepExpressionTypeId
+                        = Host.StandaloneSourceExpressions[
                             (bodyExpressionFirst
-                                + stepExpressionId) * 8 + 1]
-                            != stepTypeId)
+                                + stepExpressionId) * 8 + 1];
+                    if (stepStatementKind == 2)
                     {
-                        return 3;
+                        int32 stepExpressionOffset
+                            = (bodyExpressionFirst
+                                + stepExpressionId) * 8;
+                        if (stepPlaceId != -1
+                            || !IsStandaloneUnitType(
+                                stepExpressionTypeId)
+                            || Host.StandaloneSourceExpressions[
+                                stepExpressionOffset] != 7
+                            || Host.StandaloneSourceExpressions[
+                                stepExpressionOffset + 2] != 0
+                            || Host.StandaloneSourceExpressions[
+                                stepExpressionOffset + 3] != 0
+                            || Host.StandaloneSourceExpressions[
+                                stepExpressionOffset + 4] != 0
+                            || Host.StandaloneSourceExpressions[
+                                stepExpressionOffset + 5] != 0
+                            || Host.StandaloneSourceExpressions[
+                                stepExpressionOffset + 6] != -1)
+                        {
+                            return 3;
+                        }
+                    }
+                    else
+                    {
+                        if (stepPlaceId < bodyPlaceFirst
+                            || stepPlaceId
+                                >= bodyPlaceFirst + bodyPlaceCount
+                            || Host.StandaloneSourcePlaceUseCounts[
+                                stepPlaceId] != 0)
+                        {
+                            return 3;
+                        }
+                        int32 stepPlaceOffset = stepPlaceId * 5;
+                        int32 stepLocalId
+                            = Host.StandaloneSourcePlaces[
+                                stepPlaceOffset + 3];
+                        if (stepLocalId < bodyLocalFirst
+                            || stepLocalId
+                                >= bodyLocalFirst + bodyLocalCount)
+                        {
+                            return 3;
+                        }
+                        int32 stepLocalOffset = stepLocalId * 10;
+                        int32 stepTypeId
+                            = Host.StandaloneSourceLocals[
+                                stepLocalOffset + 2];
+                        int32 stepBindingKind
+                            = Host.StandaloneSourceLocals[
+                                stepLocalOffset + 3];
+                        if (Host.StandaloneSourcePlaces[
+                                stepPlaceOffset] != bodyId
+                            || Host.StandaloneSourcePlaces[
+                                stepPlaceOffset + 1] != stepTypeId
+                            || Host.StandaloneSourcePlaces[
+                                stepPlaceOffset + 2] != 2
+                            || Host.StandaloneSourceLocals[
+                                stepLocalOffset] != bodyId
+                            || (stepBindingKind != 1
+                                && stepBindingKind != 3)
+                            || Host.StandaloneSourceLocalStates[
+                                stepLocalId] != 1
+                            || GetStandaloneSourceUse(stepTypeId) != 1
+                            || stepExpressionTypeId != stepTypeId)
+                        {
+                            return 3;
+                        }
+                        Host.StandaloneSourcePlaceUseCounts[
+                            stepPlaceId] = 1;
+                        int32 stepLocalUseCount
+                            = Host.StandaloneSourceLocalDeclarationUseCounts[
+                                stepLocalId];
+                        if (stepBindingKind == 3
+                            && stepLocalUseCount == 1)
+                        {
+                            Host.StandaloneSourceLocalDeclarationUseCounts[
+                                stepLocalId] = stepLocalUseCount + 1;
+                        }
                     }
                     init bool stepDoesNotReturn;
                     int32 stepStatus
@@ -10583,17 +10676,6 @@ int32 VerifyStandaloneDirectCalls()
                     if (stepStatus != 0 || stepDoesNotReturn)
                     {
                         return stepStatus != 0 ? stepStatus : 3;
-                    }
-                    Host.StandaloneSourcePlaceUseCounts[
-                        stepPlaceId] = 1;
-                    int32 stepLocalUseCount
-                        = Host.StandaloneSourceLocalDeclarationUseCounts[
-                            stepLocalId];
-                    if (stepBindingKind == 3
-                        && stepLocalUseCount == 1)
-                    {
-                        Host.StandaloneSourceLocalDeclarationUseCounts[
-                            stepLocalId] = stepLocalUseCount + 1;
                     }
                 }
                 if (conditionOmitted && loopTransferKind != 8)

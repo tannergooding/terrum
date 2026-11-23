@@ -1515,11 +1515,19 @@ int32 NormalizeStandaloneSourceForLoop(int32 bodyId,
             || stepStatementId
                 >= Host.StandaloneSourceStatementCount[0]
             || Host.StandaloneSourceStatementParentIds[
-                stepStatementId] != statementId
-            || Host.StandaloneSourceStatements[
-                stepStatementId * 3] != 5
-            || Host.StandaloneSourceStatements[
-                stepStatementId * 3 + 2] < 0)
+                stepStatementId] != statementId)
+        {
+            return 3;
+        }
+        int32 stepStatementOffset = stepStatementId * 3;
+        int32 stepStatementKind
+            = Host.StandaloneSourceStatements[stepStatementOffset];
+        int32 stepPlaceId
+            = Host.StandaloneSourceStatements[
+                stepStatementOffset + 2];
+        if ((stepStatementKind != 5 && stepStatementKind != 2)
+            || (stepStatementKind == 5 && stepPlaceId < 0)
+            || (stepStatementKind == 2 && stepPlaceId != -1))
         {
             return 3;
         }
@@ -1527,7 +1535,7 @@ int32 NormalizeStandaloneSourceForLoop(int32 bodyId,
             = Host.StandaloneNormalizedOperationCount[0];
         init int32 stepTerminalKind;
         int32 stepStatus = NormalizeStandaloneSourceStatement(
-            bodyId, stepStatementId * 3,
+            bodyId, stepStatementOffset,
             ref init stepTerminalKind);
         if (stepStatus != 0 || stepTerminalKind != 0
             || Host.StandaloneNormalizedBlockCount[0]
