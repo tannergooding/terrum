@@ -887,6 +887,206 @@ internal sealed class TrRmGenericMethodSourceWriterTests
     }
 
     [Test]
+    public void ReemitsGenericReferenceStorageDependencyAcrossProviderReplacement()
+    {
+        const string providerIdentity = "reference-storage.provider";
+        const string outputIdentity = "reference-storage.reemitted";
+        const string consumerIdentity = "reference-storage.consumer";
+        var providerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Terrum.CodeAnalysis;
+                [return: DependsOn(nameof(source))]
+                public ref<T> Borrow<T>(
+                    int32 first, int32 second, ref<T> source) {
+                    return move source;
+                }
+                """));
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+
+        var provider = providerCompilation.Program!;
+        var borrow = provider.GenericMethodDefinitions.Single();
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(provider,
+            providerIdentity, GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(),
+            [new TrRmSourceGenericMethodExport(provider,
+                borrow.SourceInputOrdinal, borrow.Span, "Borrow")]);
+        var storageArtifact
+            = RewriteGenericResultDependencyRelationship(providerArtifact, 1,
+                sourceOrdinal: 2);
+        var rootReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(GenericMethodCallsSchemaIdentity,
+                storageArtifact), providerIdentity,
+            Array.Empty<TrRmStandardArtifactInput>());
+        var rootBorrow = rootReference.GenericMethodImports.Single();
+        var expectedSource = new BoundDependencySource(
+            BoundDependencySourceKind.Formal, 2);
+        var rootDependencies = rootBorrow.ProofFunction.DependencyContracts;
+        Assert.That(rootDependencies, Has.Length.EqualTo(2));
+        Assert.That(rootDependencies.Single(static dependency =>
+                dependency.Relation == BoundDependencyRelation.DependsOn)
+            .Sources.Single(), Is.EqualTo(expectedSource));
+        Assert.That(rootDependencies.Single(static dependency =>
+                dependency.Relation
+                    == BoundDependencyRelation.BorrowSourceStorage)
+            .Sources.Single(), Is.EqualTo(expectedSource));
+        Assert.That(rootBorrow.ProofFunction.ReturnType,
+            Is.EqualTo(rootBorrow.ProofFunction.Variables[2].Type));
+        var rootReferenceType = rootReference.CheckedReferenceTypes[
+            CheckedReferenceTypes.Index(
+                rootBorrow.ProofFunction.Variables[2].Type)];
+        Assert.That(rootReferenceType.ReferentType,
+            Is.EqualTo(rootBorrow.Formals[0].PlaceholderType));
+
+        var sourceFreeProgram = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), rootReference).Program!;
+        var selection = new TrRmRetainedGenericMethodExport(
+            sourceFreeProgram, providerIdentity,
+            GenericMethodCallsSchemaIdentity,
+            ImmutableArray.CreateRange(
+                System.Security.Cryptography.SHA256.HashData(storageArtifact)),
+            GetExportedMethodDefId(storageArtifact, "Borrow"), "Borrow",
+            "BorrowCopy");
+        var reemitted = TrRmExecutableCompiler
+            .EmitStandardReemittingGenericMethods(sourceFreeProgram,
+                outputIdentity, GenericMethodCallsSchemaIdentity, 0,
+                [selection]);
+        var reemittedReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(GenericMethodCallsSchemaIdentity,
+                reemitted), outputIdentity,
+            Array.Empty<TrRmStandardArtifactInput>());
+        var reemittedBorrow
+            = reemittedReference.GenericMethodImports.Single();
+        var reemittedDependencies
+            = reemittedBorrow.ProofFunction.DependencyContracts;
+        Assert.That(reemittedDependencies, Has.Length.EqualTo(2));
+        Assert.That(reemittedDependencies.Single(static dependency =>
+                dependency.Relation == BoundDependencyRelation.DependsOn)
+            .Sources.Single(), Is.EqualTo(expectedSource));
+        Assert.That(reemittedDependencies.Single(static dependency =>
+                dependency.Relation
+                    == BoundDependencyRelation.BorrowSourceStorage)
+            .Sources.Single(), Is.EqualTo(expectedSource));
+        var reemittedReferenceType = reemittedReference.CheckedReferenceTypes[
+            CheckedReferenceTypes.Index(
+                reemittedBorrow.ProofFunction.Variables[2].Type)];
+        Assert.That(reemittedReferenceType.ReferentType,
+            Is.EqualTo(reemittedBorrow.Formals[0].PlaceholderType));
+
+        var reemittedTables = TrRmStructuralMetadataValidator
+            .ValidateGenericMethodCallsDraftAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForGenericMethodCallsParameterLabelsDraft(reemitted));
+        var reemittedMethodDefId
+            = GetExportedMethodDefId(reemitted, "BorrowCopy");
+        var reemittedMethodRow = checked((int)(
+            reemittedMethodDefId & 0x00FF_FFFF));
+        var reemittedDependency = reemittedTables.Contracts
+            .GetDependencyContracts(reemittedMethodRow).Single();
+        Assert.That(reemittedDependency.Relationship, Is.EqualTo(1));
+        Assert.That(reemittedDependency.SourceKind, Is.EqualTo(1));
+        Assert.That(reemittedDependency.SourceOrdinal, Is.EqualTo(2));
+        var reemittedSignatureRow
+            = reemittedTables.Methods.GetSignature(reemittedMethodRow);
+        var (formalFirst, formalCount)
+            = reemittedTables.Signatures.GetGenericRange(
+                reemittedSignatureRow);
+        Assert.That(formalCount, Is.EqualTo(1));
+        Assert.That(reemittedTables.GenericParams.GetOwnerDefId(formalFirst),
+            Is.EqualTo(reemittedMethodDefId));
+        Assert.That(reemittedTables.GenericParams.GetOrdinal(formalFirst),
+            Is.Zero);
+
+        var consumerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Terrum.CodeAnalysis;
+                [return: DependsOn(nameof(source))]
+                public ref<T> Forward<T>(ref<T> source) {
+                    return Borrow<T>(int32(1), int32(2), source);
+                }
+                """), reemittedReference);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumer = consumerCompilation.Program!;
+        var forward = consumer.GenericMethodDefinitions.Single();
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(consumer,
+            consumerIdentity, GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(),
+            [new TrRmSourceGenericMethodExport(consumer,
+                forward.SourceInputOrdinal, forward.Span, "Forward")]);
+
+        var replacementCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Terrum.CodeAnalysis;
+                public V Identity<V>(V value) { return value; }
+                [return: DependsOn(nameof(replacementSource))]
+                public ref<U> Borrow<U>(
+                    int32 before, int32 middle,
+                    ref<U> replacementSource) {
+                    return move replacementSource;
+                }
+                """));
+        Assert.That(replacementCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                replacementCompilation.Diagnostics));
+        var replacement = replacementCompilation.Program!;
+        var identity = replacement.GenericMethodDefinitions.Single(
+            static definition => definition.Name == "Identity");
+        var replacementBorrow = replacement.GenericMethodDefinitions.Single(
+            static definition => definition.Name == "Borrow");
+        var replacementArtifact = TrRmExecutableCompiler.EmitStandard(
+            replacement, outputIdentity, GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(), [
+                new(replacement, identity.SourceInputOrdinal, identity.Span,
+                    "Identity"),
+                new(replacement, replacementBorrow.SourceInputOrdinal,
+                    replacementBorrow.Span, "BorrowCopy"),
+            ]);
+        var storageReplacementArtifact
+            = RewriteGenericResultDependencyRelationship(
+                replacementArtifact, 1, sourceOrdinal: 2);
+        var replacementMethodDefId
+            = GetExportedMethodDefId(storageReplacementArtifact, "BorrowCopy");
+        Assert.That(replacementMethodDefId,
+            Is.Not.EqualTo(reemittedMethodDefId));
+        var replacementTables = TrRmStructuralMetadataValidator
+            .ValidateGenericMethodCallsDraftAndGetExecutionTables(
+                TrRmArtifactIndex.ForGenericMethodCallsParameterLabelsDraft(
+                    storageReplacementArtifact));
+        var replacementMethodRow = checked((int)(
+            replacementMethodDefId & 0x00FF_FFFF));
+        var replacementSignatureRow
+            = replacementTables.Methods.GetSignature(replacementMethodRow);
+        var (replacementFormalFirst, replacementFormalCount)
+            = replacementTables.Signatures.GetGenericRange(
+                replacementSignatureRow);
+        Assert.That(replacementFormalCount, Is.EqualTo(1));
+        Assert.That(replacementTables.GenericParams.GetOwnerDefId(
+            replacementFormalFirst), Is.EqualTo(replacementMethodDefId));
+        Assert.That(replacementTables.GenericParams.GetOrdinal(
+            replacementFormalFirst), Is.Zero);
+
+        _ = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(GenericMethodCallsSchemaIdentity,
+                consumerArtifact), consumerIdentity, [
+                new TrRmStandardArtifactInput(GenericMethodCallsSchemaIdentity,
+                    storageReplacementArtifact),
+            ]);
+
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(
+                    GenericMethodCallsSchemaIdentity, consumerArtifact),
+                consumerIdentity, [
+                    new TrRmStandardArtifactInput(
+                        GenericMethodCallsSchemaIdentity,
+                        replacementArtifact),
+                ]));
+    }
+
+    [Test]
     public void ReemitsRetainedGenericMethodWithInterfaceRequirementBody()
     {
         const string providerIdentity = "retained-interface.provider";
