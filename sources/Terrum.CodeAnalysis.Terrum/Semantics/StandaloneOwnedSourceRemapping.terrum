@@ -1476,7 +1476,7 @@ int32 VerifyStandaloneRewrittenSourceArenas()
                 if (Host.StandaloneSourceStatementParentIds[
                         candidateStatementId] == -1
                     && (candidateKind == 6 || candidateKind == 7
-                        || candidateKind == 10)
+                        || candidateKind == 10 || candidateKind == 11)
                     && Host.StandaloneSourceStatements[
                         candidateOffset + 2] == ifNodeId)
                 {
@@ -1493,7 +1493,8 @@ int32 VerifyStandaloneRewrittenSourceArenas()
                     controlStatementId * 3 + 2] != ifNodeId
                 || ((controlStatementKind == 7
                         || controlStatementKind == 10)
-                    && falseCount != 0))
+                    && falseCount != 0)
+                || (controlStatementKind == 11 && falseCount > 1))
             {
                 return 3;
             }
@@ -1519,7 +1520,8 @@ int32 VerifyStandaloneRewrittenSourceArenas()
                     (bodyExpressionFirst
                         + conditionExpressionId) * 8];
             if ((controlStatementKind == 7
-                    || controlStatementKind == 10)
+                    || controlStatementKind == 10
+                    || controlStatementKind == 11)
                 && conditionKind == 34)
             {
                 return 3;
@@ -1574,12 +1576,18 @@ int32 VerifyStandaloneRewrittenSourceArenas()
             int32 currentChildKind
                 = Host.StandaloneSourceStatements[
                     childStatementOffset];
-            if ((controlStatementKind == 7
-                    || controlStatementKind == 10)
+            bool controlIsLoop
+                = controlStatementKind == 7
+                    || controlStatementKind == 10
+                    || controlStatementKind == 11;
+            if (controlIsLoop
                 && (currentChildKind == 8 || currentChildKind == 9))
             {
-                if (sawLoopTransfer
-                    || childOrdinal != trueCount + falseCount - 1
+                if (sawLoopTransfer || childOrdinal >= trueCount
+                    || childOrdinal
+                        != (controlStatementKind == 11
+                            ? trueCount - 1
+                            : trueCount + falseCount - 1)
                     || Host.StandaloneSourceStatements[
                         childStatementOffset + 1] != -1
                     || Host.StandaloneSourceStatements[
@@ -1590,13 +1598,12 @@ int32 VerifyStandaloneRewrittenSourceArenas()
                 sawLoopTransfer = true;
                 continue;
             }
-            if (((controlStatementKind == 7
-                        || controlStatementKind == 10)
-                    && (sawLoopTransfer || currentChildKind != 5))
-                || ((controlStatementKind != 7
-                        && controlStatementKind != 10)
-                    && currentChildKind != 1
-                    && currentChildKind != 5))
+            if (controlIsLoop
+                ? (childOrdinal < trueCount
+                    ? sawLoopTransfer || currentChildKind != 5
+                    : controlStatementKind != 11
+                        || currentChildKind != 5)
+                : currentChildKind != 1 && currentChildKind != 5)
             {
                 return 3;
             }
@@ -1701,9 +1708,13 @@ int32 VerifyStandaloneRewrittenSourceArenas()
         }
 
             if (controlStatementKind == 7
-                || controlStatementKind == 10)
+                || controlStatementKind == 10
+                || controlStatementKind == 11)
             {
-                if (falseCount != 0
+                if ((controlStatementKind != 11
+                        && falseCount != 0)
+                    || (controlStatementKind == 11
+                        && falseCount > 1)
                     || !allAssignedLocalsMutable)
                 {
                     return 3;
@@ -2341,7 +2352,8 @@ int32 VerifyStandaloneRewrittenSourceArenas()
         }
         else if (Host.StandaloneSourceStatements[offset] == 6
             || Host.StandaloneSourceStatements[offset] == 7
-            || Host.StandaloneSourceStatements[offset] == 10)
+            || Host.StandaloneSourceStatements[offset] == 10
+            || Host.StandaloneSourceStatements[offset] == 11)
         {
             int32 ifNodeId
                 = Host.StandaloneSourceStatements[offset + 2];

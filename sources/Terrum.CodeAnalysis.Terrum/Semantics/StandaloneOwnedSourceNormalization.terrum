@@ -141,6 +141,17 @@ public static int32 NormalizeStandaloneOwnedSourceProgram()
                 }
                 continue;
             }
+            if (statementKind == 11)
+            {
+                int32 forStatus
+                    = NormalizeStandaloneSourceForLoop(
+                        bodyId, statementId);
+                if (forStatus != 0)
+                {
+                    return FailStandaloneNormalization(forStatus);
+                }
+                continue;
+            }
             int32 statementStatus = NormalizeStandaloneSourceStatement(
                 bodyId, statementOffset, ref init terminalKind);
             if (statementStatus != 0)
@@ -1301,6 +1312,231 @@ int32 NormalizeStandaloneSourceLoop(int32 bodyId,
     }
     return Host.StandaloneNormalizedBlockCount[0]
         == bodyBlockFirst + conditionBlockCount + 2 ? 0 : 3;
+}
+
+int32 NormalizeStandaloneSourceForLoop(int32 bodyId,
+    int32 statementId)
+{
+    int32 bodyBlockFirst
+        = Host.StandaloneNormalizedBodyBlockRanges[bodyId * 2];
+    if (bodyBlockFirst < 0
+        || Host.StandaloneNormalizedBlockCount[0] != bodyBlockFirst
+        || statementId < 0
+        || statementId >= Host.StandaloneSourceStatementCount[0]
+        || Host.StandaloneSourceStatements[statementId * 3] != 11)
+    {
+        return 2;
+    }
+
+    int32 statementOffset = statementId * 3;
+    int32 conditionExpressionId
+        = Host.StandaloneSourceStatements[statementOffset + 1];
+    int32 loopNodeId
+        = Host.StandaloneSourceStatements[statementOffset + 2];
+    if (conditionExpressionId < 0
+        || loopNodeId < 0
+        || loopNodeId >= Host.StandaloneSourceIfNodeCount[0]
+        || Host.StandaloneSourceIfNodes[loopNodeId * 5] != bodyId)
+    {
+        return 3;
+    }
+
+    int32 bodyExpressionFirst
+        = Host.StandaloneSourceBodies[bodyId * 12 + 3];
+    int32 bodyExpressionCount
+        = Host.StandaloneSourceBodies[bodyId * 12 + 4];
+    if (conditionExpressionId >= bodyExpressionCount)
+    {
+        return 3;
+    }
+    int32 conditionExpressionOffset
+        = (bodyExpressionFirst + conditionExpressionId) * 8;
+    int32 conditionTypeId
+        = Host.StandaloneSourceExpressions[
+            conditionExpressionOffset + 1];
+    int32 conditionKind
+        = Host.StandaloneSourceExpressions[
+            conditionExpressionOffset];
+    if (!IsStandaloneLogicalNotType(conditionTypeId)
+        || conditionKind == 34)
+    {
+        return 2;
+    }
+    init bool conditionDoesNotReturn;
+    int32 conditionDoesNotReturnStatus
+        = TryGetStandaloneSourceExpressionDoesNotReturn(
+            bodyId, conditionExpressionId,
+            ref init conditionDoesNotReturn);
+    if (conditionDoesNotReturnStatus != 0
+        || conditionDoesNotReturn)
+    {
+        return conditionDoesNotReturnStatus != 0
+            ? conditionDoesNotReturnStatus : 2;
+    }
+
+    int32 loopNodeOffset = loopNodeId * 5;
+    int32 childFirst
+        = Host.StandaloneSourceIfNodes[loopNodeOffset + 1];
+    int32 childCount
+        = Host.StandaloneSourceIfNodes[loopNodeOffset + 2];
+    int32 falseFirst
+        = Host.StandaloneSourceIfNodes[loopNodeOffset + 3];
+    int32 falseCount
+        = Host.StandaloneSourceIfNodes[loopNodeOffset + 4];
+    if (childFirst < 0 || childCount < 0
+        || childFirst
+            > Host.StandaloneSourceIfChildCount[0] - childCount
+        || falseFirst != childFirst + childCount
+        || falseCount < 0 || falseCount > 1
+        || falseFirst
+            > Host.StandaloneSourceIfChildCount[0] - falseCount)
+    {
+        return 3;
+    }
+
+    mut bool bodyBreaksImmediately = false;
+    if (childCount > 0)
+    {
+        int32 lastChildStatementId
+            = Host.StandaloneSourceIfChildren[
+                childFirst + childCount - 1];
+        if (lastChildStatementId < 0
+            || lastChildStatementId
+                >= Host.StandaloneSourceStatementCount[0]
+            || Host.StandaloneSourceStatementParentIds[
+                lastChildStatementId] != statementId)
+        {
+            return 3;
+        }
+        bodyBreaksImmediately
+            = Host.StandaloneSourceStatements[
+                lastChildStatementId * 3] == 8;
+    }
+
+    mut int32 conditionBlockCount = 1;
+    if (conditionKind == 35 || conditionKind == 36)
+    {
+        init int32 conditionLeafCount;
+        init bool conditionIsHomogeneous;
+        int32 countStatus = CountStandaloneSourceLazyBooleanTree(
+            bodyId, conditionExpressionId, conditionKind, 0,
+            ref init conditionLeafCount,
+            ref init conditionIsHomogeneous);
+        if (countStatus != 0)
+        {
+            return countStatus;
+        }
+        if (conditionLeafCount < 1
+            || conditionLeafCount > 0xFFFF - 2)
+        {
+            return 3;
+        }
+        conditionBlockCount = conditionLeafCount;
+    }
+
+    bool includeStep = falseCount == 1
+        && !bodyBreaksImmediately;
+    int32 conditionBlockStart = 1;
+    int32 bodyBlockId = conditionBlockCount + 1;
+    int32 stepBlockId = includeStep ? bodyBlockId + 1 : -1;
+    int32 exitBlockId = bodyBlockId + (includeStep ? 2 : 1);
+    int32 finalBodyBlockCount = exitBlockId + 1;
+    int32 operationFirst
+        = Host.StandaloneNormalizedBodies[bodyId * 12 + 9];
+    int32 operationCount
+        = Host.StandaloneNormalizedOperationCount[0] - operationFirst;
+    if (operationCount < 0)
+    {
+        return 3;
+    }
+    init int32 entryBlockIndex;
+    int32 entryBlockStatus = AppendStandaloneNormalizedBlock(
+        bodyId, 0, operationFirst, operationCount,
+        3, 0, 0, 0, conditionBlockStart, -1, 0, 0, 0, -1, -1, 0,
+        ref init entryBlockIndex);
+    if (entryBlockStatus != 0)
+    {
+        return entryBlockStatus;
+    }
+    if (entryBlockIndex != bodyBlockFirst)
+    {
+        return 3;
+    }
+
+    int32 conditionStatus = NormalizeStandaloneSourceLoopCondition(
+        bodyId, conditionExpressionId, conditionTypeId,
+        conditionKind, conditionBlockCount, conditionBlockStart,
+        bodyBlockId, exitBlockId, finalBodyBlockCount);
+    if (conditionStatus != 0)
+    {
+        return conditionStatus;
+    }
+
+    int32 expectedBlockCountBeforeBody
+        = bodyBlockFirst + conditionBlockCount + 1;
+    int32 bodyContinueTarget
+        = includeStep ? stepBlockId : conditionBlockStart;
+    int32 bodyStatus = NormalizeStandaloneSourceLoopBody(
+        bodyId, statementId, loopNodeId, bodyBlockId,
+        bodyContinueTarget, exitBlockId,
+        expectedBlockCountBeforeBody);
+    if (bodyStatus != 0)
+    {
+        return bodyStatus;
+    }
+
+    if (includeStep)
+    {
+        int32 stepStatementId
+            = Host.StandaloneSourceIfChildren[falseFirst];
+        if (stepStatementId != statementId + childCount + 1
+            || stepStatementId < 0
+            || stepStatementId
+                >= Host.StandaloneSourceStatementCount[0]
+            || Host.StandaloneSourceStatementParentIds[
+                stepStatementId] != statementId
+            || Host.StandaloneSourceStatements[
+                stepStatementId * 3] != 5
+            || Host.StandaloneSourceStatements[
+                stepStatementId * 3 + 2] < 0)
+        {
+            return 3;
+        }
+        int32 stepOperationFirst
+            = Host.StandaloneNormalizedOperationCount[0];
+        init int32 stepTerminalKind;
+        int32 stepStatus = NormalizeStandaloneSourceStatement(
+            bodyId, stepStatementId * 3,
+            ref init stepTerminalKind);
+        if (stepStatus != 0 || stepTerminalKind != 0
+            || Host.StandaloneNormalizedBlockCount[0]
+                != bodyBlockFirst + conditionBlockCount + 2)
+        {
+            return stepStatus != 0 ? stepStatus : 2;
+        }
+        int32 stepOperationCount
+            = Host.StandaloneNormalizedOperationCount[0]
+                - stepOperationFirst;
+        init int32 stepBlockIndex;
+        int32 stepBlockStatus = AppendStandaloneNormalizedBlock(
+            bodyId, stepBlockId, stepOperationFirst, stepOperationCount,
+            3, 0, 0, 0, conditionBlockStart, -1, 0, 0, 0, -1, -1, 0,
+            ref init stepBlockIndex);
+        if (stepBlockStatus != 0)
+        {
+            return stepBlockStatus;
+        }
+        if (stepBlockIndex != bodyBlockFirst + stepBlockId)
+        {
+            return 3;
+        }
+    }
+
+    int32 expectedFinalizedBlockCount
+        = bodyBlockFirst + conditionBlockCount + 2
+            + (includeStep ? 1 : 0);
+    return Host.StandaloneNormalizedBlockCount[0]
+        == expectedFinalizedBlockCount ? 0 : 3;
 }
 
 int32 NormalizeStandaloneSourceIfReturns(int32 bodyId,
