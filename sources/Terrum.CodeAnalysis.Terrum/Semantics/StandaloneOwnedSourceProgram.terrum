@@ -2683,8 +2683,10 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
             bool oneReturnOneAssignments
                 = (trueReturns && falseAssignments)
                     || (falseReturns && trueAssignments);
+            bool oneReturnNoElse
+                = trueReturns && falseStatementCount == 0;
             if (!bothReturns && !bothAssignments
-                && !oneReturnOneAssignments)
+                && !oneReturnOneAssignments && !oneReturnNoElse)
             {
                 return 2;
             }
@@ -9033,8 +9035,10 @@ int32 VerifyStandaloneDirectCalls()
                 bool oneReturnOneAssignments
                     = (trueReturns && falseAssignments)
                         || (falseReturns && trueAssignments);
+                bool oneReturnNoElse
+                    = trueReturns && falseCount == 0;
                 if (!bothReturns && !bothAssignments
-                    && !oneReturnOneAssignments)
+                    && !oneReturnOneAssignments && !oneReturnNoElse)
                 {
                     return 3;
                 }
@@ -9093,6 +9097,40 @@ int32 VerifyStandaloneDirectCalls()
                         }
                     }
                     sawReturn = true;
+                }
+                else if (oneReturnNoElse)
+                {
+                    int32 returnExpressionId
+                        = Host.StandaloneSourceStatements[
+                            trueStatementId * 3 + 1];
+                    if (returnExpressionId == -1)
+                    {
+                        if (!IsStandaloneUnitType(returnTypeId))
+                        {
+                            return 3;
+                        }
+                    }
+                    else
+                    {
+                        if (returnExpressionId < 0
+                            || returnExpressionId >= bodyExpressionCount
+                            || Host.StandaloneSourceExpressions[
+                                (bodyExpressionFirst
+                                    + returnExpressionId) * 8 + 1]
+                                != returnTypeId)
+                        {
+                            return 3;
+                        }
+                        init bool returnDoesNotReturn;
+                        int32 returnStatus
+                            = TryGetStandaloneSourceExpressionDoesNotReturn(
+                                bodyId, returnExpressionId,
+                                ref init returnDoesNotReturn);
+                        if (returnStatus != 0 || returnDoesNotReturn)
+                        {
+                            return returnStatus != 0 ? returnStatus : 3;
+                        }
+                    }
                 }
                 else if (oneReturnOneAssignments)
                 {

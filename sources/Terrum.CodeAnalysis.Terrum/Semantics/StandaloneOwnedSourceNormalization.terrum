@@ -1007,8 +1007,10 @@ int32 NormalizeStandaloneSourceIfReturns(int32 bodyId,
     bool oneReturnOneAssignments
         = (trueReturns && falseAssignments)
             || (falseReturns && trueAssignments);
+    bool oneReturnNoElse
+        = trueReturns && falseCount == 0;
     if (!bothReturns && !bothAssignments
-        && !oneReturnOneAssignments)
+        && !oneReturnOneAssignments && !oneReturnNoElse)
     {
         return 3;
     }
@@ -1122,9 +1124,9 @@ int32 NormalizeStandaloneSourceIfReturns(int32 bodyId,
                 conditionExpressionId, trueFirst, trueCount,
                 falseFirst, falseCount);
         }
-        if (oneReturnOneAssignments)
+        if (oneReturnOneAssignments || oneReturnNoElse)
         {
-            return NormalizeStandaloneSourceLazyBooleanIfTerminalAssignments(
+            return NormalizeStandaloneSourceLazyBooleanIfTerminalArm(
                 bodyId, ifStatementId, conditionExpressionId,
                 trueFirst, trueCount, falseFirst, falseCount,
                 trueReturns, falseReturns);
@@ -1157,7 +1159,8 @@ int32 NormalizeStandaloneSourceIfReturns(int32 bodyId,
         return 3;
     }
     bool hasNormalContinuation
-        = bothAssignments || oneReturnOneAssignments;
+        = bothAssignments || oneReturnOneAssignments
+            || oneReturnNoElse;
     int32 conditionOperationCount
         = Host.StandaloneNormalizedOperationCount[0]
             - conditionOperationFirst;
@@ -1184,7 +1187,8 @@ int32 NormalizeStandaloneSourceIfReturns(int32 bodyId,
             = bothReturns
                 || (oneReturnOneAssignments
                     && (branchIndex == 0
-                        ? trueReturns : falseReturns));
+                        ? trueReturns : falseReturns)
+                || (oneReturnNoElse && branchIndex == 0);
         int32 branchOperationFirst
             = Host.StandaloneNormalizedOperationCount[0];
         mut int32 branchTerminalKind = 0;
@@ -1541,7 +1545,7 @@ int32 NormalizeStandaloneSourceLazyBooleanIfAssignments(int32 bodyId,
     return 0;
 }
 
-int32 NormalizeStandaloneSourceLazyBooleanIfTerminalAssignments(
+int32 NormalizeStandaloneSourceLazyBooleanIfTerminalArm(
     int32 bodyId, int32 ifStatementId, int32 conditionExpressionId,
     int32 trueFirst, int32 trueCount, int32 falseFirst, int32 falseCount,
     bool trueReturns, bool falseReturns)
@@ -1556,7 +1560,7 @@ int32 NormalizeStandaloneSourceLazyBooleanIfTerminalAssignments(
         || ifNodeId < 0
         || ifNodeId >= Host.StandaloneSourceIfNodeCount[0]
         || trueReturns == falseReturns
-        || trueCount <= 0 || falseCount <= 0
+        || trueCount <= 0 || falseCount < 0
         || trueFirst < 0 || falseFirst < 0
         || trueFirst > Host.StandaloneSourceIfChildCount[0] - trueCount
         || falseFirst > Host.StandaloneSourceIfChildCount[0] - falseCount
