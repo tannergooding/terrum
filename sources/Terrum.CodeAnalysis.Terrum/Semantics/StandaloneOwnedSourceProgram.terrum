@@ -2209,18 +2209,43 @@ int32 AppendStandaloneSourcePlace(int32 bodyId, int32 typeId,
         || count >= Host.StandaloneSourcePlaces.Length / 5
         || bodyId < 0 || bodyId >= Host.StandaloneSourceBodyCount[0]
         || typeId <= 0 || typeId > Host.StandaloneTypeFactCount[0]
-        || (placeKind < 1 || placeKind > 3)
-        || targetIndex < 0
-        || targetIndex >= Host.StandaloneSourceLocalCount[0])
+        || (placeKind < 1 || placeKind > 4)
+        || targetIndex < 0)
     {
         return 3;
     }
 
-    int32 localOffset = targetIndex * 10;
-    if (Host.StandaloneSourceLocals[localOffset] != bodyId
-        || Host.StandaloneSourceLocals[localOffset + 2] != typeId)
+    if (placeKind == 4)
     {
-        return 3;
+        int32 infoOffset = bodyId * 12;
+        int32 parameterCount
+            = Host.StandaloneSourceCallableInfo[infoOffset + 6];
+        int32 parameterFirst
+            = Host.StandaloneSourceCallableInfo[infoOffset + 5];
+        int32 parameterRow = parameterFirst + targetIndex;
+        if (targetIndex >= parameterCount
+            || parameterRow < 0
+            || parameterRow >= Host.StandaloneSourceParameterCount[0]
+            || Host.StandaloneSourceParameters[
+                parameterRow * 4] != bodyId
+            || Host.StandaloneSourceParameters[
+                parameterRow * 4 + 1] != typeId)
+        {
+            return 3;
+        }
+    }
+    else
+    {
+        if (targetIndex >= Host.StandaloneSourceLocalCount[0])
+        {
+            return 3;
+        }
+        int32 localOffset = targetIndex * 10;
+        if (Host.StandaloneSourceLocals[localOffset] != bodyId
+            || Host.StandaloneSourceLocals[localOffset + 2] != typeId)
+        {
+            return 3;
+        }
     }
     int32 placeOffset = count * 5;
     Host.StandaloneSourcePlaces[placeOffset] = bodyId;
@@ -3682,12 +3707,14 @@ bool IsStandaloneSourceIsKeyword(int32 tokenIndex)
         && Host.Source[start + 1] == char16(115);
 }
 
-int32 TryGetStandaloneLocalInitTest(int32 localCallableId,
+int32 TryGetStandaloneInitTestPlace(int32 localCallableId,
     int32 tokenStart, int32 tokenEnd,
-    ref<init int32> localIdResult,
+    ref<init int32> placeKindResult,
+    ref<init int32> targetIndexResult,
     ref<init int32> stateResult)
     ensure return == 0
-        ? (*localIdResult is init && *stateResult is init) : true
+        ? (*placeKindResult is init && *targetIndexResult is init
+            && *stateResult is init) : true
 {
     if (tokenStart < 0 || tokenStart >= tokenEnd
         || tokenEnd > Host.Tokens.Length / 3)
@@ -3723,23 +3750,39 @@ int32 TryGetStandaloneLocalInitTest(int32 localCallableId,
     }
     int32 localId
         = FindStandaloneSourceLocal(localCallableId, localStart);
-    if (localId < 0)
+    if (localId == -2)
     {
         return 2;
     }
-    int32 localOffset = localId * 10;
-    int32 localState
-        = Host.StandaloneSourceLocalStates[localId];
-    if (localStart
-            < Host.StandaloneSourceLocals[localOffset + 6]
-        || localState < 0 || localState > 1
-        || GetStandaloneSourceUse(
-            Host.StandaloneSourceLocals[localOffset + 2]) == 5)
+    if (localId >= 0)
+    {
+        int32 localOffset = localId * 10;
+        int32 localState
+            = Host.StandaloneSourceLocalStates[localId];
+        if (localStart
+                < Host.StandaloneSourceLocals[localOffset + 6]
+            || localState < 0 || localState > 1
+            || GetStandaloneSourceUse(
+                Host.StandaloneSourceLocals[localOffset + 2]) == 5)
+        {
+            return 2;
+        }
+        *placeKindResult = 3;
+        *targetIndexResult = localId;
+        *stateResult = localState;
+        return 0;
+    }
+    init int32 parameterOrdinal;
+    init int32 parameterTypeId;
+    if (!TryFindStandaloneSourceParameter(localCallableId,
+            localStart, ref init parameterOrdinal,
+            ref init parameterTypeId))
     {
         return 2;
     }
-    *localIdResult = localId;
-    *stateResult = localState;
+    *placeKindResult = 4;
+    *targetIndexResult = parameterOrdinal;
+    *stateResult = 1;
     return 0;
 }
 
@@ -3803,11 +3846,13 @@ bool CanBindStandaloneSourceArgument(int32 localCallableId,
                 depth + 1);
     }
 
-    init int32 initTestLocalId;
+    init int32 initTestPlaceKind;
+    init int32 initTestTargetIndex;
     init int32 initTestState;
-    int32 initTestStatus = TryGetStandaloneLocalInitTest(
+    int32 initTestStatus = TryGetStandaloneInitTestPlace(
         localCallableId, tokenStart, tokenEnd,
-        ref init initTestLocalId, ref init initTestState);
+        ref init initTestPlaceKind, ref init initTestTargetIndex,
+        ref init initTestState);
     if (initTestStatus == 0)
     {
         return IsStandaloneLogicalNotType(expectedTypeId);
@@ -4797,11 +4842,13 @@ int32 ParseStandaloneSourceExpression(int32 localCallableId,
         return 2;
     }
 
-    init int32 initTestLocalId;
+    init int32 initTestPlaceKind;
+    init int32 initTestTargetIndex;
     init int32 initTestState;
-    int32 initTestStatus = TryGetStandaloneLocalInitTest(
+    int32 initTestStatus = TryGetStandaloneInitTestPlace(
         localCallableId, tokenIndex, tokenEnd,
-        ref init initTestLocalId, ref init initTestState);
+        ref init initTestPlaceKind, ref init initTestTargetIndex,
+        ref init initTestState);
     if (initTestStatus == 0)
     {
         mut int32 resultTypeId = expectedTypeId;
@@ -4822,13 +4869,34 @@ int32 ParseStandaloneSourceExpression(int32 localCallableId,
                 return boolTypeStatus;
             }
         }
-        int32 localTypeId
-            = Host.StandaloneSourceLocals[
-                initTestLocalId * 10 + 2];
+        int32 placeTypeId;
+        if (initTestPlaceKind == 3)
+        {
+            placeTypeId
+                = Host.StandaloneSourceLocals[
+                    initTestTargetIndex * 10 + 2];
+        }
+        else
+        {
+            int32 parameterFirst
+                = Host.StandaloneSourceCallableInfo[
+                    localCallableId * 12 + 5];
+            int32 parameterRow
+                = parameterFirst + initTestTargetIndex;
+            if (parameterRow < 0
+                || parameterRow
+                    >= Host.StandaloneSourceParameterCount[0])
+            {
+                return 3;
+            }
+            placeTypeId
+                = Host.StandaloneSourceParameters[
+                    parameterRow * 4 + 1];
+        }
         init int32 placeId;
         int32 placeStatus = AppendStandaloneSourcePlace(
-            localCallableId, localTypeId, 3,
-            initTestLocalId, -1, ref init placeId);
+            localCallableId, placeTypeId, initTestPlaceKind,
+            initTestTargetIndex, -1, ref init placeId);
         if (placeStatus != 0)
         {
             return placeStatus;
@@ -6218,34 +6286,62 @@ int32 VerifyStandaloneDirectCalls()
                 = Host.StandaloneSourcePlaces[placeOffset + 1];
             int32 placeKind
                 = Host.StandaloneSourcePlaces[placeOffset + 2];
-            int32 localId
+            int32 targetIndex
                 = Host.StandaloneSourcePlaces[placeOffset + 3];
-            int32 localState
-                = localId >= 0
-                    && localId < localCount
-                    ? Host.StandaloneSourceLocalStates[localId] : -1;
             if (Host.StandaloneSourcePlaces[placeOffset] != bodyId
                 || placeTypeId <= 0
                 || placeTypeId > Host.StandaloneTypeFactCount[0]
-                || (placeKind < 1 || placeKind > 3)
-                || localId < bodyLocalFirst
-                || localId >= bodyLocalFirst + bodyLocalCount
+                || placeKind < 1 || placeKind > 4
+                || targetIndex < 0
                 || Host.StandaloneSourcePlaces[placeOffset + 4] != -1)
             {
                 return 3;
             }
-            int32 localOffset = localId * 10;
-            if (Host.StandaloneSourceLocals[localOffset] != bodyId
-                || Host.StandaloneSourceLocals[
-                    localOffset + 2] != placeTypeId
-                || localState < 0 || localState > 1
-                || (placeKind == 1 && localState != 1)
-                || (placeKind == 2
-                    && Host.StandaloneSourceLocals[
-                        localOffset + 3] == 0)
-                || GetStandaloneSourceUse(placeTypeId) == 5)
+            if (placeKind == 4)
             {
-                return 3;
+                int32 parameterFirst
+                    = Host.StandaloneSourceCallableInfo[
+                        bodyId * 12 + 5];
+                int32 parameterCount
+                    = Host.StandaloneSourceCallableInfo[
+                        bodyId * 12 + 6];
+                int32 parameterRow
+                    = parameterFirst + targetIndex;
+                if (targetIndex >= parameterCount
+                    || parameterRow < 0
+                    || parameterRow
+                        >= Host.StandaloneSourceParameterCount[0]
+                    || Host.StandaloneSourceParameters[
+                        parameterRow * 4] != bodyId
+                    || Host.StandaloneSourceParameters[
+                        parameterRow * 4 + 1] != placeTypeId)
+                {
+                    return 3;
+                }
+            }
+            else
+            {
+                if (targetIndex < bodyLocalFirst
+                    || targetIndex >= bodyLocalFirst + bodyLocalCount)
+                {
+                    return 3;
+                }
+                int32 localOffset = targetIndex * 10;
+                int32 localState
+                    = Host.StandaloneSourceLocalStates[targetIndex];
+                int32 localBindingKind
+                    = Host.StandaloneSourceLocals[
+                        localOffset + 3];
+                if (Host.StandaloneSourceLocals[localOffset] != bodyId
+                    || Host.StandaloneSourceLocals[
+                        localOffset + 2] != placeTypeId
+                    || localState < 0 || localState > 1
+                    || (placeKind == 1 && localState != 1)
+                    || (placeKind == 2 && localBindingKind == 0)
+                    || GetStandaloneSourceUse(placeTypeId) == 5)
+                {
+                    return 3;
+                }
             }
         }
         int32 bodyExpressionFirst
@@ -6480,6 +6576,11 @@ int32 VerifyStandaloneDirectCalls()
                 int32 stateAtTest
                     = Host.StandaloneSourceExpressions[
                         expressionOffset + 3];
+                int32 placeKind
+                    = operand0 >= 0
+                        && operand0 < placeCount
+                        ? Host.StandaloneSourcePlaces[
+                            operand0 * 5 + 2] : 0;
                 int32 localId
                     = operand0 >= 0
                         && operand0 < placeCount
@@ -6505,21 +6606,50 @@ int32 VerifyStandaloneDirectCalls()
                 }
                 int32 placeOffset = operand0 * 5;
                 if (Host.StandaloneSourcePlaces[placeOffset] != bodyId
-                    || Host.StandaloneSourcePlaces[
-                        placeOffset + 2] != 3
-                    || localId < bodyLocalFirst
-                    || localId >= bodyLocalFirst + bodyLocalCount
-                    || Host.StandaloneSourceLocals[localId * 10]
-                        != bodyId
-                    || Host.StandaloneSourceLocals[
-                        localId * 10 + 2]
-                        != Host.StandaloneSourcePlaces[
-                            placeOffset + 1]
-                    || GetStandaloneSourceUse(
-                        Host.StandaloneSourcePlaces[
-                            placeOffset + 1]) == 5)
+                    || (placeKind != 3 && placeKind != 4))
                 {
                     return 3;
+                }
+                int32 placeTypeId
+                    = Host.StandaloneSourcePlaces[
+                        placeOffset + 1];
+                if (placeKind == 3)
+                {
+                    if (localId < bodyLocalFirst
+                        || localId >= bodyLocalFirst + bodyLocalCount
+                        || Host.StandaloneSourceLocals[
+                            localId * 10] != bodyId
+                        || Host.StandaloneSourceLocals[
+                            localId * 10 + 2] != placeTypeId
+                        || GetStandaloneSourceUse(placeTypeId) == 5)
+                    {
+                        return 3;
+                    }
+                }
+                else
+                {
+                    int32 parameterFirst
+                        = Host.StandaloneSourceCallableInfo[
+                            bodyId * 12 + 5];
+                    int32 parameterCount
+                        = Host.StandaloneSourceCallableInfo[
+                            bodyId * 12 + 6];
+                    if (localId < 0 || localId >= parameterCount
+                        || stateAtTest != 1)
+                    {
+                        return 3;
+                    }
+                    int32 parameterRow = parameterFirst + localId;
+                    if (parameterRow < 0
+                        || parameterRow
+                            >= Host.StandaloneSourceParameterCount[0]
+                        || Host.StandaloneSourceParameters[
+                            parameterRow * 4] != bodyId
+                        || Host.StandaloneSourceParameters[
+                            parameterRow * 4 + 1] != placeTypeId)
+                    {
+                        return 3;
+                    }
                 }
                 Host.StandaloneSourcePlaceUseCounts[operand0] = 1;
             }

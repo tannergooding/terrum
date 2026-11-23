@@ -1080,6 +1080,14 @@ internal sealed class StandaloneMethodImportInputTests
         "namespace client { "
             + "bool Main() { init void token; token = (); "
             + "return token is init; } }", 0, 93, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "bool Main(bool initial) { return initial is init; } }",
+        0, 94, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "bool Main(ref<init int32> destination) { "
+            + "return destination is init; } }", 0, 95, false)]
     public async Task TerrumOwnedSourceBinderValidatesOrderedCallUsesAsync(
         BoundRuntimePolicy policy, string sourceText,
         int expectedSourceStatus, int verificationMode,
@@ -3778,64 +3786,84 @@ internal sealed class StandaloneMethodImportInputTests
                 return 0;
             }
             """;
+        var initTestHasLocal = verificationMode is >= 90 and <= 93;
+        var initTestHasParameter = verificationMode is 91 or 94 or 95;
+        var initTestHasAssignment = verificationMode is 91 or 93;
+        var initTestState = verificationMode is 91 or 93 or 94 or 95 ? 1 : 0;
+        var initTestExpectedLocalTypeKind = verificationMode == 95 ? 1 : 0;
+        var initTestExpectedLocalTypeCode = verificationMode switch
+        {
+            90 or 91 or 95 => 0x08,
+            94 => 1,
+            _ => 0,
+        };
         var localInitTestVerificationSource = $$"""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
                 if (Scan() < 1) { return 310; }
                 int32 status = BindStandaloneOwnedSourceProgram();
-                int32 isInitialized
-                    = {{verificationMode is 91 or 93 ? 1 : 0}};
-                int32 hasValueParameter
-                    = {{verificationMode == 91 ? 1 : 0}};
-                int32 expectedSourceExpressionCount
-                    = {{verificationMode is 91 or 93 ? 2 : 1}};
+                int32 expectedLocalCount
+                    = {{initTestHasLocal ? 1 : 0}};
+                int32 expectedExpressionCount
+                    = {{initTestHasAssignment ? 2 : 1}};
                 int32 expectedStatementCount
-                    = {{verificationMode is 91 or 93 ? 3 : 2}};
+                    = {{initTestHasAssignment ? 3
+                        : initTestHasParameter ? 1 : 2}};
                 int32 expectedPlaceCount
-                    = {{verificationMode is 91 or 93 ? 2 : 1}};
+                    = {{initTestHasAssignment ? 2 : 1}};
                 int32 expectedHomeCount
-                    = {{verificationMode == 91 ? 3 : 1}};
+                    = {{verificationMode == 91 ? 3
+                        : initTestHasParameter ? 2 : 1}};
                 int32 expectedOperationCount
                     = {{verificationMode == 91 ? 4 : 3}};
                 int32 testExpressionId
-                    = expectedSourceExpressionCount - 1;
+                    = expectedExpressionCount - 1;
                 int32 testExpressionOffset = testExpressionId * 8;
-                int32 testState
-                    = {{verificationMode is 91 or 93 ? 1 : 0}};
+                int32 stateAtTest = {{initTestState}};
                 int32 expectedBoolean
-                    = testState == 0 ? 1 : 0;
+                    = stateAtTest == 0 ? 1 : 0;
                 if (status != 0
-                    || Host.StandaloneSourceLocalCount[0] != 1
+                    || Host.StandaloneSourceLocalCount[0]
+                        != expectedLocalCount
                     || Host.StandaloneSourceExpressionCount[0]
-                        != expectedSourceExpressionCount
+                        != expectedExpressionCount
                     || Host.StandaloneSourceStatementCount[0]
                         != expectedStatementCount
                     || Host.StandaloneSourcePlaceCount[0]
                         != expectedPlaceCount
-                    || Host.StandaloneSourceLocalStates[0]
-                        != testState
                     || Host.StandaloneSourceExpressions[
                         testExpressionOffset] != 26
                     || Host.StandaloneSourceExpressions[
-                        testExpressionOffset + 3] != testState
-                    || Host.StandaloneSourcePlaces[
-                        Host.StandaloneSourceExpressions[
-                            testExpressionOffset + 2] * 5 + 2] != 3) {
+                        testExpressionOffset + 3] != stateAtTest) {
                     return 311;
                 }
-                int32 localTypeId
-                    = Host.StandaloneSourceLocals[2];
-                int32 expectedLocalTypeCode
-                    = {{verificationMode is 92 or 93 ? 0 : 0x08}};
+                int32 testPlaceId
+                    = Host.StandaloneSourceExpressions[
+                        testExpressionOffset + 2];
+                int32 placeOffset = testPlaceId * 5;
+                int32 placeTypeId
+                    = Host.StandaloneSourcePlaces[placeOffset + 1];
+                int32 expectedPlaceKind
+                    = {{initTestHasParameter ? 4 : 3}};
                 int32 resultTypeId
                     = Host.StandaloneSourceExpressions[
                         testExpressionOffset + 1];
-                if (localTypeId <= 0
-                    || localTypeId
+                if (testPlaceId < 0
+                    || testPlaceId
+                        >= Host.StandaloneSourcePlaceCount[0]
+                    || Host.StandaloneSourcePlaces[
+                        placeOffset + 2] != expectedPlaceKind
+                    || Host.StandaloneSourcePlaces[
+                        placeOffset + 3] != 0
+                    || placeTypeId <= 0
+                    || placeTypeId
                         > Host.StandaloneTypeFactCount[0]
                     || Host.StandaloneTypeFacts[
-                        localTypeId * 3 + 1]
-                        != expectedLocalTypeCode
+                        placeTypeId * 3]
+                        != {{initTestExpectedLocalTypeKind}}
+                    || Host.StandaloneTypeFacts[
+                        placeTypeId * 3 + 1]
+                        != {{initTestExpectedLocalTypeCode}}
                     || resultTypeId <= 0
                     || resultTypeId
                         > Host.StandaloneTypeFactCount[0]
@@ -3843,20 +3871,29 @@ internal sealed class StandaloneMethodImportInputTests
                         resultTypeId * 3 + 1] != 1) {
                     return 312;
                 }
+                if (expectedLocalCount == 1
+                    && (Host.StandaloneSourceLocalStates[0]
+                            != stateAtTest
+                        || Host.StandaloneSourceLocals[2]
+                            != placeTypeId)) {
+                    return 313;
+                }
                 status = NormalizeStandaloneOwnedSourceProgram();
                 int32 expectedLocalHome
                     = {{verificationMode == 91 ? 1
                         : verificationMode == 93 ? 0 : -1}};
                 int32 expectedResultHome
-                    = {{verificationMode == 91 ? 2 : 0}};
+                    = {{verificationMode == 91 ? 2
+                        : initTestHasParameter ? 1 : 0}};
                 if (status != 0
                     || Host.StandaloneNormalizedHomeCount[0]
                         != expectedHomeCount
                     || Host.StandaloneNormalizedOperationCount[0]
                         != expectedOperationCount
                     || Host.StandaloneNormalizedConstantCount[0] != 1
-                    || Host.StandaloneNormalizedSourceLocalHomeIds[0]
-                        != expectedLocalHome
+                    || (expectedLocalCount == 1
+                        && Host.StandaloneNormalizedSourceLocalHomeIds[0]
+                            != expectedLocalHome)
                     || Host.StandaloneNormalizedConstants[2]
                         != expectedBoolean
                     || Host.StandaloneNormalizedConstants[3] != 0
@@ -3865,16 +3902,16 @@ internal sealed class StandaloneMethodImportInputTests
                     || Host.StandaloneNormalizedOperations[
                         (expectedOperationCount - 1) * 5 + 1]
                         != expectedResultHome) {
-                    return 313;
+                    return 314;
                 }
-                if (hasValueParameter == 1
+                if (verificationMode == 91
                     && (Host.StandaloneNormalizedOperations[0] != 30
                         || Host.StandaloneNormalizedOperations[1] != 0
                         || Host.StandaloneNormalizedOperations[2] != 1
                         || Host.StandaloneNormalizedOperations[3] != 0
                         || Host.StandaloneNormalizedOperations[5] != 1
                         || Host.StandaloneNormalizedOperations[10] != 2)) {
-                    return 314;
+                    return 315;
                 }
                 int32 callableBase
                     = Host.StandaloneResolvedRootCount[0]
@@ -3936,7 +3973,7 @@ internal sealed class StandaloneMethodImportInputTests
                 if (status != 0
                     || Host.StandaloneWriterStatus[0] != 0
                     || Host.StandaloneWriterBodyPlanCount[0] != 1) {
-                    return 315;
+                    return 316;
                 }
                 return 0;
             }
@@ -4004,7 +4041,7 @@ internal sealed class StandaloneMethodImportInputTests
                                                         ? numericComparisonVerificationSource
                                                     : verificationMode == 54
                                                         ? comparisonPrecedenceVerificationSource
-                                                    : verificationMode is >= 90 and <= 93
+                                                    : verificationMode is >= 90 and <= 95
                                                         ? localInitTestVerificationSource
                                                     : verificationMode is 81 or 82
                                                         ? initializationLocalVerificationSource
@@ -4113,7 +4150,7 @@ internal sealed class StandaloneMethodImportInputTests
             or 45 or 46 or 47 or 48 or 49 or 50 or 51 or 52 or 53
             or 54 or 55 or 56 or 57 or 58 or 59
             or >= 60 and <= 74 or 75 or 77 or 81 or 82
-            or >= 90 and <= 93)
+            or >= 90 and <= 95)
         {
             var artifactIndex = new TrRmArtifactIndex(artifact);
             Assert.That(artifactIndex.TryGetSection(0x0020,
@@ -4292,7 +4329,7 @@ internal sealed class StandaloneMethodImportInputTests
                         Is.GreaterThanOrEqualTo(0));
                 }
             }
-            else if (verificationMode is >= 90 and <= 93)
+            else if (verificationMode is >= 90 and <= 95)
             {
                 Assert.That(bodyReader.Code.IndexOf((byte)0xC0),
                     Is.EqualTo(-1));
@@ -4340,7 +4377,7 @@ internal sealed class StandaloneMethodImportInputTests
                 = verificationMode is 4 or 23 or 25 or 26
                     or 29 or 30 or 31 or 32 or 33 or 34 or 35 or 36 or 37
                     or 52 or 53 or 58 or 59 or 71 or 72 or 73
-                    or 75 or 77 or 82 or >= 90 and <= 93
+                    or 75 or 77 or 82 or >= 90 and <= 95
                     ? 1 : 0;
             if (verificationMode == 71)
             {

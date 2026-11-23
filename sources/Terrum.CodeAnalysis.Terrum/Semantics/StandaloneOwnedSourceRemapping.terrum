@@ -1054,27 +1054,56 @@ int32 RewriteStandaloneSourceArenas()
             = Host.StandaloneSourcePlaces[sourceOffset + 1];
         int32 placeKind
             = Host.StandaloneSourcePlaces[sourceOffset + 2];
-        int32 localId
+        int32 targetIndex
             = Host.StandaloneSourcePlaces[sourceOffset + 3];
         if (oldBodyId < 0 || oldBodyId >= bodyCount
             || typeId <= 0 || typeId > typeCount
-            || placeKind < 1 || placeKind > 3
-            || localId < 0 || localId >= localCount)
+            || placeKind < 1 || placeKind > 4
+            || targetIndex < 0)
         {
             return 3;
         }
-        int32 localOffset = localId * 10;
-        int32 localBindingKind
-            = Host.StandaloneSourceLocals[localOffset + 3];
-        int32 localState
-            = Host.StandaloneSourceLocalStates[localId];
-        if (Host.StandaloneSourceLocals[localOffset] != oldBodyId
-            || Host.StandaloneSourceLocals[localOffset + 2] != typeId
-            || localState < 0 || localState > 1
-            || (placeKind == 1 && localState != 1)
-            || (placeKind == 2 && localBindingKind == 0))
+        if (placeKind == 4)
         {
-            return 3;
+            int32 parameterCount
+                = Host.StandaloneSourceCallableInfo[
+                    oldBodyId * 12 + 6];
+            int32 parameterRow
+                = Host.StandaloneSourceCallableInfo[
+                    oldBodyId * 12 + 5]
+                    + targetIndex;
+            if (targetIndex >= parameterCount
+                || parameterRow < 0
+                || parameterRow
+                    >= Host.StandaloneSourceParameterCount[0]
+                || Host.StandaloneSourceParameters[
+                    parameterRow * 4] != oldBodyId
+                || Host.StandaloneSourceParameters[
+                    parameterRow * 4 + 1] != typeId)
+            {
+                return 3;
+            }
+        }
+        else
+        {
+            if (targetIndex >= localCount)
+            {
+                return 3;
+            }
+            int32 localOffset = targetIndex * 10;
+            int32 localBindingKind
+                = Host.StandaloneSourceLocals[localOffset + 3];
+            int32 localState
+                = Host.StandaloneSourceLocalStates[targetIndex];
+            if (Host.StandaloneSourceLocals[localOffset] != oldBodyId
+                || Host.StandaloneSourceLocals[
+                    localOffset + 2] != typeId
+                || localState < 0 || localState > 1
+                || (placeKind == 1 && localState != 1)
+                || (placeKind == 2 && localBindingKind == 0))
+            {
+                return 3;
+            }
         }
         for (mut int32 field = 0; field < 5; field = field + 1)
         {
@@ -1087,8 +1116,11 @@ int32 RewriteStandaloneSourceArenas()
             = Host.StandaloneRewriteBodyIds[oldBodyId];
         Host.StandaloneRewrittenSourcePlaces[targetOffset + 1]
             = Host.StandaloneRewriteTypeIds[typeId];
-        Host.StandaloneRewrittenSourcePlaces[targetOffset + 3]
-            = Host.StandaloneRewriteLocalIds[localId];
+        if (placeKind != 4)
+        {
+            Host.StandaloneRewrittenSourcePlaces[targetOffset + 3]
+                = Host.StandaloneRewriteLocalIds[targetIndex];
+        }
     }
 
     Host.StandaloneRewrittenSourceLexicalScopeCount[0] = scopeCount;
@@ -1240,36 +1272,71 @@ int32 VerifyStandaloneRewrittenSourceArenas()
             = Host.StandaloneSourcePlaces[oldOffset + 1];
         int32 placeKind
             = Host.StandaloneSourcePlaces[oldOffset + 2];
-        int32 oldLocalId
+        int32 oldTargetIndex
             = Host.StandaloneSourcePlaces[oldOffset + 3];
         if (oldBodyId < 0 || oldBodyId >= bodyCount
             || typeId <= 0
             || typeId > Host.StandaloneTypeFactCount[0]
-            || placeKind < 1 || placeKind > 3
-            || oldLocalId < 0 || oldLocalId >= localCount
-            || Host.StandaloneSourceLocals[
-                oldLocalId * 10] != oldBodyId
-            || Host.StandaloneSourceLocals[
-                oldLocalId * 10 + 2] != typeId
-            || Host.StandaloneSourceLocalStates[oldLocalId] < 0
-            || Host.StandaloneSourceLocalStates[oldLocalId] > 1
-            || (placeKind == 1
-                && Host.StandaloneSourceLocalStates[oldLocalId] != 1)
-            || (placeKind == 2
-                && Host.StandaloneSourceLocals[
-                    oldLocalId * 10 + 3] == 0)
+            || placeKind < 1 || placeKind > 4
+            || oldTargetIndex < 0
             || Host.StandaloneRewrittenSourcePlaces[newOffset]
                 != Host.StandaloneRewriteBodyIds[oldBodyId]
             || Host.StandaloneRewrittenSourcePlaces[newOffset + 1]
                 != Host.StandaloneRewriteTypeIds[typeId]
             || Host.StandaloneRewrittenSourcePlaces[newOffset + 2]
                 != Host.StandaloneSourcePlaces[oldOffset + 2]
-            || Host.StandaloneRewrittenSourcePlaces[newOffset + 3]
-                != Host.StandaloneRewriteLocalIds[oldLocalId]
             || Host.StandaloneRewrittenSourcePlaces[newOffset + 4]
                 != Host.StandaloneSourcePlaces[oldOffset + 4])
         {
             return 3;
+        }
+        if (placeKind == 4)
+        {
+            int32 parameterCount
+                = Host.StandaloneSourceCallableInfo[
+                    oldBodyId * 12 + 6];
+            int32 parameterRow
+                = Host.StandaloneSourceCallableInfo[
+                    oldBodyId * 12 + 5]
+                    + oldTargetIndex;
+            if (oldTargetIndex >= parameterCount
+                || parameterRow < 0
+                || parameterRow
+                    >= Host.StandaloneSourceParameterCount[0]
+                || Host.StandaloneSourceParameters[
+                    parameterRow * 4] != oldBodyId
+                || Host.StandaloneSourceParameters[
+                    parameterRow * 4 + 1] != typeId
+                || Host.StandaloneRewrittenSourcePlaces[
+                    newOffset + 3] != oldTargetIndex)
+            {
+                return 3;
+            }
+        }
+        else
+        {
+            if (oldTargetIndex >= localCount)
+            {
+                return 3;
+            }
+            int32 localOffset = oldTargetIndex * 10;
+            int32 localState
+                = Host.StandaloneSourceLocalStates[oldTargetIndex];
+            if (Host.StandaloneSourceLocals[localOffset] != oldBodyId
+                || Host.StandaloneSourceLocals[
+                    localOffset + 2] != typeId
+                || localState < 0 || localState > 1
+                || (placeKind == 1 && localState != 1)
+                || (placeKind == 2
+                    && Host.StandaloneSourceLocals[
+                        localOffset + 3] == 0)
+                || Host.StandaloneRewrittenSourcePlaces[
+                    newOffset + 3]
+                    != Host.StandaloneRewriteLocalIds[
+                        oldTargetIndex])
+            {
+                return 3;
+            }
         }
     }
 

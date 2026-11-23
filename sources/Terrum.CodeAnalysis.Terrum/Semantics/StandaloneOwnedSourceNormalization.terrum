@@ -1139,23 +1139,58 @@ int32 NormalizeStandaloneSourceExpression(int32 bodyId,
             return 3;
         }
         int32 placeOffset = placeId * 5;
-        int32 localId
+        int32 placeKind
+            = Host.StandaloneSourcePlaces[placeOffset + 2];
+        int32 targetIndex
             = Host.StandaloneSourcePlaces[placeOffset + 3];
-        int32 localRangeOffset = bodyId * 2;
-        int32 localFirst
-            = Host.StandaloneSourceBodyLocalRanges[
-                localRangeOffset];
-        int32 localCount
-            = Host.StandaloneSourceBodyLocalRanges[
-                localRangeOffset + 1];
+        int32 placeTypeId
+            = Host.StandaloneSourcePlaces[placeOffset + 1];
         if (Host.StandaloneSourcePlaces[placeOffset] != bodyId
-            || Host.StandaloneSourcePlaces[placeOffset + 2] != 3
-            || localId < localFirst
-            || localId >= localFirst + localCount
-            || Host.StandaloneSourceLocals[localId * 10 + 2]
-                != Host.StandaloneSourcePlaces[placeOffset + 1])
+            || (placeKind != 3 && placeKind != 4))
         {
             return 3;
+        }
+        if (placeKind == 3)
+        {
+            int32 localRangeOffset = bodyId * 2;
+            int32 localFirst
+                = Host.StandaloneSourceBodyLocalRanges[
+                    localRangeOffset];
+            int32 localCount
+                = Host.StandaloneSourceBodyLocalRanges[
+                    localRangeOffset + 1];
+            if (targetIndex < localFirst
+                || targetIndex >= localFirst + localCount
+                || Host.StandaloneSourceLocals[
+                    targetIndex * 10 + 2] != placeTypeId)
+            {
+                return 3;
+            }
+        }
+        else
+        {
+            int32 parameterFirst
+                = Host.StandaloneSourceCallableInfo[
+                    bodyId * 12 + 5];
+            int32 parameterCount
+                = Host.StandaloneSourceCallableInfo[
+                    bodyId * 12 + 6];
+            if (targetIndex < 0 || targetIndex >= parameterCount
+                || stateAtTest != 1)
+            {
+                return 3;
+            }
+            int32 parameterRow = parameterFirst + targetIndex;
+            if (parameterRow < 0
+                || parameterRow
+                    >= Host.StandaloneSourceParameterCount[0]
+                || Host.StandaloneSourceParameters[
+                    parameterRow * 4] != bodyId
+                || Host.StandaloneSourceParameters[
+                    parameterRow * 4 + 1] != placeTypeId)
+            {
+                return 3;
+            }
         }
 
         int32 constantFirst
