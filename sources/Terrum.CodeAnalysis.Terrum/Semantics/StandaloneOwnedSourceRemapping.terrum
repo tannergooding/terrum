@@ -1748,12 +1748,14 @@ int32 VerifyStandaloneRewrittenSourceArenas()
                 int32 stepSourceUse
                     = GetStandaloneSourceUse(stepExpressionTypeId);
                 if (stepLocationId != -1
-                    || (unitForStep
+                    || (unitForStep && !stepDoesNotReturn
                         && !IsStandaloneUnitType(stepExpressionTypeId))
-                    || (unitForStep && stepSourceUse != 0)
-                    || (discardedForStep
+                    || (unitForStep && !stepDoesNotReturn
+                        && stepSourceUse != 0)
+                    || (discardedForStep && !stepDoesNotReturn
                         && stepSourceUse != 0 && stepSourceUse != 1)
-                    || stepStatus != 0 || stepDoesNotReturn)
+                    || (stepDoesNotReturn && conditionOmitted)
+                    || stepStatus != 0)
                 {
                     return 3;
                 }

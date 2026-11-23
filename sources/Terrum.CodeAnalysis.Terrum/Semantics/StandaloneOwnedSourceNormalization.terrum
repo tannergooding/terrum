@@ -1525,9 +1525,10 @@ int32 NormalizeStandaloneSourceForLoop(int32 bodyId,
         int32 stepPlaceId
             = Host.StandaloneSourceStatements[
                 stepStatementOffset + 2];
-        if ((stepStatementKind != 5 && stepStatementKind != 2)
+        if ((stepStatementKind != 5 && stepStatementKind != 2
+                && stepStatementKind != 3)
             || (stepStatementKind == 5 && stepPlaceId < 0)
-            || (stepStatementKind == 2 && stepPlaceId != -1))
+            || (stepStatementKind != 5 && stepPlaceId != -1))
         {
             return 3;
         }
@@ -1537,7 +1538,8 @@ int32 NormalizeStandaloneSourceForLoop(int32 bodyId,
         int32 stepStatus = NormalizeStandaloneSourceStatement(
             bodyId, stepStatementOffset,
             ref init stepTerminalKind);
-        if (stepStatus != 0 || stepTerminalKind != 0
+        if (stepStatus != 0
+            || (stepTerminalKind != 0 && stepTerminalKind != 1)
             || Host.StandaloneNormalizedBlockCount[0]
                 != bodyBlockFirst + conditionBlockCount + 2)
         {
@@ -1546,10 +1548,42 @@ int32 NormalizeStandaloneSourceForLoop(int32 bodyId,
         int32 stepOperationCount
             = Host.StandaloneNormalizedOperationCount[0]
                 - stepOperationFirst;
+        int32 stepTerminatorKind = stepTerminalKind == 1 ? 2 : 3;
+        int32 stepTarget = stepTerminalKind == 1
+            ? -1 : conditionBlockStart;
+        mut int32 noReturnInvokeLocalId = -1;
+        if (stepTerminalKind == 1)
+        {
+            if (stepOperationCount <= 0)
+            {
+                return 3;
+            }
+            int32 lastOperationOffset
+                = (stepOperationFirst + stepOperationCount - 1) * 5;
+            if (Host.StandaloneNormalizedOperations[
+                    lastOperationOffset] != 3)
+            {
+                return 3;
+            }
+            noReturnInvokeLocalId
+                = Host.StandaloneNormalizedOperations[
+                    lastOperationOffset + 1];
+            int32 bodyInvokeFirst
+                = Host.StandaloneNormalizedBodies[
+                    bodyId * 12 + 5];
+            int32 bodyInvokeCount
+                = Host.StandaloneInvokeCount[0] - bodyInvokeFirst;
+            if (noReturnInvokeLocalId < 0
+                || noReturnInvokeLocalId >= bodyInvokeCount)
+            {
+                return 3;
+            }
+        }
         init int32 stepBlockIndex;
         int32 stepBlockStatus = AppendStandaloneNormalizedBlock(
             bodyId, stepBlockId, stepOperationFirst, stepOperationCount,
-            3, 0, 0, 0, conditionBlockStart, -1, 0, 0, 0, -1, -1, 0,
+            stepTerminatorKind, 0, 0, 0, stepTarget, -1,
+            0, 0, 0, -1, noReturnInvokeLocalId, 0,
             ref init stepBlockIndex);
         if (stepBlockStatus != 0)
         {

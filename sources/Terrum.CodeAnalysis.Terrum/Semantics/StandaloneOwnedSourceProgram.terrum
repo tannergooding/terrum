@@ -2801,7 +2801,7 @@ int32 BindStandaloneSourceForHeaderLocal(int32 localCallableId,
 
 int32 ParseStandaloneSourceForValueStep(int32 localCallableId,
     int32 expressionFirst, int32 tokenStart, int32 expressionEnd,
-    bool resultDiscard,
+    bool resultDiscard, bool allowDoesNotReturn,
     ref<init int32> statementIdResult,
     ref<init int32> nextTokenResult)
     ensure return == 0 ? (*statementIdResult is init
@@ -2848,11 +2848,12 @@ int32 ParseStandaloneSourceForValueStep(int32 localCallableId,
         = TryGetStandaloneSourceExpressionDoesNotReturn(
             localCallableId, expressionId, ref init doesNotReturn);
     int32 sourceUse = GetStandaloneSourceUse(typeId);
-    if (doesNotReturnStatus != 0 || doesNotReturn
-        || (resultDiscard
-            ? (sourceUse != 0 && sourceUse != 1)
-            : (!IsStandaloneUnitType(typeId)
-                || sourceUse != 0)))
+    bool validNormalResult = resultDiscard
+        ? sourceUse == 0 || sourceUse == 1
+        : IsStandaloneUnitType(typeId) && sourceUse == 0;
+    if (doesNotReturnStatus != 0
+        || (doesNotReturn && !allowDoesNotReturn)
+        || (!doesNotReturn && !validNormalResult))
     {
         return doesNotReturnStatus != 0 ? doesNotReturnStatus : 2;
     }
@@ -3462,7 +3463,7 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
                             = ParseStandaloneSourceForValueStep(
                                 localCallableId, expressionFirst,
                                 headerStart, initializerSemicolon,
-                                resultDiscardInitializer,
+                                resultDiscardInitializer, false,
                                 ref init initializerStatementId,
                                 ref init nextInitializerToken);
                     }
@@ -3617,6 +3618,7 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
                     int32 stepStatus = ParseStandaloneSourceForValueStep(
                         localCallableId, expressionFirst, stepStart,
                         headerClose, resultDiscardStep,
+                        !conditionOmitted,
                         ref init stepStatementId,
                         ref init nextStepToken);
                     if (stepStatus != 0)
@@ -10715,13 +10717,24 @@ int32 VerifyStandaloneDirectCalls()
                     {
                         return 3;
                     }
+                    init bool stepDoesNotReturn;
+                    int32 stepStatus
+                        = TryGetStandaloneSourceExpressionDoesNotReturn(
+                            bodyId, stepExpressionId,
+                            ref init stepDoesNotReturn);
+                    if (stepStatus != 0
+                        || (stepDoesNotReturn && conditionOmitted))
+                    {
+                        return stepStatus != 0 ? stepStatus : 3;
+                    }
                     if (stepStatementKind == 2)
                     {
                         if (stepPlaceId != -1
-                            || !IsStandaloneUnitType(
-                                stepExpressionTypeId)
-                            || GetStandaloneSourceUse(
-                                stepExpressionTypeId) != 0)
+                            || (!stepDoesNotReturn
+                                && (!IsStandaloneUnitType(
+                                        stepExpressionTypeId)
+                                    || GetStandaloneSourceUse(
+                                        stepExpressionTypeId) != 0)))
                         {
                             return 3;
                         }
@@ -10732,7 +10745,8 @@ int32 VerifyStandaloneDirectCalls()
                             = GetStandaloneSourceUse(
                                 stepExpressionTypeId);
                         if (stepPlaceId != -1
-                            || (stepSourceUse != 0
+                            || (!stepDoesNotReturn
+                                && stepSourceUse != 0
                                 && stepSourceUse != 1))
                         {
                             return 3;
@@ -10740,7 +10754,8 @@ int32 VerifyStandaloneDirectCalls()
                     }
                     else
                     {
-                        if (stepPlaceId < bodyPlaceFirst
+                        if (stepDoesNotReturn
+                            || stepPlaceId < bodyPlaceFirst
                             || stepPlaceId
                                 >= bodyPlaceFirst + bodyPlaceCount
                             || Host.StandaloneSourcePlaceUseCounts[
@@ -10793,15 +10808,6 @@ int32 VerifyStandaloneDirectCalls()
                             Host.StandaloneSourceLocalDeclarationUseCounts[
                                 stepLocalId] = stepLocalUseCount + 1;
                         }
-                    }
-                    init bool stepDoesNotReturn;
-                    int32 stepStatus
-                        = TryGetStandaloneSourceExpressionDoesNotReturn(
-                            bodyId, stepExpressionId,
-                            ref init stepDoesNotReturn);
-                    if (stepStatus != 0 || stepDoesNotReturn)
-                    {
-                        return stepStatus != 0 ? stepStatus : 3;
                     }
                 }
                 if (conditionOmitted && loopTransferKind != 8)
