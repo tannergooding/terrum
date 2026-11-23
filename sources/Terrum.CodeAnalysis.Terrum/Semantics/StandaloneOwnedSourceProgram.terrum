@@ -5319,14 +5319,45 @@ int32 ParseStandaloneSourceNestedWhile(
         = Host.StandaloneSourceIfNodes[nestedNodeOffset + 1];
     int32 nestedChildCount
         = Host.StandaloneSourceIfNodes[nestedNodeOffset + 2];
-    if (nestedChildFirst < 0 || nestedChildCount != 1
+    int32 nestedFalseFirst
+        = Host.StandaloneSourceIfNodes[nestedNodeOffset + 3];
+    int32 nestedFalseCount
+        = Host.StandaloneSourceIfNodes[nestedNodeOffset + 4];
+    if (nestedChildFirst < 0
+        || (nestedChildCount != 1 && nestedChildCount != 2)
+        || nestedFalseCount != 0
         || nestedChildFirst
-            >= Host.StandaloneSourceIfChildCount[0])
+            > Host.StandaloneSourceIfChildCount[0] - nestedChildCount)
     {
         return 2;
     }
+    if (nestedFalseFirst != nestedChildFirst + nestedChildCount)
+    {
+        return 2;
+    }
+    if (nestedChildCount == 2)
+    {
+        int32 assignmentStatementId
+            = Host.StandaloneSourceIfChildren[nestedChildFirst];
+        if (assignmentStatementId < 0
+            || assignmentStatementId
+                >= Host.StandaloneSourceStatementCount[0]
+            || Host.StandaloneSourceStatementParentIds[
+                assignmentStatementId] != nestedStatementId
+            || Host.StandaloneSourceStatements[
+                assignmentStatementId * 3] != 5)
+        {
+            return 2;
+        }
+    }
     int32 breakStatementId
         = Host.StandaloneSourceIfChildren[nestedChildFirst];
+    if (nestedChildCount == 2)
+    {
+        breakStatementId
+            = Host.StandaloneSourceIfChildren[
+                nestedChildFirst + 1];
+    }
     if (breakStatementId < 0
         || breakStatementId
             >= Host.StandaloneSourceStatementCount[0]
@@ -5419,7 +5450,7 @@ int32 ParseStandaloneSourceWhileBody(int32 localCallableId,
                 {
                     break;
                 }
-                continue;
+                return 2;
             }
             if (IsStandaloneSourceIfKeyword(cursor))
             {
@@ -11146,10 +11177,17 @@ int32 VerifyStandaloneDirectCalls()
                             || Host.StandaloneSourceExpressionUseCounts[
                                 nestedExpressionIndex] != 0
                             || nestedChildFirst < 0
-                            || nestedChildCount != 1
+                            || (nestedChildCount != 1
+                                && nestedChildCount != 2)
                             || nestedFalseCount != 0
-                            || nestedFalseFirst
-                                != nestedChildFirst + nestedChildCount)
+                            || nestedChildFirst
+                                > Host.StandaloneSourceIfChildCount[0]
+                                    - nestedChildCount)
+                        {
+                            return 3;
+                        }
+                        if (nestedFalseFirst
+                            != nestedChildFirst + nestedChildCount)
                         {
                             return 3;
                         }
@@ -11164,9 +11202,100 @@ int32 VerifyStandaloneDirectCalls()
                             return nestedConditionStatus != 0
                                 ? nestedConditionStatus : 3;
                         }
+                        if (nestedChildCount == 2)
+                        {
+                            int32 nestedAssignmentStatementId
+                                = Host.StandaloneSourceIfChildren[
+                                    nestedChildFirst];
+                            if (nestedAssignmentStatementId < 0
+                                || nestedAssignmentStatementId
+                                    >= Host.StandaloneSourceStatementCount[0]
+                                || Host.StandaloneSourceStatements[
+                                    nestedAssignmentStatementId * 3]
+                                    != 5
+                                || Host.StandaloneSourceStatementParentIds[
+                                    nestedAssignmentStatementId]
+                                    != childStatementId)
+                            {
+                                return 3;
+                            }
+                            int32 assignmentPlaceId
+                                = Host.StandaloneSourceStatements[
+                                    nestedAssignmentStatementId * 3 + 2];
+                            int32 assignmentExpressionId
+                                = Host.StandaloneSourceStatements[
+                                    nestedAssignmentStatementId * 3 + 1];
+                            if (assignmentPlaceId < bodyPlaceFirst
+                                || assignmentPlaceId
+                                    >= bodyPlaceFirst + bodyPlaceCount
+                                || assignmentExpressionId < 0
+                                || assignmentExpressionId
+                                    >= bodyExpressionCount
+                                || Host.StandaloneSourcePlaceUseCounts[
+                                    assignmentPlaceId] != 0)
+                            {
+                                return 3;
+                            }
+                            int32 assignmentPlaceOffset
+                                = assignmentPlaceId * 5;
+                            int32 assignmentLocalId
+                                = Host.StandaloneSourcePlaces[
+                                    assignmentPlaceOffset + 3];
+                            int32 assignmentTypeId
+                                = Host.StandaloneSourcePlaces[
+                                    assignmentPlaceOffset + 1];
+                            int32 assignmentExpressionIndex
+                                = bodyExpressionFirst
+                                    + assignmentExpressionId;
+                            if (Host.StandaloneSourceExpressions[
+                                    assignmentExpressionIndex * 8 + 1]
+                                    != assignmentTypeId
+                                || Host.StandaloneSourceExpressionUseCounts[
+                                    assignmentExpressionIndex] != 0)
+                            {
+                                return 3;
+                            }
+                            int32 assignmentStatus
+                                = ValidateStandaloneSourceWhileAssignment(
+                                    bodyId,
+                                    nestedAssignmentStatementId, false);
+                            if (assignmentStatus != 0)
+                            {
+                                return assignmentStatus;
+                            }
+                            init bool assignmentDoesNotReturn;
+                            int32 assignmentDoesNotReturnStatus
+                                = TryGetStandaloneSourceExpressionDoesNotReturn(
+                                    bodyId, assignmentExpressionId,
+                                    ref init assignmentDoesNotReturn);
+                            if (assignmentDoesNotReturnStatus != 0
+                                || assignmentDoesNotReturn)
+                            {
+                                return assignmentDoesNotReturnStatus != 0
+                                    ? assignmentDoesNotReturnStatus : 3;
+                            }
+                            Host.StandaloneSourceExpressionUseCounts[
+                                assignmentExpressionIndex] = 1;
+                            Host.StandaloneSourcePlaceUseCounts[
+                                assignmentPlaceId] = 1;
+                            int32 assignmentLocalUseCount
+                                = Host.StandaloneSourceLocalDeclarationUseCounts[
+                                    assignmentLocalId];
+                            int32 assignmentBindingKind
+                                = Host.StandaloneSourceLocals[
+                                    assignmentLocalId * 10 + 3];
+                            if ((assignmentBindingKind == 2
+                                    || assignmentBindingKind == 3)
+                                && assignmentLocalUseCount == 1)
+                            {
+                                Host.StandaloneSourceLocalDeclarationUseCounts[
+                                    assignmentLocalId]
+                                    = assignmentLocalUseCount + 1;
+                            }
+                        }
                         int32 nestedBreakStatementId
                             = Host.StandaloneSourceIfChildren[
-                                nestedChildFirst];
+                                nestedChildFirst + nestedChildCount - 1];
                         if (nestedBreakStatementId < 0
                             || nestedBreakStatementId
                                 >= Host.StandaloneSourceStatementCount[0]

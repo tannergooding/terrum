@@ -1795,6 +1795,13 @@ internal sealed class StandaloneMethodImportInputTests
         "namespace client { int32 Main(int32 limit) { "
             + "mut int32 counter = 0; "
             + "while (counter < limit) { "
+            + "while (counter < limit) { "
+            + "counter = counter + 1; break; } } "
+            + "return counter; } }", 0, 227, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { int32 Main(int32 limit) { "
+            + "mut int32 counter = 0; "
+            + "while (counter < limit) { "
             + "counter = counter + 1; "
             + "if (counter == 2) break; } "
             + "return counter; } }", 0, 221, false)]
@@ -7741,11 +7748,13 @@ internal sealed class StandaloneMethodImportInputTests
                 return 0;
             }
             """;
-        const string nestedWhileVerificationSource = """
+        var nestedWhileVerificationSource = $$"""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
                 if (Scan() < 1) { return 87; }
                 int32 status = BindStandaloneOwnedSourceProgram();
+                int32 expectedBlockCount
+                    = {{verificationMode == 226 ? 4 : 5}};
                 if (status != 0
                     || Host.StandaloneSourceBodyCount[0] != 1
                     || Host.StandaloneSourceStatementCount[0] != 6
@@ -7753,28 +7762,43 @@ internal sealed class StandaloneMethodImportInputTests
                     || Host.StandaloneSourceIfNodeCount[0] != 2
                     || Host.StandaloneSourceStatements[3] != 7
                     || Host.StandaloneSourceStatements[6] != 7
-                    || Host.StandaloneSourceStatements[9] != 8
-                    || Host.StandaloneSourceStatements[12] != 5
+                    || Host.StandaloneSourceStatements[9]
+                        != {{verificationMode == 226 ? 8 : 5}}
+                    || Host.StandaloneSourceStatements[12]
+                        != {{verificationMode == 226 ? 5 : 8}}
                     || Host.StandaloneSourceStatementParentIds[2] != 1
                     || Host.StandaloneSourceStatementParentIds[3] != 2
-                    || Host.StandaloneSourceStatementParentIds[4] != 1
-                    || Host.StandaloneSourceIfNodes[2] != 2
-                    || Host.StandaloneSourceIfNodes[7] != 1
+                    || Host.StandaloneSourceStatementParentIds[4]
+                        != {{verificationMode == 226 ? 1 : 2}}
+                    || Host.StandaloneSourceIfNodes[2]
+                        != {{verificationMode == 226 ? 2 : 1}}
+                    || Host.StandaloneSourceIfNodes[7]
+                        != {{verificationMode == 226 ? 1 : 2}}
                     || Host.StandaloneSourceIfNodes[9] != 0) {
                     return 88;
                 }
                 status = NormalizeStandaloneOwnedSourceProgram();
                 if (status != 0
-                    || Host.StandaloneNormalizedBlockCount[0] != 4
+                    || Host.StandaloneNormalizedBlockCount[0]
+                        != expectedBlockCount
                     || Host.StandaloneNormalizedBodyBlockRanges[0] != 0
-                    || Host.StandaloneNormalizedBodyBlockRanges[1] != 4
+                    || Host.StandaloneNormalizedBodyBlockRanges[1]
+                        != expectedBlockCount
                     || Host.StandaloneNormalizedConstantCount[0] != 2
                     || Host.StandaloneNormalizedBlocks[20] != 4
                     || Host.StandaloneNormalizedBlocks[24] != 2
-                    || Host.StandaloneNormalizedBlocks[25] != 3
-                    || Host.StandaloneNormalizedBlocks[29] != 4
-                    || Host.StandaloneNormalizedBlocks[36] != 3
-                    || Host.StandaloneNormalizedBlocks[40] != 1
+                    || Host.StandaloneNormalizedBlocks[25]
+                        != {{verificationMode == 226 ? 3 : 4}}
+                    || Host.StandaloneNormalizedBlocks[29] != 5
+                    || Host.StandaloneNormalizedBlocks[36]
+                        != {{verificationMode == 226 ? 3 : 4}}
+                    || Host.StandaloneNormalizedBlocks[40]
+                        != {{verificationMode == 226 ? 1 : 3}}
+                    || ({{verificationMode == 227}}
+                        && (Host.StandaloneNormalizedBlocks[41] != 1
+                            || Host.StandaloneNormalizedBlocks[45] != 6
+                            || Host.StandaloneNormalizedBlocks[52] != 3
+                            || Host.StandaloneNormalizedBlocks[56] != 1))
                     || Host.StandaloneNormalizedBodies[11] != 0) {
                     return 89;
                 }
@@ -7848,7 +7872,7 @@ internal sealed class StandaloneMethodImportInputTests
                 ? conditionalLoopBreakVerificationSource
             : verificationMode is >= 221 and <= 224
                 ? assignmentBeforeConditionalBreakVerificationSource
-            : verificationMode == 226
+            : verificationMode is 226 or 227
                 ? nestedWhileVerificationSource
             : verificationMode == 161
                 ? importedCallInConditionalReturnVerificationSource
@@ -8336,7 +8360,7 @@ internal sealed class StandaloneMethodImportInputTests
                     or 202 or 203 or 204 or 205 or 206 or 207
                     or 208 or 209 or 213 or 214 or 215
                     or 216 or 217 or 218 or 219 or 220 or 221
-                    or 222 or 223 or 224 or 225 or 226)
+                    or 222 or 223 or 224 or 225 or 226 or 227)
             {
                 var expectedBlockCount
                     = verificationMode is 159 or 160 or 165 or 166
@@ -8370,6 +8394,7 @@ internal sealed class StandaloneMethodImportInputTests
                         : verificationMode == 224 ? 5
                         : verificationMode == 225 ? 5
                         : verificationMode == 226 ? 4
+                        : verificationMode == 227 ? 5
                         : verificationMode == 211 ? 1
                         : verificationMode == 212 ? 1
                         : verificationMode == 199 ? 3
@@ -8411,6 +8436,7 @@ internal sealed class StandaloneMethodImportInputTests
                                 or 222 or 223 or 224 ? 2
                             : verificationMode == 225 ? 2
                             : verificationMode == 226 ? 1
+                            : verificationMode == 227 ? 2
                             : verificationMode == 189 ? 1
                             : verificationMode == 190 ? 1
                             : verificationMode == 191 ? 1
@@ -8449,7 +8475,7 @@ internal sealed class StandaloneMethodImportInputTests
                     and not 213 and not 214 and not 215
                     and not 216 and not 217 and not 218 and not 219
                     and not 220 and not 221 and not 222 and not 223
-                    and not 224 and not 225 and not 226)
+                    and not 224 and not 225 and not 226 and not 227)
                 {
                     Assert.That(bodyReader.GetBlockCode(0)
                         .IndexOf((byte)0xB1),
@@ -9050,7 +9076,7 @@ internal sealed class StandaloneMethodImportInputTests
                         and not 213 and not 214 and not 215
                         and not 216 and not 217 and not 218 and not 219
                         and not 220 and not 221 and not 222 and not 223
-                        and not 224 and not 225 and not 226
+                        and not 224 and not 225 and not 226 and not 227
                         and not 170 and not 171)
                 {
                     var edgeRecord
@@ -9227,6 +9253,10 @@ internal sealed class StandaloneMethodImportInputTests
             {
                 expectedDecoderConstantMapCount = 2;
             }
+            if (verificationMode == 227)
+            {
+                expectedDecoderConstantMapCount = 2;
+            }
             if (verificationMode is 195 or 196)
             {
                 expectedDecoderConstantMapCount = 2;
@@ -9312,6 +9342,8 @@ internal sealed class StandaloneMethodImportInputTests
                     + "Host.StandaloneDecoderBodies[21] != 7",
                 226 => "Host.StandaloneDecoderBodies[19] != 4 || "
                     + "Host.StandaloneDecoderBodies[21] != 5",
+                227 => "Host.StandaloneDecoderBodies[19] != 5 || "
+                    + "Host.StandaloneDecoderBodies[21] != 7",
                 159 or 160 => "Host.StandaloneDecoderBodies[19] != 5 || "
                     + "Host.StandaloneDecoderBodies[21] != 7",
                 162 or 163 or 164
@@ -9495,7 +9527,7 @@ internal sealed class StandaloneMethodImportInputTests
                     or 202 or 203 or 204 or 205 or 206 or 207
                     or 208 or 209 or 213 or 214 or 215
                     or 216 or 217 or 218 or 219 or 220 or 221
-                    or 222 or 223 or 224 or 225 or 226)
+                    or 222 or 223 or 224 or 225 or 226 or 227)
             {
                 var artifactIndex = new TrRmArtifactIndex(artifact);
                 Assert.That(artifactIndex.TryGetSection(0x0020,
@@ -9662,7 +9694,7 @@ internal sealed class StandaloneMethodImportInputTests
                     212 => 1,
                     213 or 214 or 215 => 1,
                     216 or 217 or 218 or 219 or 220 or 221
-                    or 222 or 223 or 224 or 225 or 226 => 1,
+                    or 222 or 223 or 224 or 225 or 226 or 227 => 1,
                     161 => 2,
                     162 => 3,
                     149 => 3,
@@ -10287,6 +10319,11 @@ internal sealed class StandaloneMethodImportInputTests
                         Assert.That(Execute(3), Is.EqualTo(2));
                         break;
                     case 226:
+                        Assert.That(Execute(0), Is.EqualTo(0));
+                        Assert.That(Execute(1), Is.EqualTo(1));
+                        Assert.That(Execute(3), Is.EqualTo(3));
+                        break;
+                    case 227:
                         Assert.That(Execute(0), Is.EqualTo(0));
                         Assert.That(Execute(1), Is.EqualTo(1));
                         Assert.That(Execute(3), Is.EqualTo(3));
