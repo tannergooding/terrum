@@ -403,6 +403,18 @@ internal sealed class TrRmExecutableCompilerTests
             targetRequirement);
         var consumerInput = new TrRmStandardArtifactInput(schemaIdentity,
             consumerArtifact);
+        var incompatibleProviderProgram = Compile(
+            "public int32 Accept(fnptr<int64, int64> callback) { return 0; }",
+            library: true);
+        var incompatibleProviderArtifact
+            = TrRmExecutableCompiler.EmitStandard(
+                incompatibleProviderProgram, "terrum-fnptr-provider",
+                schemaIdentity, targetRequirement);
+        var incompatibleProviderInput = new TrRmStandardArtifactInput(
+            schemaIdentity, incompatibleProviderArtifact);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(consumerInput,
+                "terrum-fnptr-consumer", [incompatibleProviderInput]));
         var replacedReference
             = TrRmExecutableCompiler.CreateStandardReference(consumerInput,
                 "terrum-fnptr-consumer", [shiftedProviderInput]);
