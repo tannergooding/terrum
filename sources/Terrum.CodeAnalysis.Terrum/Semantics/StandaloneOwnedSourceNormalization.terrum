@@ -1086,13 +1086,20 @@ int32 NormalizeStandaloneSourceIfReturns(int32 bodyId,
     if (conditionExpressionKind == 35
         || conditionExpressionKind == 36)
     {
-        if (!bothReturns)
+        if (bothReturns)
         {
-            return 2;
+            return NormalizeStandaloneSourceLazyBooleanIfReturns(
+                bodyId, ifStatementId, conditionExpressionId,
+                trueStatementId, falseStatementId);
         }
-        return NormalizeStandaloneSourceLazyBooleanIfReturns(
-            bodyId, ifStatementId, conditionExpressionId,
-            trueStatementId, falseStatementId);
+        if (bothAssignments)
+        {
+            return NormalizeStandaloneSourceLazyBooleanIfAssignments(
+                bodyId, ifStatementId, ifNodeId,
+                conditionExpressionId, trueFirst, trueCount,
+                falseFirst, falseCount);
+        }
+        return 2;
     }
     int32 conditionOperationFirst
         = Host.StandaloneNormalizedBodies[bodyId * 12 + 9];
@@ -1341,6 +1348,151 @@ int32 NormalizeStandaloneSourceLazyBooleanIfReturns(int32 bodyId,
     }
     if (Host.StandaloneNormalizedBlockCount[0]
         != bodyBlockFirst + finalBodyBlockCount)
+    {
+        return 3;
+    }
+    return 0;
+}
+
+int32 NormalizeStandaloneSourceLazyBooleanIfAssignments(int32 bodyId,
+    int32 ifStatementId, int32 ifNodeId,
+    int32 conditionExpressionId, int32 trueFirst, int32 trueCount,
+    int32 falseFirst, int32 falseCount)
+{
+    if (bodyId < 0
+        || bodyId >= Host.StandaloneSourceBodyCount[0]
+        || ifStatementId < 0
+        || ifStatementId >= Host.StandaloneSourceStatementCount[0]
+        || ifNodeId < 0
+        || ifNodeId >= Host.StandaloneSourceIfNodeCount[0]
+        || trueCount <= 0 || falseCount < 0
+        || trueFirst < 0 || falseFirst < 0
+        || trueFirst > Host.StandaloneSourceIfChildCount[0] - trueCount
+        || falseFirst > Host.StandaloneSourceIfChildCount[0] - falseCount
+        || trueFirst + trueCount != falseFirst
+        || Host.StandaloneSourceIfNodes[ifNodeId * 5] != bodyId
+        || Host.StandaloneSourceIfNodes[ifNodeId * 5 + 1] != trueFirst
+        || Host.StandaloneSourceIfNodes[ifNodeId * 5 + 2] != trueCount
+        || Host.StandaloneSourceIfNodes[ifNodeId * 5 + 3] != falseFirst
+        || Host.StandaloneSourceIfNodes[ifNodeId * 5 + 4] != falseCount)
+    {
+        return 3;
+    }
+
+    int32 bodyBlockFirst
+        = Host.StandaloneNormalizedBodyBlockRanges[bodyId * 2];
+    int32 conditionExpressionCount
+        = Host.StandaloneSourceBodies[bodyId * 12 + 4];
+    int32 bodyExpressionFirst
+        = Host.StandaloneSourceBodies[bodyId * 12 + 3];
+    if (bodyBlockFirst < 0
+        || Host.StandaloneNormalizedBlockCount[0] != bodyBlockFirst
+        || conditionExpressionId < 0
+        || conditionExpressionId >= conditionExpressionCount)
+    {
+        return 3;
+    }
+    int32 conditionExpressionOffset
+        = (bodyExpressionFirst + conditionExpressionId) * 8;
+    int32 conditionKind
+        = Host.StandaloneSourceExpressions[conditionExpressionOffset];
+    int32 conditionTypeId
+        = Host.StandaloneSourceExpressions[
+            conditionExpressionOffset + 1];
+    if ((conditionKind != 35 && conditionKind != 36)
+        || !IsStandaloneLogicalNotType(conditionTypeId))
+    {
+        return 3;
+    }
+
+    init int32 leafCount;
+    init bool homogeneous;
+    int32 countStatus = CountStandaloneSourceLazyBooleanTree(
+        bodyId, conditionExpressionId, conditionKind, 0,
+        ref init leafCount, ref init homogeneous);
+    if (countStatus != 0)
+    {
+        return countStatus;
+    }
+    int32 joinBlockId = leafCount + 2;
+    int32 finalBodyBlockCount = leafCount + 3;
+    if (leafCount < 2
+        || finalBodyBlockCount > 0x1_0000
+        || leafCount > 0x1_0000 - finalBodyBlockCount)
+    {
+        return 3;
+    }
+
+    init int32 nextBlockOrdinal;
+    init int32 nextEdgeOrdinal;
+    int32 decisionStatus = NormalizeStandaloneSourceLazyBooleanDecision(
+        bodyId, conditionExpressionId, conditionTypeId,
+        leafCount, leafCount + 1, leafCount, finalBodyBlockCount,
+        0, 0, 0, ref init nextBlockOrdinal,
+        ref init nextEdgeOrdinal);
+    if (decisionStatus != 0)
+    {
+        return decisionStatus;
+    }
+    if (nextBlockOrdinal != leafCount
+        || nextEdgeOrdinal != leafCount
+        || Host.StandaloneNormalizedBlockCount[0]
+            != bodyBlockFirst + leafCount)
+    {
+        return 3;
+    }
+
+    for (mut int32 branchIndex = 0;
+        branchIndex < 2;
+        branchIndex = branchIndex + 1)
+    {
+        int32 childFirst = branchIndex == 0 ? trueFirst : falseFirst;
+        int32 childCount = branchIndex == 0 ? trueCount : falseCount;
+        int32 branchOperationFirst
+            = Host.StandaloneNormalizedOperationCount[0];
+        for (mut int32 childIndex = 0;
+            childIndex < childCount;
+            childIndex = childIndex + 1)
+        {
+            int32 childStatementId
+                = Host.StandaloneSourceIfChildren[
+                    childFirst + childIndex];
+            if (childStatementId < 0
+                || childStatementId
+                    >= Host.StandaloneSourceStatementCount[0]
+                || Host.StandaloneSourceStatementParentIds[
+                    childStatementId] != ifStatementId
+                || Host.StandaloneSourceStatements[
+                    childStatementId * 3] != 5)
+            {
+                return 3;
+            }
+            init int32 terminalKind;
+            int32 childStatus = NormalizeStandaloneSourceStatement(
+                bodyId, childStatementId * 3,
+                ref init terminalKind);
+            if (childStatus != 0 || terminalKind != 0)
+            {
+                return childStatus != 0 ? childStatus : 3;
+            }
+        }
+
+        int32 branchOperationCount
+            = Host.StandaloneNormalizedOperationCount[0]
+                - branchOperationFirst;
+        init int32 branchBlockIndex;
+        int32 branchStatus = AppendStandaloneNormalizedBlock(
+            bodyId, leafCount + branchIndex, branchOperationFirst,
+            branchOperationCount, 3, 0, 0, 0, joinBlockId, -1,
+            0, 0, 0, -1, -1, 0,
+            ref init branchBlockIndex);
+        if (branchStatus != 0)
+        {
+            return branchStatus;
+        }
+    }
+    if (Host.StandaloneNormalizedBlockCount[0]
+        != bodyBlockFirst + leafCount + 2)
     {
         return 3;
     }
