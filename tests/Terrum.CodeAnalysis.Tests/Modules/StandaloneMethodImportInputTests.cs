@@ -1342,6 +1342,11 @@ internal sealed class StandaloneMethodImportInputTests
             + "return (condition ? whenTrue : whenFalse) + offset; } }",
         0, 151, false)]
     [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { bool Main(bool left, bool middle, bool right, "
+            + "bool expected) { "
+            + "return (left && middle || right) == expected; } }",
+        0, 152, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
         "namespace client { int32 Main(bool condition, int32 initial, "
             + "int32 whenTrue, int32 whenFalse) { "
             + "mut int32 value = initial; "
@@ -5356,6 +5361,48 @@ internal sealed class StandaloneMethodImportInputTests
                 return 0;
             }
             """;
+        const string lazyValueInEagerExpressionVerificationSource = """
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                if (Scan() < 1) { return 87; }
+                int32 status = BindStandaloneOwnedSourceProgram();
+                if (status != 0
+                    || Host.StandaloneSourceStatementCount[0] != 1
+                    || Host.StandaloneSourceLocalCount[0] != 0
+                    || Host.StandaloneSourceExpressionCount[0] != 7
+                    || Host.StandaloneSourceExpressions[32] != 36) {
+                    return 88;
+                }
+                status = NormalizeStandaloneOwnedSourceProgram();
+                if (status != 0
+                    || Host.StandaloneNormalizedBlockCount[0] != 6
+                    || Host.StandaloneNormalizedBodyBlockRanges[0] != 0
+                    || Host.StandaloneNormalizedBodyBlockRanges[1] != 6
+                    || Host.StandaloneNormalizedHomeCount[0] != 6
+                    || Host.StandaloneNormalizedOperationCount[0] != 6
+                    || Host.StandaloneNormalizedConstantCount[0] != 2
+                    || Host.StandaloneNormalizedBlocks[8] != 1
+                    || Host.StandaloneNormalizedBlocks[9] != 2
+                    || Host.StandaloneNormalizedBlocks[13] != 6
+                    || Host.StandaloneNormalizedBlocks[24] != 3
+                    || Host.StandaloneNormalizedBlocks[25] != 2
+                    || Host.StandaloneNormalizedBlocks[29] != 7
+                    || Host.StandaloneNormalizedBlocks[40] != 3
+                    || Host.StandaloneNormalizedBlocks[41] != 4
+                    || Host.StandaloneNormalizedBlocks[45] != 8) {
+                    return 89;
+                }
+                status = RewriteStandaloneOwnedCallNodes();
+                if (status != 0) { return status; }
+                status = WriteStandaloneScalarModule();
+                if (status != 0
+                    || Host.StandaloneWriterStatus[0] != 0
+                    || Host.StandaloneWriterBodyPlanCount[0] != 1) {
+                    return 90;
+                }
+                return 0;
+            }
+            """;
         const string nestedConditionalValueVerificationSource = """
             namespace Terrum.CodeAnalysis;
             int32 Main() {
@@ -5581,6 +5628,8 @@ internal sealed class StandaloneMethodImportInputTests
                 ? nestedConditionalAssignmentVerificationSource
             : verificationMode == 151
                 ? conditionalInEagerExpressionVerificationSource
+            : verificationMode == 152
+                ? lazyValueInEagerExpressionVerificationSource
             : verificationMode == 134
                 ? mutableIfJoinVerificationSource
             : verificationMode == 135
@@ -6016,19 +6065,19 @@ internal sealed class StandaloneMethodImportInputTests
             }
             else if ((verificationMode is >= 130 and <= 140)
                 || verificationMode is 144 or 145 or 146 or 147
-                    or 148 or 149 or 150 or 151)
+                    or 148 or 149 or 150 or 151 or 152)
             {
                 var expectedBlockCount
                     = verificationMode == 130 ? 3
                         : verificationMode is 136 or 137 ? 5
                             : verificationMode is 138 or 144 or 145
                                 or 146 or 147 or 148 or 149
-                                or 150 ? 6 : 4;
+                                or 150 or 152 ? 6 : 4;
                 var expectedRecordCount
                     = expectedBlockCount
                         + (verificationMode is 136 or 137 or 138 ? 2
                             : verificationMode is 144 or 145 or 146
-                                or 148 or 149 ? 3
+                                or 148 or 149 or 152 ? 3
                                 : verificationMode is 147 or 150 ? 2 : 1);
                 Assert.That(bodyReader.BlockCount,
                     Is.EqualTo(expectedBlockCount));
@@ -6098,7 +6147,8 @@ internal sealed class StandaloneMethodImportInputTests
                         .ReadUInt16LittleEndian(nestedEdge[6..]),
                         Is.EqualTo((ushort)3));
                 }
-                else if (verificationMode is 144 or 145 or 146 or 148 or 149)
+                else if (verificationMode is 144 or 145 or 146 or 148
+                    or 149 or 152)
                 {
                     for (var blockIndex = 0;
                         blockIndex < 3;
@@ -6117,22 +6167,22 @@ internal sealed class StandaloneMethodImportInputTests
                     Assert.That(BinaryPrimitives
                         .ReadUInt16LittleEndian(firstEdge[4..]),
                         Is.EqualTo((ushort)(verificationMode is 144 or 146
-                            or 148 or 149
+                            or 148 or 149 or 152
                             ? 1 : 2)));
                     Assert.That(BinaryPrimitives
                         .ReadUInt16LittleEndian(firstEdge[6..]),
                         Is.EqualTo((ushort)(verificationMode is 144 or 146
-                            or 148 or 149
+                            or 148 or 149 or 152
                             ? 2 : 1)));
                     Assert.That(BinaryPrimitives
                         .ReadUInt16LittleEndian(secondEdge[4..]),
                         Is.EqualTo((ushort)(verificationMode is 144 or 146
-                            or 148 or 149
+                            or 148 or 149 or 152
                             ? 3 : 2)));
                     Assert.That(BinaryPrimitives
                         .ReadUInt16LittleEndian(secondEdge[6..]),
                         Is.EqualTo((ushort)(verificationMode is 144 or 146
-                            or 148 or 149
+                            or 148 or 149 or 152
                             ? 2 : 4)));
                     Assert.That(BinaryPrimitives
                         .ReadUInt16LittleEndian(thirdEdge[4..]),
@@ -6219,7 +6269,7 @@ internal sealed class StandaloneMethodImportInputTests
                     or 115 or 132 or 133 or 136 or 137
                     ? 1 : 0;
             if (verificationMode is 71 or 130 or 144 or 145 or 146
-                or 148 or 149)
+                or 148 or 149 or 152)
             {
                 expectedDecoderConstantMapCount = 2;
             }
@@ -6257,6 +6307,8 @@ internal sealed class StandaloneMethodImportInputTests
                     + "Host.StandaloneDecoderBodies[21] != 8",
                 151 => "Host.StandaloneDecoderBodies[19] != 4 || "
                     + "Host.StandaloneDecoderBodies[21] != 5",
+                152 => "Host.StandaloneDecoderBodies[19] != 6 || "
+                    + "Host.StandaloneDecoderBodies[21] != 9",
                 149 => "Host.StandaloneDecoderBodies[19] != 6 || "
                     + "Host.StandaloneDecoderBodies[21] != 9",
                 _ => "false",
@@ -6307,7 +6359,7 @@ internal sealed class StandaloneMethodImportInputTests
             Assert.That(decoderExecution.ExitCode, Is.EqualTo(0));
             if ((verificationMode is >= 130 and <= 140)
                 || verificationMode is 144 or 145 or 146 or 147
-                    or 148 or 149 or 150 or 151)
+                    or 148 or 149 or 150 or 151 or 152)
             {
                 var artifactIndex = new TrRmArtifactIndex(artifact);
                 Assert.That(artifactIndex.TryGetSection(0x0020,
@@ -6440,6 +6492,7 @@ internal sealed class StandaloneMethodImportInputTests
                     148 => 3,
                     150 => 6,
                     151 => 4,
+                    152 => 4,
                     149 => 3,
                     _ => 4,
                 };
@@ -6646,6 +6699,16 @@ internal sealed class StandaloneMethodImportInputTests
                             Is.EqualTo(20));
                         Assert.That(Execute(0, 17, 23, 3),
                             Is.EqualTo(26));
+                        break;
+                    case 152:
+                        Assert.That(Execute(1, 1, 0, 1),
+                            Is.EqualTo(1));
+                        Assert.That(Execute(1, 0, 1, 1),
+                            Is.EqualTo(1));
+                        Assert.That(Execute(0, 0, 0, 0),
+                            Is.EqualTo(1));
+                        Assert.That(Execute(0, 0, 0, 1),
+                            Is.EqualTo(0));
                         break;
                 }
             }

@@ -2893,7 +2893,7 @@ int32 NormalizeStandaloneSourceLazyBooleanValue(int32 bodyId,
         && *selectorIndexResult is init
         && *terminatedResult is init) : true
 {
-    if (depth != 0 || bodyId < 0
+    if (bodyId < 0
         || bodyId >= Host.StandaloneSourceBodyCount[0]
         || expressionId < 0
         || expressionId
