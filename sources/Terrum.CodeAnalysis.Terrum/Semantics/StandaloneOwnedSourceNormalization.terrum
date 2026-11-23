@@ -1613,7 +1613,7 @@ int32 VerifyStandaloneNormalizedProgram()
             {
                 uint64 magnitude = uint64(uint32(valueLow))
                     | (uint64(uint32(valueHigh)) << 32);
-                if (!IsStandaloneIntegerLiteralInRange(
+                if (!IsStandaloneIntegerValueBitsValid(
                         typeCode, magnitude))
                 {
                     return 3;

@@ -2935,8 +2935,9 @@ bool IsStandaloneCallArgumentMappingApplicable(int32 targetKind,
 }
 
 bool IsStandaloneIntegerSourceType(int32 typeCode)
-    => typeCode == 0x08 || typeCode == 0x0D
-        || typeCode == 0x09 || typeCode == 0x0E
+    => (typeCode >= 0x06 && typeCode <= 0x09)
+        || (typeCode >= 0x0B && typeCode <= 0x0E)
+        || typeCode == 0x10 || typeCode == 0x11
         || typeCode == 0x03;
 
 bool IsStandaloneUnaryPlusType(int32 typeId)
@@ -4037,6 +4038,69 @@ int32 ParseStandaloneSourceExpression(int32 localCallableId,
         {
             return 1;
         }
+        int32 operandToken = tokenIndex + 1;
+        if (Host.Tokens[operandToken * 3] == 3)
+        {
+            if (expectedTypeId <= 0
+                || expectedTypeId
+                    > Host.StandaloneTypeFactCount[0])
+            {
+                return 2;
+            }
+            int32 typeCode
+                = Host.StandaloneTypeFacts[
+                    expectedTypeId * 3 + 1];
+            int32 literalStart
+                = Host.Tokens[operandToken * 3 + 1];
+            int32 literalLength
+                = Host.Tokens[operandToken * 3 + 2];
+            init uint64 magnitude;
+            if (!TryParseUInt64Base(literalStart,
+                    literalLength, 10, ref init magnitude)
+                || !IsStandaloneNegativeIntegerLiteralInRange(
+                    typeCode, magnitude))
+            {
+                return 2;
+            }
+            mut uint64 valueBits = 0;
+            if (magnitude != 0)
+            {
+                valueBits
+                    = uint64(0xFFFF_FFFF_FFFF_FFFF)
+                        - (magnitude - 1);
+                if (typeCode == 0x06 || typeCode == 0x0B)
+                {
+                    valueBits = valueBits & uint64(0xFF);
+                }
+                else if (typeCode == 0x07
+                    || typeCode == 0x0C
+                    || typeCode == 0x03)
+                {
+                    valueBits = valueBits & uint64(0xFFFF);
+                }
+                else if (typeCode == 0x08
+                    || typeCode == 0x0D)
+                {
+                    valueBits = valueBits & uint64(0xFFFF_FFFF);
+                }
+            }
+            init int32 literalExpressionId;
+            int32 literalAppendStatus
+                = AppendStandaloneSourceExpression(
+                    bodyId, 2, expectedTypeId, 0, 0,
+                    EncodeWord(uint32(valueBits
+                        & uint64(uint32.MaxValue))),
+                    EncodeWord(uint32(valueBits >> 32)),
+                    -1, expressionFirst,
+                    ref init literalExpressionId);
+            if (literalAppendStatus != 0)
+            {
+                return literalAppendStatus;
+            }
+            *expressionIdResult = literalExpressionId;
+            *nextTokenResult = tokenIndex + 2;
+            return 0;
+        }
         init int32 operandExpressionId;
         init int32 nextOperandToken;
         int32 operandStatus = ParseStandaloneSourceExpression(
@@ -4529,6 +4593,14 @@ bool StandaloneCallableRequiresUnsafe(int32 targetKind,
 bool IsStandaloneIntegerLiteralInRange(int32 typeCode,
     uint64 magnitude)
 {
+    if (typeCode == 0x06)
+    {
+        return magnitude <= uint64(0x7F);
+    }
+    if (typeCode == 0x07)
+    {
+        return magnitude <= uint64(0x7FFF);
+    }
     if (typeCode == 0x08)
     {
         return magnitude <= uint64(0x7FFF_FFFF);
@@ -4536,6 +4608,14 @@ bool IsStandaloneIntegerLiteralInRange(int32 typeCode,
     if (typeCode == 0x0D)
     {
         return magnitude <= uint64(0xFFFF_FFFF);
+    }
+    if (typeCode == 0x0B)
+    {
+        return magnitude <= uint64(0xFF);
+    }
+    if (typeCode == 0x0C)
+    {
+        return magnitude <= uint64(0xFFFF);
     }
     if (typeCode == 0x09)
     {
@@ -4545,11 +4625,69 @@ bool IsStandaloneIntegerLiteralInRange(int32 typeCode,
     {
         return true;
     }
+    if (typeCode == 0x10)
+    {
+        return magnitude <= uint64(0x7FFF_FFFF_FFFF_FFFF);
+    }
+    if (typeCode == 0x11)
+    {
+        return true;
+    }
     if (typeCode == 0x03)
     {
         return magnitude <= uint64(0xFFFF);
     }
     return false;
+}
+
+bool IsStandaloneNegativeIntegerLiteralInRange(int32 typeCode,
+    uint64 magnitude)
+{
+    if (magnitude == 0)
+    {
+        return IsStandaloneIntegerLiteralInRange(typeCode, 0);
+    }
+    if (typeCode == 0x06)
+    {
+        return magnitude <= uint64(0x80);
+    }
+    if (typeCode == 0x07)
+    {
+        return magnitude <= uint64(0x8000);
+    }
+    if (typeCode == 0x08)
+    {
+        return magnitude <= uint64(0x8000_0000);
+    }
+    return (typeCode == 0x09 || typeCode == 0x10)
+        && magnitude <= uint64(0x8000_0000_0000_0000);
+}
+
+bool IsStandaloneIntegerValueBitsValid(int32 typeCode,
+    uint64 valueBits)
+{
+    if (typeCode == 1)
+    {
+        return valueBits <= 1;
+    }
+    if (typeCode == 0x03 || typeCode == 0x0C)
+    {
+        return valueBits <= uint64(0xFFFF);
+    }
+    if (typeCode == 0x06 || typeCode == 0x0B)
+    {
+        return valueBits <= uint64(0xFF);
+    }
+    if (typeCode == 0x07)
+    {
+        return valueBits <= uint64(0xFFFF);
+    }
+    if (typeCode == 0x08 || typeCode == 0x0D)
+    {
+        return valueBits <= uint64(0xFFFF_FFFF);
+    }
+    return typeCode == 0x09 || typeCode == 0x0E
+        || typeCode == 0x10 || typeCode == 0x11;
 }
 
 int32 TryGetStandaloneCallableSignature(int32 targetKind,
@@ -5192,7 +5330,7 @@ int32 VerifyStandaloneDirectCalls()
                 {
                     uint64 magnitude = uint64(uint32(valueLow))
                         | (uint64(uint32(valueHigh)) << 32);
-                    if (!IsStandaloneIntegerLiteralInRange(
+                    if (!IsStandaloneIntegerValueBitsValid(
                             typeCode, magnitude))
                     {
                         return 3;
