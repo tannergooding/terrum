@@ -1469,6 +1469,13 @@ internal static class BoundTreeTraversal
             Constraints = [.. @interface.Constraints.Select(constraint =>
                 RewriteTypes(constraint, rewriteType))],
             Members = [.. @interface.Members.Select(member => RewriteTypes(member, rewriteType))],
+            ForeignNativeInterfaceExpectedViews = [
+                .. @interface.ForeignNativeInterfaceExpectedViews.Select(
+                    expectedView => expectedView with {
+                        Definition = RewriteTypes(expectedView.Definition,
+                            rewriteType),
+                    }),
+            ],
         };
 
     internal static BoundClass RewriteTypes(BoundClass @class,

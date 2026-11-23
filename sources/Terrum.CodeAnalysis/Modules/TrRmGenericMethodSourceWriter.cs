@@ -7687,8 +7687,10 @@ public static partial class TrRmExecutableCompiler
 
                 foreach (var expectedView in expectedViews)
                 {
-                    var expectedDefinition = expectedView.Definition;
-                    if (expectedView.SourceTypeDefRow <= 0
+                    if (expectedView is null
+                        || expectedView.SourceTypeDefRow <= 0
+                        || expectedView.Definition
+                            is not BoundInterfaceDefinition expectedDefinition
                         || expectedDefinition.ModuleImport != import
                         || expectedDefinition.ForeignNativeInterface
                             is null)

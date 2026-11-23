@@ -301,7 +301,10 @@ public static partial class TrRmExecutableCompiler
                 var expectedViews
                     = providerView.ForeignNativeInterfaceExpectedViews;
                 if (expectedViews.Length != 1
-                    || expectedViews[0].SourceTypeDefRow != typeDef)
+                    || expectedViews[0] is not
+                        BoundForeignNativeInterfaceExpectedView expectedView
+                    || expectedView.SourceTypeDefRow != typeDef
+                    || expectedView.Definition is null)
                 {
                     throw Invalid(
                         "A selected ForeignNativeInterface provider view has no exact expected TypeDef surface.");
@@ -322,17 +325,19 @@ public static partial class TrRmExecutableCompiler
                     var retainedExpectedViews
                         = exposedProviderView
                             .ForeignNativeInterfaceExpectedViews;
-                    if (retainedExpectedViews.Any(expectedView =>
-                            expectedView.SourceTypeDefRow == typeDef))
+                    if (retainedExpectedViews.IsDefault
+                        || retainedExpectedViews.Any(expectedView =>
+                            expectedView is null
+                            || expectedView.SourceTypeDefRow == typeDef))
                     {
                         throw Invalid(
-                            "A ForeignNativeInterface TypeDef expectation is retained more than once.");
+                            "A ForeignNativeInterface expected-view set is invalid or retains a TypeDef more than once.");
                     }
 
                     exposedDefinitions[exposedIndex]
                         = exposedProviderView with {
                             ForeignNativeInterfaceExpectedViews = [
-                                .. retainedExpectedViews, expectedViews[0],
+                                .. retainedExpectedViews, expectedView,
                             ],
                         };
                 }
