@@ -11955,6 +11955,145 @@ public static partial class TrRmExecutableCompiler
             int MethodDefRow), int>();
         var anchorsToDecode = new List<(byte Convention,
             int MethodDefRow)>();
+        var reachableAnchorTypeSpecRows = new HashSet<int>();
+        var visitedTypeSpecReferences = new HashSet<uint>();
+        var pendingTypeSpecReferences = new Stack<uint>();
+        var remainingReachabilityWork
+            = SemanticVerifier.MaximumAnalysisVisits;
+        void EnqueueTypeSpecReference(uint typeSpecReference)
+        {
+            if (typeSpecReference == 0)
+            {
+                return;
+            }
+
+            if (--remainingReachabilityWork < 0)
+            {
+                throw new NotSupportedException(
+                    "The Standard function-pointer anchor reachability exceeds the analysis limit.");
+            }
+
+            pendingTypeSpecReferences.Push(typeSpecReference);
+        }
+
+        var (selectedMethodStart, selectedMethodEnd)
+            = tables.Modules.GetMethodDefRange(selectedModuleRow);
+        for (var methodRow = selectedMethodStart;
+            methodRow < selectedMethodEnd; methodRow++)
+        {
+            var signatureRow = tables.Methods.GetSignature(methodRow);
+            EnqueueTypeSpecReference(
+                tables.Signatures.GetResultTypeSpec(signatureRow));
+            var (firstParameter, parameterCount)
+                = tables.Signatures.GetParamRange(signatureRow);
+            for (var ordinal = 0; ordinal < parameterCount; ordinal++)
+            {
+                EnqueueTypeSpecReference(
+                    tables.Parameters.GetTypeSpec(firstParameter + ordinal));
+            }
+
+            var bodyRow = tables.Methods.GetBodyRow(methodRow);
+            if (bodyRow == 0
+                || tables.Bodies.GetRow(bodyRow)[0] != 0x01)
+            {
+                continue;
+            }
+
+            var body = tables.Bodies.GetRegisterBody(bodyRow,
+                tables.Contracts.Count);
+            for (var typeMapIndex = 0; typeMapIndex < body.TypeCount;
+                typeMapIndex++)
+            {
+                var token = BinaryPrimitives.ReadUInt32LittleEndian(
+                    body.TypeMap.Slice(typeMapIndex * sizeof(uint)));
+                if (token >> 24 == 0x11)
+                {
+                    EnqueueTypeSpecReference(
+                        token & 0x00FF_FFFFu);
+                }
+            }
+        }
+
+        var (selectedTypeDefStart, selectedTypeDefEnd)
+            = tables.Modules.GetTypeDefRange(selectedModuleRow);
+        for (var typeDefRow = selectedTypeDefStart;
+            typeDefRow < selectedTypeDefEnd; typeDefRow++)
+        {
+            var (firstField, fieldCount)
+                = tables.TypeDefs.GetFieldRange(typeDefRow);
+            for (var ordinal = 0; ordinal < fieldCount; ordinal++)
+            {
+                EnqueueTypeSpecReference(
+                    tables.Fields.GetTypeSpecRef(firstField + ordinal));
+            }
+        }
+
+        while (pendingTypeSpecReferences.TryPop(
+            out var typeSpecReference))
+        {
+            if (--remainingReachabilityWork < 0)
+            {
+                throw new NotSupportedException(
+                    "The Standard function-pointer anchor reachability exceeds the analysis limit.");
+            }
+            if (typeSpecReference == 0)
+            {
+                continue;
+            }
+            if (!visitedTypeSpecReferences.Add(typeSpecReference))
+            {
+                continue;
+            }
+
+            var typeSpec = tables.TypeSpecs.GetTypeSpecRef(
+                typeSpecReference);
+            if (!typeSpec.IsRow)
+            {
+                continue;
+            }
+
+            if (anchors.HasAnchorForTypeSpec(typeSpec.Row))
+            {
+                if (reachableAnchorTypeSpecRows.Add(typeSpec.Row))
+                {
+                    var methodDefRow
+                        = anchors.GetAnchorMethodDefRow(typeSpec.Row);
+                    var signatureRow
+                        = tables.Methods.GetSignature(methodDefRow);
+                    EnqueueTypeSpecReference(
+                        tables.Signatures.GetResultTypeSpec(signatureRow));
+                    var (firstParameter, parameterCount)
+                        = tables.Signatures.GetParamRange(signatureRow);
+                    for (var ordinal = 0; ordinal < parameterCount;
+                        ordinal++)
+                    {
+                        EnqueueTypeSpecReference(
+                            tables.Parameters.GetTypeSpec(
+                                firstParameter + ordinal));
+                    }
+                }
+
+                continue;
+            }
+
+            var typeSpecBytes = tables.TypeSpecs.GetTypeSpecBytes(
+                typeSpecReference);
+            if (typeSpecBytes.Length == 6
+                && (typeSpecBytes[0] is >= 0x06 and <= 0x0B or 0x0E))
+            {
+                EnqueueTypeSpecReference(
+                    BinaryPrimitives.ReadUInt32LittleEndian(
+                        typeSpecBytes[2..]));
+            }
+            else if (typeSpecBytes.Length == 7
+                && typeSpecBytes[0] == 0x0C)
+            {
+                EnqueueTypeSpecReference(
+                    BinaryPrimitives.ReadUInt32LittleEndian(
+                        typeSpecBytes[3..]));
+            }
+        }
+
         for (var typeSpecRow = 1;
             typeSpecRow <= tables.TypeSpecs.Count; typeSpecRow++)
         {
@@ -11965,7 +12104,8 @@ public static partial class TrRmExecutableCompiler
 
             var methodDefRow = anchors.GetAnchorMethodDefRow(typeSpecRow);
             if (tables.Methods.GetOwnerModule(methodDefRow)
-                != selectedModuleRow)
+                    != selectedModuleRow
+                && !reachableAnchorTypeSpecRows.Contains(typeSpecRow))
             {
                 continue;
             }

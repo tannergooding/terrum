@@ -422,6 +422,146 @@ internal sealed class TrRmExecutableCompilerTests
     }
 
     [Test]
+    public void StandardTerrumFunctionPointerLoadsAnchorFromAnotherModule()
+    {
+        var schemaIdentity = TrRmArtifactSchemaFacts
+            .StandardTerrumFunctionPointerSchemaIdentity;
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        var layoutOptions = new CompilationOptions {
+            LayoutCoreRegistration
+                = LayoutCoreRegistrationTestData.Create(),
+        };
+        var compilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                namespace Example {
+                    [Blittable]
+                    [Layout(LayoutKind.Sequential, Packing: 1)]
+                    public struct Payload {
+                        public int32 Value;
+                    }
+
+                    public int32 Accept(
+                        fnptr<ptr<Payload>, int32> callback) {
+                        return 0;
+                    }
+                }
+                """), layoutOptions);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, "cross-module-consumer", schemaIdentity,
+            targetRequirement, [
+                new TrRmSourceTypeExport("Example", "Payload", "payload"),
+            ]);
+        var artifactIndex = TrRmExecutableCompiler.CreateForeignInvocationIndex(
+            artifact, schemaIdentity);
+        var sourceTables
+            = TrRmStructuralMetadataValidator
+                .ValidateAndGetExecutionTables(artifactIndex);
+        _ = artifactIndex.TryGetSection(0x001F, out _,
+            out var sourceFileCount);
+        var anchorMethodRows = Enumerable.Range(1,
+                sourceTables.Methods.Count)
+            .Where(sourceTables.NativeFunctionPointerAnchors
+                .IsAnchorMethodDef)
+            .ToArray();
+        Assert.That(anchorMethodRows, Has.Length.EqualTo(1));
+        var anchorMethodRow = anchorMethodRows[0];
+        var rootIdentityRow = Enumerable.Range(1,
+                sourceTables.Strings.Count)
+            .Single(row => sourceTables.Strings.DecodeNamespace(row)
+                == "cross-module-consumer");
+        var stringRows = Enumerable.Range(1, sourceTables.Strings.Count)
+            .Select(row => (sourceTables.Strings.DecodeNamespace(row), 1))
+            .ToList();
+        stringRows.Add(("cross-module-anchor-owner", 1));
+        var stringBytes = TrRmStringTableWriter.EncodeTextRows(stringRows);
+        var strings = new TrRmStringTableReader(stringBytes,
+            stringRows.Count);
+        var featureBytes = TrRmFeatureTableWriter.EncodeModuleRanges([
+            TrRmFeatureRow.NativeBoundaryContracts,
+            TrRmFeatureRow.RootlessNativeValues,
+            TrRmFeatureRow.NativeBoundaryContracts,
+            TrRmFeatureRow.RootlessNativeValues,
+        ], TrRmArtifactSchema.Standard);
+        var (typeDefStart, _) = sourceTables.Modules
+            .GetTypeDefRange(1);
+        var (moduleRefStart, _) = sourceTables.Modules
+            .GetModuleRefRange(1);
+        var (sourceFileStart, _) = sourceTables.Modules
+            .GetSourceFileRange(1);
+        var moduleBytes = TrRmModuleTableWriter.Encode([
+            new TrRmModuleRow(rootIdentityRow, targetRequirement, 0, 0,
+                moduleRefStart, typeDefStart, 1, sourceFileStart, 1, 2),
+            new TrRmModuleRow(strings.Count, targetRequirement, 0, 0,
+                sourceTables.ModuleRefs.Count + 1,
+                sourceTables.TypeDefs.Count + 1, anchorMethodRow,
+                sourceFileCount + 1, 3, 2),
+        ], strings, sourceTables.ModuleRefs.Count,
+            sourceTables.TypeDefs.Count, sourceTables.Methods.Count,
+            sourceFileCount, featureCount: 4);
+
+        var rewrittenSections = new List<TrRmSection>(
+            artifactIndex.SectionCount);
+        for (var entry = 0; entry < artifactIndex.SectionCount; entry++)
+        {
+            artifactIndex.GetSection(entry, out var kind, out var flags,
+                out var bytes, out var recordCount);
+            switch (kind)
+            {
+                case 0x0001:
+                    rewrittenSections.Add(new TrRmSection(kind, flags, 2,
+                        moduleBytes));
+                    break;
+                case 0x0002:
+                    rewrittenSections.Add(new TrRmSection(kind, flags,
+                        checked((uint)stringRows.Count), stringBytes));
+                    break;
+                case 0x0004:
+                    rewrittenSections.Add(new TrRmSection(kind, flags, 4,
+                        featureBytes));
+                    break;
+                default:
+                    rewrittenSections.Add(new TrRmSection(kind, flags,
+                        checked((uint)recordCount), bytes.ToArray()));
+                    break;
+            }
+        }
+
+        var splitArtifact = TrRmArtifactWriter.Encode(rewrittenSections,
+            TrRmArtifactSchema.Standard,
+            standardSchemaIdentity: schemaIdentity);
+        var splitTables = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(
+                TrRmExecutableCompiler.CreateForeignInvocationIndex(
+                    splitArtifact, schemaIdentity));
+        Assert.That(splitTables.Methods.GetOwnerModule(anchorMethodRow),
+            Is.EqualTo(2));
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, splitArtifact),
+            "cross-module-consumer",
+            Array.Empty<TrRmStandardArtifactInput>());
+        var signature = reference.NativeFunctionPointerSignatures.Single();
+        Assert.That(signature.CallingConvention,
+            Is.EqualTo(NativeCallingConvention.Native));
+        var pointerType = signature.ParameterTypes.Single();
+        Assert.That(NativePointerTypes.IsType(pointerType), Is.True);
+        var pointeeType = reference.NativePointerTypes[
+            NativePointerTypes.Index(pointerType)].PointeeType;
+        var payloadStructureIndex = Enumerable.Range(0,
+                reference.Structures.Length)
+            .Single(index => reference.Structures[index].Name
+                == "Example.Payload");
+        Assert.That((int)pointeeType,
+            Is.EqualTo(100 + payloadStructureIndex));
+        var consumer = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "int32 Main() { return 0; }"), reference);
+        Assert.That(consumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumer.Diagnostics));
+    }
+
+    [Test]
     public void TerrumFunctionPointerFieldReferencesComposeAcrossProviders()
     {
         var schemaIdentity = TrRmArtifactSchemaFacts

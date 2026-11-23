@@ -955,7 +955,8 @@ public static partial class TrRmExecutableCompiler
                     standardFieldProviderValidation.FieldBindings)
                 : LoadDevelopment(artifacts[0],
                     TrRmArtifactSchema.Standard,
-                    standardSchemaIdentity: schemaIdentities[0]);
+                    standardSchemaIdentity: schemaIdentities[0],
+                    selectedModuleRow: rootModuleRow);
             loadedProgram = RetainLoadedA2SourceTypeFacts(loadedProgram, artifacts,
                 schemaIdentities, tables, rootModuleRow,
                 allTypeProviderBindings,

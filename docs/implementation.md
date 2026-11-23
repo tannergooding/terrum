@@ -853,8 +853,14 @@ composition and replacement regressions are added but remain unverified under
 the active hold. Standard method references also retain hidden TypeDef closure
 and provider origins for pointer-to-structure signatures without making those
 types lookup roots; a consumer regression remains unverified under the hold.
-Other consumer routes, cross-Module anchor contexts, NativeAddress eligibility,
-independent ABI support and broader re-encoding/remapping remain open.
+Other consumer routes, broader cross-Module anchor contexts, NativeAddress
+eligibility, independent ABI support and broader re-encoding/remapping remain
+open.
+Selected-module method, field and Body TypeMap references now discover anchors
+owned by another Module in the same artifact when their referenced TypeDefs
+are already represented in the selected program. The two-Module regression
+remains unverified under the active hold. Defining-Module-only TypeDef/Import
+closure, provider identity and cache remapping are still open.
 The Standard Contract reader also consumes the assigned 20-byte OutputState
 row, requiring Param mode `00`, a complete `ref<init T>` or `Span<init T>`
 type, and a phase-3 PredicateGraph attached to the same MethodDef. Its bounded
