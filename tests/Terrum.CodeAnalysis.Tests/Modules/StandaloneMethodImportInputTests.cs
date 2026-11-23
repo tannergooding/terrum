@@ -2171,6 +2171,14 @@ internal sealed class StandaloneMethodImportInputTests
             + "return counter; } }",
         0, 273, false)]
     [TestCase(BoundRuntimePolicy.FailFast,
+        "using api; namespace client { int32 Main(int32 limit) { "
+            + "mut int32 counter = 0; "
+            + "outer: do { "
+            + "inner: do { break outer; } while (Imported(limit)); "
+            + "} while (Imported(limit)); "
+            + "return counter; } }",
+        0, 274, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
         "namespace client { int32 Main(int32 limit) { "
             + "mut int32 counter = 0; "
             + "outer: for (; counter < limit; counter = counter + 1) { "
@@ -2287,13 +2295,13 @@ internal sealed class StandaloneMethodImportInputTests
                             or 246 or 247 or 248 or 249 or 250 or 251 or 252
                             or 253 or 254 or 255 or 256 or 257 or 258 or 259
                             or 260 or 261 or 262 or 263 or 268 or 270 or 271
-                            or 273
+                            or 273 or 274
                             ? 0xF200_0001u : 0xF200_0008u,
                     effectsMask: verificationMode is 198 or 212
                         or 228 or 229 or 246 or 247 or 248 or 249 or 250
                         or 252 or 253 or 254 or 255 or 256 or 257 or 258 or 259
                         or 261 or 263 or 268 or 270 or 271
-                        or 273
+                        or 273 or 274
                         ? 2u : 0u,
                     scalarParameter: true,
                     executableBody: verificationMode is 161 or 211 or 251
@@ -9961,15 +9969,18 @@ internal sealed class StandaloneMethodImportInputTests
                     || Host.StandaloneSourceBodyCount[0] != 1
                     || Host.StandaloneSourceStatementCount[0] != 6
                     || Host.StandaloneSourceLocalCount[0] != 1
-                    || Host.StandaloneSourceDirectCallCount[0] != 1
-                    || Host.StandaloneSourceCallArgumentCount[0] != 1
+                    || Host.StandaloneSourceDirectCallCount[0]
+                        != {{verificationMode == 274 ? 2 : 1}}
+                    || Host.StandaloneSourceCallArgumentCount[0]
+                        != {{verificationMode == 274 ? 2 : 1}}
                     || Host.StandaloneSourceIfNodeCount[0] != 2
                     || Host.StandaloneSourceLoopStackCount[0] != 0
                     || Host.StandaloneSourceLoopLabelTokens[1] < 0
                     || Host.StandaloneSourceLoopLabelTokens[2] < 0
                     || Host.StandaloneSourceTransferLabelTokens[3] < 0
                     || Host.StandaloneSourceStatements[3]
-                        != {{verificationMode == 271 ? 11 : 7}}
+                        != {{verificationMode == 271 ? 11
+                            : verificationMode == 273 ? 7 : 10}}
                     || Host.StandaloneSourceStatements[6] != 10
                     || Host.StandaloneSourceStatements[9] != 8
                     || Host.StandaloneSourceStatements[12] != 5
@@ -9980,16 +9991,19 @@ internal sealed class StandaloneMethodImportInputTests
                     || Host.StandaloneSourceStatements[11]
                         != Host.StandaloneSourceStatements[5]
                     || Host.StandaloneSourceIfNodes[2] != 1
-                    || Host.StandaloneSourceIfNodes[4] != 1
+                    || Host.StandaloneSourceIfNodes[4]
+                        != {{verificationMode == 271 ? 1 : 0}}
                     || Host.StandaloneSourceIfNodes[7] != 1
                     || Host.StandaloneSourceIfNodes[9] != 0) {
                     return 88;
                 }
                 status = NormalizeStandaloneOwnedSourceProgram();
                 if (status != 0
-                    || Host.StandaloneNormalizedBlockCount[0] != 4
+                    || Host.StandaloneNormalizedBlockCount[0]
+                        != {{verificationMode == 274 ? 3 : 4}}
                     || Host.StandaloneNormalizedBodyBlockRanges[0] != 0
-                    || Host.StandaloneNormalizedBodyBlockRanges[1] != 4
+                    || Host.StandaloneNormalizedBodyBlockRanges[1]
+                        != {{verificationMode == 274 ? 3 : 4}}
                     || Host.StandaloneNormalizedConstantCount[0] != 1
                     || Host.StandaloneInvokeCount[0] != 0
                     || Host.StandaloneInvokeInputCount[0] != 0
@@ -10130,7 +10144,7 @@ internal sealed class StandaloneMethodImportInputTests
                 ? nestedWhileOuterBreakVerificationSource
             : verificationMode == 270
                 ? siblingLoopLabelsVerificationSource
-            : verificationMode is 271 or 273
+            : verificationMode is 271 or 273 or 274
                 ? nestedDoOuterBreakVerificationSource
             : verificationMode == 272
                 ? nestedWhileOuterContinueVerificationSource
@@ -10756,6 +10770,7 @@ internal sealed class StandaloneMethodImportInputTests
                         : verificationMode == 270 ? 6
                         : verificationMode == 271 ? 4
                         : verificationMode == 273 ? 4
+                        : verificationMode == 274 ? 3
                         : verificationMode == 272 ? 6
                         : verificationMode == 228 ? 3
                         : verificationMode == 229 ? 3
@@ -10839,6 +10854,7 @@ internal sealed class StandaloneMethodImportInputTests
                             : verificationMode == 270 ? 1
                             : verificationMode == 271 ? 1
                             : verificationMode == 273 ? 1
+                            : verificationMode == 274 ? 0
                             : verificationMode == 272 ? 2
                             : verificationMode == 228 ? 0
                             : verificationMode == 229 ? 0
@@ -10906,6 +10922,7 @@ internal sealed class StandaloneMethodImportInputTests
                     and not 270
                     and not 271
                     and not 273
+                    and not 274
                     and not 272
                     and not 242
                     and not 228 and not 229)
@@ -11535,6 +11552,7 @@ internal sealed class StandaloneMethodImportInputTests
                         and not 270
                         and not 271
                         and not 273
+                        and not 274
                         and not 272
                         and not 243
                         and not 242
@@ -11819,7 +11837,7 @@ internal sealed class StandaloneMethodImportInputTests
             {
                 expectedDecoderConstantMapCount = 2;
             }
-            if (verificationMode is 271 or 273)
+            if (verificationMode is 271 or 273 or 274)
             {
                 expectedDecoderConstantMapCount = 1;
             }
@@ -12161,6 +12179,7 @@ internal sealed class StandaloneMethodImportInputTests
                     or 270
                     or 271
                     or 273
+                    or 274
                     or 272
                     or 228 or 229)
             {
@@ -12361,6 +12380,7 @@ internal sealed class StandaloneMethodImportInputTests
                     or 270
                     or 271
                     or 273
+                    or 274
                     or 272
                     or 228 or 229 => 1,
                     161 => 2,
@@ -13182,6 +13202,11 @@ internal sealed class StandaloneMethodImportInputTests
                         break;
                     case 273:
                         Assert.That(Execute(0), Is.EqualTo(0));
+                        Assert.That(Execute(3), Is.EqualTo(0));
+                        break;
+                    case 274:
+                        Assert.That(Execute(0), Is.EqualTo(0));
+                        Assert.That(Execute(1), Is.EqualTo(0));
                         Assert.That(Execute(3), Is.EqualTo(0));
                         break;
                     case 272:

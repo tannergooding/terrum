@@ -3035,6 +3035,19 @@ int32 NormalizeStandaloneSourceLoop(int32 bodyId,
                         && Host.StandaloneSourceStatements[
                             lastChildStatementId * 3 + 2]
                             != loopNodeId);
+            if (finalTransferKind == 10)
+            {
+                init bool nestedDoBreaksTargetLoop;
+                int32 nestedDoBreakStatus
+                    = HasStandaloneSourceDoBodyUnconditionalBreakTarget(
+                        bodyId, lastChildStatementId, loopNodeId,
+                        ref init nestedDoBreaksTargetLoop);
+                if (nestedDoBreakStatus != 0)
+                {
+                    return nestedDoBreakStatus;
+                }
+                doBodySkipsCondition = nestedDoBreaksTargetLoop;
+            }
         }
     }
     init bool conditionDoesNotReturn;
