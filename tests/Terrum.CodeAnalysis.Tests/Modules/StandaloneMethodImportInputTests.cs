@@ -1879,6 +1879,15 @@ internal sealed class StandaloneMethodImportInputTests
             + "mut int32 counter = 0; "
             + "while (counter < limit) { "
             + "counter = counter + 1; "
+            + "while (counter < limit) { "
+            + "counter = counter + 1; continue; } "
+            + "counter = counter + 2; } return counter; } }",
+        0, 238, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { int32 Main(int32 limit) { "
+            + "mut int32 counter = 0; "
+            + "while (counter < limit) { "
+            + "counter = counter + 1; "
             + "if (counter == 2) break; } "
             + "return counter; } }", 0, 221, false)]
     [TestCase(BoundRuntimePolicy.FailFast,
@@ -8101,7 +8110,7 @@ internal sealed class StandaloneMethodImportInputTests
                 return 0;
             }
             """;
-        const string nestedWhileWithPrefixVerificationSource = """
+        var nestedWhileWithPrefixVerificationSource = $$"""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
                 if (Scan() < 1) { return 87; }
@@ -8115,7 +8124,8 @@ internal sealed class StandaloneMethodImportInputTests
                     || Host.StandaloneSourceStatements[6] != 5
                     || Host.StandaloneSourceStatements[9] != 7
                     || Host.StandaloneSourceStatements[12] != 5
-                    || Host.StandaloneSourceStatements[15] != 8
+                    || Host.StandaloneSourceStatements[15]
+                        != {{verificationMode == 238 ? 9 : 8}}
                     || Host.StandaloneSourceStatements[18] != 5
                     || Host.StandaloneSourceStatementParentIds[2] != 1
                     || Host.StandaloneSourceStatementParentIds[3] != 1
@@ -8133,6 +8143,19 @@ internal sealed class StandaloneMethodImportInputTests
                     || Host.StandaloneNormalizedBodyBlockRanges[0] != 0
                     || Host.StandaloneNormalizedBodyBlockRanges[1] != 7
                     || Host.StandaloneNormalizedConstantCount[0] != 3
+                    || Host.StandaloneNormalizedBlocks[20] != 4
+                    || Host.StandaloneNormalizedBlocks[24] != 2
+                    || Host.StandaloneNormalizedBlocks[25] != 6
+                    || Host.StandaloneNormalizedBlocks[36] != 3
+                    || Host.StandaloneNormalizedBlocks[40] != 3
+                    || Host.StandaloneNormalizedBlocks[52] != 4
+                    || Host.StandaloneNormalizedBlocks[56] != 4
+                    || Host.StandaloneNormalizedBlocks[57] != 5
+                    || Host.StandaloneNormalizedBlocks[68] != 3
+                    || Host.StandaloneNormalizedBlocks[72]
+                        != {{verificationMode == 238 ? 3 : 5}}
+                    || Host.StandaloneNormalizedBlocks[84] != 3
+                    || Host.StandaloneNormalizedBlocks[88] != 1
                     || Host.StandaloneNormalizedBodies[11] != 0) {
                     return 89;
                 }
@@ -8167,7 +8190,7 @@ internal sealed class StandaloneMethodImportInputTests
                 """
             : verificationMode == 236
                 ? nestedSequentialWhileVerificationSource
-            : verificationMode == 237
+            : verificationMode is 237 or 238
                 ? nestedWhileWithPrefixVerificationSource
             : verificationMode == 130
                 ? multiBlockControlFlowVerificationSource
@@ -8705,7 +8728,7 @@ internal sealed class StandaloneMethodImportInputTests
                     or 216 or 217 or 218 or 219 or 220 or 221
                     or 222 or 223 or 224 or 225 or 226 or 227
                     or 230 or 231 or 232 or 233 or 234 or 235 or 236
-                    or 237)
+                    or 237 or 238)
             {
                 var expectedBlockCount
                     = verificationMode is 159 or 160 or 165 or 166
@@ -8748,6 +8771,7 @@ internal sealed class StandaloneMethodImportInputTests
                         : verificationMode == 235 ? 4
                         : verificationMode == 236 ? 4
                         : verificationMode == 237 ? 7
+                        : verificationMode == 238 ? 7
                         : verificationMode == 228 ? 3
                         : verificationMode == 229 ? 3
                         : verificationMode == 211 ? 1
@@ -8800,6 +8824,7 @@ internal sealed class StandaloneMethodImportInputTests
                             : verificationMode == 235 ? 1
                             : verificationMode == 236 ? 1
                             : verificationMode == 237 ? 2
+                            : verificationMode == 238 ? 2
                             : verificationMode == 228 ? 0
                             : verificationMode == 229 ? 0
                             : verificationMode == 189 ? 1
@@ -8843,6 +8868,7 @@ internal sealed class StandaloneMethodImportInputTests
                     and not 224 and not 225 and not 226 and not 227
                     and not 230 and not 231 and not 232 and not 233
                     and not 234 and not 235 and not 236 and not 237
+                    and not 238
                     and not 228 and not 229)
                 {
                     Assert.That(bodyReader.GetBlockCode(0)
@@ -9447,6 +9473,7 @@ internal sealed class StandaloneMethodImportInputTests
                         and not 224 and not 225 and not 226 and not 227
                         and not 230 and not 231 and not 232 and not 233
                         and not 234 and not 235 and not 236 and not 237
+                        and not 238
                         and not 228 and not 229
                         and not 170 and not 171)
                 {
@@ -9636,7 +9663,7 @@ internal sealed class StandaloneMethodImportInputTests
             {
                 expectedDecoderConstantMapCount = 2;
             }
-            if (verificationMode == 237)
+            if (verificationMode is 237 or 238)
             {
                 expectedDecoderConstantMapCount = 3;
             }
@@ -9946,6 +9973,7 @@ internal sealed class StandaloneMethodImportInputTests
                     or 235
                     or 236
                     or 237
+                    or 238
                     or 228 or 229)
             {
                 var artifactIndex = new TrRmArtifactIndex(artifact);
@@ -10121,6 +10149,7 @@ internal sealed class StandaloneMethodImportInputTests
                     or 235
                     or 236
                     or 237
+                    or 238
                     or 228 or 229 => 1,
                     161 => 2,
                     162 => 3,
@@ -10798,6 +10827,11 @@ internal sealed class StandaloneMethodImportInputTests
                         Assert.That(Execute(0), Is.EqualTo(0));
                         Assert.That(Execute(1), Is.EqualTo(3));
                         Assert.That(Execute(3), Is.EqualTo(4));
+                        break;
+                    case 238:
+                        Assert.That(Execute(0), Is.EqualTo(0));
+                        Assert.That(Execute(1), Is.EqualTo(3));
+                        Assert.That(Execute(3), Is.EqualTo(5));
                         break;
                 }
             }
