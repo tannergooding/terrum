@@ -1237,6 +1237,7 @@ internal sealed class NativeCoreRegistrationTests
                 public interface IProbe {
                     public unsafe void Ping(int32 value);
                     public unsafe int32 Read(int32 first, int32 second);
+                    public unsafe int32 ReadNarrow(int8 first, int32 second);
                     public unsafe int32 Nested(int32 value);
                     public unsafe int32 ReadPointer(int32 first,
                         ptr<int32> target, int32 second);
@@ -1282,6 +1283,22 @@ internal sealed class NativeCoreRegistrationTests
                             second: IProbe.Nested(receiver, value));
                     }
                 }
+                int32 ConversionThenNested(ptr<void> receiver,
+                    int32 first, int32 value) {
+                    unsafe {
+                        return IProbe.ReadNarrow(receiver,
+                            first: int8(first),
+                            second: IProbe.Nested(receiver, value));
+                    }
+                }
+                int32 NestedThenConversion(ptr<void> receiver,
+                    int32 first, int32 value) {
+                    unsafe {
+                        return IProbe.ReadNarrow(receiver,
+                            second: IProbe.Nested(receiver, value),
+                            first: int8(first));
+                    }
+                }
                 int32 SequenceNestedThenChecked(ptr<void> receiver,
                     int32 first, int32 divisor, int32 value) {
                     unsafe {
@@ -1299,6 +1316,24 @@ internal sealed class NativeCoreRegistrationTests
                         return IProbe.Read(receiver,
                             first: first / divisor,
                             second: IProbe.Nested(receiver, value));
+                    }
+                }
+                int32 SequenceConversionThenNested(ptr<void> receiver,
+                    int32 first, int32 value) {
+                    unsafe {
+                        IProbe.Ping(receiver, value);
+                        return IProbe.ReadNarrow(receiver,
+                            first: int8(first),
+                            second: IProbe.Nested(receiver, value));
+                    }
+                }
+                int32 SequenceNestedThenConversion(ptr<void> receiver,
+                    int32 first, int32 value) {
+                    unsafe {
+                        IProbe.Ping(receiver, value);
+                        return IProbe.ReadNarrow(receiver,
+                            second: IProbe.Nested(receiver, value),
+                            first: int8(first));
                     }
                 }
                 int32 Identity(int32 value) { return value; }
@@ -1322,6 +1357,18 @@ internal sealed class NativeCoreRegistrationTests
         AssertSequenceInstructionOrder(consumerArtifact,
             "SequenceCheckedThenNested", nestedFirst: false,
             nestedCallCount: 1);
+        AssertConversionInstructionOrder(consumerArtifact,
+            "ConversionThenNested", conversionFirst: true,
+            expectedCallCount: 2);
+        AssertConversionInstructionOrder(consumerArtifact,
+            "NestedThenConversion", conversionFirst: false,
+            expectedCallCount: 2);
+        AssertConversionInstructionOrder(consumerArtifact,
+            "SequenceConversionThenNested", conversionFirst: true,
+            expectedCallCount: 3);
+        AssertConversionInstructionOrder(consumerArtifact,
+            "SequenceNestedThenConversion", conversionFirst: false,
+            expectedCallCount: 3);
 
         var loaded = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(schemaIdentity, consumerArtifact),
@@ -1330,6 +1377,14 @@ internal sealed class NativeCoreRegistrationTests
         AssertArgumentOrder(loaded, "CheckedThenNested", 0, 1);
         AssertArgumentOrder(loaded, "SequenceNestedThenChecked", 1, 0);
         AssertArgumentOrder(loaded, "SequenceCheckedThenNested", 0, 1);
+        AssertIntegerConversionArgumentOrder(loaded,
+            "ConversionThenNested", conversionFirst: true);
+        AssertIntegerConversionArgumentOrder(loaded,
+            "NestedThenConversion", conversionFirst: false);
+        AssertIntegerConversionArgumentOrder(loaded,
+            "SequenceConversionThenNested", conversionFirst: true);
+        AssertIntegerConversionArgumentOrder(loaded,
+            "SequenceNestedThenConversion", conversionFirst: false);
         var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
             "consumer.module", schemaIdentity, 1, []);
         var reloaded = TrRmExecutableCompiler.LoadStandard(
@@ -1339,12 +1394,32 @@ internal sealed class NativeCoreRegistrationTests
         AssertArgumentOrder(reloaded, "CheckedThenNested", 0, 1);
         AssertArgumentOrder(reloaded, "SequenceNestedThenChecked", 1, 0);
         AssertArgumentOrder(reloaded, "SequenceCheckedThenNested", 0, 1);
+        AssertIntegerConversionArgumentOrder(reloaded,
+            "ConversionThenNested", conversionFirst: true);
+        AssertIntegerConversionArgumentOrder(reloaded,
+            "NestedThenConversion", conversionFirst: false);
+        AssertIntegerConversionArgumentOrder(reloaded,
+            "SequenceConversionThenNested", conversionFirst: true);
+        AssertIntegerConversionArgumentOrder(reloaded,
+            "SequenceNestedThenConversion", conversionFirst: false);
         AssertSequenceInstructionOrder(reemitted,
             "SequenceNestedThenChecked", nestedFirst: true,
             nestedCallCount: 2);
         AssertSequenceInstructionOrder(reemitted,
             "SequenceCheckedThenNested", nestedFirst: false,
             nestedCallCount: 1);
+        AssertConversionInstructionOrder(reemitted,
+            "ConversionThenNested", conversionFirst: true,
+            expectedCallCount: 2);
+        AssertConversionInstructionOrder(reemitted,
+            "NestedThenConversion", conversionFirst: false,
+            expectedCallCount: 2);
+        AssertConversionInstructionOrder(reemitted,
+            "SequenceConversionThenNested", conversionFirst: true,
+            expectedCallCount: 3);
+        AssertConversionInstructionOrder(reemitted,
+            "SequenceNestedThenConversion", conversionFirst: false,
+            expectedCallCount: 3);
         var pointerInputCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse("""
                 int32 RejectPointerMix(ptr<void> receiver, int32 first,
@@ -1454,6 +1529,66 @@ internal sealed class NativeCoreRegistrationTests
                     checkedArithmeticOffset)), name);
         }
 
+        static void AssertConversionInstructionOrder(byte[] artifact,
+            string name, bool conversionFirst, int expectedCallCount)
+        {
+            var tables = TrRmStructuralMetadataValidator
+                .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
+                    artifact,
+                    TrRmArtifactSchema
+                        .ForeignNativeInterfaceParameterSurfaceDraft));
+            var row = Enumerable.Range(1, tables.Methods.Count)
+                .Single(candidate => tables.Methods.GetName(candidate)
+                    == name);
+            var body = tables.Bodies.GetRegisterBody(
+                tables.Methods.GetBodyRow(row), tables.Contracts.Count);
+            var code = body.GetBlockCode(0).ToArray();
+            var callOffsets = new List<int>();
+            var conversionOffsets = new List<int>();
+            for (var index = 0; index < code.Length;)
+            {
+                switch (code[index])
+                {
+                    case 0x90:
+                        callOffsets.Add(index);
+                        index += 2;
+                        break;
+                    case 0xD0:
+                        conversionOffsets.Add(index);
+                        Assert.That(code[index + 1] & 0x0F,
+                            Is.EqualTo(code[index + 1] >> 4), name);
+                        index += 4;
+                        break;
+                    case 0xC0 or 0xC2 or 0xC3 or 0xD4 or 0xD5:
+                        index += 4;
+                        break;
+                    default:
+                        index += 2;
+                        break;
+                }
+            }
+
+            Assert.That(callOffsets, Has.Count.EqualTo(expectedCallCount),
+                name);
+            Assert.That(conversionOffsets, Has.Count.EqualTo(1), name);
+            var nestedCallOffset = callOffsets[^2];
+            var conversionOffset = conversionOffsets[0];
+            if (expectedCallCount == 3)
+            {
+                Assert.That(callOffsets[0],
+                    Is.LessThan(Math.Min(nestedCallOffset,
+                        conversionOffset)), name);
+            }
+
+            Assert.That(conversionFirst
+                    ? conversionOffset < nestedCallOffset
+                    : nestedCallOffset < conversionOffset,
+                Is.True, name);
+            Assert.That(callOffsets[^1],
+                Is.GreaterThan(Math.Max(nestedCallOffset,
+                    conversionOffset)), name);
+        }
+
         static void AssertArgumentOrder(BoundProgram program, string name,
             int firstFormal, int secondFormal)
         {
@@ -1498,6 +1633,52 @@ internal sealed class NativeCoreRegistrationTests
                 Is.EqualTo(TokenKind.Slash));
             Assert.That(((BoundBinary)checkedExpression).OverflowBehavior,
                 Is.EqualTo(BoundIntegerOverflowBehavior.Checked));
+        }
+
+        static void AssertIntegerConversionArgumentOrder(
+            BoundProgram program, string functionName, bool conversionFirst)
+        {
+            var function = program.Functions.Single(
+                candidate => candidate.Name == functionName);
+            BoundCall? outerCall = null;
+            _ = BoundTreeTraversal.VisitExpressions(function.Body,
+                expression =>
+                {
+                    if (expression is BoundCall call
+                        && call.ForeignInterfaceCall?.Member.Name
+                            == "ReadNarrow")
+                    {
+                        outerCall = call;
+                    }
+                });
+            var selectedCall = outerCall
+                ?? throw new AssertionException(
+                    "Expected the FNI ReadNarrow call.");
+            Assert.That(selectedCall.Arguments.Length, Is.EqualTo(2));
+            Assert.That(selectedCall.ParameterIndex(0),
+                Is.EqualTo(conversionFirst ? 0 : 1));
+            Assert.That(selectedCall.ParameterIndex(1),
+                Is.EqualTo(conversionFirst ? 1 : 0));
+            var conversionIndex = conversionFirst ? 0 : 1;
+            var conversion = selectedCall.Arguments[conversionIndex];
+            Assert.That(conversion, Is.TypeOf<BoundCast>());
+            var cast = (BoundCast)conversion;
+            Assert.That(cast.Type, Is.EqualTo(PrimitiveType.Int8));
+            Assert.That(cast.Operand, Is.TypeOf<BoundRead>());
+            Assert.That(cast.Operand.Type, Is.EqualTo(PrimitiveType.Int32));
+            var nestedIndex = conversionFirst ? 1 : 0;
+            var nestedCallFound = false;
+            _ = BoundTreeTraversal.VisitExpressions(
+                selectedCall.Arguments[nestedIndex], expression =>
+                {
+                    if (expression is BoundCall call
+                        && call.ForeignInterfaceCall?.Member.Name
+                            == "Nested")
+                    {
+                        nestedCallFound = true;
+                    }
+                });
+            Assert.That(nestedCallFound, Is.True);
         }
     }
 
@@ -7474,7 +7655,8 @@ internal sealed class NativeCoreRegistrationTests
     {
         var program = CreatePointerOutputConsumerProgram(
             functionPointerOutput: true,
-            assertFunctionPointerProviderReplacement: true);
+            assertFunctionPointerProviderReplacement: true,
+            checkedInputConversion: true);
         var function = program.Functions.Single(
             static function => function.Name == "InvokePointer");
         Assert.That(NativeFunctionPointerTypes.IsType(function.ReturnType),
@@ -7486,6 +7668,11 @@ internal sealed class NativeCoreRegistrationTests
         Assert.That(signature.ReturnType, Is.EqualTo(PrimitiveType.Int32));
         Assert.That(signature.ParameterTypes,
             Is.EqualTo(new[] { PrimitiveType.Int32 }));
+        var image = NativeEmitter.EmitLibrary(program, ["InvokePointer"],
+            NativeRuntimePolicy.FailFast);
+        Assert.That(image[..2], Is.EqualTo(new byte[] {
+            (byte)'M', (byte)'Z',
+        }));
     }
 
     [Test]
@@ -7542,7 +7729,8 @@ internal sealed class NativeCoreRegistrationTests
         string outputCondition = "NonZero",
         string successPredicate = "status != 0",
         bool functionPointerOutput = false,
-        bool assertFunctionPointerProviderReplacement = false)
+        bool assertFunctionPointerProviderReplacement = false,
+        bool checkedInputConversion = false)
     {
         const string schemaIdentity
             = "trrm/1-draft-foreign-native-interface-parameter-surface-1";
@@ -7565,6 +7753,8 @@ internal sealed class NativeCoreRegistrationTests
                 [return: Terrum.CodeAnalysis.ForwardsBacking(
                     nameof(source), nameof(fallback))]
                 """;
+        var tagType = checkedInputConversion ? "int8" : "int32";
+        var tagExpression = checkedInputConversion ? "int8(tag)" : "tag";
         var providerSource = $$"""
             using Terrum.Interop;
             [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
@@ -7573,7 +7763,7 @@ internal sealed class NativeCoreRegistrationTests
                 [param(value): NativeOutput(
                     When: NativeOutputCondition.{{outputCondition}})]
                 public unsafe int32 TryGetPointer(ptr<int32> source,
-                    int32 tag,
+                    {{tagType}} tag,
                     {{outputParameterDependencies}}
                     write ptr<{{outputValueType}}> value);
             }
@@ -7586,7 +7776,8 @@ internal sealed class NativeCoreRegistrationTests
                 init {{outputValueType}} value;
                 unsafe {
                     int32 status = IPointerProbe.TryGetPointer(
-                        receiver, value: &init value, tag: tag,
+                        receiver, value: &init value,
+                        tag: {{tagExpression}},
                         source: source);
                     if ({{successPredicate}}) { return value; }
                     return fallback;
@@ -7641,6 +7832,10 @@ internal sealed class NativeCoreRegistrationTests
             string.Join(Environment.NewLine,
                 consumerCompilation.Diagnostics));
         var consumerProgram = consumerCompilation.Program!;
+        if (checkedInputConversion)
+        {
+            AssertCheckedTagConversion(consumerProgram);
+        }
         var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
             consumerProgram, consumerIdentity, schemaIdentity, 1, []);
         var schema
@@ -7653,6 +7848,11 @@ internal sealed class NativeCoreRegistrationTests
             row => tables.Methods.GetName(row) == "InvokePointer");
         var body = tables.Bodies.GetRegisterBody(
             tables.Methods.GetBodyRow(methodRow), tables.Contracts.Count);
+        if (checkedInputConversion)
+        {
+            Assert.That(body.GetBlockCode(0).ToArray().Contains((byte)0xD0),
+                Is.True);
+        }
         Assert.That(body.GetBlockCode(1).ToArray(),
             Is.EqualTo(new byte[] { 0xD5, 0, 4, 0, 0x17, 0 }));
         Assert.That(body.GetBlockCode(2).ToArray(),
@@ -7713,6 +7913,10 @@ internal sealed class NativeCoreRegistrationTests
         var loadedFunction = loaded.Functions.Single(
             static function => function.Name == "InvokePointer");
         AssertOutputType(loaded, loadedFunction.ReturnType);
+        if (checkedInputConversion)
+        {
+            AssertCheckedTagConversion(loaded);
+        }
         var successReturn = (BoundReturn)loadedFunction.Body.Statements
             .OfType<BoundIf>().Single().Then.Statements.Single();
         Assert.That(successReturn.Value, Is.TypeOf<BoundRead>());
@@ -7729,6 +7933,10 @@ internal sealed class NativeCoreRegistrationTests
         var reloadedFunction = reloaded.Functions.Single(
             static function => function.Name == "InvokePointer");
         AssertOutputType(reloaded, reloadedFunction.ReturnType);
+        if (checkedInputConversion)
+        {
+            AssertCheckedTagConversion(reloaded);
+        }
         return reloaded;
 
         void AssertOutputType(BoundProgram candidate, PrimitiveType type)
@@ -7752,6 +7960,35 @@ internal sealed class NativeCoreRegistrationTests
                     NativePointerTypes.Index(type)].PointeeType,
                     Is.EqualTo(PrimitiveType.Int32));
             }
+        }
+
+        static void AssertCheckedTagConversion(BoundProgram candidate)
+        {
+            var function = candidate.Functions.Single(
+                static function => function.Name == "InvokePointer");
+            BoundCall? outerCall = null;
+            _ = BoundTreeTraversal.VisitExpressions(function.Body,
+                expression =>
+                {
+                    if (expression is BoundCall call
+                        && call.ForeignInterfaceCall?.Member.Name
+                            == "TryGetPointer")
+                    {
+                        outerCall = call;
+                    }
+                });
+            var selectedCall = outerCall
+                ?? throw new AssertionException(
+                    "Expected the FNI TryGetPointer call.");
+            var tagArgument = Enumerable.Range(0,
+                    selectedCall.Arguments.Length)
+                .Single(index => selectedCall.ParameterIndex(index) == 1);
+            Assert.That(selectedCall.Arguments[tagArgument],
+                Is.TypeOf<BoundCast>());
+            var conversion = (BoundCast)selectedCall.Arguments[tagArgument];
+            Assert.That(conversion.Type, Is.EqualTo(PrimitiveType.Int8));
+            Assert.That(conversion.Operand.Type,
+                Is.EqualTo(PrimitiveType.Int32));
         }
     }
 

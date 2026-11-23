@@ -19872,23 +19872,8 @@ public static partial class SemanticVerifier
             case BoundCast cast:
                 var castOperandCompletes = EvaluateExpression(cast.Operand, initialized,
                     fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
-                var integerConversion = (PrimitiveTypeFacts.IsInteger(cast.Operand.Type)
-                    && (PrimitiveTypeFacts.IsInteger(cast.Type) || cast.Type == PrimitiveType.Char16
-                        || cast.Type is PrimitiveType.Int128 or PrimitiveType.UInt128))
-                    || (cast.Operand.Type == PrimitiveType.Char16
-                        && (PrimitiveTypeFacts.IsInteger(cast.Type)
-                            || cast.Type is PrimitiveType.Int128 or PrimitiveType.UInt128));
-                var integerToFloatingConversion = (PrimitiveTypeFacts.IsInteger(cast.Operand.Type)
-                    || cast.Operand.Type == PrimitiveType.Char16)
-                    && (cast.Type is PrimitiveType.Float32 or PrimitiveType.Float64);
-                var floatingToIntegerConversion = (cast.Operand.Type is PrimitiveType.Float32 or PrimitiveType.Float64)
-                    && (cast.Type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64
-                        or PrimitiveType.UInt64 or PrimitiveType.NativeInt
-                        or PrimitiveType.NativeUInt);
-                var floatingConversion = (cast.Operand.Type is PrimitiveType.Float32 or PrimitiveType.Float64)
-                    && (cast.Type is PrimitiveType.Float32 or PrimitiveType.Float64);
-                if (!integerConversion && !integerToFloatingConversion
-                    && !floatingToIntegerConversion && !floatingConversion)
+                if (!IsSupportedCheckedNumericConversion(
+                        cast.Operand.Type, cast.Type))
                 {
                     throw Invalid();
                 }
@@ -35784,6 +35769,35 @@ public static partial class SemanticVerifier
         }
         return destinationSigned ? destinationWidth > sourceWidth : destinationWidth >= sourceWidth;
     }
+
+    internal static bool IsSupportedCheckedIntegerConversion(
+        PrimitiveType source, PrimitiveType destination)
+        => (PrimitiveTypeFacts.IsInteger(source)
+                && (PrimitiveTypeFacts.IsInteger(destination)
+                    || destination == PrimitiveType.Char16
+                    || destination is PrimitiveType.Int128
+                        or PrimitiveType.UInt128))
+            || (source == PrimitiveType.Char16
+                && (PrimitiveTypeFacts.IsInteger(destination)
+                    || destination is PrimitiveType.Int128
+                        or PrimitiveType.UInt128));
+
+    internal static bool IsSupportedCheckedNumericConversion(
+        PrimitiveType source, PrimitiveType destination)
+        => IsSupportedCheckedIntegerConversion(source, destination)
+            || ((PrimitiveTypeFacts.IsInteger(source)
+                    || source == PrimitiveType.Char16)
+                && (destination is PrimitiveType.Float32
+                    or PrimitiveType.Float64))
+            || ((source is PrimitiveType.Float32 or PrimitiveType.Float64)
+                && (destination is PrimitiveType.Int32
+                    or PrimitiveType.UInt32
+                    or PrimitiveType.Int64 or PrimitiveType.UInt64
+                    or PrimitiveType.NativeInt
+                    or PrimitiveType.NativeUInt))
+            || ((source is PrimitiveType.Float32 or PrimitiveType.Float64)
+                && (destination is PrimitiveType.Float32
+                    or PrimitiveType.Float64));
 
     private static uint FullMask(BoundProgram program, PrimitiveType type)
     {

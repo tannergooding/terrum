@@ -168,6 +168,11 @@ public static partial class TrRmExecutableCompiler
                 cast.Type);
     }
 
+    private static bool IsForeignInterfaceCheckedIntegerConversion(
+        BoundCast cast)
+        => SemanticVerifier.IsSupportedCheckedIntegerConversion(
+            cast.Operand.Type, cast.Type);
+
     private static bool IsStandardInitializationReferenceParameter(
         BoundVariable variable, BoundProgram program)
         => IsStandardInitializationReferenceParameter(variable,
@@ -2588,16 +2593,26 @@ public static partial class TrRmExecutableCompiler
 
             if (candidate is BoundCast cast)
             {
+                var isTotalConversion
+                    = TryGetGeneralPredicateConversion(cast, out _, out _);
+                var isCheckedIntegerConversion
+                    = IsForeignInterfaceCheckedIntegerConversion(cast);
                 if (cast.Type != type
-                    || !TryGetGeneralPredicateConversion(cast, out _, out _))
+                    || (!isTotalConversion
+                        && !isCheckedIntegerConversion))
                 {
                     return (false, 0, false);
                 }
 
                 var operand = Visit(cast.Operand, cast.Operand.Type);
-                return operand.IsValid && operand.OwnsRegister
-                    ? (true, operand.RegisterCount, true)
-                    : (false, 0, false);
+                if (!operand.IsValid
+                    || (isTotalConversion && !operand.OwnsRegister))
+                {
+                    return (false, 0, false);
+                }
+
+                return (true, checked(operand.RegisterCount
+                    + (operand.OwnsRegister ? 0 : 1)), true);
             }
 
             if (candidate is BoundUnary unary)
@@ -2762,7 +2777,10 @@ public static partial class TrRmExecutableCompiler
 
         return expression switch {
             BoundCast cast =>
-                ForeignInterfaceScalarInputExpressionMayThrow(cast.Operand),
+                !SemanticVerifier.IsTotalConversion(cast.Operand.Type,
+                    cast.Type)
+                || ForeignInterfaceScalarInputExpressionMayThrow(
+                    cast.Operand),
             BoundUnary unary =>
                 (unary.Operator == TokenKind.Minus
                     && PrimitiveTypeFacts.IsIntegerOrWide(unary.Type)
@@ -2900,6 +2918,29 @@ public static partial class TrRmExecutableCompiler
                 code.Add(checked((byte)((typeMapIndex << 4)
                     | operand.Register)));
                 return operand;
+            }
+
+            if (candidate is BoundCast checkedCast
+                && checkedCast.Type == type
+                && IsForeignInterfaceCheckedIntegerConversion(checkedCast))
+            {
+                var operand = Emit(checkedCast.Operand,
+                    checkedCast.Operand.Type);
+                var typeMapIndex = getTypeMapIndex(checkedCast.Type);
+                if (typeMapIndex is < 0 or > ushort.MaxValue)
+                {
+                    throw Unsupported(
+                        "A Standard F+I checked integer conversion exceeds the TypeMap index range.");
+                }
+
+                var destinationRegister = operand.OwnsRegister
+                    ? operand.Register : allocateRegister();
+                code.Add(0xD0);
+                code.Add(checked((byte)(operand.Register
+                    | (destinationRegister << 4))));
+                code.Add((byte)typeMapIndex);
+                code.Add((byte)(typeMapIndex >> 8));
+                return (destinationRegister, true);
             }
 
             if (candidate is BoundUnary unary
@@ -10358,6 +10399,47 @@ public static partial class TrRmExecutableCompiler
                     conversions++;
                     break;
                 }
+                case 0xD0:
+                {
+                    var control = instruction[1];
+                    var conversionSourceRegister = control & 0x0F;
+                    var conversionDestinationRegister = control >> 4;
+                    var typeMapIndex
+                        = BinaryPrimitives.ReadUInt16LittleEndian(
+                            instruction[2..]);
+                    if (conversionSourceRegister >= 14
+                        || conversionDestinationRegister >= 14
+                        || typeMapIndex >= body.TypeCount
+                        || !valueByRegister.TryGetValue(
+                            conversionSourceRegister,
+                            out var value))
+                    {
+                        throw Invalid(
+                            "A Standard numeric conversion has an invalid source or destination.");
+                    }
+
+                    var destinationType = GetStandardInitializationBodyType(
+                        body, typeMapIndex, typeSpecs, imports,
+                        nativePointerTypes, structureTypeByTypeDef,
+                        checkedReferenceTypes,
+                        checkedReferenceTypeIndexes,
+                        nominalClassTypesByTypeSpecReference);
+                    if (!body.Schema.UsesForeignNativeInterface()
+                        || !SemanticVerifier
+                            .IsSupportedCheckedIntegerConversion(
+                                value.Type, destinationType))
+                    {
+                        throw Invalid(
+                            "A Standard F+I checked integer conversion is invalid for its complete types.");
+                    }
+
+                    valueByRegister[conversionDestinationRegister]
+                        = new BoundCast(value, destinationType, default);
+                    valueRegisterWriteOrder[
+                        conversionDestinationRegister] = position;
+                    conversions++;
+                    break;
+                }
                 case 0xDA:
                 {
                     var register = instruction[1] & 0x0F;
@@ -11257,6 +11339,12 @@ public static partial class TrRmExecutableCompiler
                 hasConstantInputs = true;
                 offset += 4;
             }
+            else if (code[offset] == 0xD0
+                && code.Length - offset >= 4)
+            {
+                hasScalarExpressions = true;
+                offset += 4;
+            }
             else if ((code[offset] is 0xC0 or 0xC2 or 0xC3)
                 && code.Length - offset >= 4)
             {
@@ -11578,6 +11666,10 @@ public static partial class TrRmExecutableCompiler
                 preparationOffset += 2;
             }
             else if (rawEntryCode[preparationOffset] == 0xD4)
+            {
+                preparationOffset += 4;
+            }
+            else if (rawEntryCode[preparationOffset] == 0xD0)
             {
                 preparationOffset += 4;
             }
@@ -11994,6 +12086,11 @@ public static partial class TrRmExecutableCompiler
                     or >= 0x30 and <= 0x36)
             {
                 constantOffset += 2;
+                continue;
+            }
+            if (opcode == 0xD0)
+            {
+                constantOffset += 4;
                 continue;
             }
             if (opcode is 0xC0 or 0xC2 or 0xC3)
@@ -12564,6 +12661,76 @@ public static partial class TrRmExecutableCompiler
                 _ = scalarExpressionResultRegisters.Add(
                     checkedDestination);
                 registerWriteOrder[checkedDestination] = preparationOffset;
+                preparationOffset += 4;
+                continue;
+            }
+
+            if (opcode == 0xD0)
+            {
+                var control = rawEntryCode[preparationOffset + 1];
+                var conversionSourceRegister
+                    = checked((ushort)(control & 0x0F));
+                var conversionDestinationRegister
+                    = checked((ushort)(control >> 4));
+                var typeMapIndex = BinaryPrimitives
+                    .ReadUInt16LittleEndian(rawEntryCode[
+                        (preparationOffset + 2)..]);
+                if (conversionSourceRegister is 0 or >= 14
+                    || conversionDestinationRegister is 0 or >= 14
+                    || typeMapIndex >= body.TypeCount
+                    || !availableRegisters.Contains(
+                        conversionSourceRegister)
+                    || !registerInputs.TryGetValue(
+                        conversionSourceRegister,
+                        out var sourceExpression))
+                {
+                    throw Invalid(
+                        "The Standard F+I checked integer conversion has an invalid register mapping.");
+                }
+
+                var destinationIsAvailable
+                    = availableRegisters.Contains(
+                        conversionDestinationRegister);
+                if (destinationIsAvailable
+                    ? !writableExpressionRegisters.Contains(
+                        conversionDestinationRegister)
+                    : registerInputs.ContainsKey(
+                        conversionDestinationRegister))
+                {
+                    throw Invalid(
+                        "The Standard F+I checked integer conversion overwrites a non-expression register.");
+                }
+
+                var destinationType = GetStandardInitializationBodyType(
+                    body, typeMapIndex, typeSpecs, imports,
+                    nativePointerTypes, structureTypeByTypeDef,
+                    checkedReferenceTypes, checkedReferenceTypeIndexes,
+                    nominalClassTypesByTypeSpecReference);
+                var conversion = new BoundCast(sourceExpression,
+                    destinationType, default);
+                if (!IsForeignInterfaceCheckedIntegerConversion(conversion))
+                {
+                    throw Invalid(
+                        "The Standard F+I checked integer conversion is invalid for its complete types.");
+                }
+
+                if (!destinationIsAvailable)
+                {
+                    _ = availableRegisters.Add(
+                        conversionDestinationRegister);
+                    _ = writableExpressionRegisters.Add(
+                        conversionDestinationRegister);
+                }
+
+                _ = scalarExpressionResultRegisters.Remove(
+                    conversionSourceRegister);
+                _ = scalarExpressionResultRegisters.Remove(
+                    conversionDestinationRegister);
+                registerInputs[conversionDestinationRegister] = conversion;
+                _ = scalarExpressionResultRegisters.Add(
+                    conversionDestinationRegister);
+                registerWriteOrder[conversionDestinationRegister]
+                    = preparationOffset;
                 preparationOffset += 4;
                 continue;
             }

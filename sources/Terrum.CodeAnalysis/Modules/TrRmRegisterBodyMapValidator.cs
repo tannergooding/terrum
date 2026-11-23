@@ -5884,6 +5884,39 @@ internal static class TrRmRegisterBodyMapValidator
             return;
         }
 
+        if (opcode == 0xD0
+            && body.Schema.UsesForeignNativeInterface())
+        {
+            var control = operand;
+            var sourceRegister = control & 0x0F;
+            var destination = control >> 4;
+            var typeMapIndex = ReadUInt16(body, instruction, 2);
+            if (sourceRegister >= 14 || destination >= 14
+                || typeMapIndex >= body.TypeCount)
+            {
+                throw InvalidMap();
+            }
+
+            var sourceState = GetRegisterTypeState(body, registerTypes,
+                sourceRegister);
+            if (sourceState.IsPlaceHandle)
+            {
+                throw InvalidMap();
+            }
+
+            var destinationTypeSpecRef = GetTypeMapTypeSpecRef(body,
+                typeMapIndex);
+            if (!IsCopyableRegisterValueType(typeSpecs,
+                    destinationTypeSpecRef, constantValues, body.Schema))
+            {
+                throw InvalidMap();
+            }
+
+            SetRegisterTypeState(body, registerTypes, destination,
+                RegisterTypeState.FromTypeMap(typeMapIndex));
+            return;
+        }
+
         if (opcode == 0xC0
             && body.Schema == TrRmArtifactSchema.LocalAggregateLayoutDraft)
         {
