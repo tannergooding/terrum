@@ -11824,9 +11824,12 @@ int32 VerifyStandaloneDirectCalls()
                                     || Host.StandaloneSourceStatementParentIds[
                                         nestedWhileTransferStatementId]
                                         != nestedDoBodyStatementId
-                                    || Host.StandaloneSourceStatements[
-                                        nestedWhileTransferStatementId * 3]
-                                        != 8)
+                                    || (Host.StandaloneSourceStatements[
+                                            nestedWhileTransferStatementId * 3]
+                                        != 8
+                                        && Host.StandaloneSourceStatements[
+                                            nestedWhileTransferStatementId * 3]
+                                            != 9))
                                 {
                                     return 3;
                                 }
