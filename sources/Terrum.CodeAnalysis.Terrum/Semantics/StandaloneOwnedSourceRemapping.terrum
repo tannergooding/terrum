@@ -396,7 +396,15 @@ public static int32 RewriteStandaloneOwnedCallNodes()
                 || Host.StandaloneSourceExpressions[
                     sourceOffset] == 15
                 || Host.StandaloneSourceExpressions[
-                    sourceOffset] == 16)
+                    sourceOffset] == 16
+                || Host.StandaloneSourceExpressions[
+                    sourceOffset] == 17
+                || Host.StandaloneSourceExpressions[
+                    sourceOffset] == 18
+                || Host.StandaloneSourceExpressions[
+                    sourceOffset] == 19
+                || Host.StandaloneSourceExpressions[
+                    sourceOffset] == 20)
             {
                 int32 leftExpressionId
                     = Host.StandaloneSourceExpressions[
@@ -1270,7 +1278,9 @@ int32 VerifyStandaloneRewrittenSourceArenas()
         }
         else if (expressionKind == 12 || expressionKind == 13
             || expressionKind == 14 || expressionKind == 15
-            || expressionKind == 16)
+            || expressionKind == 16 || expressionKind == 17
+            || expressionKind == 18 || expressionKind == 19
+            || expressionKind == 20)
         {
             int32 leftExpressionId
                 = Host.StandaloneSourceExpressions[oldOffset + 2];
@@ -1305,13 +1315,27 @@ int32 VerifyStandaloneRewrittenSourceArenas()
                     Host.StandaloneRewriteBodyIds[oldBodyId] * 12 + 3];
             int32 expressionTypeId
                 = Host.StandaloneSourceExpressions[oldOffset + 1];
-            if ((expressionKind <= 14
+            int32 leftTypeId
+                = Host.StandaloneSourceExpressions[
+                    leftGlobalId * 8 + 1];
+            int32 rightTypeId
+                = Host.StandaloneSourceExpressions[
+                    rightGlobalId * 8 + 1];
+            bool bitwise = expressionKind <= 14;
+            bool equality
+                = expressionKind == 15 || expressionKind == 16;
+            if ((bitwise
                     ? !IsStandaloneNotType(expressionTypeId)
                     : !IsStandaloneLogicalNotType(expressionTypeId))
-                || Host.StandaloneSourceExpressions[
-                    leftGlobalId * 8 + 1] != expressionTypeId
-                || Host.StandaloneSourceExpressions[
-                    rightGlobalId * 8 + 1] != expressionTypeId
+                || (bitwise
+                    ? leftTypeId != expressionTypeId
+                        || rightTypeId != expressionTypeId
+                    : leftTypeId != rightTypeId
+                        || (equality
+                            ? !IsStandaloneComparisonEqualityType(
+                                leftTypeId)
+                            : !IsStandaloneComparisonDataType(
+                                leftTypeId)))
                 || Host.StandaloneRewrittenSourceExpressions[
                     newOffset + 2]
                     != newLeftGlobalId - newExpressionFirst
@@ -2016,6 +2040,39 @@ int32 RewriteStandaloneCallableTarget(int32 targetKind,
     return 3;
 }
 
+bool IsStandaloneRewrittenComparisonDataType(int32 typeId)
+{
+    if (typeId <= 0
+        || typeId > Host.StandaloneRewrittenTypeFactCount[0]
+        || typeId
+            >= Host.StandaloneRewrittenTypeFacts.Length / 3
+        || Host.StandaloneRewrittenTypeFacts[typeId * 3] != 0)
+    {
+        return false;
+    }
+
+    int32 typeCode
+        = Host.StandaloneRewrittenTypeFacts[typeId * 3 + 1];
+    return typeCode == 0x03 || typeCode == 0x08
+        || typeCode == 0x0D || typeCode == 0x09
+        || typeCode == 0x0E || typeCode == 0x14
+        || typeCode == 0x15;
+}
+
+bool IsStandaloneRewrittenScalarType(int32 typeId,
+    int32 expectedTypeCode)
+{
+    return typeId > 0
+        && typeId <= Host.StandaloneRewrittenTypeFactCount[0]
+        && typeId
+            < Host.StandaloneRewrittenTypeFacts.Length / 3
+        && Host.StandaloneRewrittenTypeFacts[typeId * 3] == 0
+        && Host.StandaloneRewrittenTypeFacts[
+            typeId * 3 + 1] == expectedTypeCode
+        && Host.StandaloneRewrittenTypeFacts[
+            typeId * 3 + 2] == 0;
+}
+
 int32 VerifyStandaloneRewrittenCallNodes()
 {
     int32 directCallCount
@@ -2329,6 +2386,7 @@ int32 VerifyStandaloneRewrittenCallNodes()
         {
             return 3;
         }
+        mut int32 pendingRelationHomeId = -1;
         for (mut int32 operationLocal = 0;
             operationLocal < operationCount;
             operationLocal = operationLocal + 1)
@@ -2338,13 +2396,132 @@ int32 VerifyStandaloneRewrittenCallNodes()
             int32 kind
                 = Host.StandaloneRewrittenNormalizedOperations[
                     operationOffset];
+            int32 operand0
+                = Host.StandaloneRewrittenNormalizedOperations[
+                    operationOffset + 1];
+            int32 operand1
+                = Host.StandaloneRewrittenNormalizedOperations[
+                    operationOffset + 2];
+            int32 operand2
+                = Host.StandaloneRewrittenNormalizedOperations[
+                    operationOffset + 3];
+            if (Host.StandaloneRewrittenNormalizedOperations[
+                    operationOffset + 4] != bodyId
+                || (pendingRelationHomeId >= 0 && kind != 16))
+            {
+                return 3;
+            }
+            if (kind == 15)
+            {
+                if (pendingRelationHomeId >= 0)
+                {
+                    return 3;
+                }
+                pendingRelationHomeId = operand2;
+                int32 bodyHomeFirst
+                    = Host.StandaloneRewrittenNormalizedBodies[
+                        bodyOffset + 1];
+                int32 bodyHomeCount
+                    = Host.StandaloneRewrittenNormalizedBodies[
+                        bodyOffset + 2];
+                if (operand0 < 0 || operand0 >= bodyHomeCount
+                    || operand1 < 0 || operand1 >= bodyHomeCount
+                    || operand2 < 0 || operand2 >= bodyHomeCount
+                    || operand2 == operand0 || operand2 == operand1)
+                {
+                    return 3;
+                }
+                int32 leftHomeOffset
+                    = (bodyHomeFirst + operand0) * 5;
+                int32 rightHomeOffset
+                    = (bodyHomeFirst + operand1) * 5;
+                int32 relationHomeOffset
+                    = (bodyHomeFirst + operand2) * 5;
+                int32 leftTypeId
+                    = Host.StandaloneRewrittenNormalizedHomes[
+                        leftHomeOffset + 3];
+                int32 relationTypeId
+                    = Host.StandaloneRewrittenNormalizedHomes[
+                        relationHomeOffset + 3];
+                if (!IsStandaloneRewrittenComparisonDataType(
+                        leftTypeId)
+                    || Host.StandaloneRewrittenNormalizedHomes[
+                        leftHomeOffset] != bodyId
+                    || Host.StandaloneRewrittenNormalizedHomes[
+                        rightHomeOffset] != bodyId
+                    || Host.StandaloneRewrittenNormalizedHomes[
+                        relationHomeOffset] != bodyId
+                    || Host.StandaloneRewrittenNormalizedHomes[
+                        rightHomeOffset + 3] != leftTypeId
+                    || !IsStandaloneRewrittenScalarType(
+                        relationTypeId, 0x0B)
+                    || Host.StandaloneRewrittenNormalizedHomes[
+                        leftHomeOffset + 2] != 0
+                    || Host.StandaloneRewrittenNormalizedHomes[
+                        rightHomeOffset + 2] != 0
+                    || Host.StandaloneRewrittenNormalizedHomes[
+                        relationHomeOffset + 1] != 3
+                    || Host.StandaloneRewrittenNormalizedHomes[
+                        relationHomeOffset + 2] != 0)
+                {
+                    return 3;
+                }
+                continue;
+            }
+            if (kind == 16)
+            {
+                if (pendingRelationHomeId < 0
+                    || operand0 != pendingRelationHomeId
+                    || operand1 < 0 || operand1 > 15)
+                {
+                    return 3;
+                }
+                int32 bodyHomeFirst
+                    = Host.StandaloneRewrittenNormalizedBodies[
+                        bodyOffset + 1];
+                int32 bodyHomeCount
+                    = Host.StandaloneRewrittenNormalizedBodies[
+                        bodyOffset + 2];
+                if (operand0 < 0 || operand0 >= bodyHomeCount
+                    || operand2 < 0 || operand2 >= bodyHomeCount
+                    || operand0 == operand2)
+                {
+                    return 3;
+                }
+                int32 relationHomeOffset
+                    = (bodyHomeFirst + operand0) * 5;
+                int32 resultHomeOffset
+                    = (bodyHomeFirst + operand2) * 5;
+                int32 resultTypeId
+                    = Host.StandaloneRewrittenNormalizedHomes[
+                        resultHomeOffset + 3];
+                if (!IsStandaloneRewrittenScalarType(
+                        Host.StandaloneRewrittenNormalizedHomes[
+                            relationHomeOffset + 3],
+                        0x0B)
+                    || !IsStandaloneRewrittenScalarType(
+                        resultTypeId, 1)
+                    || Host.StandaloneRewrittenNormalizedHomes[
+                        relationHomeOffset] != bodyId
+                    || Host.StandaloneRewrittenNormalizedHomes[
+                        resultHomeOffset] != bodyId
+                    || Host.StandaloneRewrittenNormalizedHomes[
+                        relationHomeOffset + 2] != 0
+                    || Host.StandaloneRewrittenNormalizedHomes[
+                        resultHomeOffset + 1] != 3
+                    || Host.StandaloneRewrittenNormalizedHomes[
+                        resultHomeOffset + 2] != 0)
+                {
+                    return 3;
+                }
+                pendingRelationHomeId = -1;
+                continue;
+            }
             if (kind != 3)
             {
                 continue;
             }
-            int32 invokeLocal
-                = Host.StandaloneRewrittenNormalizedOperations[
-                    operationOffset + 1];
+            int32 invokeLocal = operand0;
             if (invokeLocal < 0 || invokeLocal >= invokeCount)
             {
                 return 3;
@@ -2368,6 +2545,10 @@ int32 VerifyStandaloneRewrittenCallNodes()
             {
                 return 3;
             }
+        }
+        if (pendingRelationHomeId >= 0)
+        {
+            return 3;
         }
         if (terminalKind == 1
             && (operationCount == 0

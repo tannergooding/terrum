@@ -3420,6 +3420,29 @@ bool IsStandaloneDecoderRegisterValueType(int32 typeId)
         && IsStandaloneCallableScalarCode(typeCode);
 }
 
+int32 FindStandaloneDecoderScalarTypeId(int32 typeCode)
+{
+    int32 typeCount = Host.StandaloneTypeFactCount[0];
+    if (typeCount < 0
+        || typeCount >= Host.StandaloneTypeFacts.Length / 3)
+    {
+        return 0;
+    }
+    for (mut int32 typeId = 1;
+        typeId <= typeCount;
+        typeId = typeId + 1)
+    {
+        int32 offset = typeId * 3;
+        if (Host.StandaloneTypeFacts[offset] == 0
+            && Host.StandaloneTypeFacts[offset + 1] == typeCode
+            && Host.StandaloneTypeFacts[offset + 2] == 0)
+        {
+            return typeId;
+        }
+    }
+    return 0;
+}
+
 int32 SetStandaloneDecoderRegisterType(int32 bodyId,
     int32 registerIndex, int32 typeId)
 {
@@ -4135,19 +4158,100 @@ int32 ValidateStandaloneBodyCode(int32 bodyId, int32 bodyOffset,
                     > Host.StandaloneTypeFactCount[0]
                 || rightTypeId != leftTypeId
                 || Host.StandaloneTypeFacts[
-                    leftTypeId * 3] != 0
-                || Host.StandaloneTypeFacts[
-                    leftTypeId * 3 + 1] != 1)
+                    leftTypeId * 3] != 0)
             {
                 return 3;
             }
-            if (control != 0x01 && control != 0x02)
+            int32 resultTypeId;
+            if (control == 0)
             {
-                return control == 0 ? 2 : 3;
+                if (!IsStandaloneComparisonDataType(leftTypeId))
+                {
+                    return 3;
+                }
+                resultTypeId
+                    = FindStandaloneDecoderScalarTypeId(0x0B);
+                if (resultTypeId <= 0)
+                {
+                    return 3;
+                }
+            }
+            else if (control == 0x01 || control == 0x02)
+            {
+                if (!IsStandaloneLogicalNotType(leftTypeId))
+                {
+                    return 3;
+                }
+                resultTypeId = leftTypeId;
+            }
+            else
+            {
+                return 3;
             }
             int32 registerTypeStatus
                 = SetStandaloneDecoderRegisterType(
-                    bodyId, resultRegister, leftTypeId);
+                    bodyId, resultRegister, resultTypeId);
+            if (registerTypeStatus != 0)
+            {
+                return registerTypeStatus;
+            }
+            codeOffset = codeOffset + 4;
+        }
+        else if (opcode == 0xC3)
+        {
+            if (codeOffset > codeLength - 4)
+            {
+                return 3;
+            }
+            init int32 control;
+            init uint32 registerPayload;
+            if (!TryReadStandaloneArtifactAbsoluteByte(artifactStart,
+                    artifactLength, codeStart + codeOffset + 1,
+                    ref init control)
+                || !TryReadStandaloneArtifactAbsoluteHalfWord(
+                    artifactStart, artifactLength,
+                    codeStart + codeOffset + 2,
+                    ref init registerPayload))
+            {
+                return 3;
+            }
+            int32 resultRegister
+                = int32(registerPayload & 0x0F);
+            int32 conditionRegister
+                = int32((registerPayload >> 4) & 0x0F);
+            int32 unused0
+                = int32((registerPayload >> 8) & 0x0F);
+            int32 unused1
+                = int32((registerPayload >> 12) & 0x0F);
+            if (control < 0 || control > 15
+                || resultRegister > 13
+                || conditionRegister > 13
+                || unused0 != 15 || unused1 != 15)
+            {
+                return 3;
+            }
+            int32 conditionTypeId
+                = Host.StandaloneDecoderRegisterTypeIds[
+                    bodyId * 14 + conditionRegister];
+            if (conditionTypeId <= 0
+                || conditionTypeId
+                    > Host.StandaloneTypeFactCount[0]
+                || Host.StandaloneTypeFacts[
+                    conditionTypeId * 3] != 0
+                || Host.StandaloneTypeFacts[
+                    conditionTypeId * 3 + 1] != 0x0B)
+            {
+                return 3;
+            }
+            int32 boolTypeId
+                = FindStandaloneDecoderScalarTypeId(1);
+            if (boolTypeId <= 0)
+            {
+                return 3;
+            }
+            int32 registerTypeStatus
+                = SetStandaloneDecoderRegisterType(
+                    bodyId, resultRegister, boolTypeId);
             if (registerTypeStatus != 0)
             {
                 return registerTypeStatus;

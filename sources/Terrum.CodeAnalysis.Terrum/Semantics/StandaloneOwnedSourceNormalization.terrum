@@ -485,7 +485,9 @@ int32 VisitStandaloneSourceExpression(int32 bodyId,
     }
     else if (expressionKind == 12 || expressionKind == 13
         || expressionKind == 14 || expressionKind == 15
-        || expressionKind == 16)
+        || expressionKind == 16 || expressionKind == 17
+        || expressionKind == 18 || expressionKind == 19
+        || expressionKind == 20)
     {
         int32 leftExpressionId
             = Host.StandaloneSourceExpressions[
@@ -974,7 +976,9 @@ int32 NormalizeStandaloneSourceExpression(int32 bodyId,
     }
     if (expressionKind == 12 || expressionKind == 13
         || expressionKind == 14 || expressionKind == 15
-        || expressionKind == 16)
+        || expressionKind == 16 || expressionKind == 17
+        || expressionKind == 18 || expressionKind == 19
+        || expressionKind == 20)
     {
         int32 leftExpressionId
             = Host.StandaloneSourceExpressions[
@@ -982,10 +986,10 @@ int32 NormalizeStandaloneSourceExpression(int32 bodyId,
         int32 rightExpressionId
             = Host.StandaloneSourceExpressions[
                 expressionOffset + 3];
-        if ((expressionKind <= 14
-                && !IsStandaloneNotType(typeId))
-            || (expressionKind >= 15
+        bool comparison = expressionKind >= 15;
+        if ((comparison
                 && !IsStandaloneLogicalNotType(typeId))
+            || (!comparison && !IsStandaloneNotType(typeId))
             || leftExpressionId < 0
             || leftExpressionId >= expressionId
             || rightExpressionId < 0
@@ -1062,36 +1066,115 @@ int32 NormalizeStandaloneSourceExpression(int32 bodyId,
             = (homeFirst + leftSelectorIndex) * 5;
         int32 rightHomeOffset
             = (homeFirst + rightSelectorIndex) * 5;
+        int32 operandTypeId
+            = Host.StandaloneNormalizedHomes[
+                leftHomeOffset + 3];
+        bool booleanEquality
+            = (expressionKind == 15 || expressionKind == 16)
+                && IsStandaloneLogicalNotType(operandTypeId);
         if (Host.StandaloneNormalizedHomes[
                 leftHomeOffset] != bodyId
             || Host.StandaloneNormalizedHomes[
-                leftHomeOffset + 3] != typeId
-            || Host.StandaloneNormalizedHomes[
                 rightHomeOffset] != bodyId
             || Host.StandaloneNormalizedHomes[
-                rightHomeOffset + 3] != typeId)
+                rightHomeOffset + 3] != operandTypeId
+            || (comparison
+                ? (expressionKind == 15 || expressionKind == 16)
+                    ? !IsStandaloneComparisonEqualityType(
+                        operandTypeId)
+                    : !IsStandaloneComparisonDataType(
+                        operandTypeId)
+                : operandTypeId != typeId)
         {
             return 3;
         }
 
         init int32 resultHomeId;
-        int32 homeStatus = AppendStandaloneNormalizedHome(
-            bodyId, homeFirst, 3, typeId, 0,
-            ref init resultHomeId);
-        if (homeStatus != 0)
+        int32 resultHomeStatus;
+        int32 operationStatus;
+        if (!comparison)
         {
-            return homeStatus;
+            resultHomeStatus = AppendStandaloneNormalizedHome(
+                bodyId, homeFirst, 3, typeId, 0,
+                ref init resultHomeId);
+            if (resultHomeStatus != 0)
+            {
+                return resultHomeStatus;
+            }
+            int32 operationKind = expressionKind == 12 ? 10
+                : expressionKind == 13 ? 11 : 12;
+            operationStatus = AppendStandaloneNormalizedOperation(
+                bodyId, operationKind, leftSelectorIndex,
+                rightSelectorIndex, resultHomeId);
+            if (operationStatus != 0)
+            {
+                return operationStatus;
+            }
         }
-        int32 operationKind = expressionKind == 12 ? 10
-            : expressionKind == 13 ? 11
-                : expressionKind == 14 ? 12
-                    : expressionKind == 15 ? 13 : 14;
-        int32 operationStatus = AppendStandaloneNormalizedOperation(
-            bodyId, operationKind, leftSelectorIndex,
-            rightSelectorIndex, resultHomeId);
-        if (operationStatus != 0)
+        else if (booleanEquality)
         {
-            return operationStatus;
+            resultHomeStatus = AppendStandaloneNormalizedHome(
+                bodyId, homeFirst, 3, typeId, 0,
+                ref init resultHomeId);
+            if (resultHomeStatus != 0)
+            {
+                return resultHomeStatus;
+            }
+            int32 operationKind
+                = expressionKind == 15 ? 13 : 14;
+            operationStatus = AppendStandaloneNormalizedOperation(
+                bodyId, operationKind, leftSelectorIndex,
+                rightSelectorIndex, resultHomeId);
+            if (operationStatus != 0)
+            {
+                return operationStatus;
+            }
+        }
+        else
+        {
+            init int32 relationTypeId;
+            int32 relationTypeStatus
+                = InternStandaloneCallableTypeFact(
+                    0, 0x0B, false, ref init relationTypeId);
+            if (relationTypeStatus != 0)
+            {
+                return relationTypeStatus;
+            }
+            init int32 relationHomeId;
+            int32 relationHomeStatus
+                = AppendStandaloneNormalizedHome(
+                    bodyId, homeFirst, 3, relationTypeId, 0,
+                    ref init relationHomeId);
+            if (relationHomeStatus != 0)
+            {
+                return relationHomeStatus;
+            }
+            resultHomeStatus = AppendStandaloneNormalizedHome(
+                bodyId, homeFirst, 3, typeId, 0,
+                ref init resultHomeId);
+            if (resultHomeStatus != 0)
+            {
+                return resultHomeStatus;
+            }
+            operationStatus = AppendStandaloneNormalizedOperation(
+                bodyId, 15, leftSelectorIndex,
+                rightSelectorIndex, relationHomeId);
+            if (operationStatus != 0)
+            {
+                return operationStatus;
+            }
+            int32 predicate = expressionKind == 15 ? 2
+                : expressionKind == 16 ? 13
+                    : expressionKind == 17 ? 1
+                        : expressionKind == 18 ? 3
+                            : expressionKind == 19 ? 4 : 6;
+            operationStatus = AppendStandaloneNormalizedOperation(
+                bodyId, 16, relationHomeId, predicate,
+                resultHomeId);
+            if (operationStatus != 0)
+            {
+                return operationStatus;
+            }
         }
         *selectorKindResult = 2;
         *sourceUseResult = sourceUse;
@@ -1985,6 +2068,7 @@ int32 VerifyStandaloneNormalizedProgram()
         }
 
         int32 finalOperationKind = 0;
+        mut int32 pendingRelationHomeId = -1;
         for (mut int32 localOperation = 0;
             localOperation < bodyOperationCount;
             localOperation = localOperation + 1)
@@ -2007,6 +2091,27 @@ int32 VerifyStandaloneNormalizedProgram()
                     operationOffset + 4] != bodyId)
             {
                 return 3;
+            }
+            if (pendingRelationHomeId >= 0 && kind != 16)
+            {
+                return 3;
+            }
+            if (kind == 15)
+            {
+                if (pendingRelationHomeId >= 0)
+                {
+                    return 3;
+                }
+                pendingRelationHomeId = operand2;
+            }
+            else if (kind == 16)
+            {
+                if (pendingRelationHomeId < 0
+                    || operand0 != pendingRelationHomeId)
+                {
+                    return 3;
+                }
+                pendingRelationHomeId = -1;
             }
             finalOperationKind = kind;
             if (kind == 1)
@@ -2163,8 +2268,7 @@ int32 VerifyStandaloneNormalizedProgram()
                     return 3;
                 }
             }
-            else if (kind == 10 || kind == 11 || kind == 12
-                || kind == 13 || kind == 14)
+            else if (kind >= 10 && kind <= 14)
             {
                 if (operand0 < 0 || operand0 >= bodyHomeCount
                     || operand1 < 0 || operand1 >= bodyHomeCount
@@ -2182,7 +2286,8 @@ int32 VerifyStandaloneNormalizedProgram()
                 int32 typeId
                     = Host.StandaloneNormalizedHomes[
                         leftHomeOffset + 3];
-                if ((kind <= 12
+                bool bitwise = kind <= 12;
+                if ((bitwise
                         ? !IsStandaloneNotType(typeId)
                         : !IsStandaloneLogicalNotType(typeId))
                     || Host.StandaloneNormalizedHomes[
@@ -2207,10 +2312,106 @@ int32 VerifyStandaloneNormalizedProgram()
                     return 3;
                 }
             }
+            else if (kind == 15)
+            {
+                if (operand0 < 0 || operand0 >= bodyHomeCount
+                    || operand1 < 0 || operand1 >= bodyHomeCount
+                    || operand2 < 0 || operand2 >= bodyHomeCount
+                    || operand2 == operand0
+                    || operand2 == operand1)
+                {
+                    return 3;
+                }
+                int32 leftHomeOffset
+                    = (homeFirst + operand0) * 5;
+                int32 rightHomeOffset
+                    = (homeFirst + operand1) * 5;
+                int32 relationHomeOffset
+                    = (homeFirst + operand2) * 5;
+                int32 operandTypeId
+                    = Host.StandaloneNormalizedHomes[
+                        leftHomeOffset + 3];
+                int32 relationTypeId
+                    = Host.StandaloneNormalizedHomes[
+                        relationHomeOffset + 3];
+                if (!IsStandaloneComparisonDataType(
+                        operandTypeId)
+                    || relationTypeId <= 0
+                    || relationTypeId
+                        > Host.StandaloneTypeFactCount[0]
+                    || Host.StandaloneNormalizedHomes[
+                        leftHomeOffset] != bodyId
+                    || Host.StandaloneNormalizedHomes[
+                        rightHomeOffset] != bodyId
+                    || Host.StandaloneNormalizedHomes[
+                        relationHomeOffset] != bodyId
+                    || Host.StandaloneNormalizedHomes[
+                        rightHomeOffset + 3] != operandTypeId
+                    || Host.StandaloneTypeFacts[
+                        relationTypeId * 3] != 0
+                    || Host.StandaloneTypeFacts[
+                        relationTypeId * 3 + 1] != 0x0B
+                    || Host.StandaloneNormalizedHomes[
+                        leftHomeOffset + 2] != 0
+                    || Host.StandaloneNormalizedHomes[
+                        rightHomeOffset + 2] != 0
+                    || Host.StandaloneNormalizedHomes[
+                        relationHomeOffset + 1] != 3
+                    || Host.StandaloneNormalizedHomes[
+                        relationHomeOffset + 2] != 0)
+                {
+                    return 3;
+                }
+            }
+            else if (kind == 16)
+            {
+                if (operand0 < 0 || operand0 >= bodyHomeCount
+                    || operand1 < 0 || operand1 > 15
+                    || operand2 < 0 || operand2 >= bodyHomeCount
+                    || operand0 == operand2)
+                {
+                    return 3;
+                }
+                int32 relationHomeOffset
+                    = (homeFirst + operand0) * 5;
+                int32 resultHomeOffset
+                    = (homeFirst + operand2) * 5;
+                int32 relationTypeId
+                    = Host.StandaloneNormalizedHomes[
+                        relationHomeOffset + 3];
+                int32 resultTypeId
+                    = Host.StandaloneNormalizedHomes[
+                        resultHomeOffset + 3];
+                if (relationTypeId <= 0
+                    || relationTypeId
+                        > Host.StandaloneTypeFactCount[0]
+                    || Host.StandaloneNormalizedHomes[
+                        relationHomeOffset] != bodyId
+                    || Host.StandaloneNormalizedHomes[
+                        resultHomeOffset] != bodyId
+                    || Host.StandaloneTypeFacts[
+                        relationTypeId * 3] != 0
+                    || Host.StandaloneTypeFacts[
+                        relationTypeId * 3 + 1] != 0x0B
+                    || !IsStandaloneLogicalNotType(resultTypeId)
+                    || Host.StandaloneNormalizedHomes[
+                        relationHomeOffset + 2] != 0
+                    || Host.StandaloneNormalizedHomes[
+                        resultHomeOffset + 1] != 3
+                    || Host.StandaloneNormalizedHomes[
+                        resultHomeOffset + 2] != 0)
+                {
+                    return 3;
+                }
+            }
             else
             {
                 return 3;
             }
+        }
+        if (pendingRelationHomeId >= 0)
+        {
+            return 3;
         }
         if (terminalKind == 1 && finalOperationKind != 3)
         {
