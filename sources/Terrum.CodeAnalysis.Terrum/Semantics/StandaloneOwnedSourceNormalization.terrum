@@ -273,6 +273,25 @@ public static int32 NormalizeStandaloneOwnedSourceProgram()
         {
             return FailStandaloneNormalization(3);
         }
+        mut int32 edgeOrdinal = 0;
+        for (mut int32 localBlock = 0;
+            localBlock < blockCount;
+            localBlock = localBlock + 1)
+        {
+            int32 blockOffset = (blockFirst + localBlock) * 16;
+            if (Host.StandaloneNormalizedBlocks[
+                    blockOffset + 4] == 4)
+            {
+                int32 edgeRecordIndex = blockCount + edgeOrdinal;
+                if (edgeRecordIndex > 0xFFFF)
+                {
+                    return FailStandaloneNormalization(3);
+                }
+                Host.StandaloneNormalizedBlocks[
+                    blockOffset + 13] = edgeRecordIndex;
+                edgeOrdinal = edgeOrdinal + 1;
+            }
+        }
         Host.StandaloneNormalizedBodyBlockRanges[bodyId * 2]
             = blockFirst;
         Host.StandaloneNormalizedBodyBlockRanges[bodyId * 2 + 1]

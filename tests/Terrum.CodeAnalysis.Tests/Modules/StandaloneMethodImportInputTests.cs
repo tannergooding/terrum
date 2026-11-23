@@ -7702,19 +7702,19 @@ internal sealed class StandaloneMethodImportInputTests
                             : verificationMode == 188 ? 0
                             : verificationMode == 197 ? 0
                             : verificationMode == 198 ? 2
-                            : verificationMode == 200 ? 3
+                            : verificationMode == 200 ? 1
                             : verificationMode == 199 ? 1
-                            : verificationMode == 201 ? 1
-                            : verificationMode == 202 ? 1
-                            : verificationMode == 203 ? 5
-                            : verificationMode == 189 ? 3
-                            : verificationMode == 190 ? 2
+                            : verificationMode == 201 ? 0
+                            : verificationMode == 202 ? 0
+                            : verificationMode == 203 ? 2
+                            : verificationMode == 189 ? 1
+                            : verificationMode == 190 ? 1
                             : verificationMode == 191 ? 1
                             : verificationMode == 192 ? 1
                             : verificationMode == 193 ? 1
-                            : verificationMode == 194 ? 2
-                            : verificationMode == 195 ? 2
-                            : verificationMode == 196 ? 2
+                            : verificationMode == 194 ? 1
+                            : verificationMode == 195 ? 1
+                            : verificationMode == 196 ? 1
                             : verificationMode is 175 or 176 ? 2
                             : verificationMode == 177 ? 3
                             : verificationMode == 181 ? 2
@@ -8534,19 +8534,19 @@ internal sealed class StandaloneMethodImportInputTests
                 198 => "Host.StandaloneDecoderBodies[19] != 5 || "
                     + "Host.StandaloneDecoderBodies[21] != 7",
                 200 => "Host.StandaloneDecoderBodies[19] != 5 || "
-                    + "Host.StandaloneDecoderBodies[21] != 8",
+                    + "Host.StandaloneDecoderBodies[21] != 6",
                 201 => "Host.StandaloneDecoderBodies[19] != 3 || "
-                    + "Host.StandaloneDecoderBodies[21] != 4",
+                    + "Host.StandaloneDecoderBodies[21] != 3",
                 202 => "Host.StandaloneDecoderBodies[19] != 3 || "
-                    + "Host.StandaloneDecoderBodies[21] != 4",
+                    + "Host.StandaloneDecoderBodies[21] != 3",
                 203 => "Host.StandaloneDecoderBodies[19] != 9 || "
-                    + "Host.StandaloneDecoderBodies[21] != 14",
+                    + "Host.StandaloneDecoderBodies[21] != 11",
                 199 => "Host.StandaloneDecoderBodies[19] != 3 || "
                     + "Host.StandaloneDecoderBodies[21] != 4",
                 189 => "Host.StandaloneDecoderBodies[19] != 5 || "
-                    + "Host.StandaloneDecoderBodies[21] != 8",
-                190 => "Host.StandaloneDecoderBodies[19] != 4 || "
                     + "Host.StandaloneDecoderBodies[21] != 6",
+                190 => "Host.StandaloneDecoderBodies[19] != 4 || "
+                    + "Host.StandaloneDecoderBodies[21] != 5",
                 191 => "Host.StandaloneDecoderBodies[19] != 5 || "
                     + "Host.StandaloneDecoderBodies[21] != 6",
                 192 => "Host.StandaloneDecoderBodies[19] != 5 || "
@@ -8554,10 +8554,10 @@ internal sealed class StandaloneMethodImportInputTests
                 193 => "Host.StandaloneDecoderBodies[19] != 5 || "
                     + "Host.StandaloneDecoderBodies[21] != 6",
                 194 => "Host.StandaloneDecoderBodies[19] != 5 || "
-                    + "Host.StandaloneDecoderBodies[21] != 7",
+                    + "Host.StandaloneDecoderBodies[21] != 6",
                 195 or 196
                     => "Host.StandaloneDecoderBodies[19] != 5 || "
-                        + "Host.StandaloneDecoderBodies[21] != 7",
+                        + "Host.StandaloneDecoderBodies[21] != 6",
                 149 => "Host.StandaloneDecoderBodies[19] != 6 || "
                     + "Host.StandaloneDecoderBodies[21] != 9",
                 _ => "false",
