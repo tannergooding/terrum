@@ -1811,17 +1811,6 @@ int32 NormalizeStandaloneSourceLoop(int32 bodyId,
     {
         return 2;
     }
-    init bool conditionDoesNotReturn;
-    int32 conditionDoesNotReturnStatus
-        = TryGetStandaloneSourceExpressionDoesNotReturn(
-            bodyId, conditionExpressionId,
-            ref init conditionDoesNotReturn);
-    if (conditionDoesNotReturnStatus != 0
-        || conditionDoesNotReturn)
-    {
-        return conditionDoesNotReturnStatus != 0
-            ? conditionDoesNotReturnStatus : 2;
-    }
     init int32 loopBodyBlockCount;
     int32 loopBodyBlockCountStatus
         = GetStandaloneSourceLoopBodyBlockCount(
@@ -1866,6 +1855,18 @@ int32 NormalizeStandaloneSourceLoop(int32 bodyId,
                 = Host.StandaloneSourceStatements[
                     lastChildStatementId * 3] == 8;
         }
+    }
+    init bool conditionDoesNotReturn;
+    int32 conditionDoesNotReturnStatus
+        = TryGetStandaloneSourceExpressionDoesNotReturn(
+            bodyId, conditionExpressionId,
+            ref init conditionDoesNotReturn);
+    if (conditionDoesNotReturnStatus != 0
+        || (conditionDoesNotReturn
+            && !(doWhile && doBodyBreaksImmediately)))
+    {
+        return conditionDoesNotReturnStatus != 0
+            ? conditionDoesNotReturnStatus : 2;
     }
 
     mut int32 conditionBlockCount

@@ -3778,13 +3778,49 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
             {
                 return 1;
             }
+            int32 doControlNodeOffset = controlNodeId * 5;
+            int32 doBodyChildFirst
+                = Host.StandaloneSourceIfNodes[
+                    doControlNodeOffset + 1];
+            int32 doBodyChildCount
+                = Host.StandaloneSourceIfNodes[
+                    doControlNodeOffset + 2];
+            if (doBodyChildFirst < 0 || doBodyChildCount < 0
+                || doBodyChildFirst
+                    > Host.StandaloneSourceIfChildCount[0]
+                        - doBodyChildCount)
+            {
+                return 3;
+            }
+            mut bool doBodyBreaksImmediately = false;
+            if (doBodyChildCount > 0)
+            {
+                int32 lastDoBodyChildId
+                    = Host.StandaloneSourceIfChildren[
+                        doBodyChildFirst + doBodyChildCount - 1];
+                if (lastDoBodyChildId < 0
+                    || lastDoBodyChildId
+                        >= Host.StandaloneSourceStatementCount[0])
+                {
+                    return 3;
+                }
+                doBodyBreaksImmediately
+                    = Host.StandaloneSourceStatementParentIds[
+                        lastDoBodyChildId] == doStatementId
+                        && Host.StandaloneSourceStatements[
+                            lastDoBodyChildId * 3] == 8
+                        && Host.StandaloneSourceStatements[
+                            lastDoBodyChildId * 3 + 2]
+                            == controlNodeId;
+            }
             init bool conditionDoesNotReturn;
             int32 conditionDoesNotReturnStatus
                 = TryGetStandaloneSourceExpressionDoesNotReturn(
                     localCallableId, conditionExpressionId,
                     ref init conditionDoesNotReturn);
             if (conditionDoesNotReturnStatus != 0
-                || conditionDoesNotReturn)
+                || (conditionDoesNotReturn
+                    && !doBodyBreaksImmediately))
             {
                 return conditionDoesNotReturnStatus != 0
                     ? conditionDoesNotReturnStatus : 2;
@@ -11061,17 +11097,6 @@ int32 VerifyStandaloneDirectCalls()
                     {
                         return 2;
                     }
-                    init bool conditionDoesNotReturn;
-                    int32 conditionStatus
-                        = TryGetStandaloneSourceExpressionDoesNotReturn(
-                            bodyId, expressionId,
-                            ref init conditionDoesNotReturn);
-                    if (conditionStatus != 0
-                        || conditionDoesNotReturn)
-                    {
-                        return conditionStatus != 0
-                            ? conditionStatus : 2;
-                    }
                 }
 
                 int32 loopNodeOffset = loopNodeId * 5;
@@ -11099,6 +11124,40 @@ int32 VerifyStandaloneDirectCalls()
                             - falseCount)
                 {
                     return 3;
+                }
+                mut bool loopBodyBreaksImmediately = false;
+                if (childCount > 0)
+                {
+                    int32 lastChildStatementId
+                        = Host.StandaloneSourceIfChildren[
+                            childFirst + childCount - 1];
+                    if (lastChildStatementId < bodyStatementFirst
+                        || lastChildStatementId
+                            >= bodyStatementFirst + bodyStatementCount)
+                    {
+                        return 3;
+                    }
+                    loopBodyBreaksImmediately
+                        = Host.StandaloneSourceStatementParentIds[
+                            lastChildStatementId] == statementId
+                            && Host.StandaloneSourceStatements[
+                                lastChildStatementId * 3] == 8;
+                }
+                if (!conditionOmitted)
+                {
+                    init bool conditionDoesNotReturn;
+                    int32 conditionStatus
+                        = TryGetStandaloneSourceExpressionDoesNotReturn(
+                            bodyId, expressionId,
+                            ref init conditionDoesNotReturn);
+                    if (conditionStatus != 0
+                        || (conditionDoesNotReturn
+                            && !(statementKind == 10
+                                && loopBodyBreaksImmediately)))
+                    {
+                        return conditionStatus != 0
+                            ? conditionStatus : 2;
+                    }
                 }
 
                 mut bool sawLoopTransfer = false;
