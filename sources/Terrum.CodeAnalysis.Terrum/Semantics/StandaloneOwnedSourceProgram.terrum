@@ -5252,11 +5252,46 @@ int32 ParseStandaloneSourceNestedWhile(
             >= Host.StandaloneSourceIfNodeCount[0]
         || parentStatementId < 0
         || parentStatementId
-            >= Host.StandaloneSourceStatementCount[0]
-        || Host.StandaloneSourceIfNodes[
-            parentControlNodeId * 5 + 2] != 0)
+            >= Host.StandaloneSourceStatementCount[0])
     {
         return 2;
+    }
+
+    int32 parentNodeOffset = parentControlNodeId * 5;
+    int32 parentChildFirst
+        = Host.StandaloneSourceIfNodes[parentNodeOffset + 1];
+    int32 parentChildCount
+        = Host.StandaloneSourceIfNodes[parentNodeOffset + 2];
+    int32 parentFalseFirst
+        = Host.StandaloneSourceIfNodes[parentNodeOffset + 3];
+    int32 parentFalseCount
+        = Host.StandaloneSourceIfNodes[parentNodeOffset + 4];
+    if (parentChildFirst < 0 || parentChildCount < 0
+        || parentChildFirst
+            > Host.StandaloneSourceIfChildCount[0]
+                - parentChildCount
+        || parentFalseCount != 0
+        || parentFalseFirst != parentChildFirst + parentChildCount)
+    {
+        return 2;
+    }
+    for (mut int32 parentChildOrdinal = 0;
+        parentChildOrdinal < parentChildCount;
+        parentChildOrdinal = parentChildOrdinal + 1)
+    {
+        int32 parentChildStatementId
+            = Host.StandaloneSourceIfChildren[
+                parentChildFirst + parentChildOrdinal];
+        if (parentChildStatementId < 0
+            || parentChildStatementId
+                >= Host.StandaloneSourceStatementCount[0]
+            || Host.StandaloneSourceStatementParentIds[
+                parentChildStatementId] != parentStatementId
+            || Host.StandaloneSourceStatements[
+                parentChildStatementId * 3] != 5)
+        {
+            return 2;
+        }
     }
 
     init int32 conditionClose;
