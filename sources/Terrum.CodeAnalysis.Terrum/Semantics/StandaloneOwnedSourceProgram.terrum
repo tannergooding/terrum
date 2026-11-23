@@ -3618,7 +3618,7 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
                     int32 stepStatus = ParseStandaloneSourceForValueStep(
                         localCallableId, expressionFirst, stepStart,
                         headerClose, resultDiscardStep,
-                        !conditionOmitted,
+                        true,
                         ref init stepStatementId,
                         ref init nextStepToken);
                     if (stepStatus != 0)
@@ -10722,10 +10722,9 @@ int32 VerifyStandaloneDirectCalls()
                         = TryGetStandaloneSourceExpressionDoesNotReturn(
                             bodyId, stepExpressionId,
                             ref init stepDoesNotReturn);
-                    if (stepStatus != 0
-                        || (stepDoesNotReturn && conditionOmitted))
+                    if (stepStatus != 0)
                     {
-                        return stepStatus != 0 ? stepStatus : 3;
+                        return stepStatus;
                     }
                     if (stepStatementKind == 2)
                     {

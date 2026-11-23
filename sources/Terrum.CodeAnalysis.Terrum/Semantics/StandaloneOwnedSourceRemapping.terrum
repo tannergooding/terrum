@@ -1754,7 +1754,6 @@ int32 VerifyStandaloneRewrittenSourceArenas()
                         && stepSourceUse != 0)
                     || (discardedForStep && !stepDoesNotReturn
                         && stepSourceUse != 0 && stepSourceUse != 1)
-                    || (stepDoesNotReturn && conditionOmitted)
                     || stepStatus != 0)
                 {
                     return 3;
@@ -3773,7 +3772,7 @@ int32 VerifyStandaloneRewrittenCallNodes()
             {
                 return 3;
             }
-            if (terminalKind == 2 && blockTerminatorKind != 3)
+            if (terminalKind == 2 && blockTerminatorKind == 1)
             {
                 return 3;
             }

@@ -6386,7 +6386,7 @@ int32 VerifyStandaloneNormalizedProgram()
                 localBlock = localBlock + 1)
             {
                 if (Host.StandaloneNormalizedBlocks[
-                        (blockFirst + localBlock) * 16 + 4] != 3)
+                        (blockFirst + localBlock) * 16 + 4] == 1)
                 {
                     return 3;
                 }
