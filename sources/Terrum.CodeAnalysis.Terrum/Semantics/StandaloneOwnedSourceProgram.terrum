@@ -1869,6 +1869,39 @@ int32 AppendStandaloneSourceLexicalScope(int32 bodyId,
     return 0;
 }
 
+int32 AppendStandaloneSourceForHeaderScope(int32 bodyId,
+    int32 parentScopeId, int32 forToken,
+    ref<init int32> scopeIdResult)
+    ensure return == 0 ? *scopeIdResult is init : true
+{
+    int32 count = Host.StandaloneSourceLexicalScopeCount[0];
+    if (bodyId < 0 || bodyId >= Host.StandaloneSourceBodyCount[0]
+        || parentScopeId < 0
+        || parentScopeId >= count
+        || Host.StandaloneSourceLexicalScopes[
+            parentScopeId * 5 + 1] != bodyId
+        || forToken < 0 || forToken >= Host.Tokens.Length / 3
+        || forToken > int32.MaxValue - 2
+        || count < 0
+        || count >= Host.StandaloneSourceLexicalScopes.Length / 5)
+    {
+        return 3;
+    }
+
+    int32 scopeOffset = count * 5;
+    Host.StandaloneSourceLexicalScopes[scopeOffset] = parentScopeId;
+    Host.StandaloneSourceLexicalScopes[scopeOffset + 1] = bodyId;
+    Host.StandaloneSourceLexicalScopes[scopeOffset + 2]
+        = Host.StandaloneSourceLocalCount[0];
+    Host.StandaloneSourceLexicalScopes[scopeOffset + 3] = 0;
+    // Child-scope rows store the owning for token here; safety is inherited.
+    Host.StandaloneSourceLexicalScopes[scopeOffset + 4]
+        = forToken + 2;
+    Host.StandaloneSourceLexicalScopeCount[0] = count + 1;
+    *scopeIdResult = count;
+    return 0;
+}
+
 int32 FindStandaloneLocalInitializerEnd(int32 tokenStart,
     int32 tokenEnd, ref<init int32> semicolonResult)
     ensure return == 0 ? *semicolonResult is init : true
@@ -2157,6 +2190,51 @@ int32 FindStandaloneSourceStatementSemicolon(int32 tokenStart,
     return 1;
 }
 
+int32 FindStandaloneSourceForStatementEnd(int32 forToken,
+    int32 tokenEnd, ref<init int32> nextTokenResult)
+    ensure return == 0 ? *nextTokenResult is init : true
+{
+    if (forToken < 0 || forToken + 1 >= tokenEnd
+        || tokenEnd > Host.Tokens.Length / 3
+        || !IsStandaloneSourceForKeyword(forToken)
+        || Host.Tokens[(forToken + 1) * 3] != 46)
+    {
+        return 1;
+    }
+
+    init int32 headerClose;
+    if (!FindStandaloneMatchingClose(
+            forToken + 1, tokenEnd, 46, 47,
+            ref init headerClose)
+        || headerClose + 1 >= tokenEnd)
+    {
+        return 1;
+    }
+    int32 bodyStart = headerClose + 1;
+    if (Host.Tokens[bodyStart * 3] == 48)
+    {
+        init int32 bodyClose;
+        if (!FindStandaloneMatchingClose(
+                bodyStart, tokenEnd, 48, 49,
+                ref init bodyClose))
+        {
+            return 1;
+        }
+        *nextTokenResult = bodyClose + 1;
+        return 0;
+    }
+
+    init int32 bodySemicolon;
+    int32 semicolonStatus = FindStandaloneSourceStatementSemicolon(
+        bodyStart, tokenEnd, ref init bodySemicolon);
+    if (semicolonStatus != 0)
+    {
+        return semicolonStatus;
+    }
+    *nextTokenResult = bodySemicolon + 1;
+    return 0;
+}
+
 int32 InventoryStandaloneSourceLocals(int32 bodyId,
     int32 scopeId, int32 tokenStart, int32 tokenEnd)
 {
@@ -2173,6 +2251,19 @@ int32 InventoryStandaloneSourceLocals(int32 bodyId,
     mut int32 tokenIndex = tokenStart;
     while (tokenIndex < tokenEnd)
     {
+        if (IsStandaloneSourceForKeyword(tokenIndex))
+        {
+            init int32 afterForToken;
+            int32 forEndStatus = FindStandaloneSourceForStatementEnd(
+                tokenIndex, tokenEnd, ref init afterForToken);
+            if (forEndStatus != 0)
+            {
+                return forEndStatus;
+            }
+            tokenIndex = afterForToken;
+            continue;
+        }
+
         init int32 localId;
         init int32 nextToken;
         int32 localStatus = TryInventoryStandaloneSourceLocal(
@@ -2209,6 +2300,241 @@ int32 InventoryStandaloneSourceLocals(int32 bodyId,
     int32 scopeOffset = scopeId * 5;
     Host.StandaloneSourceLexicalScopes[scopeOffset + 2] = localFirst;
     Host.StandaloneSourceLexicalScopes[scopeOffset + 3] = localCount;
+    int32 forLocalStatus = InventoryStandaloneSourceForHeaderLocals(
+        bodyId, scopeId, tokenStart, tokenEnd);
+    if (forLocalStatus != 0)
+    {
+        return forLocalStatus;
+    }
+
+    int32 totalLocalCount
+        = Host.StandaloneSourceLocalCount[0] - localFirst;
+    Host.StandaloneSourceBodyLocalRanges[bodyId * 2 + 1]
+        = totalLocalCount;
+    return VerifyStandaloneForLocalNames(
+        bodyId, scopeId, localFirst, localCount, totalLocalCount);
+}
+
+int32 InventoryStandaloneSourceForHeaderLocals(int32 bodyId,
+    int32 bodyScopeId, int32 tokenStart, int32 tokenEnd)
+{
+    mut int32 tokenIndex = tokenStart;
+    while (tokenIndex < tokenEnd)
+    {
+        if (!IsStandaloneSourceForKeyword(tokenIndex))
+        {
+            tokenIndex = tokenIndex + 1;
+            continue;
+        }
+
+        init int32 afterForToken;
+        int32 forEndStatus = FindStandaloneSourceForStatementEnd(
+            tokenIndex, tokenEnd, ref init afterForToken);
+        if (forEndStatus != 0)
+        {
+            return forEndStatus;
+        }
+        init int32 headerClose;
+        if (!FindStandaloneMatchingClose(
+                tokenIndex + 1, tokenEnd, 46, 47,
+                ref init headerClose))
+        {
+            return 1;
+        }
+        int32 headerStart = tokenIndex + 2;
+        init int32 initializerSemicolon;
+        int32 initializerStatus
+            = FindStandaloneSourceStatementSemicolon(
+                headerStart, headerClose,
+                ref init initializerSemicolon);
+        if (initializerStatus != 0)
+        {
+            return initializerStatus;
+        }
+        init int32 forScopeId;
+        int32 scopeStatus
+            = AppendStandaloneSourceForHeaderScope(
+                bodyId, bodyScopeId, tokenIndex,
+                ref init forScopeId);
+        if (scopeStatus != 0)
+        {
+            return scopeStatus;
+        }
+        if (initializerSemicolon != headerStart)
+        {
+            int32 forLocalFirst
+                = Host.StandaloneSourceLocalCount[0];
+            init int32 localId;
+            init int32 afterLocalToken;
+            int32 localStatus
+                = TryInventoryStandaloneSourceLocal(
+                    bodyId, forScopeId, headerStart, headerClose,
+                    ref init localId, ref init afterLocalToken);
+            if (localStatus != 1)
+            {
+                return localStatus == 0 ? 2 : localStatus;
+            }
+            int32 localOffset = localId * 10;
+            int32 bindingKind
+                = Host.StandaloneSourceLocals[localOffset + 3];
+            if (afterLocalToken != initializerSemicolon + 1
+                || Host.StandaloneSourceLocals[localOffset + 8] < 0
+                || (bindingKind != 0 && bindingKind != 1))
+            {
+                return 2;
+            }
+            int32 scopeOffset = forScopeId * 5;
+            Host.StandaloneSourceLexicalScopes[scopeOffset + 2]
+                = forLocalFirst;
+            Host.StandaloneSourceLexicalScopes[scopeOffset + 3] = 1;
+        }
+        tokenIndex = afterForToken;
+    }
+    return 0;
+}
+
+int32 VerifyStandaloneForLocalNames(int32 bodyId,
+    int32 bodyScopeId, int32 rootLocalFirst, int32 rootLocalCount,
+    int32 bodyLocalCount)
+{
+    if (bodyId < 0 || bodyId >= Host.StandaloneSourceBodyCount[0]
+        || bodyScopeId < 0
+        || bodyScopeId >= Host.StandaloneSourceLexicalScopeCount[0])
+    {
+        return 3;
+    }
+    int32 bodyLocalFirst
+        = Host.StandaloneSourceBodyLocalRanges[bodyId * 2];
+    if (bodyLocalFirst != rootLocalFirst
+        || rootLocalCount < 0 || bodyLocalCount < rootLocalCount
+        || bodyLocalFirst < 0
+        || bodyLocalFirst
+            > Host.StandaloneSourceLocalCount[0] - bodyLocalCount)
+    {
+        return 3;
+    }
+    for (mut int32 scopeId = 0;
+        scopeId < Host.StandaloneSourceLexicalScopeCount[0];
+        scopeId = scopeId + 1)
+    {
+        int32 scopeOffset = scopeId * 5;
+        int32 scopeBodyId
+            = Host.StandaloneSourceLexicalScopes[scopeOffset + 1];
+        if (scopeBodyId != bodyId)
+        {
+            continue;
+        }
+        if (scopeId == bodyScopeId)
+        {
+            continue;
+        }
+        if (Host.StandaloneSourceLexicalScopes[scopeOffset]
+            != bodyScopeId)
+        {
+            return 3;
+        }
+        int32 scopeLocalFirst
+            = Host.StandaloneSourceLexicalScopes[scopeOffset + 2];
+        int32 scopeLocalCount
+            = Host.StandaloneSourceLexicalScopes[scopeOffset + 3];
+        int32 scopeOwnerEncoding
+            = Host.StandaloneSourceLexicalScopes[scopeOffset + 4];
+        if (scopeOwnerEncoding < 2)
+        {
+            return 3;
+        }
+        int32 scopeOwnerToken
+            = scopeOwnerEncoding - 2;
+        int32 bodyTokenStart
+            = Host.StandaloneSourceBodies[bodyId * 12 + 1];
+        int32 bodyTokenEnd
+            = Host.StandaloneSourceBodies[bodyId * 12 + 2];
+        if (scopeBodyId != bodyId
+            || bodyTokenStart < 0
+            || bodyTokenStart > bodyTokenEnd
+            || bodyTokenEnd > Host.Tokens.Length / 3
+            || scopeOwnerToken < bodyTokenStart
+            || scopeOwnerToken >= bodyTokenEnd)
+        {
+            return 3;
+        }
+        init int32 scopeEndToken;
+        int32 scopeEndStatus = FindStandaloneSourceForStatementEnd(
+            scopeOwnerToken, bodyTokenEnd, ref init scopeEndToken);
+        init int32 headerClose;
+        if (!FindStandaloneMatchingClose(
+                scopeOwnerToken + 1, bodyTokenEnd,
+                46, 47, ref init headerClose))
+        {
+            return 3;
+        }
+        int32 headerStart = scopeOwnerToken + 2;
+        init int32 initializerSemicolon;
+        int32 initializerStatus = FindStandaloneSourceStatementSemicolon(
+            headerStart, headerClose, ref init initializerSemicolon);
+        if (initializerStatus != 0)
+        {
+            return 3;
+        }
+        bool hasInitializer = initializerSemicolon != headerStart;
+        if (scopeLocalFirst < bodyLocalFirst + rootLocalCount
+            || scopeLocalCount < 0
+            || scopeLocalFirst
+                > bodyLocalFirst + bodyLocalCount - scopeLocalCount
+            || scopeEndStatus != 0
+            || (hasInitializer && scopeLocalCount != 1)
+            || (!hasInitializer && scopeLocalCount != 0))
+        {
+            return 3;
+        }
+        if (hasInitializer)
+        {
+            int32 localId = scopeLocalFirst;
+            int32 localOffset = localId * 10;
+            int32 bindingKind
+                = Host.StandaloneSourceLocals[localOffset + 3];
+            if (Host.StandaloneSourceLocals[localOffset + 1] != scopeId
+                || Host.StandaloneSourceLocals[localOffset + 7]
+                    != headerStart
+                || Host.StandaloneSourceLocals[localOffset + 8] < 0
+                || Host.StandaloneSourceLocals[localOffset + 9]
+                    != initializerSemicolon
+                || (bindingKind != 0 && bindingKind != 1))
+            {
+                return 3;
+            }
+        }
+        for (mut int32 localOrdinal = 0;
+            localOrdinal < scopeLocalCount;
+            localOrdinal = localOrdinal + 1)
+        {
+            int32 localId = scopeLocalFirst + localOrdinal;
+            int32 nameToken
+                = Host.StandaloneSourceLocals[localId * 10 + 6];
+            if (Host.StandaloneSourceLocals[localId * 10 + 1]
+                    != scopeId
+                || nameToken < scopeOwnerToken
+                || nameToken >= scopeEndToken)
+            {
+                return 3;
+            }
+            for (mut int32 rootOrdinal = 0;
+                rootOrdinal < rootLocalCount;
+                rootOrdinal = rootOrdinal + 1)
+            {
+                int32 rootLocalId
+                    = rootLocalFirst + rootOrdinal;
+                if (IsStandaloneSourceName(nameToken,
+                        Host.StandaloneSourceLocals[
+                            rootLocalId * 10 + 4],
+                        Host.StandaloneSourceLocals[
+                            rootLocalId * 10 + 5]))
+                {
+                    return 2;
+                }
+            }
+        }
+    }
     return 0;
 }
 
@@ -2224,9 +2550,13 @@ int32 FindStandaloneSourceLocal(int32 bodyId, int32 nameToken)
         = Host.StandaloneSourceBodyLocalRanges[rangeOffset];
     int32 localCount
         = Host.StandaloneSourceBodyLocalRanges[rangeOffset + 1];
+    int32 bodyScopeId
+        = Host.StandaloneSourceBodyScopeIds[bodyId];
     if (localFirst < 0 || localCount < 0
         || localFirst
-            > Host.StandaloneSourceLocalCount[0] - localCount)
+            > Host.StandaloneSourceLocalCount[0] - localCount
+        || bodyScopeId < 0
+        || bodyScopeId >= Host.StandaloneSourceLexicalScopeCount[0])
     {
         return -2;
     }
@@ -2243,7 +2573,44 @@ int32 FindStandaloneSourceLocal(int32 bodyId, int32 nameToken)
                 Host.StandaloneSourceLocals[localOffset + 4],
                 Host.StandaloneSourceLocals[localOffset + 5]))
         {
-            return localId;
+            int32 scopeId
+                = Host.StandaloneSourceLocals[localOffset + 1];
+            if (scopeId < 0
+                || scopeId
+                    >= Host.StandaloneSourceLexicalScopeCount[0])
+            {
+                return -2;
+            }
+            if (scopeId == bodyScopeId)
+            {
+                return localId;
+            }
+            int32 scopeOffset = scopeId * 5;
+            if (Host.StandaloneSourceLexicalScopes[
+                    scopeOffset] != bodyScopeId
+                || Host.StandaloneSourceLexicalScopes[
+                    scopeOffset + 1] != bodyId
+                || Host.StandaloneSourceLexicalScopes[
+                    scopeOffset + 4] < 2)
+            {
+                return -2;
+            }
+            int32 forToken
+                = Host.StandaloneSourceLexicalScopes[
+                    scopeOffset + 4] - 2;
+            init int32 scopeEndToken;
+            int32 scopeEndStatus = FindStandaloneSourceForStatementEnd(
+                forToken,
+                Host.StandaloneSourceBodies[bodyId * 12 + 2],
+                ref init scopeEndToken);
+            if (scopeEndStatus != 0)
+            {
+                return -2;
+            }
+            if (nameToken >= forToken && nameToken < scopeEndToken)
+            {
+                return localId;
+            }
         }
     }
     return -1;
@@ -2879,11 +3246,101 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
                 = FindStandaloneSourceStatementSemicolon(
                     headerStart, headerClose,
                     ref init initializerSemicolon);
-            if (initializerSemicolonStatus != 0
-                || initializerSemicolon != headerStart)
+            if (initializerSemicolonStatus != 0)
             {
-                return initializerSemicolonStatus != 0
-                    ? initializerSemicolonStatus : 2;
+                return initializerSemicolonStatus;
+            }
+            if (initializerSemicolon != headerStart)
+            {
+                int32 initializerLocalId
+                    = FindStandaloneSourceLocalAtDeclaration(
+                        localCallableId, headerStart);
+                if (initializerLocalId < 0)
+                {
+                    return 2;
+                }
+                int32 initializerLocalOffset = initializerLocalId * 10;
+                mut int32 initializerTypeId
+                    = Host.StandaloneSourceLocals[
+                        initializerLocalOffset + 2];
+                int32 initializerBindingKind
+                    = Host.StandaloneSourceLocals[
+                        initializerLocalOffset + 3];
+                int32 initializerExpressionStart
+                    = Host.StandaloneSourceLocals[
+                        initializerLocalOffset + 8];
+                if ((initializerBindingKind != 0
+                        && initializerBindingKind != 1)
+                    || initializerExpressionStart < 0
+                    || Host.StandaloneSourceLocals[
+                        initializerLocalOffset + 9]
+                        != initializerSemicolon)
+                {
+                    return 2;
+                }
+                init int32 initializerExpressionId;
+                init int32 nextInitializerToken;
+                int32 initializerStatus
+                    = ParseStandaloneSourceExpression(
+                        localCallableId, localCallableId,
+                        expressionFirst,
+                        initializerTypeId == 0
+                            ? -1 : initializerTypeId,
+                        initializerExpressionStart,
+                        initializerSemicolon, 1,
+                        ref init initializerExpressionId,
+                        ref init nextInitializerToken);
+                if (initializerStatus != 0)
+                {
+                    return initializerStatus;
+                }
+                if (nextInitializerToken != initializerSemicolon)
+                {
+                    return 1;
+                }
+                int32 initializerValueTypeId
+                    = Host.StandaloneSourceExpressions[
+                        (expressionFirst
+                            + initializerExpressionId) * 8 + 1];
+                if (initializerTypeId == 0)
+                {
+                    if (!IsStandaloneSourceConstructionType(
+                            initializerValueTypeId)
+                        || GetStandaloneSourceUse(
+                            initializerValueTypeId) == 5)
+                    {
+                        return 2;
+                    }
+                    Host.StandaloneSourceLocals[
+                        initializerLocalOffset + 2]
+                        = initializerValueTypeId;
+                    initializerTypeId = initializerValueTypeId;
+                }
+                else if (initializerValueTypeId != initializerTypeId)
+                {
+                    return 2;
+                }
+                init bool initializerDoesNotReturn;
+                int32 initializerDoesNotReturnStatus
+                    = TryGetStandaloneSourceExpressionDoesNotReturn(
+                        localCallableId, initializerExpressionId,
+                        ref init initializerDoesNotReturn);
+                if (initializerDoesNotReturnStatus != 0
+                    || initializerDoesNotReturn)
+                {
+                    return initializerDoesNotReturnStatus != 0
+                        ? initializerDoesNotReturnStatus : 2;
+                }
+                int32 initializerStatementStatus
+                    = AppendStandaloneSourceStatement(
+                        localCallableId, expressionFirst, 4,
+                        initializerExpressionId, initializerLocalId);
+                if (initializerStatementStatus != 0)
+                {
+                    return initializerStatementStatus;
+                }
+                Host.StandaloneSourceLocalStates[
+                    initializerLocalId] = 1;
             }
             init int32 conditionSemicolon;
             int32 conditionSemicolonStatus
@@ -8617,8 +9074,6 @@ int32 VerifyStandaloneDirectCalls()
         || lexicalScopeCount < 0
         || lexicalScopeCount
             > Host.StandaloneSourceLexicalScopes.Length / 5
-        || lexicalScopeCount
-            > Host.StandaloneSourceBodyScopeIds.Length
         || localCount < 0
         || localCount > Host.StandaloneSourceLocals.Length / 10
         || localCount
@@ -8703,16 +9158,27 @@ int32 VerifyStandaloneDirectCalls()
             return 3;
         }
         int32 scopeOffset = bodyScopeId * 5;
+        int32 rootLocalFirst
+            = Host.StandaloneSourceLexicalScopes[
+                scopeOffset + 2];
+        int32 rootLocalCount
+            = Host.StandaloneSourceLexicalScopes[
+                scopeOffset + 3];
         if (Host.StandaloneSourceLexicalScopes[scopeOffset] != -1
             || Host.StandaloneSourceLexicalScopes[
                 scopeOffset + 1] != bodyId
-            || Host.StandaloneSourceLexicalScopes[
-                scopeOffset + 2] != bodyLocalFirst
-            || Host.StandaloneSourceLexicalScopes[
-                scopeOffset + 3] != bodyLocalCount
+            || rootLocalFirst != bodyLocalFirst
+            || rootLocalCount < 0
+            || rootLocalCount > bodyLocalCount
             || Host.StandaloneSourceLexicalScopes[
                 scopeOffset + 4]
                 != Host.StandaloneSourceBodies[bodyOffset + 11])
+        {
+            return 3;
+        }
+        if (VerifyStandaloneForLocalNames(
+                bodyId, bodyScopeId, rootLocalFirst, rootLocalCount,
+                bodyLocalCount) != 0)
         {
             return 3;
         }
@@ -8738,9 +9204,42 @@ int32 VerifyStandaloneDirectCalls()
                 = Host.StandaloneSourceLocals[localOffset + 8];
             int32 semicolonToken
                 = Host.StandaloneSourceLocals[localOffset + 9];
+            int32 localScopeId
+                = Host.StandaloneSourceLocals[localOffset + 1];
+            if (localScopeId < 0
+                || localScopeId >= lexicalScopeCount)
+            {
+                return 3;
+            }
+            int32 localScopeOffset = localScopeId * 5;
+            int32 localScopeFirst
+                = Host.StandaloneSourceLexicalScopes[
+                    localScopeOffset + 2];
+            int32 localScopeCount
+                = Host.StandaloneSourceLexicalScopes[
+                    localScopeOffset + 3];
+            bool localInDeclaredScope
+                = localScopeId == bodyScopeId
+                    ? localId >= rootLocalFirst
+                        && localId < rootLocalFirst + rootLocalCount
+                    : Host.StandaloneSourceLexicalScopes[
+                            localScopeOffset] == bodyScopeId
+                        && Host.StandaloneSourceLexicalScopes[
+                            localScopeOffset + 1] == bodyId
+                        && Host.StandaloneSourceLexicalScopes[
+                            localScopeOffset + 4] >= 2
+                        && localId >= localScopeFirst
+                        && localId
+                            < localScopeFirst + localScopeCount;
+            if (!localInDeclaredScope
+                || localScopeFirst < bodyLocalFirst
+                || localScopeCount < 0
+                || localScopeFirst
+                    > bodyLocalFirst + bodyLocalCount - localScopeCount)
+            {
+                return 3;
+            }
             if (Host.StandaloneSourceLocals[localOffset] != bodyId
-                || Host.StandaloneSourceLocals[localOffset + 1]
-                    != bodyScopeId
                 || typeId <= 0
                 || typeId > Host.StandaloneTypeFactCount[0]
                 || GetStandaloneSourceUse(typeId) == 5

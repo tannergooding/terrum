@@ -1562,6 +1562,23 @@ internal sealed class StandaloneMethodImportInputTests
         "namespace client { int32 Main() { for (;;) { } } }",
         0, 188, false)]
     [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { int32 Main(int32 limit) { "
+            + "mut int32 total = 0; "
+            + "for (mut int32 index = 1; index < limit; "
+            + "index = index + 1) { total = total + index; } "
+            + "return total; } }", 0, 189, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { int32 Main(int32 limit) { "
+            + "for (mut int32 index = 0; index < limit; "
+            + "index = index + 1) { } return index; } }",
+        2, 0, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { int32 Main(int32 limit) { "
+            + "mut int32 index = 1; "
+            + "for (mut int32 index = 0; index < limit; "
+            + "index = index + 1) { } return index; } }",
+        2, 0, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
         "namespace client { int32 Main() { break; return 0; } }",
         2, 0, false)]
     [TestCase(BoundRuntimePolicy.FailFast,
@@ -6428,28 +6445,53 @@ internal sealed class StandaloneMethodImportInputTests
                 return 0;
             }
             """;
-        const string forLoopVerificationSource = """
+        var forLoopVerificationSource = $$"""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
                 if (Scan() < 1) { return 87; }
                 int32 status = BindStandaloneOwnedSourceProgram();
+                int32 loopStatementId
+                    = {{verificationMode == 189 ? 2 : 1}};
                 if (status != 0
                     || Host.StandaloneSourceBodyCount[0] < 1
                     || Host.StandaloneSourceStatementCount[0] < 3
-                    || Host.StandaloneSourceStatements[3] != 11) {
+                    || Host.StandaloneSourceStatements[
+                        loopStatementId * 3] != 11) {
+                    return 88;
+                }
+                if (Host.StandaloneSourceLexicalScopeCount[0]
+                        != 2
+                    || ({{verificationMode == 189 ? "true" : "false"}}
+                        && (Host.StandaloneSourceLexicalScopes[0] != -1
+                            || Host.StandaloneSourceLexicalScopes[1] != 0
+                            || Host.StandaloneSourceLexicalScopes[2] != 0
+                            || Host.StandaloneSourceLexicalScopes[3] != 1
+                            || Host.StandaloneSourceLexicalScopes[5] != 0
+                            || Host.StandaloneSourceLexicalScopes[6] != 0
+                            || Host.StandaloneSourceLexicalScopes[7] != 1
+                            || Host.StandaloneSourceLexicalScopes[8] != 1
+                            || Host.StandaloneSourceLexicalScopes[9] < 2
+                            || Host.StandaloneSourceBodyLocalRanges[0] != 0
+                            || Host.StandaloneSourceBodyLocalRanges[1] != 2
+                            || Host.StandaloneSourceLocals[3] != 1
+                            || Host.StandaloneSourceLocals[1] != 0
+                            || Host.StandaloneSourceLocals[11] != 1
+                            || Host.StandaloneSourceLocals[13] != 1))) {
                     return 88;
                 }
                 int32 sourceStatementCount
                     = Host.StandaloneSourceStatementCount[0];
                 int32 loopConditionExpressionId
-                    = Host.StandaloneSourceStatements[4];
+                    = Host.StandaloneSourceStatements[
+                        loopStatementId * 3 + 1];
                 bool conditionOmitted
                     = loopConditionExpressionId == -1;
                 int32 loopConditionGlobalExpressionId
                     = Host.StandaloneSourceBodies[3]
                         + loopConditionExpressionId;
                 int32 loopNodeId
-                    = Host.StandaloneSourceStatements[5];
+                    = Host.StandaloneSourceStatements[
+                        loopStatementId * 3 + 2];
                 if (!conditionOmitted
                     && (loopConditionExpressionId < 0
                         || loopConditionExpressionId
@@ -6510,9 +6552,13 @@ internal sealed class StandaloneMethodImportInputTests
                         > Host.StandaloneSourceIfChildCount[0]
                             - stepCount
                     || sourceStatementCount
-                        != 3 + bodyCount + stepCount
-                    || Host.StandaloneSourceLocalCount[0] != 1
-                    || Host.StandaloneSourceLocalStates[0] != 1) {
+                        != {{verificationMode == 189 ? 4 : 3}}
+                            + bodyCount + stepCount
+                    || Host.StandaloneSourceLocalCount[0]
+                        != {{verificationMode == 189 ? 2 : 1}}
+                    || Host.StandaloneSourceLocalStates[0] != 1
+                    || ({{verificationMode == 189 ? "true" : "false"}}
+                        && Host.StandaloneSourceLocalStates[1] != 1)) {
                     return 88;
                 }
                 bool bodyBreaksImmediately
@@ -6528,7 +6574,9 @@ internal sealed class StandaloneMethodImportInputTests
                 if (stepCount == 1) {
                     int32 stepStatementId
                         = Host.StandaloneSourceIfChildren[stepFirst];
-                    if (stepStatementId != 2 + bodyCount
+                    if (stepStatementId
+                            != {{verificationMode == 189 ? 3 : 2}}
+                                + bodyCount
                         || Host.StandaloneSourceStatements[
                             stepStatementId * 3] != 5) {
                         return 88;
@@ -6603,6 +6651,13 @@ internal sealed class StandaloneMethodImportInputTests
                     || Host.StandaloneSourceStatementCount[0] != 1
                     || Host.StandaloneSourceStatements[0] != 11
                     || Host.StandaloneSourceStatements[1] != -1
+                    || Host.StandaloneSourceLexicalScopeCount[0] != 2
+                    || Host.StandaloneSourceLexicalScopes[5] != 0
+                    || Host.StandaloneSourceLexicalScopes[6] != 0
+                    || Host.StandaloneSourceLexicalScopes[7]
+                        != Host.StandaloneSourceLocalCount[0]
+                    || Host.StandaloneSourceLexicalScopes[8] != 0
+                    || Host.StandaloneSourceLexicalScopes[9] < 2
                     || Host.StandaloneSourceIfNodeCount[0] != 1
                     || Host.StandaloneSourceIfNodes[2] != 0
                     || Host.StandaloneSourceIfNodes[4] != 0) {
@@ -6877,7 +6932,7 @@ internal sealed class StandaloneMethodImportInputTests
                 ? whileLoopVerificationSource
             : verificationMode is >= 178 and <= 181
                 ? doLoopVerificationSource
-            : verificationMode is >= 182 and <= 187
+            : verificationMode is >= 182 and <= 187 or 189
                 ? forLoopVerificationSource
             : verificationMode == 188
                 ? infiniteForVerificationSource
@@ -7331,7 +7386,7 @@ internal sealed class StandaloneMethodImportInputTests
                     or 172 or 173 or 174 or 175 or 176 or 177
                     or 178 or 179 or 180 or 181
                     or 182 or 183 or 184 or 185 or 186 or 187
-                    or 188)
+                    or 188 or 189)
             {
                 var expectedBlockCount
                     = verificationMode is 159 or 160 or 165 or 166
@@ -7344,6 +7399,7 @@ internal sealed class StandaloneMethodImportInputTests
                         : verificationMode == 186 ? 6
                         : verificationMode == 187 ? 3
                         : verificationMode == 188 ? 2
+                        : verificationMode == 189 ? 5
                         : verificationMode is 184 or 185 ? 4
                         : verificationMode == 169 ? 4
                         : verificationMode is 172 or 173 or 174 ? 4
@@ -7357,6 +7413,7 @@ internal sealed class StandaloneMethodImportInputTests
                         + (verificationMode == 180 ? 0
                             : verificationMode == 187 ? 0
                             : verificationMode == 188 ? 0
+                            : verificationMode == 189 ? 2
                             : verificationMode is 175 or 176 ? 2
                             : verificationMode == 177 ? 3
                             : verificationMode == 181 ? 2
@@ -7377,7 +7434,7 @@ internal sealed class StandaloneMethodImportInputTests
                     and not 175 and not 176 and not 177
                     and not 178 and not 179 and not 180 and not 181
                     and not 182 and not 183 and not 184 and not 185
-                    and not 186 and not 187 and not 188)
+                    and not 186 and not 187 and not 188 and not 189)
                 {
                     Assert.That(bodyReader.GetBlockCode(0)
                         .IndexOf((byte)0xB1),
@@ -7948,7 +8005,7 @@ internal sealed class StandaloneMethodImportInputTests
                         and not 175 and not 176 and not 177
                         and not 178 and not 179 and not 180 and not 181
                         and not 182 and not 183 and not 184 and not 185
-                        and not 186 and not 187 and not 188
+                        and not 186 and not 187 and not 188 and not 189
                         and not 170 and not 171)
                 {
                     var edgeRecord
@@ -8017,6 +8074,10 @@ internal sealed class StandaloneMethodImportInputTests
                     or 178 or 179 or 180 or 181
                     or 182 or 183 or 184 or 185 or 186 or 187
                     ? 1 : 0;
+            if (verificationMode == 189)
+            {
+                expectedDecoderConstantMapCount = 2;
+            }
             if (verificationMode is 71 or 130 or 144 or 145 or 146
                 or 148 or 149 or 152 or 153)
             {
@@ -8115,6 +8176,8 @@ internal sealed class StandaloneMethodImportInputTests
                     + "Host.StandaloneDecoderBodies[21] != 3",
                 188 => "Host.StandaloneDecoderBodies[19] != 2 || "
                     + "Host.StandaloneDecoderBodies[21] != 2",
+                189 => "Host.StandaloneDecoderBodies[19] != 5 || "
+                    + "Host.StandaloneDecoderBodies[21] != 7",
                 149 => "Host.StandaloneDecoderBodies[19] != 6 || "
                     + "Host.StandaloneDecoderBodies[21] != 9",
                 _ => "false",
@@ -8208,7 +8271,7 @@ internal sealed class StandaloneMethodImportInputTests
                     or 172 or 173 or 174 or 175 or 176 or 177
                     or 178 or 179 or 180 or 181
                     or 182 or 183 or 184 or 185 or 186 or 187
-                    or 188)
+                    or 188 or 189)
             {
                 var artifactIndex = new TrRmArtifactIndex(artifact);
                 Assert.That(artifactIndex.TryGetSection(0x0020,
@@ -8390,6 +8453,7 @@ internal sealed class StandaloneMethodImportInputTests
                     186 => 3,
                     187 => 2,
                     188 => 0,
+                    189 => 1,
                     _ => 4,
                 };
                 var mainIndex = -1;
@@ -8821,6 +8885,11 @@ internal sealed class StandaloneMethodImportInputTests
                         Assert.That(Execute(5, 2), Is.EqualTo(6));
                         break;
                     case 188:
+                        break;
+                    case 189:
+                        Assert.That(Execute(0), Is.EqualTo(0));
+                        Assert.That(Execute(2), Is.EqualTo(1));
+                        Assert.That(Execute(4), Is.EqualTo(6));
                         break;
                 }
             }

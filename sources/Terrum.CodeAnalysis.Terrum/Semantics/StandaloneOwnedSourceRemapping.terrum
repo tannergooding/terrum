@@ -1,5 +1,56 @@
 namespace Terrum.CodeAnalysis;
 
+int32 GetStandaloneRewrittenLocalRange(int32 oldFirst,
+    int32 oldCount, int32 localCount, int32 emptyRangeFirst,
+    ref<init int32> newFirstResult)
+    ensure return == 0 ? *newFirstResult is init : true
+{
+    if (localCount < 0 || oldFirst < 0 || oldCount < 0
+        || oldFirst > localCount - oldCount
+        || emptyRangeFirst < 0 || emptyRangeFirst > localCount)
+    {
+        return 3;
+    }
+    if (oldCount == 0)
+    {
+        *newFirstResult = emptyRangeFirst;
+        return 0;
+    }
+
+    mut int32 minimum = int32.MaxValue;
+    mut int32 maximum = -1;
+    for (mut int32 ordinal = 0;
+        ordinal < oldCount;
+        ordinal = ordinal + 1)
+    {
+        int32 oldLocalId = oldFirst + ordinal;
+        if (oldLocalId >= Host.StandaloneRewriteLocalIds.Length)
+        {
+            return 3;
+        }
+        int32 newLocalId
+            = Host.StandaloneRewriteLocalIds[oldLocalId];
+        if (newLocalId < 0 || newLocalId >= localCount)
+        {
+            return 3;
+        }
+        if (newLocalId < minimum)
+        {
+            minimum = newLocalId;
+        }
+        if (newLocalId > maximum)
+        {
+            maximum = newLocalId;
+        }
+    }
+    if (maximum - minimum + 1 != oldCount)
+    {
+        return 3;
+    }
+    *newFirstResult = minimum;
+    return 0;
+}
+
 public static int32 RewriteStandaloneOwnedCallNodes()
 {
     if (Host.StandaloneRewriteStatus.Length != 1
@@ -1040,7 +1091,7 @@ int32 RewriteStandaloneSourceArenas()
     int32 ifNodeCount = Host.StandaloneSourceIfNodeCount[0];
     int32 ifChildCount = Host.StandaloneSourceIfChildCount[0];
     int32 typeCount = Host.StandaloneTypeFactCount[0];
-    if (scopeCount != bodyCount || bodyCount < 0
+    if (scopeCount < bodyCount || bodyCount < 0
         || scopeCount < 0 || localCount < 0 || placeCount < 0
         || ifNodeCount < 0 || ifChildCount < 0
         || ifNodeCount > Host.StandaloneSourceIfNodes.Length / 5
@@ -1071,12 +1122,17 @@ int32 RewriteStandaloneSourceArenas()
         int32 placeCountForBody
             = Host.StandaloneSourceBodyPlaceRanges[
                 placeRangeOffset + 1];
+        init int32 newLocalFirst;
+        int32 localRangeStatus = GetStandaloneRewrittenLocalRange(
+            localFirst, localCountForBody, localCount, 0,
+            ref init newLocalFirst);
         if (newBodyId < 0 || newBodyId >= bodyCount
             || scopeId < 0 || scopeId >= scopeCount
             || Host.StandaloneSourceLexicalScopes[
                 scopeId * 5 + 1] != oldBodyId
             || localFirst < 0 || localCountForBody < 0
             || localFirst > localCount - localCountForBody
+            || localRangeStatus != 0
             || placeFirst < 0 || placeCountForBody < 0
             || placeFirst > placeCount - placeCountForBody)
         {
@@ -1085,7 +1141,7 @@ int32 RewriteStandaloneSourceArenas()
         Host.StandaloneRewrittenSourceBodyScopeIds[newBodyId]
             = Host.StandaloneRewriteScopeIds[scopeId];
         Host.StandaloneRewrittenSourceBodyLocalRanges[
-            newBodyId * 2] = localFirst;
+            newBodyId * 2] = newLocalFirst;
         Host.StandaloneRewrittenSourceBodyLocalRanges[
             newBodyId * 2 + 1] = localCountForBody;
         Host.StandaloneRewrittenSourceBodyPlaceRanges[
@@ -1107,17 +1163,47 @@ int32 RewriteStandaloneSourceArenas()
                 sourceOffset + 1];
         int32 parentScopeId
             = Host.StandaloneSourceLexicalScopes[sourceOffset];
-        if (oldBodyId < 0 || oldBodyId >= bodyCount
-            || parentScopeId < -1
+        if (oldBodyId < 0 || oldBodyId >= bodyCount)
+        {
+            return 3;
+        }
+        int32 scopeLocalFirst
+            = Host.StandaloneSourceLexicalScopes[
+                sourceOffset + 2];
+        int32 scopeLocalCount
+            = Host.StandaloneSourceLexicalScopes[
+                sourceOffset + 3];
+        int32 bodyLocalRangeOffset = oldBodyId * 2;
+        int32 bodyLocalFirst
+            = Host.StandaloneSourceBodyLocalRanges[
+                bodyLocalRangeOffset];
+        int32 bodyLocalCount
+            = Host.StandaloneSourceBodyLocalRanges[
+                bodyLocalRangeOffset + 1];
+        int32 newBodyId
+            = Host.StandaloneRewriteBodyIds[oldBodyId];
+        if (newBodyId < 0 || newBodyId >= bodyCount)
+        {
+            return 3;
+        }
+        init int32 newScopeLocalFirst;
+        int32 scopeLocalRangeStatus = GetStandaloneRewrittenLocalRange(
+            scopeLocalFirst, scopeLocalCount, localCount,
+            Host.StandaloneRewrittenSourceBodyLocalRanges[
+                newBodyId * 2],
+            ref init newScopeLocalFirst);
+        if (parentScopeId < -1
             || parentScopeId >= scopeCount
-            || Host.StandaloneSourceLexicalScopes[
-                sourceOffset + 2]
-                != Host.StandaloneSourceBodyLocalRanges[
-                    oldBodyId * 2]
-            || Host.StandaloneSourceLexicalScopes[
-                sourceOffset + 3]
-                != Host.StandaloneSourceBodyLocalRanges[
-                    oldBodyId * 2 + 1])
+            || bodyLocalFirst < 0 || bodyLocalCount < 0
+            || bodyLocalFirst > localCount - bodyLocalCount
+            || scopeLocalFirst < bodyLocalFirst
+            || scopeLocalCount < 0
+            || scopeLocalFirst
+                > bodyLocalFirst + bodyLocalCount - scopeLocalCount
+            || (parentScopeId >= 0
+                && Host.StandaloneSourceLexicalScopes[
+                    parentScopeId * 5 + 1] != oldBodyId)
+            || scopeLocalRangeStatus != 0)
         {
             return 3;
         }
@@ -1130,8 +1216,7 @@ int32 RewriteStandaloneSourceArenas()
             = Host.StandaloneRewriteBodyIds[oldBodyId];
         Host.StandaloneRewrittenSourceLexicalScopes[
             targetOffset + 2]
-            = Host.StandaloneSourceLexicalScopes[
-                sourceOffset + 2];
+            = newScopeLocalFirst;
         Host.StandaloneRewrittenSourceLexicalScopes[
             targetOffset + 3]
             = Host.StandaloneSourceLexicalScopes[
@@ -1369,16 +1454,34 @@ int32 VerifyStandaloneRewrittenSourceArenas()
             = Host.StandaloneRewriteScopeIds[oldScopeId];
         int32 oldRangeOffset = oldBodyId * 2;
         int32 newRangeOffset = newBodyId * 2;
+        int32 oldBodyLocalFirst
+            = Host.StandaloneSourceBodyLocalRanges[oldRangeOffset];
+        int32 oldBodyLocalCount
+            = Host.StandaloneSourceBodyLocalRanges[oldRangeOffset + 1];
+        init int32 expectedBodyLocalFirst;
+        int32 bodyLocalRangeStatus = GetStandaloneRewrittenLocalRange(
+            oldBodyLocalFirst, oldBodyLocalCount, localCount, 0,
+            ref init expectedBodyLocalFirst);
+        int32 oldRootLocalFirst
+            = Host.StandaloneSourceLexicalScopes[
+                oldScopeId * 5 + 2];
+        int32 oldRootLocalCount
+            = Host.StandaloneSourceLexicalScopes[
+                oldScopeId * 5 + 3];
+        init int32 expectedRootLocalFirst;
+        int32 rootLocalRangeStatus = GetStandaloneRewrittenLocalRange(
+            oldRootLocalFirst, oldRootLocalCount, localCount,
+            expectedBodyLocalFirst,
+            ref init expectedRootLocalFirst);
         if (Host.StandaloneRewrittenSourceBodyScopeIds[
                 newBodyId] != newScopeId
+            || bodyLocalRangeStatus != 0
             || Host.StandaloneRewrittenSourceBodyLocalRanges[
                 newRangeOffset]
-                != Host.StandaloneSourceBodyLocalRanges[
-                    oldRangeOffset]
+                != expectedBodyLocalFirst
             || Host.StandaloneRewrittenSourceBodyLocalRanges[
                 newRangeOffset + 1]
-                != Host.StandaloneSourceBodyLocalRanges[
-                    oldRangeOffset + 1]
+                != oldBodyLocalCount
             || Host.StandaloneRewrittenSourceBodyPlaceRanges[
                 newRangeOffset]
                 != Host.StandaloneSourceBodyPlaceRanges[
@@ -1402,14 +1505,13 @@ int32 VerifyStandaloneRewrittenSourceArenas()
                 scopeOffset] != expectedParentScopeId
             || Host.StandaloneRewrittenSourceLexicalScopes[
                 scopeOffset + 1] != newBodyId
+            || rootLocalRangeStatus != 0
             || Host.StandaloneRewrittenSourceLexicalScopes[
                 scopeOffset + 2]
-                != Host.StandaloneRewrittenSourceBodyLocalRanges[
-                    newRangeOffset]
+                != expectedRootLocalFirst
             || Host.StandaloneRewrittenSourceLexicalScopes[
                 scopeOffset + 3]
-                != Host.StandaloneRewrittenSourceBodyLocalRanges[
-                    newRangeOffset + 1]
+                != oldRootLocalCount
             || Host.StandaloneRewrittenSourceLexicalScopes[
                 scopeOffset + 4]
                 != Host.StandaloneSourceLexicalScopes[
@@ -1767,6 +1869,82 @@ int32 VerifyStandaloneRewrittenSourceArenas()
                     }
                 }
             }
+        }
+    }
+
+    for (mut int32 oldScopeId = 0;
+        oldScopeId < scopeCount;
+        oldScopeId = oldScopeId + 1)
+    {
+        int32 sourceOffset = oldScopeId * 5;
+        int32 oldBodyId
+            = Host.StandaloneSourceLexicalScopes[
+                sourceOffset + 1];
+        int32 oldParentScopeId
+            = Host.StandaloneSourceLexicalScopes[sourceOffset];
+        if (oldBodyId < 0 || oldBodyId >= bodyCount
+            || oldParentScopeId < -1
+            || oldParentScopeId >= scopeCount)
+        {
+            return 3;
+        }
+        int32 newBodyId
+            = Host.StandaloneRewriteBodyIds[oldBodyId];
+        int32 newScopeId
+            = Host.StandaloneRewriteScopeIds[oldScopeId];
+        if (newBodyId < 0 || newBodyId >= bodyCount
+            || newScopeId < 0 || newScopeId >= scopeCount)
+        {
+            return 3;
+        }
+        int32 bodyRangeOffset = oldBodyId * 2;
+        int32 bodyLocalFirst
+            = Host.StandaloneSourceBodyLocalRanges[bodyRangeOffset];
+        int32 bodyLocalCount
+            = Host.StandaloneSourceBodyLocalRanges[
+                bodyRangeOffset + 1];
+        int32 scopeLocalFirst
+            = Host.StandaloneSourceLexicalScopes[sourceOffset + 2];
+        int32 scopeLocalCount
+            = Host.StandaloneSourceLexicalScopes[sourceOffset + 3];
+        if (bodyLocalFirst < 0 || bodyLocalCount < 0
+            || bodyLocalFirst > localCount - bodyLocalCount
+            || scopeLocalFirst < bodyLocalFirst
+            || scopeLocalCount < 0
+            || scopeLocalFirst
+                > bodyLocalFirst + bodyLocalCount - scopeLocalCount
+            || (oldParentScopeId >= 0
+                && Host.StandaloneSourceLexicalScopes[
+                    oldParentScopeId * 5 + 1] != oldBodyId))
+        {
+            return 3;
+        }
+        init int32 expectedScopeLocalFirst;
+        int32 rangeStatus = GetStandaloneRewrittenLocalRange(
+            scopeLocalFirst, scopeLocalCount, localCount,
+            Host.StandaloneRewrittenSourceBodyLocalRanges[
+                newBodyId * 2],
+            ref init expectedScopeLocalFirst);
+        int32 targetOffset = newScopeId * 5;
+        int32 expectedParentScopeId = oldParentScopeId < 0
+            ? -1
+            : Host.StandaloneRewriteScopeIds[oldParentScopeId];
+        if (rangeStatus != 0
+            || Host.StandaloneRewrittenSourceLexicalScopes[
+                targetOffset]
+                != expectedParentScopeId
+            || Host.StandaloneRewrittenSourceLexicalScopes[
+                targetOffset + 1] != newBodyId
+            || Host.StandaloneRewrittenSourceLexicalScopes[
+                targetOffset + 2] != expectedScopeLocalFirst
+            || Host.StandaloneRewrittenSourceLexicalScopes[
+                targetOffset + 3] != scopeLocalCount
+            || Host.StandaloneRewrittenSourceLexicalScopes[
+                targetOffset + 4]
+                != Host.StandaloneSourceLexicalScopes[
+                    sourceOffset + 4])
+        {
+            return 3;
         }
     }
 
@@ -2796,7 +2974,7 @@ bool ValidateStandaloneRewriteMaps()
         || expressionCount > Host.StandaloneRewriteExpressionIds.Length
         || scopeCount < 0
         || scopeCount > Host.StandaloneRewriteScopeIds.Length
-        || scopeCount != bodyCount
+        || scopeCount < bodyCount
         || localCount < 0
         || localCount > Host.StandaloneRewriteLocalIds.Length
         || placeCount < 0
