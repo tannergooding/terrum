@@ -5014,9 +5014,7 @@ int32 ParseStandaloneSourceConditionalLoopTransfer(
         || controlNodeId < 0
         || controlNodeId >= Host.StandaloneSourceIfNodeCount[0]
         || loopStatementId < 0
-        || loopStatementId >= Host.StandaloneSourceStatementCount[0]
-        || Host.StandaloneSourceIfNodes[
-            controlNodeId * 5 + 2] != 0)
+        || loopStatementId >= Host.StandaloneSourceStatementCount[0])
     {
         return 2;
     }
@@ -5060,6 +5058,40 @@ int32 ParseStandaloneSourceConditionalLoopTransfer(
     {
         return doesNotReturnStatus != 0
             ? doesNotReturnStatus : 2;
+    }
+
+    int32 controlNodeOffset = controlNodeId * 5;
+    int32 priorChildFirst
+        = Host.StandaloneSourceIfNodes[controlNodeOffset + 1];
+    int32 priorChildCount
+        = Host.StandaloneSourceIfNodes[controlNodeOffset + 2];
+    if (priorChildCount < 0
+        || (priorChildCount == 0
+            ? priorChildFirst != -1
+            : priorChildFirst < 0
+                || priorChildFirst
+                    > Host.StandaloneSourceIfChildCount[0]
+                        - priorChildCount))
+    {
+        return 3;
+    }
+    for (mut int32 childOrdinal = 0;
+        childOrdinal < priorChildCount;
+        childOrdinal = childOrdinal + 1)
+    {
+        int32 priorChildId
+            = Host.StandaloneSourceIfChildren[
+                priorChildFirst + childOrdinal];
+        if (priorChildId < 0
+            || priorChildId
+                >= Host.StandaloneSourceStatementCount[0]
+            || Host.StandaloneSourceStatementParentIds[
+                priorChildId] != loopStatementId
+            || Host.StandaloneSourceStatements[
+                priorChildId * 3] != 5)
+        {
+            return 2;
+        }
     }
 
     int32 transferToken = conditionClose + 1;
@@ -5147,6 +5179,9 @@ int32 ParseStandaloneSourceWhileBody(int32 localCallableId,
             }
             if (IsStandaloneSourceIfKeyword(cursor))
             {
+                int32 priorBodyChildCount
+                    = Host.StandaloneSourceIfNodes[
+                        controlNodeId * 5 + 2];
                 init int32 afterConditionalTransfer;
                 int32 conditionalTransferStatus
                     = ParseStandaloneSourceConditionalLoopTransfer(
@@ -5167,6 +5202,10 @@ int32 ParseStandaloneSourceWhileBody(int32 localCallableId,
                 if (cursor == blockClose)
                 {
                     break;
+                }
+                if (priorBodyChildCount != 0)
+                {
+                    return 2;
                 }
                 continue;
             }
@@ -10799,7 +10838,9 @@ int32 VerifyStandaloneDirectCalls()
                         int32 conditionExpressionId
                             = Host.StandaloneSourceStatements[
                                 childStatementOffset + 1];
-                        if (childCount < 1 || childIndex != 0
+                        if (childCount < 1
+                            || (childIndex != 0
+                                && childIndex != childCount - 1)
                             || sawLoopTransfer
                             || Host.StandaloneSourceStatements[
                                 childStatementOffset + 2] != loopNodeId
