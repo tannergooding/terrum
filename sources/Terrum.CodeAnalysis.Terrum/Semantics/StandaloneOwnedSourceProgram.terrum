@@ -1678,7 +1678,8 @@ int32 TryGetStandaloneSourceExpressionDoesNotReturn(int32 bodyId,
         || expressionKind == 18 || expressionKind == 19
         || expressionKind == 20 || expressionKind == 21
         || expressionKind == 22 || expressionKind == 23
-        || expressionKind == 24 || expressionKind == 25)
+        || expressionKind == 24 || expressionKind == 25
+        || (expressionKind >= 31 && expressionKind <= 33))
     {
         int32 leftExpressionId
             = Host.StandaloneSourceExpressions[
@@ -3632,8 +3633,10 @@ int32 FindStandaloneBinaryOperator(int32 tokenStart,
                     : kind == 71 ? 3
                         : (kind == 65 || kind == 66) ? 4
                             : (kind >= 67 && kind <= 70) ? 5
-                                : (kind == 57 || kind == 58) ? 7
-                                    : (kind >= 59 && kind <= 61) ? 8 : 0;
+                                : (kind >= 88 && kind <= 90) ? 6
+                                    : (kind == 57 || kind == 58) ? 7
+                                        : (kind >= 59 && kind <= 61)
+                                            ? 8 : 0;
             bool hasLeftOperand = tokenIndex > tokenStart
                 && IsStandaloneSourceOperandEndKind(
                     Host.Tokens[(tokenIndex - 1) * 3]);
@@ -3833,6 +3836,141 @@ int32 FindStandaloneArithmeticOperandType(int32 localCallableId,
     return 0;
 }
 
+bool IsStandaloneShiftCountType(int32 typeId)
+{
+    return typeId > 0
+        && typeId <= Host.StandaloneTypeFactCount[0]
+        && Host.StandaloneTypeFacts[typeId * 3] == 0
+        && (Host.StandaloneTypeFacts[typeId * 3 + 1] == 0x08
+            || Host.StandaloneTypeFacts[typeId * 3 + 1] == 0x0D);
+}
+
+bool IsStandaloneSourceShiftDataType(int32 typeId)
+{
+    return typeId > 0
+        && typeId <= Host.StandaloneTypeFactCount[0]
+        && Host.StandaloneTypeFacts[typeId * 3] == 0
+        && (Host.StandaloneTypeFacts[typeId * 3 + 1] == 0x08
+            || Host.StandaloneTypeFacts[typeId * 3 + 1] == 0x0D
+            || Host.StandaloneTypeFacts[typeId * 3 + 1] == 0x09
+            || Host.StandaloneTypeFacts[typeId * 3 + 1] == 0x0E);
+}
+
+int32 FindStandaloneShiftCountType(int32 localCallableId,
+    int32 tokenStart, int32 tokenEnd, int32 depth,
+    ref<init int32> typeIdResult)
+    ensure return == 0 ? *typeIdResult is init : true
+{
+    if (depth > 64 || tokenStart < 0 || tokenStart >= tokenEnd
+        || tokenEnd > Host.Tokens.Length / 3)
+    {
+        return 2;
+    }
+    mut int32 selectedTypeId = 0;
+    if (!HasStandaloneSourceTypeEvidence(tokenStart, tokenEnd))
+    {
+        init int32 contextualTypeId;
+        int32 status = InternStandaloneCallableTypeFact(
+            0, 0x08, false, ref init contextualTypeId);
+        if (status != 0)
+        {
+            return status;
+        }
+        selectedTypeId = contextualTypeId;
+    }
+    else
+    {
+        for (mut int32 typeId = 1;
+            typeId <= Host.StandaloneTypeFactCount[0];
+            typeId = typeId + 1)
+        {
+            if (!IsStandaloneShiftCountType(typeId)
+                || !CanBindStandaloneSourceArgument(localCallableId,
+                    tokenStart, tokenEnd, typeId, depth + 1))
+            {
+                continue;
+            }
+            if (selectedTypeId != 0)
+            {
+                return 2;
+            }
+            selectedTypeId = typeId;
+        }
+        if (selectedTypeId == 0)
+        {
+            return 2;
+        }
+    }
+
+    if (Host.StandaloneTypeFacts[
+            selectedTypeId * 3 + 1] == 0x08)
+    {
+        init int32 uint32TypeId;
+        int32 conversionTypeStatus
+            = InternStandaloneCallableTypeFact(
+                0, 0x0D, false, ref init uint32TypeId);
+        if (conversionTypeStatus != 0)
+        {
+            return conversionTypeStatus;
+        }
+    }
+
+    *typeIdResult = selectedTypeId;
+    return 0;
+}
+
+int32 FindStandaloneShiftOperandTypes(int32 localCallableId,
+    int32 leftStart, int32 leftEnd, int32 rightStart, int32 rightEnd,
+    int32 depth, ref<init int32> dataTypeIdResult,
+    ref<init int32> countTypeIdResult)
+    ensure return == 0 ? (*dataTypeIdResult is init
+        && *countTypeIdResult is init) : true
+{
+    if (depth > 64 || leftStart < 0 || leftStart >= leftEnd
+        || rightStart < 0 || rightStart >= rightEnd
+        || leftEnd > Host.Tokens.Length / 3
+        || rightEnd > Host.Tokens.Length / 3
+        || !HasStandaloneSourceTypeEvidence(leftStart, leftEnd))
+    {
+        return 2;
+    }
+
+    mut int32 selectedDataTypeId = 0;
+    for (mut int32 typeId = 1;
+        typeId <= Host.StandaloneTypeFactCount[0];
+        typeId = typeId + 1)
+    {
+        if (!IsStandaloneSourceShiftDataType(typeId)
+            || !CanBindStandaloneSourceArgument(localCallableId,
+                leftStart, leftEnd, typeId, depth + 1))
+        {
+            continue;
+        }
+        if (selectedDataTypeId != 0)
+        {
+            return 2;
+        }
+        selectedDataTypeId = typeId;
+    }
+    if (selectedDataTypeId == 0)
+    {
+        return 2;
+    }
+
+    init int32 selectedCountTypeId;
+    int32 countTypeStatus = FindStandaloneShiftCountType(
+        localCallableId, rightStart, rightEnd, depth + 1,
+        ref init selectedCountTypeId);
+    if (countTypeStatus != 0)
+    {
+        return countTypeStatus;
+    }
+
+    *dataTypeIdResult = selectedDataTypeId;
+    *countTypeIdResult = selectedCountTypeId;
+    return 0;
+}
+
 bool IsStandaloneSourceConstructionType(int32 typeId)
 {
     if (typeId <= 0 || typeId > Host.StandaloneTypeFactCount[0]
@@ -3972,6 +4110,20 @@ bool CanBindStandaloneSourceArgument(int32 localCallableId,
                 localCallableId, operatorKind, tokenStart,
                 binaryOperator, binaryOperator + 1, tokenEnd,
                 depth + 1, ref init operandTypeId) == 0;
+        }
+        if (operatorKind >= 88 && operatorKind <= 90)
+        {
+            init int32 countTypeId;
+            return IsStandaloneSourceShiftDataType(expectedTypeId)
+                && FindStandaloneShiftCountType(localCallableId,
+                    binaryOperator + 1, tokenEnd, depth + 1,
+                    ref init countTypeId) == 0
+                && CanBindStandaloneSourceArgument(localCallableId,
+                    tokenStart, binaryOperator, expectedTypeId,
+                    depth + 1)
+                && CanBindStandaloneSourceArgument(localCallableId,
+                    binaryOperator + 1, tokenEnd, countTypeId,
+                    depth + 1);
         }
         if (operatorKind >= 57 && operatorKind <= 61)
         {
@@ -5118,8 +5270,10 @@ int32 ParseStandaloneSourceExpression(int32 localCallableId,
             = Host.Tokens[binaryOperator * 3];
         bool comparison = operatorKind >= 65 && operatorKind <= 70;
         bool arithmetic = operatorKind >= 57 && operatorKind <= 61;
+        bool shift = operatorKind >= 88 && operatorKind <= 90;
         mut int32 resultTypeId = expectedTypeId;
         mut int32 operandTypeId = expectedTypeId;
+        mut int32 rightOperandTypeId = expectedTypeId;
         if (comparison)
         {
             if (resultTypeId >= 0
@@ -5147,6 +5301,7 @@ int32 ParseStandaloneSourceExpression(int32 localCallableId,
                 return typeStatus;
             }
             operandTypeId = inferredOperandTypeId;
+            rightOperandTypeId = operandTypeId;
         }
         else if (arithmetic)
         {
@@ -5163,6 +5318,39 @@ int32 ParseStandaloneSourceExpression(int32 localCallableId,
                     localCallableId, tokenIndex, binaryOperator,
                     binaryOperator + 1, tokenEnd, depth + 1,
                     ref init operandTypeId);
+                if (typeStatus != 0)
+                {
+                    return typeStatus;
+                }
+                resultTypeId = operandTypeId;
+                rightOperandTypeId = operandTypeId;
+            }
+        }
+        else if (shift)
+        {
+            if (resultTypeId >= 0)
+            {
+                if (!IsStandaloneSourceShiftDataType(resultTypeId))
+                {
+                    return 2;
+                }
+                operandTypeId = resultTypeId;
+                int32 countTypeStatus
+                    = FindStandaloneShiftCountType(localCallableId,
+                        binaryOperator + 1, tokenEnd, depth + 1,
+                        ref init rightOperandTypeId);
+                if (countTypeStatus != 0)
+                {
+                    return countTypeStatus;
+                }
+            }
+            else
+            {
+                int32 typeStatus = FindStandaloneShiftOperandTypes(
+                    localCallableId, tokenIndex, binaryOperator,
+                    binaryOperator + 1, tokenEnd, depth + 1,
+                    ref init operandTypeId,
+                    ref init rightOperandTypeId);
                 if (typeStatus != 0)
                 {
                     return typeStatus;
@@ -5192,7 +5380,7 @@ int32 ParseStandaloneSourceExpression(int32 localCallableId,
         init int32 nextRightToken;
         int32 rightStatus = ParseStandaloneSourceExpression(
             localCallableId, bodyId, expressionFirst,
-            operandTypeId, binaryOperator + 1, tokenEnd,
+            rightOperandTypeId, binaryOperator + 1, tokenEnd,
             depth + 1, ref init rightExpressionId,
             ref init nextRightToken);
         if (rightStatus != 0)
@@ -5213,7 +5401,7 @@ int32 ParseStandaloneSourceExpression(int32 localCallableId,
             || Host.StandaloneSourceExpressions[
                 leftGlobalId * 8 + 1] != operandTypeId
             || Host.StandaloneSourceExpressions[
-                rightGlobalId * 8 + 1] != operandTypeId
+                rightGlobalId * 8 + 1] != rightOperandTypeId
             || Host.StandaloneSourceExpressionUseCounts[
                 leftGlobalId] != 0
             || Host.StandaloneSourceExpressionUseCounts[
@@ -5221,9 +5409,12 @@ int32 ParseStandaloneSourceExpression(int32 localCallableId,
         {
             return 3;
         }
-        int32 expressionKind = operatorKind == 71 ? 12
-            : operatorKind == 73 ? 13
-                : operatorKind == 75 ? 14
+        int32 expressionKind = operatorKind == 88 ? 31
+            : operatorKind == 89 ? 32
+                : operatorKind == 90 ? 33
+                    : operatorKind == 71 ? 12
+                        : operatorKind == 73 ? 13
+                            : operatorKind == 75 ? 14
                     : operatorKind == 65 ? 15
                         : operatorKind == 66 ? 16
                             : operatorKind == 67 ? 17
@@ -7150,7 +7341,8 @@ int32 VerifyStandaloneDirectCalls()
                 || expressionKind == 19 || expressionKind == 20
                 || expressionKind == 21 || expressionKind == 22
                 || expressionKind == 23 || expressionKind == 24
-                || expressionKind == 25)
+                || expressionKind == 25
+                || (expressionKind >= 31 && expressionKind <= 33))
             {
                 int32 rightExpressionId
                     = Host.StandaloneSourceExpressions[
@@ -7183,14 +7375,22 @@ int32 VerifyStandaloneDirectCalls()
                     = expressionKind == 15 || expressionKind == 16;
                 bool arithmetic
                     = expressionKind >= 21 && expressionKind <= 25;
+                bool shift
+                    = expressionKind >= 31 && expressionKind <= 33;
                 bool sameTypeBinary = bitwise || arithmetic;
                 bool validResultType = bitwise
                     ? IsStandaloneNotType(expressionTypeId)
                     : arithmetic
                         ? IsStandaloneArithmeticType(expressionTypeId)
-                        : IsStandaloneLogicalNotType(expressionTypeId);
+                        : shift
+                            ? IsStandaloneSourceShiftDataType(
+                                expressionTypeId)
+                            : IsStandaloneLogicalNotType(expressionTypeId);
                 if (!validResultType
-                    || (sameTypeBinary
+                    || (shift
+                        ? leftTypeId != expressionTypeId
+                            || !IsStandaloneShiftCountType(rightTypeId)
+                        : sameTypeBinary
                         ? leftTypeId != expressionTypeId
                             || rightTypeId != expressionTypeId
                         : leftTypeId != rightTypeId

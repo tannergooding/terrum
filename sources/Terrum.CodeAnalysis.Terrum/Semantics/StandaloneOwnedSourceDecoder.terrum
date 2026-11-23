@@ -3845,6 +3845,67 @@ int32 ValidateStandaloneBodyCode(int32 bodyId, int32 bodyOffset,
             }
             codeOffset = codeOffset + 2;
         }
+        else if (opcode == 0xD3)
+        {
+            if (codeOffset > codeLength - 4)
+            {
+                return 3;
+            }
+            init int32 control;
+            init uint32 mapIndex;
+            if (!TryReadStandaloneArtifactAbsoluteByte(
+                    artifactStart, artifactLength,
+                    codeStart + codeOffset + 1,
+                    ref init control)
+                || !TryReadStandaloneArtifactAbsoluteHalfWord(
+                    artifactStart, artifactLength,
+                    codeStart + codeOffset + 2,
+                    ref init mapIndex))
+            {
+                return 3;
+            }
+            int32 sourceRegister = control & 0x0F;
+            int32 destinationRegister = control >>> 4;
+            int32 typeMapCount
+                = Host.StandaloneDecoderBodies[bodyOffset + 10];
+            int32 typeMapFirst
+                = Host.StandaloneDecoderBodies[bodyOffset + 29];
+            if (sourceRegister > 13 || destinationRegister > 13
+                || mapIndex >= uint32(typeMapCount))
+            {
+                return 3;
+            }
+            int32 sourceTypeId
+                = Host.StandaloneDecoderRegisterTypeIds[
+                    bodyId * 14 + sourceRegister];
+            int32 destinationTypeId
+                = Host.StandaloneDecoderTypeMapTypeIds[
+                    typeMapFirst + int32(mapIndex)];
+            if (sourceTypeId <= 0
+                || sourceTypeId
+                    > Host.StandaloneTypeFactCount[0]
+                || destinationTypeId <= 0
+                || destinationTypeId
+                    > Host.StandaloneTypeFactCount[0]
+                || Host.StandaloneTypeFacts[
+                    sourceTypeId * 3] != 0
+                || Host.StandaloneTypeFacts[
+                    sourceTypeId * 3 + 1] != 0x08
+                || Host.StandaloneTypeFacts[
+                    destinationTypeId * 3] != 0
+                || Host.StandaloneTypeFacts[
+                    destinationTypeId * 3 + 1] != 0x0D)
+            {
+                return 3;
+            }
+            int32 setStatus = SetStandaloneDecoderRegisterType(
+                bodyId, destinationRegister, destinationTypeId);
+            if (setStatus != 0)
+            {
+                return setStatus;
+            }
+            codeOffset = codeOffset + 4;
+        }
         else if (opcode == 0xD4 || opcode == 0xD5)
         {
             if (codeOffset > codeLength - 4)
@@ -4146,7 +4207,42 @@ int32 ValidateStandaloneBodyCode(int32 bodyId, int32 bodyOffset,
             }
             else if (control >= 5 && control <= 7)
             {
-                return 2;
+                if (source0Register > 13 || source1Register > 13)
+                {
+                    return 3;
+                }
+                int32 dataTypeId
+                    = Host.StandaloneDecoderRegisterTypeIds[
+                        bodyId * 14 + source0Register];
+                int32 countTypeId
+                    = Host.StandaloneDecoderRegisterTypeIds[
+                        bodyId * 14 + source1Register];
+                if (dataTypeId <= 0
+                    || dataTypeId
+                        > Host.StandaloneTypeFactCount[0]
+                    || countTypeId <= 0
+                    || countTypeId
+                        > Host.StandaloneTypeFactCount[0]
+                    || !IsStandaloneSourceShiftDataType(dataTypeId)
+                    || Host.StandaloneTypeFacts[
+                        countTypeId * 3] != 0
+                    || Host.StandaloneTypeFacts[
+                        countTypeId * 3 + 1] != 0x0D)
+                {
+                    return 3;
+                }
+                int32 dataTypeCode
+                    = Host.StandaloneTypeFacts[
+                        dataTypeId * 3 + 1];
+                bool unsignedDataType
+                    = (dataTypeCode >= 0x0B
+                        && dataTypeCode <= 0x0E)
+                        || dataTypeCode == 0x11;
+                if (control == 0x06 && unsignedDataType)
+                {
+                    return 3;
+                }
+                registerTypeId = dataTypeId;
             }
             else
             {

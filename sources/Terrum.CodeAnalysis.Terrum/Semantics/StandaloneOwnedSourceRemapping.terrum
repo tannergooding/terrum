@@ -1530,7 +1530,8 @@ int32 VerifyStandaloneRewrittenSourceArenas()
             || expressionKind == 18 || expressionKind == 19
             || expressionKind == 20 || expressionKind == 21
             || expressionKind == 22 || expressionKind == 23
-            || expressionKind == 24 || expressionKind == 25)
+            || expressionKind == 24 || expressionKind == 25
+            || (expressionKind >= 31 && expressionKind <= 33))
         {
             int32 leftExpressionId
                 = Host.StandaloneSourceExpressions[oldOffset + 2];
@@ -1576,14 +1577,22 @@ int32 VerifyStandaloneRewrittenSourceArenas()
                 = expressionKind == 15 || expressionKind == 16;
             bool arithmetic
                 = expressionKind >= 21 && expressionKind <= 25;
+            bool shift
+                = expressionKind >= 31 && expressionKind <= 33;
             bool sameTypeBinary = bitwise || arithmetic;
             bool validResultType = bitwise
                 ? IsStandaloneNotType(expressionTypeId)
                 : arithmetic
                     ? IsStandaloneArithmeticType(expressionTypeId)
-                    : IsStandaloneLogicalNotType(expressionTypeId);
+                    : shift
+                        ? IsStandaloneSourceShiftDataType(
+                            expressionTypeId)
+                        : IsStandaloneLogicalNotType(expressionTypeId);
             if (!validResultType
-                || (sameTypeBinary
+                || (shift
+                    ? leftTypeId != expressionTypeId
+                        || !IsStandaloneShiftCountType(rightTypeId)
+                    : sameTypeBinary
                     ? leftTypeId != expressionTypeId
                         || rightTypeId != expressionTypeId
                     : leftTypeId != rightTypeId
