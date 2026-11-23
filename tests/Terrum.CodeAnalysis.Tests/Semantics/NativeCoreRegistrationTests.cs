@@ -57,6 +57,11 @@ internal sealed class NativeCoreRegistrationTests
         IntPtr source, int tag, out IntPtr value);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int NativeFunctionPointerMultiOutputCallback(
+        IntPtr receiver, IntPtr source, int tag, out int scalarValue,
+        out IntPtr functionPointerValue);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate IntPtr NativePointerOutputFunction(IntPtr receiver,
         IntPtr source, int tag, IntPtr fallback);
 
@@ -7831,6 +7836,23 @@ internal sealed class NativeCoreRegistrationTests
             .ConfigureAwait(true);
     }
 
+    [Test]
+    public async Task StandardForeignNativeInterfaceMultipleOutputFunctionPointerExecutesOnWindowsX64()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+
+        var program = CreatePointerOutputConsumerProgram(
+            functionPointerOutput: true, multipleOutputs: true);
+        var image = NativeEmitter.EmitLibrary(program, ["InvokePointer"],
+            NativeRuntimePolicy.FailFast);
+        Assert.That(image[..2], Is.EqualTo(new byte[] {
+            (byte)'M', (byte)'Z',
+        }));
+        await AssertMultipleFunctionPointerOutputAsync(image, "InvokePointer")
+            .ConfigureAwait(true);
+    }
+
     private static BoundProgram CreatePointerOutputConsumerProgram(
         string outputCondition = "NonZero",
         string successPredicate = "status != 0",
@@ -13406,6 +13428,89 @@ internal sealed class NativeCoreRegistrationTests
                 }
 
                 value = targetPointer;
+                return succeed ? 1 : 0;
+            };
+            Marshal.WriteIntPtr(vtable,
+                Marshal.GetFunctionPointerForDelegate(callback));
+            Marshal.WriteIntPtr(receiver, vtable);
+
+            var invoke = Marshal.GetDelegateForFunctionPointer<
+                NativePointerOutputFunction>(
+                    NativeLibrary.GetExport(module, functionName));
+            var result = invoke(receiver, source, 7, fallbackPointer);
+            Assert.That(result, Is.EqualTo(targetPointer));
+            Assert.That(Marshal.GetDelegateForFunctionPointer<
+                NativeFunctionPointerTarget>(result)(5), Is.EqualTo(42));
+
+            succeed = false;
+            result = invoke(receiver, source, 7, fallbackPointer);
+            Assert.That(result, Is.EqualTo(fallbackPointer));
+            Assert.That(Marshal.GetDelegateForFunctionPointer<
+                NativeFunctionPointerTarget>(result)(5), Is.EqualTo(47));
+            GC.KeepAlive(callback);
+            GC.KeepAlive(target);
+            GC.KeepAlive(fallback);
+        }
+        finally
+        {
+            if (module != IntPtr.Zero)
+            {
+                NativeLibrary.Free(module);
+            }
+            if (source != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(source);
+            }
+            if (vtable != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(vtable);
+            }
+            if (receiver != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(receiver);
+            }
+            await TestFileCleanup.DeleteWithRetryAsync(path)
+                .ConfigureAwait(true);
+        }
+    }
+
+    private static async Task AssertMultipleFunctionPointerOutputAsync(
+        byte[] image, string functionName)
+    {
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"native-fni-multiple-function-pointer-output-{Guid.NewGuid():N}.dll");
+        var module = IntPtr.Zero;
+        var receiver = IntPtr.Zero;
+        var vtable = IntPtr.Zero;
+        var source = IntPtr.Zero;
+        NativeFunctionPointerMultiOutputCallback? callback = null;
+        NativeFunctionPointerTarget? target = null;
+        NativeFunctionPointerTarget? fallback = null;
+        try
+        {
+            await File.WriteAllBytesAsync(path, image).ConfigureAwait(true);
+            module = NativeLibrary.Load(path);
+            receiver = Marshal.AllocHGlobal(IntPtr.Size);
+            vtable = Marshal.AllocHGlobal(IntPtr.Size);
+            source = Marshal.AllocHGlobal(sizeof(int));
+            target = static value => value + 37;
+            fallback = static value => value + 42;
+            var targetPointer = Marshal.GetFunctionPointerForDelegate(target);
+            var fallbackPointer
+                = Marshal.GetFunctionPointerForDelegate(fallback);
+            var succeed = true;
+            callback = (IntPtr actualReceiver, IntPtr actualSource, int tag,
+                out int scalarValue, out IntPtr functionPointerValue) => {
+                if (actualReceiver != receiver || actualSource != source
+                    || tag != 7)
+                {
+                    scalarValue = 0;
+                    functionPointerValue = IntPtr.Zero;
+                    return 0;
+                }
+
+                scalarValue = 11;
+                functionPointerValue = targetPointer;
                 return succeed ? 1 : 0;
             };
             Marshal.WriteIntPtr(vtable,
