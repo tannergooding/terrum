@@ -997,6 +997,20 @@ int32 NormalizeStandaloneSourceExpression(int32 bodyId,
         {
             return 3;
         }
+        int32 operandTypeId
+            = Host.StandaloneSourceExpressions[
+                (expressionFirst + leftExpressionId) * 8 + 1];
+        int32 rightOperandTypeId
+            = Host.StandaloneSourceExpressions[
+                (expressionFirst + rightExpressionId) * 8 + 1];
+        bool equality
+            = expressionKind == 15 || expressionKind == 16;
+        bool unitEquality
+            = equality && IsStandaloneUnitType(operandTypeId);
+        if (rightOperandTypeId != operandTypeId)
+        {
+            return 3;
+        }
 
         init int32 leftSelectorKind;
         init int32 leftSourceUse;
@@ -1018,7 +1032,15 @@ int32 NormalizeStandaloneSourceExpression(int32 bodyId,
             *terminatedResult = true;
             return 0;
         }
-        if (leftSelectorKind != 2 || leftSourceUse != 1
+        if (unitEquality)
+        {
+            if (leftSelectorKind != 0 || leftSourceUse != 0
+                || leftSelectorIndex != 0)
+            {
+                return 3;
+            }
+        }
+        else if (leftSelectorKind != 2 || leftSourceUse != 1
             || leftSelectorIndex < 0)
         {
             return 2;
@@ -1044,7 +1066,15 @@ int32 NormalizeStandaloneSourceExpression(int32 bodyId,
             *terminatedResult = true;
             return 0;
         }
-        if (rightSelectorKind != 2 || rightSourceUse != 1
+        if (unitEquality)
+        {
+            if (rightSelectorKind != 0 || rightSourceUse != 0
+                || rightSelectorIndex != 0)
+            {
+                return 3;
+            }
+        }
+        else if (rightSelectorKind != 2 || rightSourceUse != 1
             || rightSelectorIndex < 0)
         {
             return 2;
@@ -1056,8 +1086,53 @@ int32 NormalizeStandaloneSourceExpression(int32 bodyId,
                 bodyId * 12 + 1];
         int32 bodyHomeCount
             = Host.StandaloneNormalizedHomeCount[0] - homeFirst;
-        if (sourceUse != 1
-            || leftSelectorIndex >= bodyHomeCount
+        if (sourceUse != 1)
+        {
+            return 3;
+        }
+        if (unitEquality)
+        {
+            int32 constantFirst
+                = Host.StandaloneNormalizedBodies[
+                    bodyId * 12 + 3];
+            init int32 constantId;
+            int32 constantStatus
+                = AppendStandaloneNormalizedConstant(
+                    bodyId, constantFirst, typeId,
+                    expressionKind == 15 ? 1 : 0, 0,
+                    ref init constantId);
+            if (constantStatus != 0)
+            {
+                return constantStatus;
+            }
+            init int32 resultHomeId;
+            int32 homeStatus = AppendStandaloneNormalizedHome(
+                bodyId, homeFirst, 3, typeId, 0,
+                ref init resultHomeId);
+            if (homeStatus != 0)
+            {
+                return homeStatus;
+            }
+            int32 operationStatus
+                = AppendStandaloneNormalizedOperation(
+                    bodyId, 1, constantId, 0, 0);
+            if (operationStatus != 0)
+            {
+                return operationStatus;
+            }
+            operationStatus = AppendStandaloneNormalizedOperation(
+                bodyId, 2, resultHomeId, 0, 0);
+            if (operationStatus != 0)
+            {
+                return operationStatus;
+            }
+            *selectorKindResult = 2;
+            *sourceUseResult = sourceUse;
+            *selectorIndexResult = resultHomeId;
+            *terminatedResult = false;
+            return 0;
+        }
+        if (leftSelectorIndex >= bodyHomeCount
             || rightSelectorIndex >= bodyHomeCount)
         {
             return 3;
@@ -1066,20 +1141,19 @@ int32 NormalizeStandaloneSourceExpression(int32 bodyId,
             = (homeFirst + leftSelectorIndex) * 5;
         int32 rightHomeOffset
             = (homeFirst + rightSelectorIndex) * 5;
-        int32 operandTypeId
-            = Host.StandaloneNormalizedHomes[
-                leftHomeOffset + 3];
         bool booleanEquality
-            = (expressionKind == 15 || expressionKind == 16)
+            = equality
                 && IsStandaloneLogicalNotType(operandTypeId);
         if (Host.StandaloneNormalizedHomes[
                 leftHomeOffset] != bodyId
             || Host.StandaloneNormalizedHomes[
                 rightHomeOffset] != bodyId
             || Host.StandaloneNormalizedHomes[
+                leftHomeOffset + 3] != operandTypeId
+            || Host.StandaloneNormalizedHomes[
                 rightHomeOffset + 3] != operandTypeId
             || (comparison
-                ? (expressionKind == 15 || expressionKind == 16)
+                ? equality
                     ? !IsStandaloneComparisonEqualityType(
                         operandTypeId)
                     : !IsStandaloneComparisonDataType(

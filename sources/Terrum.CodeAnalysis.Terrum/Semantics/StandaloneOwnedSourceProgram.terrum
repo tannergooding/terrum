@@ -1167,6 +1167,7 @@ int32 InternStandaloneSourcePrimitiveTypeFacts()
 
     int32 tokenCount = Host.Tokens.Length / 3;
     mut bool needsBooleanType = false;
+    mut bool needsUnitType = false;
     for (mut int32 tokenIndex = 0;
         tokenIndex < tokenCount;
         tokenIndex = tokenIndex + 1)
@@ -1177,6 +1178,13 @@ int32 InternStandaloneSourcePrimitiveTypeFacts()
             || (tokenKind >= 65 && tokenKind <= 70))
         {
             needsBooleanType = true;
+        }
+        if (tokenKind == 46 && tokenIndex + 1 < tokenCount
+            && Host.Tokens[(tokenIndex + 1) * 3] == 47
+            && (tokenIndex == 0
+                || Host.Tokens[(tokenIndex - 1) * 3] != 2))
+        {
+            needsUnitType = true;
         }
         if (tokenKind != 2)
         {
@@ -1220,6 +1228,16 @@ int32 InternStandaloneSourcePrimitiveTypeFacts()
         if (boolTypeStatus != 0)
         {
             return boolTypeStatus;
+        }
+    }
+    if (needsUnitType)
+    {
+        init int32 unitTypeId;
+        int32 unitTypeStatus = InternStandaloneCallableTypeFact(
+            0, 0, false, ref init unitTypeId);
+        if (unitTypeStatus != 0)
+        {
+            return unitTypeStatus;
         }
     }
     return 0;
@@ -3311,7 +3329,8 @@ bool IsStandaloneComparisonDataType(int32 typeId)
 bool IsStandaloneComparisonEqualityType(int32 typeId)
 {
     return IsStandaloneLogicalNotType(typeId)
-        || IsStandaloneComparisonDataType(typeId);
+        || IsStandaloneComparisonDataType(typeId)
+        || IsStandaloneUnitType(typeId);
 }
 
 int32 FindStandaloneBinaryOperator(int32 tokenStart,
@@ -3383,7 +3402,9 @@ bool HasStandaloneComparisonTypeEvidence(int32 tokenStart,
         tokenIndex = tokenIndex + 1)
     {
         int32 kind = Host.Tokens[tokenIndex * 3];
-        if (kind == 2 || kind == 20 || kind == 21)
+        if (kind == 2 || kind == 20 || kind == 21
+            || (kind == 46 && tokenIndex + 1 < tokenEnd
+                && Host.Tokens[(tokenIndex + 1) * 3] == 47))
         {
             return true;
         }
