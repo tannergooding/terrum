@@ -5001,7 +5001,7 @@ int32 ParseStandaloneSourceIfBranch(int32 localCallableId,
     return 0;
 }
 
-int32 ParseStandaloneSourceConditionalLoopBreak(
+int32 ParseStandaloneSourceConditionalLoopTransfer(
     int32 localCallableId, int32 expressionFirst,
     int32 controlNodeId, int32 loopStatementId,
     int32 tokenStart, int32 tokenEnd,
@@ -5062,36 +5062,39 @@ int32 ParseStandaloneSourceConditionalLoopBreak(
             ? doesNotReturnStatus : 2;
     }
 
-    int32 breakToken = conditionClose + 1;
+    int32 transferToken = conditionClose + 1;
+    int32 conditionalTransferKind
+        = IsStandaloneSourceBreakKeyword(transferToken) ? 12
+        : IsStandaloneSourceContinueKeyword(transferToken) ? 13 : 0;
     init int32 semicolonToken;
     int32 semicolonStatus
         = FindStandaloneSourceStatementSemicolon(
-            breakToken, tokenEnd, ref init semicolonToken);
+            transferToken, tokenEnd, ref init semicolonToken);
     if (semicolonStatus != 0)
     {
         return semicolonStatus;
     }
-    if (!IsStandaloneSourceBreakKeyword(breakToken)
-        || semicolonToken != breakToken + 1
+    if (conditionalTransferKind == 0
+        || semicolonToken != transferToken + 1
         || (semicolonToken + 1 < tokenEnd
             && IsStandaloneSourceElseKeyword(semicolonToken + 1)))
     {
         return 1;
     }
 
-    // Kind 12 carries an eager conditional break under its owning loop.
+    // Kinds 12 and 13 carry eager conditional loop transfers.
     int32 statementStatus = AppendStandaloneSourceStatement(
-        localCallableId, expressionFirst, 12,
+        localCallableId, expressionFirst, conditionalTransferKind,
         conditionExpressionId, controlNodeId);
     if (statementStatus != 0)
     {
         return statementStatus;
     }
-    int32 conditionalBreakStatementId
+    int32 conditionalTransferStatementId
         = Host.StandaloneSourceStatementCount[0] - 1;
     int32 childStatus = AppendStandaloneSourceIfChild(
         localCallableId, controlNodeId, loopStatementId, true,
-        conditionalBreakStatementId);
+        conditionalTransferStatementId);
     if (childStatus != 0)
     {
         return childStatus;
@@ -5134,7 +5137,7 @@ int32 ParseStandaloneSourceWhileBody(int32 localCallableId,
         }
 
         mut int32 cursor = tokenStart + 1;
-        mut bool sawConditionalBreak = false;
+        mut bool sawConditionalTransfer = false;
         while (cursor < blockClose)
         {
             if (Host.Tokens[cursor * 3] == 52)
@@ -5144,18 +5147,18 @@ int32 ParseStandaloneSourceWhileBody(int32 localCallableId,
             }
             if (IsStandaloneSourceIfKeyword(cursor))
             {
-                init int32 afterConditionalBreak;
-                int32 conditionalBreakStatus
-                    = ParseStandaloneSourceConditionalLoopBreak(
+                init int32 afterConditionalTransfer;
+                int32 conditionalTransferStatus
+                    = ParseStandaloneSourceConditionalLoopTransfer(
                         localCallableId, expressionFirst, controlNodeId,
                         loopStatementId, cursor, blockClose,
-                        ref init afterConditionalBreak);
-                if (conditionalBreakStatus != 0)
+                        ref init afterConditionalTransfer);
+                if (conditionalTransferStatus != 0)
                 {
-                    return conditionalBreakStatus;
+                    return conditionalTransferStatus;
                 }
-                cursor = afterConditionalBreak;
-                sawConditionalBreak = true;
+                cursor = afterConditionalTransfer;
+                sawConditionalTransfer = true;
                 while (cursor < blockClose
                     && Host.Tokens[cursor * 3] == 52)
                 {
@@ -5178,7 +5181,7 @@ int32 ParseStandaloneSourceWhileBody(int32 localCallableId,
             int32 transferKind
                 = IsStandaloneSourceBreakKeyword(cursor) ? 8
                 : IsStandaloneSourceContinueKeyword(cursor) ? 9 : 0;
-            if (sawConditionalBreak && transferKind != 0)
+            if (sawConditionalTransfer && transferKind != 0)
             {
                 return 2;
             }
@@ -5238,7 +5241,7 @@ int32 ParseStandaloneSourceWhileBody(int32 localCallableId,
                 return appendStatus;
             }
             cursor = afterStatementToken;
-            if (sawConditionalBreak)
+            if (sawConditionalTransfer)
             {
                 while (cursor < blockClose
                     && Host.Tokens[cursor * 3] == 52)
@@ -5271,17 +5274,17 @@ int32 ParseStandaloneSourceWhileBody(int32 localCallableId,
 
     if (IsStandaloneSourceIfKeyword(tokenStart))
     {
-        init int32 afterConditionalBreak;
-        int32 conditionalBreakStatus
-            = ParseStandaloneSourceConditionalLoopBreak(
+        init int32 afterConditionalTransfer;
+        int32 conditionalTransferStatus
+            = ParseStandaloneSourceConditionalLoopTransfer(
                 localCallableId, expressionFirst, controlNodeId,
                 loopStatementId, tokenStart, tokenEnd,
-                ref init afterConditionalBreak);
-        if (conditionalBreakStatus != 0)
+                ref init afterConditionalTransfer);
+        if (conditionalTransferStatus != 0)
         {
-            return conditionalBreakStatus;
+            return conditionalTransferStatus;
         }
-        *nextTokenResult = afterConditionalBreak;
+        *nextTokenResult = afterConditionalTransfer;
         return 0;
     }
 
@@ -10791,7 +10794,7 @@ int32 VerifyStandaloneDirectCalls()
                     int32 childKind
                         = Host.StandaloneSourceStatements[
                             childStatementOffset];
-                    if (childKind == 12)
+                    if (childKind == 12 || childKind == 13)
                     {
                         int32 conditionExpressionId
                             = Host.StandaloneSourceStatements[

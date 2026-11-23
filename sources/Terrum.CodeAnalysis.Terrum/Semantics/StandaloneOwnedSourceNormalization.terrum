@@ -1103,11 +1103,11 @@ int32 NormalizeStandaloneSourceLoopBody(int32 bodyId,
         if (Host.StandaloneSourceStatementParentIds[
                 childStatementId] != statementId
             || (childKind != 5 && childKind != 8 && childKind != 9
-                && childKind != 12))
+                && childKind != 12 && childKind != 13))
         {
             return 3;
         }
-        if (childKind == 12)
+        if (childKind == 12 || childKind == 13)
         {
             int32 conditionExpressionId
                 = Host.StandaloneSourceStatements[
@@ -1171,12 +1171,32 @@ int32 NormalizeStandaloneSourceLoopBody(int32 bodyId,
             int32 conditionalContinueTarget
                 = bodyBlockCount == 2
                     ? bodyBlockId + 1 : continueTarget;
+            int32 conditionalTransferTarget
+                = childKind == 12 ? exitBlockId : continueTarget;
+            if (childKind == 13 && bodyBlockCount == 1)
+            {
+                init int32 continueBlockIndex;
+                int32 continueBlockStatus
+                    = AppendStandaloneNormalizedBlock(
+                        bodyId, bodyBlockId,
+                        conditionOperationFirst,
+                        conditionOperationCount,
+                        3, 0, 0, 0, continueTarget, -1,
+                        0, 0, 0, -1, -1, 0,
+                        ref init continueBlockIndex);
+                if (continueBlockStatus != 0)
+                {
+                    return continueBlockStatus;
+                }
+                return continueBlockIndex
+                    == bodyBlockFirst + bodyBlockId ? 0 : 3;
+            }
             init int32 conditionalBlockIndex;
             int32 conditionalBlockStatus
                 = AppendStandaloneNormalizedBlock(
                     bodyId, bodyBlockId, conditionOperationFirst,
                     conditionOperationCount,
-                    4, 0, 0, 0, exitBlockId,
+                    4, 0, 0, 0, conditionalTransferTarget,
                     conditionalContinueTarget,
                     2, conditionSelectorIndex, conditionTypeId,
                     edgeRecordIndex, -1, 0,
@@ -1343,7 +1363,7 @@ int32 GetStandaloneSourceLoopBodyBlockCount(int32 statementId,
             = Host.StandaloneSourceStatements[firstChildId * 3];
         int32 secondChildKind
             = Host.StandaloneSourceStatements[secondChildId * 3];
-        if (firstChildKind == 12)
+        if (firstChildKind == 12 || firstChildKind == 13)
         {
             if (secondChildKind != 5)
             {
