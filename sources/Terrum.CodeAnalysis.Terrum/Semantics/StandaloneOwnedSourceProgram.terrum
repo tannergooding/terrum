@@ -4181,7 +4181,9 @@ bool IsStandaloneShiftCountType(int32 typeId)
         && typeId <= Host.StandaloneTypeFactCount[0]
         && Host.StandaloneTypeFacts[typeId * 3] == 0
         && (Host.StandaloneTypeFacts[typeId * 3 + 1] == 0x08
-            || Host.StandaloneTypeFacts[typeId * 3 + 1] == 0x0D);
+            || Host.StandaloneTypeFacts[typeId * 3 + 1] == 0x09
+            || Host.StandaloneTypeFacts[typeId * 3 + 1] == 0x0D
+            || Host.StandaloneTypeFacts[typeId * 3 + 1] == 0x0E);
 }
 
 bool IsStandaloneSourceShiftDataType(int32 typeId)

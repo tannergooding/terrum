@@ -3188,6 +3188,28 @@ int32 DecodeStandaloneCallSiteRecord(int32 bodyId,
     return 0;
 }
 
+bool IsStandaloneDecoderShiftDataType(int32 typeId)
+{
+    return typeId > 0
+        && typeId <= Host.StandaloneTypeFactCount[0]
+        && Host.StandaloneTypeFacts[typeId * 3] == 0
+        && (Host.StandaloneTypeFacts[typeId * 3 + 1] == 0x08
+            || Host.StandaloneTypeFacts[typeId * 3 + 1] == 0x0D
+            || Host.StandaloneTypeFacts[typeId * 3 + 1] == 0x09
+            || Host.StandaloneTypeFacts[typeId * 3 + 1] == 0x0E);
+}
+
+bool IsStandaloneDecoderShiftCountType(int32 typeId)
+{
+    return typeId > 0
+        && typeId <= Host.StandaloneTypeFactCount[0]
+        && Host.StandaloneTypeFacts[typeId * 3] == 0
+        && (Host.StandaloneTypeFacts[typeId * 3 + 1] == 0x08
+            || Host.StandaloneTypeFacts[typeId * 3 + 1] == 0x09
+            || Host.StandaloneTypeFacts[typeId * 3 + 1] == 0x0D
+            || Host.StandaloneTypeFacts[typeId * 3 + 1] == 0x0E);
+}
+
 int32 ValidateStandaloneDecoderConditionalEdge(int32 bodyOffset,
     int32 recordIndex, int32 artifactStart, int32 artifactLength)
 {
@@ -4392,11 +4414,8 @@ int32 ValidateStandaloneBodyBlockCode(int32 bodyId, int32 bodyOffset,
                     || countTypeId <= 0
                     || countTypeId
                         > Host.StandaloneTypeFactCount[0]
-                    || !IsStandaloneSourceShiftDataType(dataTypeId)
-                    || Host.StandaloneTypeFacts[
-                        countTypeId * 3] != 0
-                    || Host.StandaloneTypeFacts[
-                        countTypeId * 3 + 1] != 0x0D)
+                    || !IsStandaloneDecoderShiftDataType(dataTypeId)
+                    || !IsStandaloneDecoderShiftCountType(countTypeId))
                 {
                     return 3;
                 }

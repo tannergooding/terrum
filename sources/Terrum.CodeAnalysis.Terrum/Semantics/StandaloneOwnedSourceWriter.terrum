@@ -2906,7 +2906,9 @@ int32 AddStandaloneWriterBodyConstantMapEntry(int32 constantFirst,
 bool IsStandaloneRewrittenShiftCountType(int32 typeId)
 {
     return IsStandaloneRewrittenScalarType(typeId, 0x08)
-        || IsStandaloneRewrittenScalarType(typeId, 0x0D);
+        || IsStandaloneRewrittenScalarType(typeId, 0x09)
+        || IsStandaloneRewrittenScalarType(typeId, 0x0D)
+        || IsStandaloneRewrittenScalarType(typeId, 0x0E);
 }
 
 bool IsStandaloneRewrittenShiftDataType(int32 typeId)

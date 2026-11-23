@@ -1120,6 +1120,22 @@ internal sealed class StandaloneMethodImportInputTests
             + "return value >> count; } }", 0, 117, false)]
     [TestCase(BoundRuntimePolicy.FailFast,
         "namespace client { "
+            + "int32 Main(int32 value, int64 count) { "
+            + "return value << count; } }", 0, 122, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "int32 Main(int32 value, uint64 count) { "
+            + "return value >> count; } }", 0, 123, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "int64 Main(int64 value, int64 count) { "
+            + "return value >>> count; } }", 0, 124, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "uint64 Main(uint64 value, uint64 count) { "
+            + "return value >> count; } }", 0, 125, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
             + "float32 Main(float32 value, int32 count) { "
             + "return value << count; } }", 2, 0, false)]
     [TestCase(BoundRuntimePolicy.FailFast,
@@ -1146,6 +1162,26 @@ internal sealed class StandaloneMethodImportInputTests
             + "uint32 Main(uint32 initial, uint32 count) { "
             + "mut uint32 value = initial; value >>= count; "
             + "return value; } }", 0, 121, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "int32 Main(int32 initial, int64 count) { "
+            + "mut int32 value = initial; value <<= count; "
+            + "return value; } }", 0, 126, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "int32 Main(int32 initial, uint64 count) { "
+            + "mut int32 value = initial; value >>= count; "
+            + "return value; } }", 0, 127, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "int64 Main(int64 initial, int64 count) { "
+            + "mut int64 value = initial; value >>>= count; "
+            + "return value; } }", 0, 128, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "uint64 Main(uint64 initial, uint64 count) { "
+            + "mut uint64 value = initial; value >>= count; "
+            + "return value; } }", 0, 129, false)]
     [TestCase(BoundRuntimePolicy.FailFast,
         "namespace client { "
             + "int32 Main(int32 initial) { "
@@ -4004,6 +4040,9 @@ internal sealed class StandaloneMethodImportInputTests
             111 => 31,
             112 or 114 or 116 or 117 => 32,
             115 => 31,
+            122 => 31,
+            123 or 125 => 32,
+            124 => 33,
             _ => 33,
         };
         var shiftOperationKind = verificationMode switch
@@ -4011,6 +4050,9 @@ internal sealed class StandaloneMethodImportInputTests
             111 => 35,
             112 or 114 or 116 or 117 => 36,
             115 => 35,
+            122 => 35,
+            123 or 125 => 36,
+            124 => 37,
             _ => 37,
         };
         var shiftControl = verificationMode switch
@@ -4018,6 +4060,8 @@ internal sealed class StandaloneMethodImportInputTests
             111 => 0x05,
             112 or 116 => 0x06,
             115 => 0x05,
+            122 => 0x05,
+            123 => 0x06,
             _ => 0x07,
         };
         var shiftDataTypeCode = verificationMode switch
@@ -4025,10 +4069,16 @@ internal sealed class StandaloneMethodImportInputTests
             114 => 0x0D,
             116 => 0x09,
             117 => 0x0E,
+            123 => 0x08,
+            124 => 0x09,
+            125 => 0x0E,
             _ => 0x08,
         };
         var shiftCountTypeCode = verificationMode is 113 or 114 or 117
-            ? 0x0D : 0x08;
+            ? 0x0D
+            : verificationMode is 122 or 124 ? 0x09
+            : verificationMode is 123 or 125 ? 0x0E
+            : 0x08;
         var shiftNeedsReinterpret
             = verificationMode is 111 or 112 or 115 or 116;
         var shiftRightExpressionKind
@@ -4091,6 +4141,10 @@ internal sealed class StandaloneMethodImportInputTests
                     || Host.StandaloneNormalizedBlocks[6] != 2
                     || Host.StandaloneNormalizedBlocks[7] != dataTypeId
                     || Host.StandaloneNormalizedHomeCount[0] != 3
+                    || Host.StandaloneNormalizedHomes[8] <= 0
+                    || Host.StandaloneTypeFacts[
+                        Host.StandaloneNormalizedHomes[8] * 3 + 1]
+                        != {{shiftCountTypeCode}}
                     || Host.StandaloneNormalizedOperationCount[0]
                         != {{shiftOperationCount}}
                     || Host.StandaloneNormalizedConstantCount[0]
@@ -4167,26 +4221,36 @@ internal sealed class StandaloneMethodImportInputTests
             """;
         var shiftCompoundExpressionKind = verificationMode switch
         {
-            118 => 31,
-            119 or 121 => 32,
+            118 or 126 => 31,
+            119 or 121 or 127 or 129 => 32,
+            128 => 33,
             _ => 33,
         };
         var shiftCompoundOperationKind = verificationMode switch
         {
-            118 => 35,
-            119 or 121 => 36,
+            118 or 126 => 35,
+            119 or 121 or 127 or 129 => 36,
+            128 => 37,
             _ => 37,
         };
         var shiftCompoundControl = verificationMode switch
         {
-            118 => 0x05,
-            119 => 0x06,
+            118 or 126 => 0x05,
+            119 or 127 => 0x06,
             _ => 0x07,
         };
-        var shiftCompoundDataTypeCode = verificationMode == 121
-            ? 0x0D : 0x08;
+        var shiftCompoundDataTypeCode = verificationMode switch
+        {
+            121 => 0x0D,
+            128 => 0x09,
+            129 => 0x0E,
+            _ => 0x08,
+        };
         var shiftCompoundCountTypeCode = verificationMode is 120 or 121
-            ? 0x0D : 0x08;
+            ? 0x0D
+            : verificationMode is 126 or 128 ? 0x09
+            : verificationMode is 127 or 129 ? 0x0E
+            : 0x08;
         var shiftCompoundNeedsReinterpret
             = verificationMode is 118 or 119;
         var shiftCompoundVerificationSource = $$"""
@@ -4766,8 +4830,10 @@ internal sealed class StandaloneMethodImportInputTests
                                                     : verificationMode is >= 104 and <= 109
                                                         ? updateExpressionVerificationSource
                                                     : verificationMode is >= 111 and <= 117
+                                                        or >= 122 and <= 125
                                                         ? shiftVerificationSource
                                                     : verificationMode is >= 118 and <= 121
+                                                        or >= 126 and <= 129
                                                         ? shiftCompoundVerificationSource
                                                     : verificationMode is 81 or 82
                                                         ? initializationLocalVerificationSource
@@ -4880,7 +4946,8 @@ internal sealed class StandaloneMethodImportInputTests
             or >= 60 and <= 74 or 75 or 77 or 81 or 82
             or >= 90 and <= 95 or >= 96 and <= 103
             or >= 104 and <= 109 or >= 111 and <= 117
-            or >= 118 and <= 121 or 130)
+            or >= 122 and <= 125
+            or >= 118 and <= 121 or >= 126 and <= 129 or 130)
         {
             var artifactIndex = new TrRmArtifactIndex(artifact);
             Assert.That(artifactIndex.TryGetSection(0x0020,
@@ -5090,7 +5157,8 @@ internal sealed class StandaloneMethodImportInputTests
                 Assert.That(code.IndexOf((byte)0xD6),
                     Is.GreaterThanOrEqualTo(0));
             }
-            else if (verificationMode is >= 111 and <= 117)
+            else if (verificationMode is >= 111 and <= 117
+                or >= 122 and <= 125)
             {
                 var code = bodyReader.Code;
                 var shiftOffset = code.IndexOf((byte)0xC1);
@@ -5112,7 +5180,8 @@ internal sealed class StandaloneMethodImportInputTests
                 Assert.That(code.IndexOf((byte)0xD6),
                     Is.GreaterThanOrEqualTo(0));
             }
-            else if (verificationMode is >= 118 and <= 121)
+            else if (verificationMode is >= 118 and <= 121
+                or >= 126 and <= 129)
             {
                 var code = bodyReader.Code;
                 var shiftOffset = code.IndexOf((byte)0xC1);
