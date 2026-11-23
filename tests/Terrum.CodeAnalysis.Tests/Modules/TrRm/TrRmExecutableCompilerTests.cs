@@ -585,6 +585,182 @@ internal sealed class TrRmExecutableCompilerTests
         var splitArtifact = TrRmArtifactWriter.Encode(rewrittenSections,
             TrRmArtifactSchema.Standard,
             standardSchemaIdentity: schemaIdentity);
+
+        byte[] AddOwnerTypeDefImport(string providerIdentity,
+            string exportKey)
+        {
+            var inputIndex = TrRmExecutableCompiler
+                .CreateForeignInvocationIndex(splitArtifact, schemaIdentity);
+            var inputTables
+                = TrRmStructuralMetadataValidator
+                    .ValidateAndGetExecutionTables(inputIndex);
+            if (inputTables.ModuleRefs.Count != 0
+                || inputTables.Imports.Count != 0
+                || inputTables.Modules.Count != 2)
+            {
+                throw new InvalidDataException(
+                    "The cross-Module fixture requires two Modules without existing imports.");
+            }
+
+            _ = inputIndex.TryGetSection(0x0002, out var inputStringBytes,
+                out var inputStringCount);
+            var inputStrings = new TrRmStringTableReader(inputStringBytes,
+                inputStringCount);
+            var textRows = new List<(string Text, int Encoding)>(
+                inputStringCount + 2);
+            var stringRowsByText = new Dictionary<string, int>(
+                StringComparer.Ordinal);
+            for (var row = 1; row <= inputStrings.Count; row++)
+            {
+                var text = inputStrings.DecodeNamespace(row);
+                textRows.Add((text, text.Any(
+                    static character => character > 0x7F) ? 1 : 0));
+                _ = stringRowsByText.TryAdd(text, row);
+            }
+
+            int AddString(string text)
+            {
+                if (!stringRowsByText.TryGetValue(text, out var row))
+                {
+                    row = textRows.Count + 1;
+                    textRows.Add((text, 0));
+                    stringRowsByText.Add(text, row);
+                }
+
+                return row;
+            }
+
+            var providerIdentityRow = AddString(providerIdentity);
+            var exportKeyRow = AddString(exportKey);
+            var stringsBytes
+                = TrRmStringTableWriter.EncodeTextRows(textRows);
+            var strings = new TrRmStringTableReader(stringsBytes,
+                textRows.Count);
+            var moduleRows = new TrRmModuleRow[inputTables.Modules.Count];
+            for (var moduleRow = 1;
+                moduleRow <= inputTables.Modules.Count; moduleRow++)
+            {
+                var (target, runtime) = inputTables.Modules
+                    .GetRequirements(moduleRow);
+                var (typeDefStart, _) = inputTables.Modules
+                    .GetTypeDefRange(moduleRow);
+                var (methodStart, _) = inputTables.Modules
+                    .GetMethodDefRange(moduleRow);
+                var (sourceFileStart, _) = inputTables.Modules
+                    .GetSourceFileRange(moduleRow);
+                var (featureFirst, featureCount) = inputTables.Modules
+                    .GetFeatureRange(moduleRow);
+                moduleRows[moduleRow - 1] = new TrRmModuleRow(
+                    IdentityStringRow: stringRowsByText[
+                        inputTables.Modules.GetIdentity(moduleRow)],
+                    TargetRequirement: target,
+                    RuntimePolicy: runtime,
+                    EntryMethodDefRow: inputTables.Modules
+                        .GetEntryMethod(moduleRow),
+                    ModuleRefStart: 1,
+                    TypeDefStart: typeDefStart,
+                    MethodDefStart: methodStart,
+                    SourceFileStart: sourceFileStart,
+                    FeatureFirst: featureFirst,
+                    FeatureCount: featureCount,
+                    GoverningRuleEdition: inputTables.Modules
+                        .GetGoverningRuleEdition(moduleRow));
+            }
+
+            var moduleBytes = TrRmModuleTableWriter.Encode(moduleRows,
+                strings, 1, inputTables.TypeDefs.Count,
+                inputTables.Methods.Count, sourceFileCount,
+                inputTables.Features.Count);
+            var modules = new TrRmModuleTableReader(moduleBytes,
+                moduleRows.Length, strings, 1, inputTables.TypeDefs.Count,
+                inputTables.Methods.Count, sourceFileCount,
+                inputTables.Features.Count);
+            var moduleRefBytes = TrRmModuleRefTableWriter.Encode([
+                new TrRmModuleRefRow(providerIdentityRow, targetRequirement, 0),
+            ], strings, modules);
+            var moduleRefs = new TrRmModuleRefTableReader(moduleRefBytes, 1,
+                strings, modules);
+            _ = inputIndex.TryGetSection(0x0013, out var inputTypeDefBytes,
+                out var inputTypeDefCount);
+            var typeDefs = new TrRmTypeDefTableReader(inputTypeDefBytes,
+                inputTypeDefCount, strings, modules, inputTables.Fields.Count,
+                inputTables.GenericParams.Count, inputTables.Layouts.Count,
+                inputTables.Contracts.Count, TrRmArtifactSchema.Standard);
+            var importBytes = TrRmImportTableWriter.Encode([
+                new TrRmImportRow(1, exportKeyRow, 0x1300_0002),
+            ], strings, moduleRefs, typeDefs, inputTables.Methods,
+                default, default, default, inputTables.Fields);
+            var sections = new List<TrRmSection>(
+                inputIndex.SectionCount + 2);
+            for (var entry = 0; entry < inputIndex.SectionCount; entry++)
+            {
+                inputIndex.GetSection(entry, out var kind, out var flags,
+                    out var section, out var recordCount);
+                if (kind is 0x0010 or 0x001C)
+                {
+                    if (recordCount == 0)
+                    {
+                        continue;
+                    }
+
+                    throw new InvalidDataException(
+                        "The cross-Module fixture unexpectedly contains imports.");
+                }
+
+                sections.Add(kind switch
+                {
+                    0x0001 => new TrRmSection(kind, flags,
+                        checked((uint)moduleRows.Length), moduleBytes),
+                    0x0002 => new TrRmSection(kind, flags,
+                        checked((uint)textRows.Count), stringsBytes),
+                    _ => new TrRmSection(kind, flags,
+                        checked((uint)recordCount), section.ToArray()),
+                });
+            }
+
+            sections.Add(new TrRmSection(0x0010, 0, 1, moduleRefBytes));
+            sections.Add(new TrRmSection(0x001C, 0, 1, importBytes));
+            sections.Sort(static (left, right)
+                => left.Kind.CompareTo(right.Kind));
+            return TrRmArtifactWriter.Encode(sections,
+                TrRmArtifactSchema.Standard,
+                standardSchemaIdentity: schemaIdentity);
+        }
+
+        byte[] EmitOwnerTypeProvider(bool shiftTypeDefRow = false,
+            bool changeFieldType = false)
+        {
+            var decoy = shiftTypeDefRow ? """
+                [Blittable]
+                [Layout(LayoutKind.Sequential, Packing: 1)]
+                public struct Decoy {
+                    public int32 Value;
+                }
+                """ : string.Empty;
+            var payloadFieldType = changeFieldType ? "int64" : "int32";
+            var providerCompilation = Compilation.CreateLibrary(
+                SyntaxTree.Parse($$"""
+                    namespace Example {
+                        {{decoy}}
+                        [Blittable]
+                        [Layout(LayoutKind.Sequential, Packing: 1)]
+                        public struct Payload {
+                            public {{payloadFieldType}} Value;
+                        }
+                    }
+                    """), layoutOptions);
+            Assert.That(providerCompilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine,
+                    providerCompilation.Diagnostics));
+            return TrRmExecutableCompiler.EmitStandard(
+                providerCompilation.Program!,
+                "cross-module-type-provider", schemaIdentity,
+                targetRequirement, [
+                    new TrRmSourceTypeExport("Example", "Payload",
+                        "owner-payload"),
+                ]);
+        }
+
         var splitTables = TrRmStructuralMetadataValidator
             .ValidateAndGetExecutionTables(
                 TrRmExecutableCompiler.CreateForeignInvocationIndex(
@@ -658,6 +834,79 @@ internal sealed class TrRmExecutableCompilerTests
                     == "cross-module-anchor-owner");
         Assert.That((int)reemittedPointeeType,
             Is.EqualTo(100 + reemittedOwnerStructureIndex));
+
+        var ownerProviderArtifact = EmitOwnerTypeProvider();
+        var importedArtifact = AddOwnerTypeDefImport(
+            "cross-module-type-provider", "owner-payload");
+        var importedInput = new TrRmStandardArtifactInput(schemaIdentity,
+            importedArtifact);
+        var ownerProviderInput = new TrRmStandardArtifactInput(schemaIdentity,
+            ownerProviderArtifact);
+        var importedReference
+            = TrRmExecutableCompiler.CreateStandardReference(importedInput,
+                "cross-module-consumer", [ownerProviderInput]);
+        var importedOwnerStructure = importedReference.Structures.Single(
+            static structure => structure.StandardTypeOrigin?.Provider
+                .ModuleIdentity == "cross-module-type-provider");
+        var importedOwnerOrigin
+            = importedOwnerStructure.StandardTypeOrigin!;
+        Assert.That(importedOwnerOrigin.DefinitionId & 0x00FF_FFFFu,
+            Is.EqualTo(1u));
+        Assert.That(importedOwnerOrigin.IsLookupRoot, Is.False);
+        var importedSignature
+            = importedReference.NativeFunctionPointerSignatures.Single();
+        var importedPointerType
+            = importedSignature.ParameterTypes.Single();
+        var importedPointeeType = importedReference.NativePointerTypes[
+            NativePointerTypes.Index(importedPointerType)].PointeeType;
+        Assert.That((int)importedPointeeType,
+            Is.EqualTo(100 + importedReference.Structures.IndexOf(
+                importedOwnerStructure)));
+        var importedConsumer = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "int32 Main() { return 0; }"), importedReference);
+        Assert.That(importedConsumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                importedConsumer.Diagnostics));
+
+        var shiftedOwnerProviderArtifact = EmitOwnerTypeProvider(
+            shiftTypeDefRow: true);
+        var shiftedOwnerProviderInput = new TrRmStandardArtifactInput(
+            schemaIdentity, shiftedOwnerProviderArtifact);
+        var shiftedOwnerReference
+            = TrRmExecutableCompiler.CreateStandardReference(importedInput,
+                "cross-module-consumer", [shiftedOwnerProviderInput]);
+        var shiftedOwnerOrigin = shiftedOwnerReference.Structures.Single(
+            static structure => structure.StandardTypeOrigin?.Provider
+                .ModuleIdentity == "cross-module-type-provider")
+            .StandardTypeOrigin!;
+        Assert.That(shiftedOwnerOrigin.DefinitionId & 0x00FF_FFFFu,
+            Is.EqualTo(2u));
+        var incompatibleOwnerProviderInput
+            = new TrRmStandardArtifactInput(schemaIdentity,
+                EmitOwnerTypeProvider(changeFieldType: true));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(importedInput,
+                "cross-module-consumer",
+                [incompatibleOwnerProviderInput]));
+
+        var importedLoaded = TrRmExecutableCompiler.LoadStandard(
+            importedInput, "cross-module-consumer",
+            [ownerProviderInput]);
+        var importedReemittedArtifact = TrRmExecutableCompiler.EmitStandard(
+            importedLoaded, "cross-module-reemitted", schemaIdentity,
+            targetRequirement);
+        var importedReemittedReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    importedReemittedArtifact),
+                "cross-module-reemitted", [ownerProviderInput]);
+        var importedReemittedOwner = importedReemittedReference.Structures
+            .Single(static structure => structure.StandardTypeOrigin?.Provider
+                .ModuleIdentity == "cross-module-type-provider");
+        var importedReemittedOrigin
+            = importedReemittedOwner.StandardTypeOrigin!;
+        Assert.That(importedReemittedOrigin.DefinitionId & 0x00FF_FFFFu,
+            Is.EqualTo(1u));
     }
 
     [Test]

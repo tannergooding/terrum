@@ -861,9 +861,11 @@ owned by another Module in the same artifact and append the defining-Module
 Blittable TypeDef/Import closure as hidden provider-origin structures. Standard
 emission retains each selected structure's TypeDef row identity instead of
 collapsing equal names. A two-Module regression uses same-named unrelated
-TypeDefs and covers source-free re-emission/reload; it remains unverified under
-the active hold. Imported-owner replacement, TypeDef/anchor row relocation
-and same-provider cache canonicalization remain open.
+TypeDefs and covers source-free re-emission/reload. An imported owner TypeDef
+regression covers provider-row relocation, incompatible replacement and
+source-free re-emission. Both regressions remain unverified under the active
+hold. Anchor-row relocation and same-provider cache canonicalization remain
+open.
 The Standard Contract reader also consumes the assigned 20-byte OutputState
 row, requiring Param mode `00`, a complete `ref<init T>` or `Span<init T>`
 type, and a phase-3 PredicateGraph attached to the same MethodDef. Its bounded
