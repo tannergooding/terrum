@@ -8168,6 +8168,41 @@ public static partial class TrRmExecutableCompiler
             = new List<CheckedReferenceTypeDefinition>();
         var checkedReferenceTypeIndexes
             = new Dictionary<CheckedReferenceTypeDefinition, int>();
+        var functionPointerSignatureIndexByTypeSpecRow
+            = new int[types.Count + 1];
+        Array.Fill(functionPointerSignatureIndexByTypeSpecRow, -1);
+        var standardFunctionPointerSignatures
+            = ImmutableArray<NativeFunctionPointerSignatureDefinition>.Empty;
+        int[]? standardFunctionPointerStructureTypeByTypeDef = null;
+        var standardFunctionPointerAnchorProfile
+            = schema == TrRmArtifactSchema.Standard;
+        if (standardFunctionPointerAnchorProfile)
+        {
+            standardFunctionPointerStructureTypeByTypeDef
+                = new int[typeDefs.Count + 1];
+            Array.Fill(standardFunctionPointerStructureTypeByTypeDef, -1);
+            if (targetProfiles.TryGetProfile(1, 1, out _))
+            {
+                var nextStructureIndex = optionalStructures.Length;
+                for (var typeDefRow = 1;
+                    typeDefRow <= typeDefs.Count; typeDefRow++)
+                {
+                    if (selectedTypeDefRows.Contains(typeDefRow)
+                        && layouts.HasBlittableLayout(typeDefRow, 1, 1))
+                    {
+                        standardFunctionPointerStructureTypeByTypeDef[
+                            typeDefRow] = nextStructureIndex++;
+                    }
+                }
+            }
+
+            standardFunctionPointerSignatures
+                = LoadStandardFunctionPointerSignatures(validatedTables,
+                    selectedModuleRow,
+                    standardFunctionPointerStructureTypeByTypeDef,
+                    nativePointerTypeDefinitions,
+                    functionPointerSignatureIndexByTypeSpecRow);
+        }
         var structures = LoadBlittableStructures(typeDefs, fields, layouts, layoutFields,
             targetProfiles, types, optionalStructures, nativePointerTypeDefinitions,
             out var structureTypeByTypeDef, imports: imports,
@@ -8177,7 +8212,17 @@ public static partial class TrRmExecutableCompiler
                 or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
                 or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft,
             nominalClassTypesByTypeSpecReference:
-                nominalClassTypesByTypeSpecReference);
+                nominalClassTypesByTypeSpecReference,
+            functionPointerSignatureIndexByTypeSpecRow:
+                standardFunctionPointerAnchorProfile
+                    ? functionPointerSignatureIndexByTypeSpecRow : null);
+        if (standardFunctionPointerStructureTypeByTypeDef is not null
+            && !structureTypeByTypeDef.AsSpan().SequenceEqual(
+                standardFunctionPointerStructureTypeByTypeDef))
+        {
+            throw Invalid(
+                "The Standard function-pointer signature TypeDef map changed while loading layouts.");
+        }
 
         var declaredExports = new HashSet<int>(exportCount);
         for (var row = 0; row < exportCount; row++)
@@ -8242,7 +8287,11 @@ public static partial class TrRmExecutableCompiler
                 nativePointerTypeDefinitions, structureTypeByTypeDef,
                 imports, checkedReferenceTypeDefinitions,
                 checkedReferenceTypeIndexes,
-                nominalClassTypesByTypeSpecReference);
+                nominalClassTypesByTypeSpecReference,
+                functionPointerSignatureIndexByAnchorTypeSpec:
+                    developmentProfile
+                        ? null
+                        : functionPointerSignatureIndexByTypeSpecRow);
             var (first, count) = sigs.GetParamRange(signature);
             var parameterTypes = ImmutableArray.CreateBuilder<PrimitiveType>(count);
             for (var parameter = 0; parameter < count; parameter++)
@@ -8264,7 +8313,11 @@ public static partial class TrRmExecutableCompiler
                             .GetDeclaredEffectsMask(signatureRow) : 0,
                 });
         }
-        var nativeFunctionPointerSignatureArray = nativeFunctionPointerSignatureDefinitions.ToImmutable();
+        var nativeFunctionPointerSignatureArray = developmentProfile
+            ? nativeFunctionPointerSignatureDefinitions.ToImmutable()
+            : standardFunctionPointerAnchorProfile
+                ? standardFunctionPointerSignatures
+                : ImmutableArray<NativeFunctionPointerSignatureDefinition>.Empty;
         var signatureIndexByAnchorMethod = new int[methodCount + 1];
         Array.Fill(signatureIndexByAnchorMethod, -1);
         for (var signatureRow = 1;
@@ -8325,6 +8378,19 @@ public static partial class TrRmExecutableCompiler
         {
             if (nativeFunctionPointerSignatureTable.HasSignatureForMethod(row))
             {
+                continue;
+            }
+            if (!developmentProfile
+                && validatedTables.NativeFunctionPointerAnchors
+                    .IsAnchorMethodDef(row))
+            {
+                var anchorSignature = defs.GetSignature(row);
+                if (!usedSignatures[anchorSignature])
+                {
+                    usedSignatures[anchorSignature] = true;
+                    usedSignatureCount++;
+                }
+
                 continue;
             }
 
@@ -8437,7 +8503,11 @@ public static partial class TrRmExecutableCompiler
                         nativePointerTypeDefinitions, structureTypeByTypeDef,
                         imports, checkedReferenceTypeDefinitions,
                         checkedReferenceTypeIndexes,
-                        nominalClassTypesByTypeSpecReference);
+                        nominalClassTypesByTypeSpecReference,
+                        functionPointerSignatureIndexByAnchorTypeSpec:
+                            standardFunctionPointerAnchorProfile
+                                ? functionPointerSignatureIndexByTypeSpecRow
+                                : null);
                 var mode = parameters.GetMode(first + param);
                 var initializationReferenceParameter
                     = standardInitializationReferenceBodies
@@ -8662,13 +8732,21 @@ public static partial class TrRmExecutableCompiler
                             nativePointerTypeDefinitions, structureTypeByTypeDef,
                             imports, checkedReferenceTypeDefinitions,
                             checkedReferenceTypeIndexes,
-                            nominalClassTypesByTypeSpecReference)
+                            nominalClassTypesByTypeSpecReference,
+                            functionPointerSignatureIndexByAnchorTypeSpec:
+                                standardFunctionPointerAnchorProfile
+                                    ? functionPointerSignatureIndexByTypeSpecRow
+                                    : null)
                         : throw Invalid("Unsupported direct native import result type.")
                 : FromNativeValueRow(types, resultTypeRow,
                     nativePointerTypeDefinitions, structureTypeByTypeDef,
                     imports, checkedReferenceTypeDefinitions,
                     checkedReferenceTypeIndexes,
-                    nominalClassTypesByTypeSpecReference);
+                    nominalClassTypesByTypeSpecReference,
+                    functionPointerSignatureIndexByAnchorTypeSpec:
+                        standardFunctionPointerAnchorProfile
+                            ? functionPointerSignatureIndexByTypeSpecRow
+                            : null);
             var function = new BoundFunction(name, returnType,
                 variables.ToImmutable(), count, new BoundBlock([], default), default) {
                 DoesNotReturn = doesNotReturn,
@@ -11863,6 +11941,420 @@ public static partial class TrRmExecutableCompiler
         payload[6] = extent == 0 ? (byte)0 : (byte)1;
         BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(8), extent);
         return payload;
+    }
+
+    private static ImmutableArray<NativeFunctionPointerSignatureDefinition>
+        LoadStandardFunctionPointerSignatures(
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+        int selectedModuleRow, int[] structureTypeByTypeDef,
+        List<NativePointerTypeDefinition> nativePointerTypeDefinitions,
+        int[] signatureIndexByTypeSpecRow)
+    {
+        var anchors = tables.NativeFunctionPointerAnchors;
+        var indexByAnchor = new Dictionary<(byte Convention,
+            int MethodDefRow), int>();
+        var anchorsToDecode = new List<(byte Convention,
+            int MethodDefRow)>();
+        for (var typeSpecRow = 1;
+            typeSpecRow <= tables.TypeSpecs.Count; typeSpecRow++)
+        {
+            if (!anchors.HasAnchorForTypeSpec(typeSpecRow))
+            {
+                continue;
+            }
+
+            var methodDefRow = anchors.GetAnchorMethodDefRow(typeSpecRow);
+            if (tables.Methods.GetOwnerModule(methodDefRow)
+                != selectedModuleRow)
+            {
+                continue;
+            }
+
+            var convention = anchors.GetCallingConvention(typeSpecRow);
+            var key = (convention, methodDefRow);
+            if (!indexByAnchor.TryGetValue(key, out var signatureIndex))
+            {
+                if (anchorsToDecode.Count
+                    >= SemanticVerifier.MaximumAnalysisVisits)
+                {
+                    throw new NotSupportedException(
+                        "The selected Standard function-pointer anchor table exceeds the analysis limit.");
+                }
+
+                signatureIndex = anchorsToDecode.Count;
+                indexByAnchor.Add(key, signatureIndex);
+                anchorsToDecode.Add(key);
+            }
+
+            signatureIndexByTypeSpecRow[typeSpecRow] = signatureIndex;
+        }
+
+        if (anchorsToDecode.Count != 0
+            && !TrRmFeatureManifestValidator.Requires(tables.Features,
+                tables.Modules, selectedModuleRow,
+                TrRmFeatureTableReader.RootlessNativeValuesFeatureId,
+                tables.Schema))
+        {
+            throw Invalid(
+                "A Standard function-pointer value requires RootlessNativeValues 2/1.");
+        }
+
+        var signatures
+            = ImmutableArray.CreateBuilder<
+                NativeFunctionPointerSignatureDefinition>(
+                    anchorsToDecode.Count);
+        foreach (var (convention, methodDefRow) in anchorsToDecode)
+        {
+            var signatureRow
+                = tables.Methods.GetSignature(methodDefRow);
+            var returnType = FromNativeValueRow(tables.TypeSpecs,
+                tables.Signatures.GetResultTypeSpec(signatureRow),
+                nativePointerTypeDefinitions, structureTypeByTypeDef,
+                tables.Imports,
+                functionPointerSignatureIndexByAnchorTypeSpec:
+                    signatureIndexByTypeSpecRow);
+            var (firstParameter, parameterCount)
+                = tables.Signatures.GetParamRange(signatureRow);
+            var parameterTypes
+                = ImmutableArray.CreateBuilder<PrimitiveType>(
+                    parameterCount);
+            for (var ordinal = 0; ordinal < parameterCount; ordinal++)
+            {
+                parameterTypes.Add(FromNativeValueRow(tables.TypeSpecs,
+                    tables.Parameters.GetTypeSpec(firstParameter + ordinal),
+                    nativePointerTypeDefinitions, structureTypeByTypeDef,
+                    tables.Imports,
+                    functionPointerSignatureIndexByAnchorTypeSpec:
+                        signatureIndexByTypeSpecRow));
+            }
+
+            var predicateContracts
+                = tables.Contracts.GetPredicateGraphContracts(methodDefRow);
+            var selectorOrdinalByGraphRow
+                = new Dictionary<int, uint>(predicateContracts.Length);
+            var selectors
+                = ImmutableArray.CreateBuilder<
+                    NativeFunctionPointerSelector>(
+                        predicateContracts.Length);
+            foreach (var predicate in predicateContracts)
+            {
+                if (predicate.PhaseTag != 3)
+                {
+                    throw Unsupported(
+                        "A Standard function-pointer anchor contains an unsupported predicate phase.");
+                }
+
+                var rootNode = tables.PredicateGraphs.GetRootNodeRow(
+                    predicate.PredicateGraphRow);
+                var nodeKind = tables.PredicateNodes.GetNodeKind(rootNode);
+                if (nodeKind > byte.MaxValue
+                    || !selectorOrdinalByGraphRow.TryAdd(
+                        predicate.PredicateGraphRow,
+                        predicate.PhaseLocalOrdinal))
+                {
+                    throw Invalid(
+                        "A Standard function-pointer selector is malformed.");
+                }
+
+                selectors.Add(new NativeFunctionPointerSelector(
+                    predicate.PhaseTag, predicate.PhaseLocalOrdinal,
+                    checked((byte)nodeKind)));
+            }
+
+            var outputStates
+                = ImmutableArray.CreateBuilder<
+                    NativeFunctionPointerOutputState>();
+            foreach (var outputState in tables.Contracts
+                         .GetOutputStateContracts(methodDefRow))
+            {
+                if (!selectorOrdinalByGraphRow.TryGetValue(
+                        outputState.PredicateGraphRow,
+                        out var selectorOrdinal))
+                {
+                    throw Invalid(
+                        "A Standard function-pointer output state has no selector.");
+                }
+
+                outputStates.Add(new NativeFunctionPointerOutputState(
+                    checked((uint)outputState.ParameterOrdinal),
+                    selectorOrdinal, outputState.State));
+            }
+
+            if (!tables.Contracts.GetNativeParameters(methodDefRow).IsEmpty)
+            {
+                throw Unsupported(
+                    "Standard function-pointer anchors do not select NativeParameter contracts.");
+            }
+
+            signatures.Add(new NativeFunctionPointerSignatureDefinition(
+                (NativeCallingConvention)convention, returnType,
+                parameterTypes.MoveToImmutable()) {
+                EffectsMask = tables.Contracts.GetEffectsMask(methodDefRow),
+                Selectors = selectors.MoveToImmutable(),
+                OutputStates = outputStates.MoveToImmutable(),
+                Dependencies = [.. tables.Contracts
+                    .GetDependencyContracts(methodDefRow)
+                    .Select(static dependency =>
+                        new NativeFunctionPointerDependency(
+                            dependency.DestinationKind,
+                            dependency.SourceKind,
+                            dependency.Relationship,
+                            dependency.Phase,
+                            dependency.DestinationOrdinal,
+                            dependency.SourceOrdinal))],
+                NativeParameters = [],
+            });
+        }
+
+        var sourceSignatures = signatures.MoveToImmutable();
+        var sourcePointerTypes = nativePointerTypeDefinitions.ToArray();
+        var signatureMapping = new int[sourceSignatures.Length];
+        Array.Fill(signatureMapping, -1);
+        var signatureStates = new byte[sourceSignatures.Length];
+        var pointerMapping = new int[sourcePointerTypes.Length];
+        Array.Fill(pointerMapping, -1);
+        var pointerStates = new byte[sourcePointerTypes.Length];
+        var canonicalSignatures
+            = ImmutableArray.CreateBuilder<
+                NativeFunctionPointerSignatureDefinition>();
+        var canonicalPointers
+            = ImmutableArray.CreateBuilder<NativePointerTypeDefinition>();
+        var pointerIndexByDefinition
+            = new Dictionary<NativePointerTypeDefinition, int>();
+        var signatureIndexesByHash
+            = new Dictionary<int, List<int>>();
+        var remainingCanonicalizationWork
+            = SemanticVerifier.MaximumAnalysisVisits;
+
+        int SignatureHash(
+            NativeFunctionPointerSignatureDefinition signature)
+        {
+            var hash = new HashCode();
+            hash.Add(signature.CallingConvention);
+            hash.Add(signature.ReturnType);
+            hash.Add(signature.EffectsMask);
+            foreach (var type in signature.ParameterTypes)
+            {
+                if (--remainingCanonicalizationWork < 0)
+                {
+                    throw new NotSupportedException(
+                        "The Standard function-pointer signature normalization exceeds its analysis limit.");
+                }
+                hash.Add(type);
+            }
+
+            foreach (var selector in signature.Selectors
+                .OrderBy(static selector => selector.PhaseTag)
+                .ThenBy(static selector => selector.PhaseLocalOrdinal)
+                .ThenBy(static selector => selector.NodeKind))
+            {
+                if (--remainingCanonicalizationWork < 0)
+                {
+                    throw new NotSupportedException(
+                        "The Standard function-pointer signature normalization exceeds its analysis limit.");
+                }
+                hash.Add(selector);
+            }
+
+            foreach (var outputState in signature.OutputStates
+                .OrderBy(static output => output.FormalOrdinal)
+                .ThenBy(static output => output.SelectorOrdinal)
+                .ThenBy(static output => output.State))
+            {
+                if (--remainingCanonicalizationWork < 0)
+                {
+                    throw new NotSupportedException(
+                        "The Standard function-pointer signature normalization exceeds its analysis limit.");
+                }
+                hash.Add(outputState);
+            }
+
+            foreach (var dependency in signature.Dependencies
+                .OrderBy(static dependency => dependency.DestinationKind)
+                .ThenBy(static dependency => dependency.DestinationOrdinal)
+                .ThenBy(static dependency => dependency.Phase)
+                .ThenBy(static dependency => dependency.SourceKind)
+                .ThenBy(static dependency => dependency.SourceOrdinal)
+                .ThenBy(static dependency => dependency.Relationship))
+            {
+                if (--remainingCanonicalizationWork < 0)
+                {
+                    throw new NotSupportedException(
+                        "The Standard function-pointer signature normalization exceeds its analysis limit.");
+                }
+                hash.Add(dependency);
+            }
+
+            foreach (var parameter in signature.NativeParameters
+                .OrderBy(static parameter => parameter.ParameterIndex)
+                .ThenBy(static parameter => parameter.PointeeType)
+                .ThenBy(static parameter => parameter.Access)
+                .ThenBy(static parameter => parameter.Retention)
+                .ThenBy(static parameter => parameter.Extent))
+            {
+                if (--remainingCanonicalizationWork < 0)
+                {
+                    throw new NotSupportedException(
+                        "The Standard function-pointer signature normalization exceeds its analysis limit.");
+                }
+                hash.Add(parameter.ParameterIndex);
+                hash.Add(parameter.PointeeType);
+                hash.Add(parameter.Access);
+                hash.Add(parameter.Retention);
+                hash.Add(parameter.Extent);
+            }
+
+            return hash.ToHashCode();
+        }
+
+        PrimitiveType RemapSignatureType(PrimitiveType type)
+        {
+            if (NativeFunctionPointerTypes.IsType(type))
+            {
+                return NativeFunctionPointerTypes.Type(
+                    RemapSignature(NativeFunctionPointerTypes.Index(type)));
+            }
+
+            if (NativePointerTypes.IsType(type))
+            {
+                return NativePointerTypes.Type(
+                    RemapPointer(NativePointerTypes.Index(type)));
+            }
+
+            return type;
+        }
+
+        int RemapPointer(int pointerIndex)
+        {
+            if ((uint)pointerIndex >= (uint)pointerMapping.Length)
+            {
+                throw Invalid(
+                    "A Standard function-pointer signature has an invalid native-pointer type.");
+            }
+            if (pointerMapping[pointerIndex] >= 0)
+            {
+                return pointerMapping[pointerIndex];
+            }
+            if (pointerStates[pointerIndex] == 1
+                || --remainingCanonicalizationWork < 0)
+            {
+                throw Invalid(
+                    "A Standard function-pointer signature has a recursive native-pointer type.");
+            }
+
+            pointerStates[pointerIndex] = 1;
+            var candidate = sourcePointerTypes[pointerIndex] with {
+                PointeeType = RemapSignatureType(
+                    sourcePointerTypes[pointerIndex].PointeeType),
+            };
+            if (!pointerIndexByDefinition.TryGetValue(candidate,
+                    out var remappedIndex))
+            {
+                remappedIndex = canonicalPointers.Count;
+                pointerIndexByDefinition.Add(candidate, remappedIndex);
+                canonicalPointers.Add(candidate);
+            }
+
+            pointerMapping[pointerIndex] = remappedIndex;
+            pointerStates[pointerIndex] = 2;
+            return remappedIndex;
+        }
+
+        int RemapSignature(int signatureIndex)
+        {
+            if ((uint)signatureIndex >= (uint)sourceSignatures.Length)
+            {
+                throw Invalid(
+                    "A Standard function-pointer signature references an invalid nested signature.");
+            }
+            if (signatureMapping[signatureIndex] >= 0)
+            {
+                return signatureMapping[signatureIndex];
+            }
+            if (signatureStates[signatureIndex] == 1
+                || --remainingCanonicalizationWork < 0)
+            {
+                throw Invalid(
+                    "A Standard function-pointer signature graph is recursive.");
+            }
+
+            signatureStates[signatureIndex] = 1;
+            var source = sourceSignatures[signatureIndex];
+            var candidate = source with {
+                ReturnType = RemapSignatureType(source.ReturnType),
+                ParameterTypes = [
+                    .. source.ParameterTypes.Select(
+                        RemapSignatureType),
+                ],
+                NativeParameters = [
+                    .. source.NativeParameters.Select(parameter =>
+                        parameter with {
+                            PointeeType = RemapSignatureType(
+                                parameter.PointeeType),
+                        }),
+                ],
+            };
+            var signatureHash = SignatureHash(candidate);
+            var remappedIndex = -1;
+            if (signatureIndexesByHash.TryGetValue(signatureHash,
+                    out var candidates))
+            {
+                foreach (var candidateIndex in candidates)
+                {
+                    if (--remainingCanonicalizationWork < 0)
+                    {
+                        throw new NotSupportedException(
+                            "The Standard function-pointer signature normalization exceeds its analysis limit.");
+                    }
+
+                    if (NativeFunctionPointerContract.AreEquivalent(
+                            canonicalSignatures[candidateIndex],
+                            candidate))
+                    {
+                        remappedIndex = candidateIndex;
+                        break;
+                    }
+                }
+            }
+
+            if (remappedIndex < 0)
+            {
+                remappedIndex = canonicalSignatures.Count;
+                canonicalSignatures.Add(candidate);
+                if (candidates is null)
+                {
+                    candidates = [];
+                    signatureIndexesByHash.Add(signatureHash, candidates);
+                }
+                candidates.Add(remappedIndex);
+            }
+
+            signatureMapping[signatureIndex] = remappedIndex;
+            signatureStates[signatureIndex] = 2;
+            return remappedIndex;
+        }
+
+        for (var signatureIndex = 0;
+            signatureIndex < sourceSignatures.Length; signatureIndex++)
+        {
+            _ = RemapSignature(signatureIndex);
+        }
+
+        foreach (var typeSpecRow in Enumerable.Range(1,
+            signatureIndexByTypeSpecRow.Length - 1))
+        {
+            var signatureIndex
+                = signatureIndexByTypeSpecRow[typeSpecRow];
+            if (signatureIndex >= 0)
+            {
+                signatureIndexByTypeSpecRow[typeSpecRow]
+                    = signatureMapping[signatureIndex];
+            }
+        }
+
+        nativePointerTypeDefinitions.Clear();
+        nativePointerTypeDefinitions.AddRange(canonicalPointers);
+        return canonicalSignatures.MoveToImmutable();
     }
 
     private static ImmutableArray<BoundStruct> LoadBlittableStructures(

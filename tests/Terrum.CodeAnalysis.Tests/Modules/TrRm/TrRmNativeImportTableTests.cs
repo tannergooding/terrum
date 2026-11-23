@@ -685,6 +685,11 @@ internal sealed class TrRmNativeImportTableTests
                 standardSchemaIdentity: schemaIdentity));
         Assert.That(equivalent.NativeFunctionPointerAnchors
             .AreEquivalentTypeSpecRefs(3, 4), Is.True);
+        var equivalentProgram = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, equivalentArtifact),
+            "module", Array.Empty<TrRmStandardArtifactInput>());
+        Assert.That(equivalentProgram.NativeFunctionPointerSignatures,
+            Has.Length.EqualTo(1));
 
         var foreignArtifact = CreateAnchorMethodMapArtifact(
             0x1600_0001, firstAnchorConvention: 0,
@@ -695,6 +700,15 @@ internal sealed class TrRmNativeImportTableTests
                 standardSchemaIdentity: schemaIdentity));
         Assert.That(foreign.NativeFunctionPointerAnchors
             .AreEquivalentTypeSpecRefs(3, 4), Is.False);
+        var foreignProgram = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, foreignArtifact),
+            "module", Array.Empty<TrRmStandardArtifactInput>());
+        Assert.That(foreignProgram.NativeFunctionPointerSignatures,
+            Has.Length.EqualTo(2));
+        Assert.That(foreignProgram.NativeFunctionPointerSignatures[0]
+            .CallingConvention, Is.EqualTo(NativeCallingConvention.Native));
+        Assert.That(foreignProgram.NativeFunctionPointerSignatures[1]
+            .CallingConvention, Is.EqualTo(NativeCallingConvention.Unmanaged));
 
         _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
