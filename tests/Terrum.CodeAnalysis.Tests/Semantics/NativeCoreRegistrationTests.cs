@@ -7761,7 +7761,8 @@ internal sealed class NativeCoreRegistrationTests
         var program = CreatePointerOutputConsumerProgram(
             functionPointerOutput: true,
             assertFunctionPointerProviderReplacement: true,
-            floatInputConversion: true);
+            floatInputConversion: true,
+            multipleOutputs: true);
         var function = program.Functions.Single(
             static function => function.Name == "InvokePointer");
         Assert.That(NativeFunctionPointerTypes.IsType(function.ReturnType),
@@ -7835,7 +7836,8 @@ internal sealed class NativeCoreRegistrationTests
         string successPredicate = "status != 0",
         bool functionPointerOutput = false,
         bool assertFunctionPointerProviderReplacement = false,
-        bool floatInputConversion = false)
+        bool floatInputConversion = false,
+        bool multipleOutputs = false)
     {
         const string schemaIdentity
             = "trrm/1-draft-foreign-native-interface-parameter-surface-1";
@@ -7858,6 +7860,19 @@ internal sealed class NativeCoreRegistrationTests
                 [return: Terrum.CodeAnalysis.ForwardsBacking(
                     nameof(source), nameof(fallback))]
                 """;
+        var additionalScalarOutputParameter = multipleOutputs
+            ? $$"""
+                    [param(statusValue): NativeOutput(
+                        When: NativeOutputCondition.{{outputCondition}})]
+                    write ptr<int32> statusValue,
+                """
+            : string.Empty;
+        var additionalOutputLocal = multipleOutputs
+            ? "init int32 statusValue;\n                "
+            : string.Empty;
+        var additionalOutputArgument = multipleOutputs
+            ? "statusValue: &init statusValue,\n                        "
+            : string.Empty;
         var tagSourceType = floatInputConversion ? "float64" : "int32";
         var tagExpression = floatInputConversion ? "int32(tag)" : "tag";
         var providerSource = $$"""
@@ -7869,6 +7884,7 @@ internal sealed class NativeCoreRegistrationTests
                     When: NativeOutputCondition.{{outputCondition}})]
                 public unsafe int32 TryGetPointer(ptr<int32> source,
                     int32 tag,
+                    {{additionalScalarOutputParameter}}
                     {{outputParameterDependencies}}
                     write ptr<{{outputValueType}}> value);
             }
@@ -7878,10 +7894,12 @@ internal sealed class NativeCoreRegistrationTests
             {{outputValueType}} InvokePointer(ptr<void> receiver,
                 ptr<int32> source, {{tagSourceType}} tag,
                 {{outputValueType}} fallback) {
+                {{additionalOutputLocal}}
                 init {{outputValueType}} value;
                 unsafe {
                     int32 status = IPointerProbe.TryGetPointer(
                         receiver, value: &init value,
+                        {{additionalOutputArgument}}
                         tag: {{tagExpression}},
                         source: source);
                     if ({{successPredicate}}) { return value; }
@@ -7905,8 +7923,11 @@ internal sealed class NativeCoreRegistrationTests
         var providerProgram = providerCompilation.Program!;
         var providerMember = providerProgram.Interfaces.Single().Members
             .Single();
-        var outputType = providerMember.NativeOutputContracts.Single()
-            .PointeeType;
+        var outputContract = providerMember.NativeOutputContracts.Single(
+            contract => functionPointerOutput
+                ? NativeFunctionPointerTypes.IsType(contract.PointeeType)
+                : NativePointerTypes.IsType(contract.PointeeType));
+        var outputType = outputContract.PointeeType;
         AssertOutputType(providerProgram, outputType);
         var providerArtifact = TrRmExecutableCompiler.EmitStandard(
             providerProgram, providerIdentity, schemaIdentity, 1, [
@@ -7925,18 +7946,32 @@ internal sealed class NativeCoreRegistrationTests
             providerArtifact);
         var providerReference = TrRmExecutableCompiler
             .CreateStandardReference(providerInput, providerIdentity, []);
-        var referencedOutput = providerReference.Interfaces.Single()
-            .Members.Single().NativeOutputContracts.Single();
+        var referencedMember = providerReference.Interfaces.Single()
+            .Members.Single();
+        Assert.That(referencedMember.NativeOutputContracts.Length,
+            Is.EqualTo(multipleOutputs ? 2 : 1));
+        if (multipleOutputs)
+        {
+            Assert.That(referencedMember.NativeOutputContracts.Any(
+                contract => contract.PointeeType == PrimitiveType.Int32),
+                Is.True);
+        }
+        var referencedOutput
+            = referencedMember.NativeOutputContracts.Single(contract =>
+                contract.PointeeType == outputType);
         AssertOutputType(providerReference, referencedOutput.PointeeType);
         Assert.That(referencedOutput.Dependencies,
-            Is.EqualTo(providerMember.NativeOutputContracts.Single()
-                .Dependencies));
+            Is.EqualTo(outputContract.Dependencies));
         var consumerCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse(consumerSource), providerReference, options);
         Assert.That(consumerCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine,
                 consumerCompilation.Diagnostics));
         var consumerProgram = consumerCompilation.Program!;
+        if (multipleOutputs)
+        {
+            AssertOutputFormalOrder(consumerProgram);
+        }
         if (floatInputConversion)
         {
             AssertFloatTagConversion(consumerProgram);
@@ -7958,8 +7993,14 @@ internal sealed class NativeCoreRegistrationTests
             Assert.That(body.GetBlockCode(0).ToArray().Contains((byte)0xD0),
                 Is.True);
         }
+        var outputValueHome = consumerProgram.Functions.Single(
+            static function => function.Name == "InvokePointer")
+            .ParameterCount + (multipleOutputs ? 1 : 0);
         Assert.That(body.GetBlockCode(1).ToArray(),
-            Is.EqualTo(new byte[] { 0xD5, 0, 4, 0, 0x17, 0 }));
+            Is.EqualTo(new byte[] {
+                0xD5, 0, checked((byte)outputValueHome),
+                checked((byte)(outputValueHome >> 8)), 0x17, 0,
+            }));
         Assert.That(body.GetBlockCode(2).ToArray(),
             Is.EqualTo(new byte[] { 0xD5, 0, 3, 0, 0x17, 0 }));
 
@@ -8022,13 +8063,18 @@ internal sealed class NativeCoreRegistrationTests
         {
             AssertFloatTagConversion(loaded);
         }
+        if (multipleOutputs)
+        {
+            AssertOutputFormalOrder(loaded);
+        }
         var successReturn = (BoundReturn)loadedFunction.Body.Statements
             .OfType<BoundIf>().Single().Then.Statements.Single();
         Assert.That(successReturn.Value, Is.TypeOf<BoundRead>());
         Assert.That(successReturn.Value.Type,
             Is.EqualTo(loadedFunction.ReturnType));
         Assert.That(((BoundRead)successReturn.Value).Variable,
-            Is.EqualTo(loadedFunction.ParameterCount));
+            Is.EqualTo(loadedFunction.ParameterCount
+                + (multipleOutputs ? 1 : 0)));
 
         var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(loaded,
             consumerIdentity, schemaIdentity, 1, []);
@@ -8041,6 +8087,10 @@ internal sealed class NativeCoreRegistrationTests
         if (floatInputConversion)
         {
             AssertFloatTagConversion(reloaded);
+        }
+        if (multipleOutputs)
+        {
+            AssertOutputFormalOrder(reloaded);
         }
         return reloaded;
 
@@ -8094,6 +8144,37 @@ internal sealed class NativeCoreRegistrationTests
             Assert.That(conversion.Type, Is.EqualTo(PrimitiveType.Int32));
             Assert.That(conversion.Operand.Type,
                 Is.EqualTo(PrimitiveType.Float64));
+        }
+
+        static void AssertOutputFormalOrder(BoundProgram candidate)
+        {
+            var function = candidate.Functions.Single(
+                static function => function.Name == "InvokePointer");
+            BoundCall? outerCall = null;
+            _ = BoundTreeTraversal.VisitExpressions(function.Body,
+                expression =>
+                {
+                    if (expression is BoundCall call
+                        && call.ForeignInterfaceCall?.Member.Name
+                            == "TryGetPointer")
+                    {
+                        outerCall = call;
+                    }
+                });
+            var selectedCall = outerCall
+                ?? throw new AssertionException(
+                    "Expected the FNI TryGetPointer call.");
+            var outputArguments = Enumerable.Range(0,
+                    selectedCall.Arguments.Length)
+                .Where(index => selectedCall.Arguments[index]
+                    is BoundNativeOutputReservation)
+                .ToArray();
+            Assert.That(outputArguments, Has.Length.EqualTo(2));
+            Assert.That(outputArguments.Select(index =>
+                    selectedCall.ParameterIndex(index)),
+                Is.EqualTo(new[] { 3, 2 }));
+            Assert.That(selectedCall.ForeignInterfaceCall!
+                .NativeOutputContracts.Length, Is.EqualTo(2));
         }
     }
 
