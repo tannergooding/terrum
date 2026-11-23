@@ -1828,6 +1828,15 @@ internal sealed class StandaloneMethodImportInputTests
         "namespace client { int32 Main(int32 limit) { "
             + "mut int32 counter = 0; "
             + "while (counter < limit) { "
+            + "while (counter < limit) { "
+            + "counter = counter + 1; break; } "
+            + "counter = counter + 2; "
+            + "counter = counter + 3; } return counter; } }",
+        0, 232, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { int32 Main(int32 limit) { "
+            + "mut int32 counter = 0; "
+            + "while (counter < limit) { "
             + "counter = counter + 1; "
             + "if (counter == 2) break; } "
             + "return counter; } }", 0, 221, false)]
@@ -7877,14 +7886,16 @@ internal sealed class StandaloneMethodImportInputTests
                 int32 status = BindStandaloneOwnedSourceProgram();
                 int32 expectedBlockCount
                     = {{verificationMode == 226 ? 4
-                        : verificationMode == 231 ? 6 : 5}};
+                        : verificationMode is 231 or 232 ? 6 : 5}};
                 int32 expectedStatementCount
-                    = {{verificationMode is 230 or 231 ? 7 : 6}};
+                    = {{verificationMode is 230 or 231 ? 7
+                        : verificationMode == 232 ? 8 : 6}};
                 int32 expectedNestedChildCount
                     = {{verificationMode == 226 ? 1
                         : verificationMode == 230 ? 3 : 2}};
                 int32 expectedOuterChildCount
-                    = {{verificationMode is 226 or 231 ? 2 : 1}};
+                    = {{verificationMode is 226 or 231 ? 2
+                        : verificationMode == 232 ? 3 : 1}};
                 if (status != 0
                     || Host.StandaloneSourceBodyCount[0] != 1
                     || Host.StandaloneSourceStatementCount[0]
@@ -7897,11 +7908,15 @@ internal sealed class StandaloneMethodImportInputTests
                         != {{verificationMode == 226 ? 8 : 5}}
                     || Host.StandaloneSourceStatements[12]
                         != {{verificationMode == 226 ? 5
-                            : verificationMode is 227 or 231 ? 8 : 5}}
+                            : verificationMode is 227 or 231 or 232
+                                ? 8 : 5}}
                     || ({{verificationMode == 230}}
                         && Host.StandaloneSourceStatements[15] != 8)
                     || ({{verificationMode == 231}}
                         && Host.StandaloneSourceStatements[15] != 5)
+                    || ({{verificationMode == 232}}
+                        && (Host.StandaloneSourceStatements[15] != 5
+                            || Host.StandaloneSourceStatements[18] != 5))
                     || Host.StandaloneSourceStatementParentIds[2] != 1
                     || Host.StandaloneSourceStatementParentIds[3] != 2
                     || Host.StandaloneSourceStatementParentIds[4]
@@ -7909,6 +7924,10 @@ internal sealed class StandaloneMethodImportInputTests
                     || ({{verificationMode is 230 or 231}}
                         && (Host.StandaloneSourceStatementParentIds[5]
                             != {{verificationMode == 230 ? 2 : 1}}))
+                    || ({{verificationMode == 232}}
+                        && (Host.StandaloneSourceStatementParentIds[5] != 1
+                            || Host.StandaloneSourceStatementParentIds[6]
+                                != 1))
                     || Host.StandaloneSourceIfNodes[2]
                         != expectedOuterChildCount
                     || Host.StandaloneSourceIfNodes[7]
@@ -7924,13 +7943,14 @@ internal sealed class StandaloneMethodImportInputTests
                     || Host.StandaloneNormalizedBodyBlockRanges[1]
                         != expectedBlockCount
                     || Host.StandaloneNormalizedConstantCount[0]
-                        != {{verificationMode is 230 or 231 ? 3 : 2}}
+                        != {{verificationMode is 230 or 231 ? 3
+                            : verificationMode == 232 ? 4 : 2}}
                     || Host.StandaloneNormalizedBlocks[20] != 4
                     || Host.StandaloneNormalizedBlocks[24] != 2
                     || Host.StandaloneNormalizedBlocks[25]
                         != {{verificationMode == 226 ? 3
-                            : verificationMode == 231 ? 5 : 4}}
-                    || ({{verificationMode != 231}}
+                            : verificationMode is 231 or 232 ? 5 : 4}}
+                    || ({{verificationMode is not 231 and not 232}}
                         && Host.StandaloneNormalizedBlocks[29] != 5)
                     || Host.StandaloneNormalizedBlocks[36]
                         != {{verificationMode == 226 ? 3 : 4}}
@@ -7941,8 +7961,9 @@ internal sealed class StandaloneMethodImportInputTests
                             || Host.StandaloneNormalizedBlocks[45] != 6
                             || Host.StandaloneNormalizedBlocks[52] != 3
                             || Host.StandaloneNormalizedBlocks[56] != 1))
-                    || ({{verificationMode == 231}}
+                    || ({{verificationMode is 231 or 232}}
                         && (Host.StandaloneNormalizedBlocks[41] != 4
+                            || Host.StandaloneNormalizedBlocks[45] != 7
                             || Host.StandaloneNormalizedBlocks[52] != 3
                             || Host.StandaloneNormalizedBlocks[56] != 4
                             || Host.StandaloneNormalizedBlocks[68] != 3
@@ -8024,7 +8045,7 @@ internal sealed class StandaloneMethodImportInputTests
                 ? conditionalLoopBreakVerificationSource
             : verificationMode is >= 221 and <= 224
                 ? assignmentBeforeConditionalBreakVerificationSource
-            : verificationMode is 226 or 227 or 230 or 231
+            : verificationMode is 226 or 227 or 230 or 231 or 232
                 ? nestedWhileVerificationSource
             : verificationMode == 161
                 ? importedCallInConditionalReturnVerificationSource
@@ -8513,7 +8534,7 @@ internal sealed class StandaloneMethodImportInputTests
                     or 208 or 209 or 213 or 214 or 215
                     or 216 or 217 or 218 or 219 or 220 or 221
                     or 222 or 223 or 224 or 225 or 226 or 227
-                    or 230 or 231)
+                    or 230 or 231 or 232)
             {
                 var expectedBlockCount
                     = verificationMode is 159 or 160 or 165 or 166
@@ -8550,6 +8571,7 @@ internal sealed class StandaloneMethodImportInputTests
                         : verificationMode == 227 ? 5
                         : verificationMode == 230 ? 5
                         : verificationMode == 231 ? 6
+                        : verificationMode == 232 ? 6
                         : verificationMode == 228 ? 3
                         : verificationMode == 229 ? 3
                         : verificationMode == 211 ? 1
@@ -8596,6 +8618,7 @@ internal sealed class StandaloneMethodImportInputTests
                             : verificationMode == 227 ? 2
                             : verificationMode == 230 ? 2
                             : verificationMode == 231 ? 2
+                            : verificationMode == 232 ? 2
                             : verificationMode == 228 ? 0
                             : verificationMode == 229 ? 0
                             : verificationMode == 189 ? 1
@@ -8637,7 +8660,7 @@ internal sealed class StandaloneMethodImportInputTests
                     and not 216 and not 217 and not 218 and not 219
                     and not 220 and not 221 and not 222 and not 223
                     and not 224 and not 225 and not 226 and not 227
-                    and not 230 and not 231
+                    and not 230 and not 231 and not 232
                     and not 228 and not 229)
                 {
                     Assert.That(bodyReader.GetBlockCode(0)
@@ -9240,7 +9263,7 @@ internal sealed class StandaloneMethodImportInputTests
                         and not 216 and not 217 and not 218 and not 219
                         and not 220 and not 221 and not 222 and not 223
                         and not 224 and not 225 and not 226 and not 227
-                        and not 230 and not 231
+                        and not 230 and not 231 and not 232
                         and not 228 and not 229
                         and not 170 and not 171)
                 {
@@ -9426,6 +9449,10 @@ internal sealed class StandaloneMethodImportInputTests
             {
                 expectedDecoderConstantMapCount = 3;
             }
+            if (verificationMode == 232)
+            {
+                expectedDecoderConstantMapCount = 4;
+            }
             if (verificationMode == 229)
             {
                 expectedDecoderConstantMapCount = 2;
@@ -9525,6 +9552,8 @@ internal sealed class StandaloneMethodImportInputTests
                     + "Host.StandaloneDecoderBodies[21] != 9",
                 231 => "Host.StandaloneDecoderBodies[19] != 6 || "
                     + "Host.StandaloneDecoderBodies[21] != 9",
+                232 => "Host.StandaloneDecoderBodies[19] != 6 || "
+                    + "Host.StandaloneDecoderBodies[21] != 11",
                 159 or 160 => "Host.StandaloneDecoderBodies[19] != 5 || "
                     + "Host.StandaloneDecoderBodies[21] != 7",
                 162 or 163 or 164
@@ -9710,6 +9739,7 @@ internal sealed class StandaloneMethodImportInputTests
                     or 216 or 217 or 218 or 219 or 220 or 221
                     or 222 or 223 or 224 or 225 or 226 or 227 or 230
                     or 231
+                    or 232
                     or 228 or 229)
             {
                 var artifactIndex = new TrRmArtifactIndex(artifact);
@@ -9879,6 +9909,7 @@ internal sealed class StandaloneMethodImportInputTests
                     216 or 217 or 218 or 219 or 220 or 221
                     or 222 or 223 or 224 or 225 or 226 or 227 or 230
                     or 231
+                    or 232
                     or 228 or 229 => 1,
                     161 => 2,
                     162 => 3,
@@ -10526,6 +10557,11 @@ internal sealed class StandaloneMethodImportInputTests
                         Assert.That(Execute(0), Is.EqualTo(0));
                         Assert.That(Execute(1), Is.EqualTo(3));
                         Assert.That(Execute(3), Is.EqualTo(3));
+                        break;
+                    case 232:
+                        Assert.That(Execute(0), Is.EqualTo(0));
+                        Assert.That(Execute(1), Is.EqualTo(6));
+                        Assert.That(Execute(3), Is.EqualTo(6));
                         break;
                 }
             }
