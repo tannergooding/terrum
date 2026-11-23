@@ -5248,11 +5248,11 @@ int32 ParseStandaloneSourceWhileBody(int32 localCallableId,
                 {
                     cursor = cursor + 1;
                 }
-                if (cursor != blockClose)
+                if (cursor == blockClose)
                 {
-                    return 2;
+                    break;
                 }
-                break;
+                continue;
             }
             if (transferKind != 0)
             {
@@ -5261,11 +5261,11 @@ int32 ParseStandaloneSourceWhileBody(int32 localCallableId,
                 {
                     cursor = cursor + 1;
                 }
-                if (cursor != blockClose)
+                if (cursor == blockClose)
                 {
-                    return 2;
+                    break;
                 }
-                break;
+                continue;
             }
         }
         *nextTokenResult = blockClose + 1;
@@ -10799,8 +10799,7 @@ int32 VerifyStandaloneDirectCalls()
                         int32 conditionExpressionId
                             = Host.StandaloneSourceStatements[
                                 childStatementOffset + 1];
-                        if (childCount < 1 || childCount > 2
-                            || childIndex != 0
+                        if (childCount < 1 || childIndex != 0
                             || sawLoopTransfer
                             || Host.StandaloneSourceStatements[
                                 childStatementOffset + 2] != loopNodeId

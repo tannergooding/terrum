@@ -1112,7 +1112,10 @@ int32 NormalizeStandaloneSourceLoopBody(int32 bodyId,
             int32 conditionExpressionId
                 = Host.StandaloneSourceStatements[
                     childStatementOffset + 1];
-            if (childCount != bodyBlockCount || childIndex != 0
+            if (childIndex != 0
+                || bodyBlockCount < 1 || bodyBlockCount > 2
+                || (bodyBlockCount == 1 && childCount != 1)
+                || (bodyBlockCount == 2 && childCount < 2)
                 || Host.StandaloneSourceStatements[
                     childStatementOffset + 2] != loopNodeId
                 || conditionExpressionId < 0
@@ -1219,36 +1222,43 @@ int32 NormalizeStandaloneSourceLoopBody(int32 bodyId,
             {
                 return 3;
             }
-            int32 assignmentStatementId
-                = Host.StandaloneSourceIfChildren[
-                    childFirst + 1];
-            if (assignmentStatementId < 0
-                || assignmentStatementId
-                    >= Host.StandaloneSourceStatementCount[0])
-            {
-                return 3;
-            }
-            int32 assignmentStatementOffset
-                = assignmentStatementId * 3;
-            if (Host.StandaloneSourceStatementParentIds[
-                    assignmentStatementId] != statementId
-                || Host.StandaloneSourceStatements[
-                    assignmentStatementOffset] != 5)
-            {
-                return 3;
-            }
             int32 assignmentOperationFirst
                 = Host.StandaloneNormalizedOperationCount[0];
-            init int32 assignmentTerminalKind;
-            int32 assignmentStatus
-                = NormalizeStandaloneSourceStatement(
-                    bodyId, assignmentStatementOffset,
-                    ref init assignmentTerminalKind);
-            if (assignmentStatus != 0
-                || assignmentTerminalKind != 0)
+            for (mut int32 assignmentOrdinal = 1;
+                assignmentOrdinal < childCount;
+                assignmentOrdinal = assignmentOrdinal + 1)
             {
-                return assignmentStatus != 0
-                    ? assignmentStatus : 2;
+                int32 assignmentStatementId
+                    = Host.StandaloneSourceIfChildren[
+                        childFirst + assignmentOrdinal];
+                if (assignmentStatementId < 0
+                    || assignmentStatementId
+                        >= Host.StandaloneSourceStatementCount[0])
+                {
+                    return 3;
+                }
+                int32 assignmentStatementOffset
+                    = assignmentStatementId * 3;
+                if (Host.StandaloneSourceStatementParentIds[
+                        assignmentStatementId] != statementId
+                    || Host.StandaloneSourceStatements[
+                        assignmentStatementOffset] != 5)
+                {
+                    return 3;
+                }
+                init int32 assignmentTerminalKind;
+                int32 assignmentStatus
+                    = NormalizeStandaloneSourceStatement(
+                        bodyId, assignmentStatementOffset,
+                        ref init assignmentTerminalKind);
+                if (assignmentStatus != 0
+                    || assignmentTerminalKind != 0
+                    || Host.StandaloneNormalizedBlockCount[0]
+                        != expectedBlockCountBeforeBody + 1)
+                {
+                    return assignmentStatus != 0
+                        ? assignmentStatus : 2;
+                }
             }
             int32 assignmentOperationCount
                 = Host.StandaloneNormalizedOperationCount[0]
@@ -1340,34 +1350,39 @@ int32 GetStandaloneSourceLoopBodyBlockCount(int32 statementId,
     {
         return 3;
     }
-    if (childCount == 2)
+    if (childCount > 1)
     {
         int32 firstChildId
             = Host.StandaloneSourceIfChildren[childFirst];
-        int32 secondChildId
-            = Host.StandaloneSourceIfChildren[childFirst + 1];
         if (firstChildId < 0
             || firstChildId
                 >= Host.StandaloneSourceStatementCount[0]
-            || secondChildId < 0
-            || secondChildId
-                >= Host.StandaloneSourceStatementCount[0]
             || Host.StandaloneSourceStatementParentIds[
-                firstChildId] != statementId
-            || Host.StandaloneSourceStatementParentIds[
-                secondChildId] != statementId)
+                firstChildId] != statementId)
         {
             return 3;
         }
         int32 firstChildKind
             = Host.StandaloneSourceStatements[firstChildId * 3];
-        int32 secondChildKind
-            = Host.StandaloneSourceStatements[secondChildId * 3];
         if (firstChildKind == 12 || firstChildKind == 13)
         {
-            if (secondChildKind != 5)
+            for (mut int32 childOrdinal = 1;
+                childOrdinal < childCount;
+                childOrdinal = childOrdinal + 1)
             {
-                return 2;
+                int32 childId
+                    = Host.StandaloneSourceIfChildren[
+                        childFirst + childOrdinal];
+                if (childId < 0
+                    || childId
+                        >= Host.StandaloneSourceStatementCount[0]
+                    || Host.StandaloneSourceStatementParentIds[
+                        childId] != statementId
+                    || Host.StandaloneSourceStatements[
+                        childId * 3] != 5)
+                {
+                    return 2;
+                }
             }
             *blockCountResult = 2;
             return 0;
