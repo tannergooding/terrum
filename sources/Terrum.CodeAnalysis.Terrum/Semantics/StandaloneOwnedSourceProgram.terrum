@@ -2713,6 +2713,34 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
                         localTypeId = childTypeId;
                     }
                 }
+                int32 localOffset = localId * 10;
+                int32 bindingKind
+                    = Host.StandaloneSourceLocals[localOffset + 3];
+                int32 localState
+                    = Host.StandaloneSourceLocalStates[localId];
+                if ((bindingKind == 1 && localState != 1)
+                    || (bindingKind == 2
+                        && (localState != 0
+                            || falseStatementCount == 0
+                            || trueStatementCount != 1
+                            || falseStatementCount != 1))
+                    || (bindingKind == 3
+                        && (localState != 0 && localState != 1))
+                    || (bindingKind != 1 && bindingKind != 2
+                        && bindingKind != 3))
+                {
+                    return 2;
+                }
+                if (falseStatementCount == 0 && localState == 0
+                    && (bindingKind == 2 || bindingKind == 3))
+                {
+                    return 2;
+                }
+                if (falseStatementCount != 0 && localState == 0
+                    && (bindingKind == 2 || bindingKind == 3))
+                {
+                    Host.StandaloneSourceLocalStates[localId] = 1;
+                }
             }
             sawReturn = bothReturns;
             tokenIndex = afterFalseToken;
@@ -3506,9 +3534,12 @@ int32 ParseStandaloneSourceAssignmentBranch(int32 localCallableId,
         = Host.StandaloneSourceLocals[localOffset + 2];
     int32 bindingKind
         = Host.StandaloneSourceLocals[localOffset + 3];
+    int32 localState
+        = Host.StandaloneSourceLocalStates[localId];
     if (Host.StandaloneSourceLocals[localOffset] != bodyId
-        || (bindingKind != 1 && bindingKind != 3)
-        || Host.StandaloneSourceLocalStates[localId] != 1
+        || !((bindingKind == 1 && localState == 1)
+            || (bindingKind == 2 && localState == 0)
+            || bindingKind == 3)
         || GetStandaloneSourceUse(typeId) != 1)
     {
         return 2;
@@ -9072,13 +9103,23 @@ int32 VerifyStandaloneDirectCalls()
                     int32 bindingKind
                         = Host.StandaloneSourceLocals[
                             localOffset + 3];
+                    int32 localUseCount
+                        = Host.StandaloneSourceLocalDeclarationUseCounts[
+                            joinedLocalId];
+                    int32 localState
+                        = Host.StandaloneSourceLocalStates[joinedLocalId];
                     if (Host.StandaloneSourceLocals[
                             localOffset] != bodyId
-                        || (bindingKind != 1 && bindingKind != 3)
-                        || Host.StandaloneSourceLocalStates[
-                            joinedLocalId] != 1
+                        || (bindingKind != 1 && bindingKind != 2
+                            && bindingKind != 3)
+                        || localState != 1
                         || GetStandaloneSourceUse(localTypeId) != 1
-                        || joinedTypeId != localTypeId)
+                        || joinedTypeId != localTypeId
+                        || (bindingKind == 2
+                            && (falseCount == 0
+                                || trueCount != 1 || falseCount != 1
+                                || localUseCount != 1))
+                        || (bindingKind == 3 && localUseCount < 1))
                     {
                         return 3;
                     }
@@ -9127,6 +9168,13 @@ int32 VerifyStandaloneDirectCalls()
                             Host.StandaloneSourcePlaceUseCounts[
                                 childPlaceId] = 1;
                         }
+                    }
+                    if ((bindingKind == 2
+                            || (bindingKind == 3 && localUseCount == 1))
+                        && localState == 1)
+                    {
+                        Host.StandaloneSourceLocalDeclarationUseCounts[
+                            joinedLocalId] = localUseCount + 1;
                     }
                 }
                 continue;

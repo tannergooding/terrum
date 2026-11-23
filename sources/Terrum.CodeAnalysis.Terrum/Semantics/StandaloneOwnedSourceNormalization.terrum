@@ -1050,7 +1050,11 @@ int32 NormalizeStandaloneSourceIfReturns(int32 bodyId,
         int32 bindingKind
             = Host.StandaloneSourceLocals[localOffset + 3];
         if (Host.StandaloneSourceLocals[localOffset] != bodyId
-            || (bindingKind != 1 && bindingKind != 3)
+            || (bindingKind != 1 && bindingKind != 2
+                && bindingKind != 3)
+            || (bindingKind == 2
+                && (falseCount == 0 || trueCount != 1
+                    || falseCount != 1))
             || Host.StandaloneSourceLocalStates[localId] != 1
             || Host.StandaloneSourceLocals[localOffset + 2]
                 != localTypeId)
@@ -1332,7 +1336,6 @@ int32 NormalizeStandaloneSourceStatement(int32 bodyId,
             || (bindingKind != 1 && bindingKind != 2
                 && bindingKind != 3)
             || (bindingKind == 1 && destinationHomeId < 0)
-            || (bindingKind == 2 && destinationHomeId >= 0)
             || expressionId < 0)
         {
             return 3;

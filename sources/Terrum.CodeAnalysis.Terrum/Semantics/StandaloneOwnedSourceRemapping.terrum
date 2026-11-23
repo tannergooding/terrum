@@ -1502,14 +1502,20 @@ int32 VerifyStandaloneRewrittenSourceArenas()
                         != bodyId
                     || Host.StandaloneSourceLocals[
                         localId * 10 + 2] != typeId
-                    || (Host.StandaloneSourceLocals[
-                            localId * 10 + 3] != 1
-                        && Host.StandaloneSourceLocals[
-                            localId * 10 + 3] != 3)
                     || Host.StandaloneSourceLocalStates[localId] != 1
                     || (assignedLocalId >= 0
                         && (assignedLocalId != localId
                             || assignedTypeId != typeId)))
+                {
+                    return 3;
+                }
+                int32 bindingKind
+                    = Host.StandaloneSourceLocals[localId * 10 + 3];
+                if ((bindingKind != 1 && bindingKind != 2
+                        && bindingKind != 3)
+                    || (bindingKind == 2
+                        && (falseCount == 0 || trueCount != 1
+                            || falseCount != 1)))
                 {
                     return 3;
                 }
