@@ -1852,7 +1852,9 @@ int32 VerifyStandaloneRewrittenSourceArenas()
                 {
                     sameAssignedLocal = false;
                 }
-                if (bindingKind != 1 && bindingKind != 3)
+                if (bindingKind != 1 && bindingKind != 3
+                    && !(controlStatementKind == 11
+                        && conditionOmitted && bindingKind == 2))
                 {
                     allAssignedLocalsMutable = false;
                 }

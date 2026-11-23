@@ -3652,7 +3652,7 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
                     }
                     int32 stepValidationStatus
                         = ValidateStandaloneSourceWhileAssignment(
-                            localCallableId, stepStatementId);
+                            localCallableId, stepStatementId, false);
                     if (stepValidationStatus != 0)
                     {
                         return stepValidationStatus;
@@ -5009,10 +5009,16 @@ int32 ParseStandaloneSourceWhileBody(int32 localCallableId,
     ensure return == 0 ? *nextTokenResult is init : true
 {
     if (tokenStart < 0 || tokenStart >= tokenEnd
-        || tokenEnd > Host.Tokens.Length / 3)
+        || tokenEnd > Host.Tokens.Length / 3
+        || loopStatementId < 0
+        || loopStatementId >= Host.StandaloneSourceStatementCount[0])
     {
         return 2;
     }
+    bool allowFixedInitialization
+        = Host.StandaloneSourceStatements[loopStatementId * 3] == 11
+            && Host.StandaloneSourceStatements[
+                loopStatementId * 3 + 1] == -1;
 
     int32 blockClose = -1;
     if (Host.Tokens[tokenStart * 3] == 52)
@@ -5088,7 +5094,8 @@ int32 ParseStandaloneSourceWhileBody(int32 localCallableId,
             {
                 int32 childStatus
                     = ValidateStandaloneSourceWhileAssignment(
-                        localCallableId, childStatementId);
+                        localCallableId, childStatementId,
+                        allowFixedInitialization);
                 if (childStatus != 0)
                 {
                     return childStatus;
@@ -5168,7 +5175,8 @@ int32 ParseStandaloneSourceWhileBody(int32 localCallableId,
     if (transferKind == 0)
     {
         int32 childStatus = ValidateStandaloneSourceWhileAssignment(
-            localCallableId, childStatementId);
+            localCallableId, childStatementId,
+            allowFixedInitialization);
         if (childStatus != 0)
         {
             return childStatus;
@@ -5186,7 +5194,7 @@ int32 ParseStandaloneSourceWhileBody(int32 localCallableId,
 }
 
 int32 ValidateStandaloneSourceWhileAssignment(int32 bodyId,
-    int32 statementId)
+    int32 statementId, bool allowFixedInitialization)
 {
     if (statementId < 0
         || statementId >= Host.StandaloneSourceStatementCount[0]
@@ -5218,7 +5226,8 @@ int32 ValidateStandaloneSourceWhileAssignment(int32 bodyId,
         || Host.StandaloneSourcePlaces[placeOffset] != bodyId
         || Host.StandaloneSourcePlaces[placeOffset + 2] != 2
         || Host.StandaloneSourcePlaces[placeOffset + 1] != typeId
-        || (bindingKind != 1 && bindingKind != 3)
+        || (bindingKind != 1 && bindingKind != 3
+            && !(allowFixedInitialization && bindingKind == 2))
         || Host.StandaloneSourceLocalStates[localId] != 1
         || GetStandaloneSourceUse(typeId) != 1)
     {
@@ -10685,7 +10694,10 @@ int32 VerifyStandaloneDirectCalls()
                             childPlaceOffset + 2] != 2
                         || Host.StandaloneSourceLocals[
                             childLocalOffset] != bodyId
-                        || (bindingKind != 1 && bindingKind != 3)
+                        || (bindingKind != 1 && bindingKind != 3
+                            && !(statementKind == 11
+                                && conditionOmitted
+                                && bindingKind == 2))
                         || Host.StandaloneSourceLocalStates[
                             childLocalId] != 1
                         || GetStandaloneSourceUse(childTypeId) != 1
@@ -10712,7 +10724,8 @@ int32 VerifyStandaloneDirectCalls()
                     int32 localUseCount
                         = Host.StandaloneSourceLocalDeclarationUseCounts[
                             childLocalId];
-                    if (bindingKind == 3 && localUseCount == 1)
+                    if ((bindingKind == 2 || bindingKind == 3)
+                        && localUseCount == 1)
                     {
                         Host.StandaloneSourceLocalDeclarationUseCounts[
                             childLocalId] = localUseCount + 1;
