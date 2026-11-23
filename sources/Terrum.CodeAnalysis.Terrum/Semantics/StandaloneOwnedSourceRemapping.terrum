@@ -1506,25 +1506,33 @@ int32 VerifyStandaloneRewrittenSourceArenas()
             int32 conditionExpressionId
                 = Host.StandaloneSourceStatements[
                     controlStatementId * 3 + 1];
-            if (conditionExpressionId < 0
-                || conditionExpressionId >= bodyExpressionCount
-                || !IsStandaloneLogicalNotType(
-                    Host.StandaloneSourceExpressions[
-                        (bodyExpressionFirst
-                            + conditionExpressionId) * 8 + 1]))
+            bool conditionOmitted
+                = controlStatementKind == 11
+                    && conditionExpressionId == -1;
+            if (conditionOmitted
+                ? conditionExpressionId != -1
+                : conditionExpressionId < 0
+                    || conditionExpressionId >= bodyExpressionCount
+                    || !IsStandaloneLogicalNotType(
+                        Host.StandaloneSourceExpressions[
+                            (bodyExpressionFirst
+                                + conditionExpressionId) * 8 + 1]))
             {
                 return 3;
             }
-            int32 conditionKind
-                = Host.StandaloneSourceExpressions[
-                    (bodyExpressionFirst
-                        + conditionExpressionId) * 8];
-            if ((controlStatementKind == 7
-                    || controlStatementKind == 10
-                    || controlStatementKind == 11)
-                && conditionKind == 34)
+            if (!conditionOmitted)
             {
-                return 3;
+                int32 conditionKind
+                    = Host.StandaloneSourceExpressions[
+                        (bodyExpressionFirst
+                            + conditionExpressionId) * 8];
+                if ((controlStatementKind == 7
+                        || controlStatementKind == 10
+                        || controlStatementKind == 11)
+                    && conditionKind == 34)
+                {
+                    return 3;
+                }
             }
 
             if (controlStatementKind == 6 && trueCount <= 0)
@@ -1550,6 +1558,7 @@ int32 VerifyStandaloneRewrittenSourceArenas()
             mut bool sameAssignedLocal = true;
             mut bool allAssignedLocalsMutable = true;
             mut bool sawLoopTransfer = false;
+            mut int32 loopTransferKind = 0;
             for (mut int32 childOrdinal = 0;
             childOrdinal < trueCount + falseCount;
             childOrdinal = childOrdinal + 1)
@@ -1596,6 +1605,7 @@ int32 VerifyStandaloneRewrittenSourceArenas()
                     return 3;
                 }
                 sawLoopTransfer = true;
+                loopTransferKind = currentChildKind;
                 continue;
             }
             if (controlIsLoop
@@ -1758,6 +1768,10 @@ int32 VerifyStandaloneRewrittenSourceArenas()
                         return 3;
                     }
                 }
+            }
+            if (conditionOmitted && loopTransferKind != 8)
+            {
+                return 3;
             }
         }
     }

@@ -1333,7 +1333,11 @@ int32 NormalizeStandaloneSourceForLoop(int32 bodyId,
         = Host.StandaloneSourceStatements[statementOffset + 1];
     int32 loopNodeId
         = Host.StandaloneSourceStatements[statementOffset + 2];
-    if (conditionExpressionId < 0
+    bool conditionOmitted = conditionExpressionId == -1;
+    if (conditionExpressionId < -1
+        || (!conditionOmitted
+            && conditionExpressionId
+                >= Host.StandaloneSourceBodies[bodyId * 12 + 4])
         || loopNodeId < 0
         || loopNodeId >= Host.StandaloneSourceIfNodeCount[0]
         || Host.StandaloneSourceIfNodes[loopNodeId * 5] != bodyId)
@@ -1343,35 +1347,40 @@ int32 NormalizeStandaloneSourceForLoop(int32 bodyId,
 
     int32 bodyExpressionFirst
         = Host.StandaloneSourceBodies[bodyId * 12 + 3];
-    int32 bodyExpressionCount
-        = Host.StandaloneSourceBodies[bodyId * 12 + 4];
-    if (conditionExpressionId >= bodyExpressionCount)
+    mut int32 conditionTypeId = 0;
+    mut int32 conditionKind = 0;
+    if (!conditionOmitted)
     {
-        return 3;
-    }
-    int32 conditionExpressionOffset
-        = (bodyExpressionFirst + conditionExpressionId) * 8;
-    int32 conditionTypeId
-        = Host.StandaloneSourceExpressions[
-            conditionExpressionOffset + 1];
-    int32 conditionKind
-        = Host.StandaloneSourceExpressions[
-            conditionExpressionOffset];
-    if (!IsStandaloneLogicalNotType(conditionTypeId)
-        || conditionKind == 34)
-    {
-        return 2;
-    }
-    init bool conditionDoesNotReturn;
-    int32 conditionDoesNotReturnStatus
-        = TryGetStandaloneSourceExpressionDoesNotReturn(
-            bodyId, conditionExpressionId,
-            ref init conditionDoesNotReturn);
-    if (conditionDoesNotReturnStatus != 0
-        || conditionDoesNotReturn)
-    {
-        return conditionDoesNotReturnStatus != 0
-            ? conditionDoesNotReturnStatus : 2;
+        int32 bodyExpressionCount
+            = Host.StandaloneSourceBodies[bodyId * 12 + 4];
+        if (conditionExpressionId >= bodyExpressionCount)
+        {
+            return 3;
+        }
+        int32 conditionExpressionOffset
+            = (bodyExpressionFirst + conditionExpressionId) * 8;
+        conditionTypeId
+            = Host.StandaloneSourceExpressions[
+                conditionExpressionOffset + 1];
+        conditionKind
+            = Host.StandaloneSourceExpressions[
+                conditionExpressionOffset];
+        if (!IsStandaloneLogicalNotType(conditionTypeId)
+            || conditionKind == 34)
+        {
+            return 2;
+        }
+        init bool conditionDoesNotReturn;
+        int32 conditionDoesNotReturnStatus
+            = TryGetStandaloneSourceExpressionDoesNotReturn(
+                bodyId, conditionExpressionId,
+                ref init conditionDoesNotReturn);
+        if (conditionDoesNotReturnStatus != 0
+            || conditionDoesNotReturn)
+        {
+            return conditionDoesNotReturnStatus != 0
+                ? conditionDoesNotReturnStatus : 2;
+        }
     }
 
     int32 loopNodeOffset = loopNodeId * 5;
@@ -1413,8 +1422,14 @@ int32 NormalizeStandaloneSourceForLoop(int32 bodyId,
                 lastChildStatementId * 3] == 8;
     }
 
-    mut int32 conditionBlockCount = 1;
-    if (conditionKind == 35 || conditionKind == 36)
+    if (conditionOmitted && !bodyBreaksImmediately)
+    {
+        return 2;
+    }
+
+    mut int32 conditionBlockCount = conditionOmitted ? 0 : 1;
+    if (!conditionOmitted
+        && (conditionKind == 35 || conditionKind == 36))
     {
         init int32 conditionLeafCount;
         init bool conditionIsHomogeneous;
@@ -1463,13 +1478,16 @@ int32 NormalizeStandaloneSourceForLoop(int32 bodyId,
         return 3;
     }
 
-    int32 conditionStatus = NormalizeStandaloneSourceLoopCondition(
-        bodyId, conditionExpressionId, conditionTypeId,
-        conditionKind, conditionBlockCount, conditionBlockStart,
-        bodyBlockId, exitBlockId, finalBodyBlockCount);
-    if (conditionStatus != 0)
+    if (!conditionOmitted)
     {
-        return conditionStatus;
+        int32 conditionStatus = NormalizeStandaloneSourceLoopCondition(
+            bodyId, conditionExpressionId, conditionTypeId,
+            conditionKind, conditionBlockCount, conditionBlockStart,
+            bodyBlockId, exitBlockId, finalBodyBlockCount);
+        if (conditionStatus != 0)
+        {
+            return conditionStatus;
+        }
     }
 
     int32 expectedBlockCountBeforeBody

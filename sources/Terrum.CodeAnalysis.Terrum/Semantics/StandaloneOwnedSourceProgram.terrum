@@ -2890,45 +2890,56 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
                     initializerSemicolon + 1, headerClose,
                     ref init conditionSemicolon);
             if (conditionSemicolonStatus != 0
-                || conditionSemicolon <= initializerSemicolon + 1)
+                || conditionSemicolon < initializerSemicolon + 1)
             {
                 return conditionSemicolonStatus != 0
                     ? conditionSemicolonStatus : 2;
             }
 
-            init int32 boolTypeId;
-            int32 boolTypeStatus = InternStandaloneCallableTypeFact(
-                0, 1, false, ref init boolTypeId);
-            if (boolTypeStatus != 0)
+            bool conditionOmitted
+                = conditionSemicolon == initializerSemicolon + 1;
+            mut int32 conditionExpressionId = -1;
+            if (!conditionOmitted)
             {
-                return boolTypeStatus;
-            }
-            init int32 conditionExpressionId;
-            init int32 nextConditionToken;
-            int32 conditionStatus = ParseStandaloneSourceExpression(
-                localCallableId, localCallableId, expressionFirst,
-                boolTypeId, initializerSemicolon + 1,
-                conditionSemicolon, 1,
-                ref init conditionExpressionId,
-                ref init nextConditionToken);
-            if (conditionStatus != 0)
-            {
-                return conditionStatus;
-            }
-            if (nextConditionToken != conditionSemicolon)
-            {
-                return 1;
-            }
-            init bool conditionDoesNotReturn;
-            int32 conditionDoesNotReturnStatus
-                = TryGetStandaloneSourceExpressionDoesNotReturn(
-                    localCallableId, conditionExpressionId,
-                    ref init conditionDoesNotReturn);
-            if (conditionDoesNotReturnStatus != 0
-                || conditionDoesNotReturn)
-            {
-                return conditionDoesNotReturnStatus != 0
-                    ? conditionDoesNotReturnStatus : 2;
+                init int32 boolTypeId;
+                int32 boolTypeStatus
+                    = InternStandaloneCallableTypeFact(
+                        0, 1, false, ref init boolTypeId);
+                if (boolTypeStatus != 0)
+                {
+                    return boolTypeStatus;
+                }
+                init int32 parsedConditionExpressionId;
+                init int32 nextConditionToken;
+                int32 conditionStatus
+                    = ParseStandaloneSourceExpression(
+                        localCallableId, localCallableId,
+                        expressionFirst, boolTypeId,
+                        initializerSemicolon + 1,
+                        conditionSemicolon, 1,
+                        ref init parsedConditionExpressionId,
+                        ref init nextConditionToken);
+                if (conditionStatus != 0)
+                {
+                    return conditionStatus;
+                }
+                if (nextConditionToken != conditionSemicolon)
+                {
+                    return 1;
+                }
+                init bool conditionDoesNotReturn;
+                int32 conditionDoesNotReturnStatus
+                    = TryGetStandaloneSourceExpressionDoesNotReturn(
+                        localCallableId, parsedConditionExpressionId,
+                        ref init conditionDoesNotReturn);
+                if (conditionDoesNotReturnStatus != 0
+                    || conditionDoesNotReturn)
+                {
+                    return conditionDoesNotReturnStatus != 0
+                        ? conditionDoesNotReturnStatus : 2;
+                }
+                conditionExpressionId
+                    = parsedConditionExpressionId;
             }
 
             init int32 controlNodeId;
@@ -9657,15 +9668,20 @@ int32 VerifyStandaloneDirectCalls()
                 || statementKind == 11)
             {
                 int32 loopNodeId = statementLocationId;
+                bool conditionOmitted
+                    = statementKind == 11 && expressionId == -1;
                 if (sawReturn
-                    || expressionId < 0
-                    || expressionId >= bodyExpressionCount
+                    || (conditionOmitted
+                        ? expressionId != -1
+                        : expressionId < 0
+                            || expressionId >= bodyExpressionCount
+                            || !IsStandaloneLogicalNotType(
+                                Host.StandaloneSourceExpressions[
+                                    (bodyExpressionFirst
+                                        + expressionId) * 8 + 1]))
                     || loopNodeId < 0
                     || loopNodeId
                         >= Host.StandaloneSourceIfNodeCount[0]
-                    || !IsStandaloneLogicalNotType(
-                        Host.StandaloneSourceExpressions[
-                            (bodyExpressionFirst + expressionId) * 8 + 1])
                     || Host.StandaloneSourceIfNodes[
                         loopNodeId * 5] != bodyId
                     || Host.StandaloneSourceIfNodes[
@@ -9679,21 +9695,26 @@ int32 VerifyStandaloneDirectCalls()
                 {
                     return 3;
                 }
-                int32 loopConditionKind
-                    = Host.StandaloneSourceExpressions[
-                        (bodyExpressionFirst + expressionId) * 8];
-                if (loopConditionKind == 34)
+                if (!conditionOmitted)
                 {
-                    return 2;
-                }
-                init bool conditionDoesNotReturn;
-                int32 conditionStatus
-                    = TryGetStandaloneSourceExpressionDoesNotReturn(
-                        bodyId, expressionId,
-                        ref init conditionDoesNotReturn);
-                if (conditionStatus != 0 || conditionDoesNotReturn)
-                {
-                    return conditionStatus != 0 ? conditionStatus : 2;
+                    int32 loopConditionKind
+                        = Host.StandaloneSourceExpressions[
+                            (bodyExpressionFirst + expressionId) * 8];
+                    if (loopConditionKind == 34)
+                    {
+                        return 2;
+                    }
+                    init bool conditionDoesNotReturn;
+                    int32 conditionStatus
+                        = TryGetStandaloneSourceExpressionDoesNotReturn(
+                            bodyId, expressionId,
+                            ref init conditionDoesNotReturn);
+                    if (conditionStatus != 0
+                        || conditionDoesNotReturn)
+                    {
+                        return conditionStatus != 0
+                            ? conditionStatus : 2;
+                    }
                 }
 
                 int32 loopNodeOffset = loopNodeId * 5;
@@ -9724,6 +9745,7 @@ int32 VerifyStandaloneDirectCalls()
                 }
 
                 mut bool sawLoopTransfer = false;
+                mut int32 loopTransferKind = 0;
                 for (mut int32 childIndex = 0;
                     childIndex < childCount;
                     childIndex = childIndex + 1)
@@ -9756,6 +9778,7 @@ int32 VerifyStandaloneDirectCalls()
                             return 3;
                         }
                         sawLoopTransfer = true;
+                        loopTransferKind = childKind;
                         continue;
                     }
                     if (sawLoopTransfer || childKind != 5)
@@ -9926,6 +9949,10 @@ int32 VerifyStandaloneDirectCalls()
                         Host.StandaloneSourceLocalDeclarationUseCounts[
                             stepLocalId] = stepLocalUseCount + 1;
                     }
+                }
+                if (conditionOmitted && loopTransferKind != 8)
+                {
+                    return 2;
                 }
                 continue;
             }
