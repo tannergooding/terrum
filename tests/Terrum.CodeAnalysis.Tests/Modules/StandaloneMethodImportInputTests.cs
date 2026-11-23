@@ -1304,6 +1304,13 @@ internal sealed class StandaloneMethodImportInputTests
     [TestCase(BoundRuntimePolicy.FailFast,
         "namespace client { int32 Main(bool condition, int32 initial, "
             + "int32 whenTrue, int32 whenFalse) { "
+            + "mut int32 value = initial; "
+            + "if (condition) { value = whenTrue; value = initial; } "
+            + "else { value = whenFalse; value = whenTrue; } "
+            + "return value; } }", 0, 135, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { int32 Main(bool condition, int32 initial, "
+            + "int32 whenTrue, int32 whenFalse) { "
             + "mut int32 first = initial; mut int32 second = initial; "
             + "if (condition) { first = whenTrue; } "
             + "else { second = whenFalse; } "
@@ -4965,6 +4972,38 @@ internal sealed class StandaloneMethodImportInputTests
                 return 0;
             }
             """;
+        const string mutableIfMultipleJoinVerificationSource = """
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                if (Scan() < 1) { return 92; }
+                int32 status = BindStandaloneOwnedSourceProgram();
+                if (status != 0
+                    || Host.StandaloneSourceStatementCount[0] != 7
+                    || Host.StandaloneSourceLocalCount[0] != 1
+                    || Host.StandaloneSourceIfNodeCount[0] != 1
+                    || Host.StandaloneSourceIfNodes[2] != 2
+                    || Host.StandaloneSourceIfNodes[4] != 2) {
+                    return 93;
+                }
+                status = NormalizeStandaloneOwnedSourceProgram();
+                if (status != 0
+                    || Host.StandaloneNormalizedBlockCount[0] != 4
+                    || Host.StandaloneNormalizedBodyBlockRanges[0] != 0
+                    || Host.StandaloneNormalizedBodyBlockRanges[1] != 4
+                    || Host.StandaloneNormalizedOperationCount[0] != 7) {
+                    return 94;
+                }
+                status = RewriteStandaloneOwnedCallNodes();
+                if (status != 0) { return status; }
+                status = WriteStandaloneScalarModule();
+                if (status != 0
+                    || Host.StandaloneWriterStatus[0] != 0
+                    || Host.StandaloneWriterBodyPlanCount[0] != 1) {
+                    return 95;
+                }
+                return 0;
+            }
+            """;
         var verificationSource = expectedSourceStatus != 0
             ? $$"""
                 namespace Terrum.CodeAnalysis;
@@ -4991,6 +5030,8 @@ internal sealed class StandaloneMethodImportInputTests
                 ? lazyBooleanVerificationSource
             : verificationMode == 134
                 ? mutableIfJoinVerificationSource
+            : verificationMode == 135
+                ? mutableIfMultipleJoinVerificationSource
             : verificationMode == 2
                 ? localOverloadCallVerificationSource
                 : verificationMode == 3
@@ -5414,7 +5455,7 @@ internal sealed class StandaloneMethodImportInputTests
                 Assert.That(code.IndexOf((byte)0xD6),
                     Is.GreaterThanOrEqualTo(0));
             }
-            else if (verificationMode is >= 130 and <= 134)
+            else if (verificationMode is >= 130 and <= 135)
             {
                 var expectedBlockCount
                     = verificationMode == 130 ? 3 : 4;
@@ -5424,7 +5465,7 @@ internal sealed class StandaloneMethodImportInputTests
                     Is.EqualTo(expectedBlockCount + 1));
                 Assert.That(bodyReader.GetBlockCode(0)
                     .IndexOf((byte)0xB1), Is.GreaterThanOrEqualTo(0));
-                if (verificationMode is >= 131 and <= 134)
+                if (verificationMode is >= 131 and <= 135)
                 {
                     Assert.That(bodyReader.GetBlockCode(1)
                         .IndexOf((byte)0xB0),
@@ -5508,6 +5549,8 @@ internal sealed class StandaloneMethodImportInputTests
                     + "Host.StandaloneDecoderBodies[21] != 5",
                 134 => "Host.StandaloneDecoderBodies[19] != 4 || "
                     + "Host.StandaloneDecoderBodies[21] != 5",
+                135 => "Host.StandaloneDecoderBodies[19] != 4 || "
+                    + "Host.StandaloneDecoderBodies[21] != 5",
                 _ => "false",
             };
             var decoderVerificationSource = $$"""
@@ -5554,7 +5597,7 @@ internal sealed class StandaloneMethodImportInputTests
             var decoderExecution = NativeJit.ExecuteWithData(
                 decoderProgram, (NativeRuntimePolicy)policy);
             Assert.That(decoderExecution.ExitCode, Is.EqualTo(0));
-            if (verificationMode is >= 130 and <= 134)
+            if (verificationMode is >= 130 and <= 135)
             {
                 var artifactIndex = new TrRmArtifactIndex(artifact);
                 Assert.That(artifactIndex.TryGetSection(0x0020,
@@ -5759,6 +5802,12 @@ internal sealed class StandaloneMethodImportInputTests
                             Is.EqualTo(11));
                         Assert.That(Execute(0, 7, 11, 13),
                             Is.EqualTo(13));
+                        break;
+                    case 135:
+                        Assert.That(Execute(1, 7, 11, 13),
+                            Is.EqualTo(7));
+                        Assert.That(Execute(0, 7, 11, 13),
+                            Is.EqualTo(11));
                         break;
                 }
             }
