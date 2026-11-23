@@ -3454,7 +3454,8 @@ int32 VerifyStandaloneRewrittenCallNodes()
         int32 blockHomeCount
             = Host.StandaloneRewrittenNormalizedBodies[
                 bodyOffset + 2];
-        if ((terminalKind != 0 && terminalKind != 1)
+        if ((terminalKind != 0 && terminalKind != 1
+                && terminalKind != 2)
             || blockFirst < 0 || bodyBlockCount <= 0
             || bodyBlockCount
                 > Host.StandaloneRewrittenNormalizedBlockCount[0]
@@ -3541,10 +3542,14 @@ int32 VerifyStandaloneRewrittenCallNodes()
             {
                 return 3;
             }
+            if (terminalKind == 2 && blockTerminatorKind != 3)
+            {
+                return 3;
+            }
             if (blockTerminatorKind == 1)
             {
                 if (blockOperationCount == 0
-                    || terminalKind == 1
+                    || terminalKind != 0
                     || target0 != -1 || target1 != -1
                     || conditionSelectorKind != 0
                     || conditionSelectorIndex != 0

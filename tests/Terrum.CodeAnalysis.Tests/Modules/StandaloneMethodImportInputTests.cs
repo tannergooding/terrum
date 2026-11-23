@@ -6613,7 +6613,7 @@ internal sealed class StandaloneMethodImportInputTests
                     || Host.StandaloneNormalizedBlockCount[0] != 2
                     || Host.StandaloneNormalizedBodyBlockRanges[0] != 0
                     || Host.StandaloneNormalizedBodyBlockRanges[1] != 2
-                    || Host.StandaloneNormalizedBodies[11] != 1
+                    || Host.StandaloneNormalizedBodies[11] != 2
                     || Host.StandaloneNormalizedBlocks[8] != 1
                     || Host.StandaloneNormalizedBlocks[20] != 3
                     || Host.StandaloneNormalizedBlocks[24] != 1) {

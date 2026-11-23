@@ -3729,7 +3729,9 @@ int32 BuildStandaloneWriterBodyPlans()
         }
         if (expectedOperationFirst != operationFirst + operationCount
             || edgeCount > 65_536 - blockCount
-            || ((bodyEffectMask & 2) == 0 && !bodyHasNormalReturn))
+            || (terminalKind == 2 && bodyHasNormalReturn)
+            || ((bodyEffectMask & 2) == 0
+                && !bodyHasNormalReturn && terminalKind != 2))
         {
             return 3;
         }

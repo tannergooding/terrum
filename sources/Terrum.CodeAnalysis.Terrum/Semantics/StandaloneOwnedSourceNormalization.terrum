@@ -154,7 +154,7 @@ public static int32 NormalizeStandaloneOwnedSourceProgram()
                 }
                 if (!hasNormalExit)
                 {
-                    terminalKind = 1;
+                    terminalKind = 2;
                     break;
                 }
                 continue;
@@ -6280,7 +6280,8 @@ int32 VerifyStandaloneNormalizedProgram()
             || bodyBlockCount <= 0
             || blockFirst < 0
             || blockFirst > blockCount - bodyBlockCount
-            || (terminalKind != 0 && terminalKind != 1))
+            || (terminalKind != 0 && terminalKind != 1
+                && terminalKind != 2))
         {
             return 3;
         }
@@ -6305,6 +6306,19 @@ int32 VerifyStandaloneNormalizedProgram()
             {
                 if (Host.StandaloneNormalizedBlocks[
                         (blockFirst + localBlock) * 16 + 4] == 1)
+                {
+                    return 3;
+                }
+            }
+        }
+        else if (terminalKind == 2)
+        {
+            for (mut int32 localBlock = 0;
+                localBlock < bodyBlockCount;
+                localBlock = localBlock + 1)
+            {
+                if (Host.StandaloneNormalizedBlocks[
+                        (blockFirst + localBlock) * 16 + 4] != 3)
                 {
                     return 3;
                 }
@@ -6402,7 +6416,8 @@ int32 VerifyStandaloneNormalizedProgram()
             }
             if (localState == 1 && homeId < 0)
             {
-                if (homeId != -1 || terminalKind != 1)
+                if (homeId != -1
+                    || (terminalKind != 1 && terminalKind != 2))
                 {
                     return 3;
                 }
