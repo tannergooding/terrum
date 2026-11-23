@@ -1695,7 +1695,8 @@ int32 VerifyStandaloneRewrittenSourceArenas()
                 int32 conditionExpressionId
                     = Host.StandaloneSourceStatements[
                         childStatementOffset + 1];
-                if (childOrdinal != 0 || trueCount != 1
+                if (childOrdinal != 0 || trueCount < 1
+                    || trueCount > 2
                     || Host.StandaloneSourceStatements[
                         childStatementOffset + 2] != ifNodeId
                     || conditionExpressionId < 0
