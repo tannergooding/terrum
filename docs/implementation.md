@@ -869,8 +869,9 @@ regression covers same-provider alias signature canonicalization, provider-row
 relocation, incompatible replacement and source-free re-emission. The loader
 uses the resolved provider TypeDef identity to canonicalize nested pointee
 types before function-pointer signatures are interned. Both regressions remain
-unverified under the active hold. Anchor-row relocation and other provider
-cache keys remain open.
+unverified under the active hold. A source-free re-emission regression also
+shifts the anchor MethodDef row; provider replacement across a relocated
+external anchor and other provider cache keys remain open.
 The Standard Contract reader also consumes the assigned 20-byte OutputState
 row, requiring Param mode `00`, a complete `ref<init T>` or `Span<init T>`
 type, and a phase-3 PredicateGraph attached to the same MethodDef. Its bounded

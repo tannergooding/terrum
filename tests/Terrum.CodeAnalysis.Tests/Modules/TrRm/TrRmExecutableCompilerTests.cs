@@ -873,6 +873,16 @@ internal sealed class TrRmExecutableCompilerTests
                     return (int)sourceReference.NativePointerTypes[
                         NativePointerTypes.Index(type)].PointeeType - 100;
                 })];
+        int GetAnchorMethodRow(byte[] selectedArtifact)
+        {
+            var selectedTables = TrRmStructuralMetadataValidator
+                .ValidateAndGetExecutionTables(
+                    TrRmExecutableCompiler.CreateForeignInvocationIndex(
+                        selectedArtifact, schemaIdentity));
+            return Enumerable.Range(1, selectedTables.Methods.Count)
+                .Single(selectedTables.NativeFunctionPointerAnchors
+                    .IsAnchorMethodDef);
+        }
 
         Assert.That(reference.NativeFunctionPointerSignatures,
             Has.Length.EqualTo(2));
@@ -1030,6 +1040,33 @@ internal sealed class TrRmExecutableCompilerTests
             (origin.DefinitionId & 0x00FF_FFFFu) == 1u), Is.True);
         Assert.That(importedReemittedReference
             .NativeFunctionPointerSignatures, Has.Length.EqualTo(1));
+        var importedReemittedAnchorMethodRow
+            = GetAnchorMethodRow(importedReemittedArtifact);
+        var importedLoadedWithoutPrecede = importedLoaded with {
+            Functions = [.. importedLoaded.Functions.Where(
+                static function => function.Name != "Precede")],
+        };
+        var shiftedAnchorReemission = TrRmExecutableCompiler.EmitStandard(
+            importedLoadedWithoutPrecede,
+            "cross-module-reemitted-shifted", schemaIdentity,
+            targetRequirement);
+        Assert.That(GetAnchorMethodRow(shiftedAnchorReemission),
+            Is.Not.EqualTo(importedReemittedAnchorMethodRow));
+        var shiftedAnchorReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    shiftedAnchorReemission),
+                "cross-module-reemitted-shifted", [ownerProviderInput]);
+        Assert.That(shiftedAnchorReference.NativeFunctionPointerSignatures,
+            Has.Length.EqualTo(1));
+        var shiftedAnchorOwnerOrigins = shiftedAnchorReference.Structures
+            .Where(static structure => structure.StandardTypeOrigin?.Provider
+                .ModuleIdentity == "cross-module-type-provider")
+            .Select(static structure => structure.StandardTypeOrigin!)
+            .ToArray();
+        Assert.That(shiftedAnchorOwnerOrigins, Has.Length.EqualTo(2));
+        Assert.That(shiftedAnchorOwnerOrigins.All(static origin =>
+            (origin.DefinitionId & 0x00FF_FFFFu) == 1u), Is.True);
     }
 
     [Test]
