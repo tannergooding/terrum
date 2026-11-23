@@ -1529,6 +1529,78 @@ int32 NormalizeStandaloneSourceLoopBody(int32 bodyId,
                 int32 nestedDoBodyStatementKind
                     = Host.StandaloneSourceStatements[
                         nestedDoBodyStatementId * 3];
+                if (nestedDoBodyStatementKind == 12)
+                {
+                    int32 conditionalExpressionId
+                        = Host.StandaloneSourceStatements[
+                            nestedDoBodyStatementId * 3 + 1];
+                    if (nestedDoChildCount != 2
+                        || childOrdinal != 0
+                        || Host.StandaloneSourceStatements[
+                            nestedDoBodyStatementId * 3 + 2]
+                            != nestedDoNodeId
+                        || conditionalExpressionId < 0
+                        || conditionalExpressionId
+                            >= Host.StandaloneSourceBodies[
+                                bodyId * 12 + 4])
+                    {
+                        return 3;
+                    }
+                    int32 conditionalExpressionOffset
+                        = (Host.StandaloneSourceBodies[
+                            bodyId * 12 + 3]
+                            + conditionalExpressionId) * 8;
+                    int32 conditionalExpressionKind
+                        = Host.StandaloneSourceExpressions[
+                            conditionalExpressionOffset];
+                    int32 conditionalExpressionTypeId
+                        = Host.StandaloneSourceExpressions[
+                            conditionalExpressionOffset + 1];
+                    if (!IsStandaloneLogicalNotType(
+                            conditionalExpressionTypeId)
+                        || conditionalExpressionKind == 34
+                        || conditionalExpressionKind == 35
+                        || conditionalExpressionKind == 36)
+                    {
+                        return 3;
+                    }
+                    init bool conditionalDoesNotReturn;
+                    int32 conditionalStatus
+                        = TryGetStandaloneSourceExpressionDoesNotReturn(
+                            bodyId, conditionalExpressionId,
+                            ref init conditionalDoesNotReturn);
+                    if (conditionalStatus != 0
+                        || conditionalDoesNotReturn)
+                    {
+                        return conditionalStatus != 0
+                            ? conditionalStatus : 2;
+                    }
+                    init int32 conditionalSelectorKind;
+                    init int32 conditionalSourceUse;
+                    init int32 conditionalSelectorIndex;
+                    init bool conditionalTerminated;
+                    int32 conditionalNormalizeStatus
+                        = NormalizeStandaloneSourceExpression(
+                            bodyId, conditionalExpressionId, 1,
+                            ref init conditionalSelectorKind,
+                            ref init conditionalSourceUse,
+                            ref init conditionalSelectorIndex,
+                            ref init conditionalTerminated);
+                    if (conditionalNormalizeStatus != 0)
+                    {
+                        return conditionalNormalizeStatus;
+                    }
+                    if (conditionalTerminated
+                        || conditionalSelectorKind != 2
+                        || conditionalSourceUse != 1
+                        || conditionalSelectorIndex < 0
+                        || Host.StandaloneNormalizedBlockCount[0]
+                            != currentBlockCountBeforeBody)
+                    {
+                        return 2;
+                    }
+                    continue;
+                }
                 if (nestedDoBodyStatementKind == 7)
                 {
                     int32 nestedWhileNodeId
@@ -2290,6 +2362,14 @@ int32 GetStandaloneSourceLoopBodyBlockCount(int32 statementId,
             }
             *blockCountResult = nestedBranchCount == 0
                 ? 1 : nestedBodyBlockCount;
+            return 0;
+        }
+        if (childCount == 2 && firstChildKind == 12
+            && lastChildKind == 8
+            && Host.StandaloneSourceStatements[
+                firstChildId * 3 + 2] == loopNodeId)
+        {
+            *blockCountResult = 1;
             return 0;
         }
         if (firstChildKind == 12 || firstChildKind == 13)

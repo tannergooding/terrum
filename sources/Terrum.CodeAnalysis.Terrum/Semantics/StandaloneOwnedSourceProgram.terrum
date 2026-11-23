@@ -3622,6 +3622,7 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
             int32 bodyStatus = ParseStandaloneSourceWhileBody(
                 localCallableId, expressionFirst, controlNodeId,
                 loopStatementId, headerClose + 1, bodyTokenEnd,
+                false,
                 ref init afterBodyToken);
             if (bodyStatus != 0)
             {
@@ -3752,6 +3753,7 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
             int32 bodyStatus = ParseStandaloneSourceWhileBody(
                 localCallableId, expressionFirst, controlNodeId,
                 loopStatementId, tokenIndex + 1, bodyTokenEnd,
+                false,
                 ref init afterBodyToken);
             if (bodyStatus != 0)
             {
@@ -3958,6 +3960,7 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
             int32 loopBodyStatus = ParseStandaloneSourceWhileBody(
                 localCallableId, expressionFirst, controlNodeId,
                 loopStatementId, conditionClose + 1, bodyTokenEnd,
+                false,
                 ref init afterBodyToken);
             if (loopBodyStatus != 0)
             {
@@ -5475,6 +5478,7 @@ int32 ParseStandaloneSourceNestedWhile(
     int32 nestedBodyStatus = ParseStandaloneSourceWhileBody(
         localCallableId, expressionFirst, nestedControlNodeId,
         nestedStatementId, conditionClose + 1, tokenEnd,
+        false,
         ref init afterNestedBody);
     if (nestedBodyStatus != 0)
     {
@@ -5599,6 +5603,7 @@ int32 ParseStandaloneSourceNestedDo(
     int32 bodyStatus = ParseStandaloneSourceWhileBody(
         localCallableId, expressionFirst, nestedControlNodeId,
         nestedStatementId, tokenStart + 1, tokenEnd,
+        true,
         ref init afterBodyToken);
     if (bodyStatus != 0)
     {
@@ -5650,6 +5655,17 @@ int32 ParseStandaloneSourceNestedDo(
         int32 nestedBodyStatementKind
             = Host.StandaloneSourceStatements[
                 nestedBodyStatementId * 3];
+        if (nestedBodyStatementKind == 12)
+        {
+            if (nestedChildCount != 2 || childOrdinal != 0
+                || Host.StandaloneSourceStatements[
+                    nestedBodyStatementId * 3 + 2]
+                    != nestedControlNodeId)
+            {
+                return 2;
+            }
+            continue;
+        }
         if (nestedBodyStatementKind == 7)
         {
             int32 nestedWhileNodeId
@@ -5759,6 +5775,7 @@ int32 ParseStandaloneSourceWhileBody(int32 localCallableId,
     int32 expressionFirst, int32 controlNodeId,
     int32 loopStatementId,
     int32 tokenStart, int32 tokenEnd,
+    bool allowConditionalBreakThenBreak,
     ref<init int32> nextTokenResult)
     ensure return == 0 ? *nextTokenResult is init : true
 {
@@ -5789,7 +5806,7 @@ int32 ParseStandaloneSourceWhileBody(int32 localCallableId,
         }
 
         mut int32 cursor = tokenStart + 1;
-        mut bool sawConditionalTransfer = false;
+        mut int32 conditionalTransferKind = 0;
         while (cursor < blockClose)
         {
             if (Host.Tokens[cursor * 3] == 52)
@@ -5851,7 +5868,36 @@ int32 ParseStandaloneSourceWhileBody(int32 localCallableId,
                     return conditionalTransferStatus;
                 }
                 cursor = afterConditionalTransfer;
-                sawConditionalTransfer = true;
+                int32 conditionalNodeOffset = controlNodeId * 5;
+                int32 conditionalChildFirst
+                    = Host.StandaloneSourceIfNodes[
+                        conditionalNodeOffset + 1];
+                int32 conditionalChildCount
+                    = Host.StandaloneSourceIfNodes[
+                        conditionalNodeOffset + 2];
+                if (conditionalChildFirst < 0
+                    || conditionalChildCount <= priorBodyChildCount)
+                {
+                    return 3;
+                }
+                int32 conditionalChildId
+                    = Host.StandaloneSourceIfChildren[
+                        conditionalChildFirst + priorBodyChildCount];
+                if (conditionalChildId < 0
+                    || conditionalChildId
+                        >= Host.StandaloneSourceStatementCount[0])
+                {
+                    return 3;
+                }
+                conditionalTransferKind
+                    = Host.StandaloneSourceStatements[
+                        conditionalChildId * 3];
+                if (allowConditionalBreakThenBreak
+                    && (conditionalTransferKind != 12
+                        || conditionalChildCount != priorBodyChildCount + 1))
+                {
+                    return 2;
+                }
                 while (cursor < blockClose
                     && Host.Tokens[cursor * 3] == 52)
                 {
@@ -5859,7 +5905,16 @@ int32 ParseStandaloneSourceWhileBody(int32 localCallableId,
                 }
                 if (cursor == blockClose)
                 {
+                    if (allowConditionalBreakThenBreak)
+                    {
+                        return 2;
+                    }
                     break;
+                }
+                if (allowConditionalBreakThenBreak
+                    && !IsStandaloneSourceBreakKeyword(cursor))
+                {
+                    return 2;
                 }
                 if (priorBodyChildCount != 0)
                 {
@@ -5878,9 +5933,23 @@ int32 ParseStandaloneSourceWhileBody(int32 localCallableId,
             int32 transferKind
                 = IsStandaloneSourceBreakKeyword(cursor) ? 8
                 : IsStandaloneSourceContinueKeyword(cursor) ? 9 : 0;
-            if (sawConditionalTransfer && transferKind != 0)
+            if (conditionalTransferKind != 0 && transferKind != 0)
             {
-                return 2;
+                mut int32 afterTransferToken = semicolonToken + 1;
+                while (afterTransferToken < blockClose
+                    && Host.Tokens[afterTransferToken * 3] == 52)
+                {
+                    afterTransferToken = afterTransferToken + 1;
+                }
+                if (!allowConditionalBreakThenBreak
+                    || transferKind != 8
+                    || conditionalTransferKind != 12
+                    || Host.StandaloneSourceStatements[
+                        loopStatementId * 3] != 10
+                    || afterTransferToken != blockClose)
+                {
+                    return 2;
+                }
             }
             init int32 childStatementId;
             init int32 afterStatementToken;
@@ -5938,7 +6007,7 @@ int32 ParseStandaloneSourceWhileBody(int32 localCallableId,
                 return appendStatus;
             }
             cursor = afterStatementToken;
-            if (sawConditionalTransfer)
+            if (conditionalTransferKind != 0)
             {
                 while (cursor < blockClose
                     && Host.Tokens[cursor * 3] == 52)
@@ -11777,6 +11846,58 @@ int32 VerifyStandaloneDirectCalls()
                             int32 nestedDoBodyStatementKind
                                 = Host.StandaloneSourceStatements[
                                     nestedDoBodyStatementId * 3];
+                            if (nestedDoBodyStatementKind == 12)
+                            {
+                                int32 conditionalExpressionId
+                                    = Host.StandaloneSourceStatements[
+                                        nestedDoBodyStatementId * 3 + 1];
+                                if (nestedDoChildCount != 2
+                                    || childOrdinal != 0
+                                    || Host.StandaloneSourceStatements[
+                                        nestedDoBodyStatementId * 3 + 2]
+                                        != nestedDoNodeId
+                                    || conditionalExpressionId < 0
+                                    || conditionalExpressionId
+                                        >= bodyExpressionCount)
+                                {
+                                    return 3;
+                                }
+                                int32 conditionalExpressionIndex
+                                    = bodyExpressionFirst
+                                        + conditionalExpressionId;
+                                int32 conditionalExpressionOffset
+                                    = conditionalExpressionIndex * 8;
+                                int32 conditionalExpressionKind
+                                    = Host.StandaloneSourceExpressions[
+                                        conditionalExpressionOffset];
+                                int32 conditionalExpressionTypeId
+                                    = Host.StandaloneSourceExpressions[
+                                        conditionalExpressionOffset + 1];
+                                if (!IsStandaloneLogicalNotType(
+                                        conditionalExpressionTypeId)
+                                    || conditionalExpressionKind == 34
+                                    || conditionalExpressionKind == 35
+                                    || conditionalExpressionKind == 36
+                                    || Host.StandaloneSourceExpressionUseCounts[
+                                        conditionalExpressionIndex] != 0)
+                                {
+                                    return 3;
+                                }
+                                init bool conditionalDoesNotReturn;
+                                int32 conditionalStatus
+                                    = TryGetStandaloneSourceExpressionDoesNotReturn(
+                                        bodyId, conditionalExpressionId,
+                                        ref init conditionalDoesNotReturn);
+                                if (conditionalStatus != 0
+                                    || conditionalDoesNotReturn)
+                                {
+                                    return conditionalStatus != 0
+                                        ? conditionalStatus : 3;
+                                }
+                                Host.StandaloneSourceExpressionUseCounts[
+                                    conditionalExpressionIndex] = 1;
+                                continue;
+                            }
                             if (nestedDoBodyStatementKind == 7)
                             {
                                 int32 nestedWhileNodeId
