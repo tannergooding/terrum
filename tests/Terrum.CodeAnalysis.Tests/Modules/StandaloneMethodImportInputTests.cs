@@ -1709,6 +1709,12 @@ internal sealed class StandaloneMethodImportInputTests
             + "do { total = total + 1; } while (total < limit); "
             + "return total; } }", 0, 209, false)]
     [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { int32 Add(int32 value) { "
+            + "return value + 1; } "
+            + "int32 Main(int32 left, int32 right) { "
+            + "return Add(left) + Add(right); } }",
+        0, 210, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
         "namespace client { int32 Main(int32 limit) { "
             + "for (mut int32 index = 0; index < limit; "
             + "index = index + 1) { } return index; } }",
@@ -7301,6 +7307,39 @@ internal sealed class StandaloneMethodImportInputTests
                 return 0;
             }
             """;
+        const string nestedCallArithmeticVerificationSource = """
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                if (Scan() < 1) { return 87; }
+                int32 status = BindStandaloneOwnedSourceProgram();
+                if (status != 0
+                    || Host.StandaloneSourceBodyCount[0] != 2
+                    || Host.StandaloneSourceDirectCallCount[0] != 2
+                    || Host.StandaloneSourceCallArgumentCount[0] != 2) {
+                    return 88;
+                }
+                status = NormalizeStandaloneOwnedSourceProgram();
+                if (status != 0
+                    || Host.StandaloneNormalizedBlockCount[0] != 2
+                    || Host.StandaloneNormalizedBodyBlockRanges[0] != 0
+                    || Host.StandaloneNormalizedBodyBlockRanges[1] != 1
+                    || Host.StandaloneNormalizedBodyBlockRanges[2] != 1
+                    || Host.StandaloneNormalizedBodyBlockRanges[3] != 1
+                    || Host.StandaloneInvokeCount[0] != 2
+                    || Host.StandaloneInvokeInputCount[0] != 2) {
+                    return 89;
+                }
+                status = RewriteStandaloneOwnedCallNodes();
+                if (status != 0) { return status; }
+                status = WriteStandaloneScalarModule();
+                if (status != 0
+                    || Host.StandaloneWriterStatus[0] != 0
+                    || Host.StandaloneWriterBodyPlanCount[0] != 2) {
+                    return 90;
+                }
+                return 0;
+            }
+            """;
         var verificationSource = expectedSourceStatus != 0
             ? $$"""
                 namespace Terrum.CodeAnalysis;
@@ -7349,6 +7388,8 @@ internal sealed class StandaloneMethodImportInputTests
                 ? lazyBooleanIfReturnVerificationSource
             : verificationMode == 158
                 ? localCallInLazyIfReturnVerificationSource
+            : verificationMode == 210
+                ? nestedCallArithmeticVerificationSource
             : verificationMode == 161
                 ? importedCallInConditionalReturnVerificationSource
             : verificationMode is 162 or 163 or 164
@@ -8549,10 +8590,10 @@ internal sealed class StandaloneMethodImportInputTests
                 "sources/Terrum.CodeAnalysis.Terrum/Semantics/StandaloneOwnedSourceDecoder.terrum",
             };
             var expectedDecoderBodyCount
-                = verificationMode == 58 ? 2 : 1;
+                = verificationMode is 58 or 210 ? 2 : 1;
             var expectedDecoderCallCount = verificationMode is 4 or 158
                     or 161 or 198 or 199 ? 1
-                : verificationMode == 58 ? 2 : 0;
+                : verificationMode is 58 or 210 ? 2 : 0;
             var expectedDecoderConstantMapCount
                 = verificationMode is 4 or 23 or 25 or 26
                     or 29 or 30 or 31 or 32 or 33 or 34 or 35 or 36 or 37
@@ -8565,6 +8606,10 @@ internal sealed class StandaloneMethodImportInputTests
                     or 178 or 179 or 180 or 181
                     or 182 or 183 or 184 or 185 or 186 or 187
                     ? 1 : 0;
+            if (verificationMode == 210)
+            {
+                expectedDecoderConstantMapCount = 1;
+            }
             if (verificationMode == 189)
             {
                 expectedDecoderConstantMapCount = 3;
@@ -9025,6 +9070,7 @@ internal sealed class StandaloneMethodImportInputTests
                     155 => 5,
                     156 => 5,
                     158 => 2,
+                    210 => 2,
                     161 => 2,
                     162 => 3,
                     149 => 3,
@@ -9580,6 +9626,10 @@ internal sealed class StandaloneMethodImportInputTests
                         Assert.That(Execute(-1), Is.EqualTo(3));
                         Assert.That(Execute(3), Is.EqualTo(3));
                         Assert.That(Execute(5), Is.EqualTo(5));
+                        break;
+                    case 210:
+                        Assert.That(Execute(1, 2), Is.EqualTo(5));
+                        Assert.That(Execute(-3, 10), Is.EqualTo(9));
                         break;
                 }
             }
