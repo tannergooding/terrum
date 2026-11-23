@@ -1278,6 +1278,16 @@ internal sealed class StandaloneMethodImportInputTests
         "namespace client { bool Main(bool condition) { "
             + "if (condition) { return true; } "
             + "else { return false; } } }", 0, 130, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { int32 Main(bool condition, "
+            + "int32 trueValue, int32 falseValue) { "
+            + "return condition ? trueValue : falseValue; } }",
+        0, 131, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { int32 Main(bool condition, "
+            + "int32 trueValue, uint32 falseValue) { "
+            + "return condition ? trueValue : falseValue; } }",
+        2, 0, false)]
     public async Task TerrumOwnedSourceBinderValidatesOrderedCallUsesAsync(
         BoundRuntimePolicy policy, string sourceText,
         int expectedSourceStatus, int verificationMode,
@@ -4760,6 +4770,57 @@ internal sealed class StandaloneMethodImportInputTests
                 return 0;
             }
             """;
+        const string conditionalValueJoinVerificationSource = """
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                if (Scan() < 1) { return 83; }
+                int32 status = BindStandaloneOwnedSourceProgram();
+                if (status != 0
+                    || Host.StandaloneSourceExpressionCount[0] != 4
+                    || Host.StandaloneSourceExpressions[24] != 34
+                    || Host.StandaloneSourceExpressions[26] != 0
+                    || Host.StandaloneSourceExpressions[27] != 1
+                    || Host.StandaloneSourceExpressions[28] != 2) {
+                    return 84;
+                }
+                status = NormalizeStandaloneOwnedSourceProgram();
+                if (status != 0
+                    || Host.StandaloneNormalizedBlockCount[0] != 4
+                    || Host.StandaloneNormalizedBodyBlockRanges[0] != 0
+                    || Host.StandaloneNormalizedBodyBlockRanges[1] != 4
+                    || Host.StandaloneNormalizedHomeCount[0] != 4
+                    || Host.StandaloneNormalizedOperationCount[0] != 3
+                    || Host.StandaloneNormalizedBlocks[4] != 4
+                    || Host.StandaloneNormalizedBlocks[8] != 1
+                    || Host.StandaloneNormalizedBlocks[9] != 2
+                    || Host.StandaloneNormalizedBlocks[13] != 4
+                    || Host.StandaloneNormalizedBlocks[20] != 3
+                    || Host.StandaloneNormalizedBlocks[24] != 3
+                    || Host.StandaloneNormalizedBlocks[36] != 3
+                    || Host.StandaloneNormalizedBlocks[40] != 3
+                    || Host.StandaloneNormalizedBlocks[52] != 1
+                    || Host.StandaloneNormalizedBlocks[54] != 3
+                    || Host.StandaloneNormalizedOperations[0] != 38
+                    || Host.StandaloneNormalizedOperations[1] != 1
+                    || Host.StandaloneNormalizedOperations[2] != 3
+                    || Host.StandaloneNormalizedOperations[5] != 38
+                    || Host.StandaloneNormalizedOperations[6] != 2
+                    || Host.StandaloneNormalizedOperations[7] != 3
+                    || Host.StandaloneNormalizedOperations[10] != 4
+                    || Host.StandaloneNormalizedOperations[11] != 3) {
+                    return 85;
+                }
+                status = RewriteStandaloneOwnedCallNodes();
+                if (status != 0) { return status; }
+                status = WriteStandaloneScalarModule();
+                if (status != 0
+                    || Host.StandaloneWriterStatus[0] != 0
+                    || Host.StandaloneWriterBodyPlanCount[0] != 1) {
+                    return 86;
+                }
+                return 0;
+            }
+            """;
         var verificationSource = expectedSourceStatus != 0
             ? $$"""
                 namespace Terrum.CodeAnalysis;
@@ -4780,6 +4841,8 @@ internal sealed class StandaloneMethodImportInputTests
                 """
             : verificationMode == 130
                 ? multiBlockControlFlowVerificationSource
+            : verificationMode == 131
+                ? conditionalValueJoinVerificationSource
             : verificationMode == 2
                 ? localOverloadCallVerificationSource
                 : verificationMode == 3
@@ -5203,13 +5266,27 @@ internal sealed class StandaloneMethodImportInputTests
                 Assert.That(code.IndexOf((byte)0xD6),
                     Is.GreaterThanOrEqualTo(0));
             }
-            else if (verificationMode == 130)
+            else if (verificationMode is 130 or 131)
             {
-                Assert.That(bodyReader.BlockCount, Is.EqualTo(3));
-                Assert.That(bodyReader.RecordCount, Is.EqualTo(4));
+                var expectedBlockCount
+                    = verificationMode == 130 ? 3 : 4;
+                Assert.That(bodyReader.BlockCount,
+                    Is.EqualTo(expectedBlockCount));
+                Assert.That(bodyReader.RecordCount,
+                    Is.EqualTo(expectedBlockCount + 1));
                 Assert.That(bodyReader.GetBlockCode(0)
                     .IndexOf((byte)0xB1), Is.GreaterThanOrEqualTo(0));
-                var edgeRecord = bodyReader.GetRecord(3);
+                if (verificationMode == 131)
+                {
+                    Assert.That(bodyReader.GetBlockCode(1)
+                        .IndexOf((byte)0xB0),
+                        Is.GreaterThanOrEqualTo(0));
+                    Assert.That(bodyReader.GetBlockCode(2)
+                        .IndexOf((byte)0xB0),
+                        Is.GreaterThanOrEqualTo(0));
+                }
+                var edgeRecord
+                    = bodyReader.GetRecord(expectedBlockCount);
                 Assert.That(edgeRecord[0], Is.EqualTo((byte)6));
                 Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
                     edgeRecord[4..]), Is.EqualTo((ushort)1));
@@ -5273,6 +5350,14 @@ internal sealed class StandaloneMethodImportInputTests
             {
                 expectedDecoderConstantMapCount = 2;
             }
+            var expectedDecoderBodyShape = verificationMode switch
+            {
+                130 => "Host.StandaloneDecoderBodies[19] != 3 || "
+                    + "Host.StandaloneDecoderBodies[21] != 4",
+                131 => "Host.StandaloneDecoderBodies[19] != 4 || "
+                    + "Host.StandaloneDecoderBodies[21] != 5",
+                _ => "false",
+            };
             var decoderVerificationSource = $$"""
                 namespace Terrum.CodeAnalysis;
                 int32 Main() {
@@ -5285,9 +5370,7 @@ internal sealed class StandaloneMethodImportInputTests
                             != {{expectedDecoderCallCount}}
                         || Host.StandaloneDecoderConstantMapCount[0]
                             != {{expectedDecoderConstantMapCount}}
-                        || ({{verificationMode == 130
-                            ? "Host.StandaloneDecoderBodies[19] != 3 || Host.StandaloneDecoderBodies[21] != 4"
-                            : "false"}})) {
+                        || ({{expectedDecoderBodyShape}})) {
                         return 80;
                     }
                     return 0;
@@ -5319,7 +5402,7 @@ internal sealed class StandaloneMethodImportInputTests
             var decoderExecution = NativeJit.ExecuteWithData(
                 decoderProgram, (NativeRuntimePolicy)policy);
             Assert.That(decoderExecution.ExitCode, Is.EqualTo(0));
-            if (verificationMode == 130)
+            if (verificationMode is 130 or 131)
             {
                 var artifactIndex = new TrRmArtifactIndex(artifact);
                 Assert.That(artifactIndex.TryGetSection(0x0020,

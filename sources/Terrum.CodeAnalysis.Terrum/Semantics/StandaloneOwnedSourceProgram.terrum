@@ -1700,6 +1700,53 @@ int32 TryGetStandaloneSourceExpressionDoesNotReturn(int32 bodyId,
     }
     int32 expressionKind
         = Host.StandaloneSourceExpressions[expressionIndex * 8];
+    if (expressionKind == 34)
+    {
+        int32 conditionExpressionId
+            = Host.StandaloneSourceExpressions[
+                expressionIndex * 8 + 2];
+        int32 trueExpressionId
+            = Host.StandaloneSourceExpressions[
+                expressionIndex * 8 + 3];
+        int32 falseExpressionId
+            = Host.StandaloneSourceExpressions[
+                expressionIndex * 8 + 4];
+        init bool conditionDoesNotReturn;
+        int32 conditionStatus
+            = TryGetStandaloneSourceExpressionDoesNotReturn(
+                bodyId, conditionExpressionId,
+                ref init conditionDoesNotReturn);
+        if (conditionStatus != 0)
+        {
+            return conditionStatus;
+        }
+        if (conditionDoesNotReturn)
+        {
+            *doesNotReturnResult = true;
+            return 0;
+        }
+        init bool trueDoesNotReturn;
+        int32 trueStatus
+            = TryGetStandaloneSourceExpressionDoesNotReturn(
+                bodyId, trueExpressionId,
+                ref init trueDoesNotReturn);
+        if (trueStatus != 0)
+        {
+            return trueStatus;
+        }
+        init bool falseDoesNotReturn;
+        int32 falseStatus
+            = TryGetStandaloneSourceExpressionDoesNotReturn(
+                bodyId, falseExpressionId,
+                ref init falseDoesNotReturn);
+        if (falseStatus != 0)
+        {
+            return falseStatus;
+        }
+        *doesNotReturnResult
+            = trueDoesNotReturn && falseDoesNotReturn;
+        return 0;
+    }
     if (expressionKind == 12 || expressionKind == 13
         || expressionKind == 14 || expressionKind == 15
         || expressionKind == 16 || expressionKind == 17
@@ -2389,7 +2436,7 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
                         localCallableId, localCallableId,
                         expressionFirst,
                         inferredType ? -1 : typeId, initializerStart,
-                        semicolonToken, 0,
+                        semicolonToken, 1,
                         ref init initializerExpressionId,
                         ref init nextInitializerToken);
                 if (initializerStatus != 0)
@@ -2465,7 +2512,7 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
                 = ParseStandaloneSourceExpression(
                     localCallableId, localCallableId,
                     expressionFirst, boolTypeId, tokenIndex + 2,
-                    conditionClose, 0,
+                conditionClose, 1,
                     ref init conditionExpressionId,
                     ref init nextConditionToken);
             if (conditionStatus != 0)
@@ -2635,7 +2682,7 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
                     = ParseStandaloneSourceExpression(
                         localCallableId, localCallableId,
                         expressionFirst, typeId, tokenIndex + 2,
-                        semicolonToken, 0,
+                        semicolonToken, 1,
                         ref init parsedExpressionId,
                         ref init nextToken);
                 if (expressionStatus != 0)
@@ -2669,7 +2716,7 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
                 init int32 nextLeftToken;
                 int32 leftStatus = ParseStandaloneSourceExpression(
                     localCallableId, localCallableId, expressionFirst,
-                    typeId, tokenIndex, tokenIndex + 1, 0,
+                    typeId, tokenIndex, tokenIndex + 1, 1,
                     ref init leftExpressionId,
                     ref init nextLeftToken);
                 if (leftStatus != 0)
@@ -2681,7 +2728,7 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
                 int32 rightStatus = ParseStandaloneSourceExpression(
                     localCallableId, localCallableId, expressionFirst,
                     compoundRightTypeId, tokenIndex + 2,
-                    semicolonToken, 0,
+                    semicolonToken, 1,
                     ref init rightExpressionId,
                     ref init nextRightToken);
                 if (rightStatus != 0)
@@ -2833,7 +2880,7 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
         int32 expressionStatus
             = ParseStandaloneSourceExpression(localCallableId,
                 localCallableId, expressionFirst, -1,
-                expressionStart, bodyTokenEnd, 0,
+                expressionStart, bodyTokenEnd, 1,
                 ref init expressionId, ref init nextToken);
         if (expressionStatus != 0)
         {
@@ -3248,7 +3295,7 @@ int32 ParseStandaloneSourceReturnBranch(int32 localCallableId,
         int32 expressionStatus
             = ParseStandaloneSourceExpression(localCallableId,
                 bodyId, expressionFirst, returnTypeId,
-                statementStart + 1, semicolonToken, 0,
+                statementStart + 1, semicolonToken, 1,
                 ref init parsedExpressionId,
                 ref init nextExpressionToken);
         if (expressionStatus != 0)
@@ -3933,6 +3980,94 @@ bool IsStandaloneSourceOperandEndKind(int32 kind)
         || kind == 21 || kind == 47 || kind == 86 || kind == 87;
 }
 
+int32 FindStandaloneConditionalQuestion(int32 tokenStart,
+    int32 tokenEnd)
+{
+    if (tokenStart < 0 || tokenStart >= tokenEnd
+        || tokenEnd > Host.Tokens.Length / 3)
+    {
+        return -1;
+    }
+
+    mut int32 parenthesisDepth = 0;
+    for (mut int32 tokenIndex = tokenStart;
+        tokenIndex < tokenEnd;
+        tokenIndex = tokenIndex + 1)
+    {
+        int32 kind = Host.Tokens[tokenIndex * 3];
+        if (kind == 46)
+        {
+            parenthesisDepth = parenthesisDepth + 1;
+        }
+        else if (kind == 47)
+        {
+            if (parenthesisDepth == 0)
+            {
+                return -1;
+            }
+            parenthesisDepth = parenthesisDepth - 1;
+        }
+        else if (parenthesisDepth == 0 && kind == 56
+            && tokenIndex > tokenStart
+            && IsStandaloneBinaryOperatorSeparated(tokenIndex))
+        {
+            return tokenIndex;
+        }
+    }
+
+    return -1;
+}
+
+int32 FindStandaloneConditionalColon(int32 questionIndex,
+    int32 tokenEnd)
+{
+    if (questionIndex < 0 || questionIndex >= tokenEnd
+        || tokenEnd > Host.Tokens.Length / 3
+        || Host.Tokens[questionIndex * 3] != 56)
+    {
+        return -1;
+    }
+
+    mut int32 parenthesisDepth = 0;
+    mut int32 nestedConditionalDepth = 0;
+    for (mut int32 tokenIndex = questionIndex + 1;
+        tokenIndex < tokenEnd;
+        tokenIndex = tokenIndex + 1)
+    {
+        int32 kind = Host.Tokens[tokenIndex * 3];
+        if (kind == 46)
+        {
+            parenthesisDepth = parenthesisDepth + 1;
+        }
+        else if (kind == 47)
+        {
+            if (parenthesisDepth == 0)
+            {
+                return -1;
+            }
+            parenthesisDepth = parenthesisDepth - 1;
+        }
+        else if (parenthesisDepth == 0 && kind == 56)
+        {
+            nestedConditionalDepth = nestedConditionalDepth + 1;
+        }
+        else if (parenthesisDepth == 0 && kind == 55)
+        {
+            if (!IsStandaloneBinaryOperatorSeparated(tokenIndex))
+            {
+                return -1;
+            }
+            if (nestedConditionalDepth == 0)
+            {
+                return tokenIndex;
+            }
+            nestedConditionalDepth = nestedConditionalDepth - 1;
+        }
+    }
+
+    return -1;
+}
+
 int32 FindStandaloneBinaryOperator(int32 tokenStart,
     int32 tokenEnd)
 {
@@ -4452,6 +4587,41 @@ bool CanBindStandaloneSourceArgument(int32 localCallableId,
         || expectedTypeId > Host.StandaloneTypeFactCount[0])
     {
         return false;
+    }
+
+    int32 conditionalQuestion
+        = FindStandaloneConditionalQuestion(tokenStart, tokenEnd);
+    if (conditionalQuestion >= 0)
+    {
+        int32 conditionalColon
+            = FindStandaloneConditionalColon(
+                conditionalQuestion, tokenEnd);
+        if (conditionalQuestion <= tokenStart
+            || conditionalQuestion + 1 >= tokenEnd
+            || conditionalColon <= conditionalQuestion + 1
+            || conditionalColon >= tokenEnd - 1
+            || !IsStandaloneBinaryOperatorSeparated(conditionalColon)
+            || depth != 0
+            || GetStandaloneSourceUse(expectedTypeId) != 1
+            || !IsStandaloneSourceConstructionType(expectedTypeId))
+        {
+            return false;
+        }
+        init int32 boolTypeId;
+        if (InternStandaloneCallableTypeFact(
+                0, 1, false, ref init boolTypeId) != 0)
+        {
+            return false;
+        }
+        return CanBindStandaloneSourceArgument(localCallableId,
+                tokenStart, conditionalQuestion, boolTypeId,
+                depth + 1)
+            && CanBindStandaloneSourceArgument(localCallableId,
+                conditionalQuestion + 1, conditionalColon,
+                expectedTypeId, depth + 1)
+            && CanBindStandaloneSourceArgument(localCallableId,
+                conditionalColon + 1, tokenEnd,
+                expectedTypeId, depth + 1);
     }
 
     int32 binaryOperator
@@ -5620,6 +5790,127 @@ int32 ParseStandaloneSourceExpression(int32 localCallableId,
     if (initTestStatus != 1)
     {
         return initTestStatus;
+    }
+
+    int32 conditionalQuestion
+        = FindStandaloneConditionalQuestion(tokenIndex, tokenEnd);
+    if (conditionalQuestion >= 0)
+    {
+        int32 conditionalColon
+            = FindStandaloneConditionalColon(
+                conditionalQuestion, tokenEnd);
+        if (conditionalQuestion <= tokenIndex
+            || conditionalQuestion + 1 >= tokenEnd
+            || conditionalColon <= conditionalQuestion + 1
+            || conditionalColon >= tokenEnd - 1
+            || !IsStandaloneBinaryOperatorSeparated(conditionalColon)
+            || depth != 0
+            || expectedTypeId <= 0
+            || expectedTypeId > Host.StandaloneTypeFactCount[0]
+            || GetStandaloneSourceUse(expectedTypeId) != 1
+            || !IsStandaloneSourceConstructionType(expectedTypeId))
+        {
+            return 2;
+        }
+        init int32 boolTypeId;
+        int32 boolTypeStatus
+            = InternStandaloneCallableTypeFact(
+                0, 1, false, ref init boolTypeId);
+        if (boolTypeStatus != 0)
+        {
+            return boolTypeStatus;
+        }
+        init int32 conditionExpressionId;
+        init int32 nextConditionToken;
+        int32 conditionStatus = ParseStandaloneSourceExpression(
+            localCallableId, bodyId, expressionFirst, boolTypeId,
+            tokenIndex, conditionalQuestion, depth + 1,
+            ref init conditionExpressionId,
+            ref init nextConditionToken);
+        if (conditionStatus != 0)
+        {
+            return conditionStatus;
+        }
+        init int32 trueExpressionId;
+        init int32 nextTrueToken;
+        int32 trueStatus = ParseStandaloneSourceExpression(
+            localCallableId, bodyId, expressionFirst,
+            expectedTypeId, conditionalQuestion + 1,
+            conditionalColon, depth + 1,
+            ref init trueExpressionId, ref init nextTrueToken);
+        if (trueStatus != 0)
+        {
+            return trueStatus;
+        }
+        init int32 falseExpressionId;
+        init int32 nextFalseToken;
+        int32 falseStatus = ParseStandaloneSourceExpression(
+            localCallableId, bodyId, expressionFirst,
+            expectedTypeId, conditionalColon + 1, tokenEnd,
+            depth + 1, ref init falseExpressionId,
+            ref init nextFalseToken);
+        if (falseStatus != 0)
+        {
+            return falseStatus;
+        }
+        if (nextConditionToken != conditionalQuestion
+            || nextTrueToken != conditionalColon
+            || nextFalseToken != tokenEnd
+            || conditionExpressionId == trueExpressionId
+            || conditionExpressionId == falseExpressionId
+            || trueExpressionId == falseExpressionId)
+        {
+            return 1;
+        }
+        int32 conditionGlobalId
+            = expressionFirst + conditionExpressionId;
+        int32 trueGlobalId
+            = expressionFirst + trueExpressionId;
+        int32 falseGlobalId
+            = expressionFirst + falseExpressionId;
+        if (conditionGlobalId < expressionFirst
+            || conditionGlobalId
+                >= Host.StandaloneSourceExpressionCount[0]
+            || trueGlobalId < expressionFirst
+            || trueGlobalId
+                >= Host.StandaloneSourceExpressionCount[0]
+            || falseGlobalId < expressionFirst
+            || falseGlobalId
+                >= Host.StandaloneSourceExpressionCount[0]
+            || Host.StandaloneSourceExpressions[
+                conditionGlobalId * 8 + 1] != boolTypeId
+            || Host.StandaloneSourceExpressions[
+                trueGlobalId * 8 + 1] != expectedTypeId
+            || Host.StandaloneSourceExpressions[
+                falseGlobalId * 8 + 1] != expectedTypeId
+            || Host.StandaloneSourceExpressionUseCounts[
+                conditionGlobalId] != 0
+            || Host.StandaloneSourceExpressionUseCounts[
+                trueGlobalId] != 0
+            || Host.StandaloneSourceExpressionUseCounts[
+                falseGlobalId] != 0)
+        {
+            return 3;
+        }
+        init int32 conditionalExpressionId;
+        int32 conditionalAppendStatus
+            = AppendStandaloneSourceExpression(
+                bodyId, 34, expectedTypeId,
+                conditionExpressionId, trueExpressionId,
+                falseExpressionId, 0, -1,
+                expressionFirst,
+                ref init conditionalExpressionId);
+        if (conditionalAppendStatus != 0)
+        {
+            return conditionalAppendStatus;
+        }
+        Host.StandaloneSourceExpressionUseCounts[
+            conditionGlobalId] = 1;
+        Host.StandaloneSourceExpressionUseCounts[trueGlobalId] = 1;
+        Host.StandaloneSourceExpressionUseCounts[falseGlobalId] = 1;
+        *expressionIdResult = conditionalExpressionId;
+        *nextTokenResult = tokenEnd;
+        return 0;
     }
 
     int32 binaryOperator
@@ -7697,6 +7988,52 @@ int32 VerifyStandaloneDirectCalls()
                         childGlobalId * 8 + 7] != bodyId
                     || Host.StandaloneSourceExpressionUseCounts[
                         childGlobalId] != 1)
+                {
+                    return 3;
+                }
+            }
+            else if (expressionKind == 34)
+            {
+                int32 conditionExpressionId = operand0;
+                int32 trueExpressionId = operand1;
+                int32 falseExpressionId
+                    = Host.StandaloneSourceExpressions[
+                        expressionOffset + 4];
+                int32 conditionGlobalId
+                    = bodyExpressionFirst + conditionExpressionId;
+                int32 trueGlobalId
+                    = bodyExpressionFirst + trueExpressionId;
+                int32 falseGlobalId
+                    = bodyExpressionFirst + falseExpressionId;
+                if (conditionExpressionId < 0
+                    || conditionExpressionId >= expressionLocal
+                    || trueExpressionId < 0
+                    || trueExpressionId >= expressionLocal
+                    || falseExpressionId < 0
+                    || falseExpressionId >= expressionLocal
+                    || conditionExpressionId == trueExpressionId
+                    || conditionExpressionId == falseExpressionId
+                    || trueExpressionId == falseExpressionId
+                    || Host.StandaloneSourceExpressions[
+                        expressionOffset + 5] != 0
+                    || Host.StandaloneSourceExpressions[
+                        expressionOffset + 6] != -1
+                    || !IsStandaloneLogicalNotType(
+                        Host.StandaloneSourceExpressions[
+                            conditionGlobalId * 8 + 1])
+                    || GetStandaloneSourceUse(expressionTypeId) != 1
+                    || !IsStandaloneSourceConstructionType(
+                        expressionTypeId)
+                    || Host.StandaloneSourceExpressions[
+                        trueGlobalId * 8 + 1] != expressionTypeId
+                    || Host.StandaloneSourceExpressions[
+                        falseGlobalId * 8 + 1] != expressionTypeId
+                    || Host.StandaloneSourceExpressionUseCounts[
+                        conditionGlobalId] != 1
+                    || Host.StandaloneSourceExpressionUseCounts[
+                        trueGlobalId] != 1
+                    || Host.StandaloneSourceExpressionUseCounts[
+                        falseGlobalId] != 1)
                 {
                     return 3;
                 }
