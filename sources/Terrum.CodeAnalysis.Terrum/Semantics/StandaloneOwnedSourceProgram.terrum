@@ -1876,14 +1876,17 @@ int32 AppendStandaloneSourceForHeaderScope(int32 bodyId,
 {
     int32 count = Host.StandaloneSourceLexicalScopeCount[0];
     if (bodyId < 0 || bodyId >= Host.StandaloneSourceBodyCount[0]
+        || count < 0
+        || count >= Host.StandaloneSourceLexicalScopes.Length / 5
         || parentScopeId < 0
         || parentScopeId >= count
-        || Host.StandaloneSourceLexicalScopes[
-            parentScopeId * 5 + 1] != bodyId
         || forToken < 0 || forToken >= Host.Tokens.Length / 3
-        || forToken > int32.MaxValue - 2
-        || count < 0
-        || count >= Host.StandaloneSourceLexicalScopes.Length / 5)
+        || forToken > int32.MaxValue - 2)
+    {
+        return 3;
+    }
+    if (Host.StandaloneSourceLexicalScopes[
+            parentScopeId * 5 + 1] != bodyId)
     {
         return 3;
     }
