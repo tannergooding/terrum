@@ -653,6 +653,14 @@ internal sealed class StandaloneMethodImportInputTests
         0, 38, false)]
     [TestCase(BoundRuntimePolicy.FailFast,
         "namespace client { "
+            + "bool Main(bool left, bool right) { return left& right; } }",
+        1, 0, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "bool Main(bool left, bool right) { return left &right; } }",
+        1, 0, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
             + "bool Main(bool left, bool right) { return left | right; } }",
         0, 39, false)]
     [TestCase(BoundRuntimePolicy.FailFast,
@@ -671,6 +679,14 @@ internal sealed class StandaloneMethodImportInputTests
         "namespace client { "
             + "bool Main(bool left, bool right) { return left == right; } }",
         0, 42, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "bool Main(bool left, bool right) { return left== right; } }",
+        1, 0, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "bool Main(bool left, bool right) { return left ==right; } }",
+        1, 0, false)]
     [TestCase(BoundRuntimePolicy.FailFast,
         "namespace client { "
             + "bool Main(bool left, bool right) { return left != right; } }",

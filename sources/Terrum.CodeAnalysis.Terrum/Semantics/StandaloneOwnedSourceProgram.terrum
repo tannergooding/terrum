@@ -3264,6 +3264,19 @@ int32 FindStandaloneBinaryOperator(int32 tokenStart,
     return parenthesisDepth == 0 ? selectedIndex : -1;
 }
 
+bool IsStandaloneBinaryOperatorSeparated(int32 tokenIndex)
+{
+    int32 tokenCount = Host.Tokens.Length / 3;
+    if (tokenIndex <= 0 || tokenIndex >= tokenCount - 1)
+    {
+        return false;
+    }
+    return !AreStandaloneSourceTokensAdjacent(
+            tokenIndex - 1, tokenIndex)
+        && !AreStandaloneSourceTokensAdjacent(
+            tokenIndex, tokenIndex + 1);
+}
+
 bool IsStandaloneSourceConstructionType(int32 typeId)
 {
     if (typeId <= 0 || typeId > Host.StandaloneTypeFactCount[0]
@@ -3299,6 +3312,7 @@ bool CanBindStandaloneSourceArgument(int32 localCallableId,
             = operatorKind == 65 || operatorKind == 66;
         if (binaryOperator <= tokenStart
             || binaryOperator + 1 >= tokenEnd
+            || !IsStandaloneBinaryOperatorSeparated(binaryOperator)
             || (booleanEquality
                 ? !IsStandaloneLogicalNotType(expectedTypeId)
                 : !IsStandaloneNotType(expectedTypeId)))
@@ -4297,7 +4311,9 @@ int32 ParseStandaloneSourceExpression(int32 localCallableId,
     if (binaryOperator >= 0)
     {
         if (binaryOperator <= tokenIndex
-            || binaryOperator + 1 >= tokenEnd)
+            || binaryOperator + 1 >= tokenEnd
+            || !IsStandaloneBinaryOperatorSeparated(
+                binaryOperator))
         {
             return 1;
         }
