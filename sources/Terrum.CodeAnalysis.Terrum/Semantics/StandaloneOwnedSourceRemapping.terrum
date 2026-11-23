@@ -1558,7 +1558,6 @@ int32 VerifyStandaloneRewrittenSourceArenas()
             mut bool sameAssignedLocal = true;
             mut bool allAssignedLocalsMutable = true;
             mut bool sawLoopTransfer = false;
-            mut int32 loopTransferKind = 0;
             for (mut int32 childOrdinal = 0;
             childOrdinal < trueCount + falseCount;
             childOrdinal = childOrdinal + 1)
@@ -1605,7 +1604,6 @@ int32 VerifyStandaloneRewrittenSourceArenas()
                     return 3;
                 }
                 sawLoopTransfer = true;
-                loopTransferKind = currentChildKind;
                 continue;
             }
             if (controlIsLoop
@@ -1768,10 +1766,6 @@ int32 VerifyStandaloneRewrittenSourceArenas()
                         return 3;
                     }
                 }
-            }
-            if (conditionOmitted && loopTransferKind != 8)
-            {
-                return 3;
             }
         }
     }

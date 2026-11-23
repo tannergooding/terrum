@@ -2414,6 +2414,7 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
 
     mut int32 tokenIndex = bodyTokenStart;
     mut bool sawReturn = false;
+    mut bool sawDivergence = false;
     while (tokenIndex < bodyTokenEnd)
     {
         int32 kind = Host.Tokens[tokenIndex * 3];
@@ -3014,6 +3015,24 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
                 = Host.StandaloneSourceIfChildCount[0]
                     - Host.StandaloneSourceIfNodes[
                         controlNodeOffset + 4];
+            if (conditionOmitted)
+            {
+                int32 bodyChildFirst
+                    = Host.StandaloneSourceIfNodes[
+                        controlNodeOffset + 1];
+                int32 bodyChildCount
+                    = Host.StandaloneSourceIfNodes[
+                        controlNodeOffset + 2];
+                bool bodyBreaksImmediately = bodyChildCount > 0
+                    && Host.StandaloneSourceStatements[
+                        Host.StandaloneSourceIfChildren[
+                            bodyChildFirst + bodyChildCount - 1] * 3]
+                        == 8;
+                if (!bodyBreaksImmediately)
+                {
+                    sawDivergence = true;
+                }
+            }
             tokenIndex = afterBodyToken;
             continue;
         }
@@ -3554,7 +3573,8 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
         tokenIndex = tokenIndex + 1;
     }
 
-    if (!IsStandaloneUnitType(resultTypeId) && !sawReturn)
+    if (!IsStandaloneUnitType(resultTypeId)
+        && !sawReturn && !sawDivergence)
     {
         return 2;
     }
@@ -9514,6 +9534,7 @@ int32 VerifyStandaloneDirectCalls()
         }
 
         mut bool sawReturn = false;
+        mut bool sawDivergence = false;
         for (mut int32 statementIndex = 0;
             statementIndex < bodyStatementCount;
             statementIndex = statementIndex + 1)
@@ -9952,7 +9973,7 @@ int32 VerifyStandaloneDirectCalls()
                 }
                 if (conditionOmitted && loopTransferKind != 8)
                 {
-                    return 2;
+                    sawDivergence = true;
                 }
                 continue;
             }
@@ -10666,7 +10687,8 @@ int32 VerifyStandaloneDirectCalls()
                 return 3;
             }
         }
-        if (!IsStandaloneUnitType(returnTypeId) && !sawReturn)
+        if (!IsStandaloneUnitType(returnTypeId)
+            && !sawReturn && !sawDivergence)
         {
             return 3;
         }

@@ -143,12 +143,19 @@ public static int32 NormalizeStandaloneOwnedSourceProgram()
             }
             if (statementKind == 11)
             {
+                init bool hasNormalExit;
                 int32 forStatus
                     = NormalizeStandaloneSourceForLoop(
-                        bodyId, statementId);
+                        bodyId, statementId,
+                        ref init hasNormalExit);
                 if (forStatus != 0)
                 {
                     return FailStandaloneNormalization(forStatus);
+                }
+                if (!hasNormalExit)
+                {
+                    terminalKind = 1;
+                    break;
                 }
                 continue;
             }
@@ -1315,7 +1322,8 @@ int32 NormalizeStandaloneSourceLoop(int32 bodyId,
 }
 
 int32 NormalizeStandaloneSourceForLoop(int32 bodyId,
-    int32 statementId)
+    int32 statementId, ref<init bool> hasNormalExitResult)
+    ensure return == 0 ? *hasNormalExitResult is init : true
 {
     int32 bodyBlockFirst
         = Host.StandaloneNormalizedBodyBlockRanges[bodyId * 2];
@@ -1420,11 +1428,6 @@ int32 NormalizeStandaloneSourceForLoop(int32 bodyId,
         bodyBreaksImmediately
             = Host.StandaloneSourceStatements[
                 lastChildStatementId * 3] == 8;
-    }
-
-    if (conditionOmitted && !bodyBreaksImmediately)
-    {
-        return 2;
     }
 
     mut int32 conditionBlockCount = conditionOmitted ? 0 : 1;
@@ -1553,8 +1556,14 @@ int32 NormalizeStandaloneSourceForLoop(int32 bodyId,
     int32 expectedFinalizedBlockCount
         = bodyBlockFirst + conditionBlockCount + 2
             + (includeStep ? 1 : 0);
-    return Host.StandaloneNormalizedBlockCount[0]
-        == expectedFinalizedBlockCount ? 0 : 3;
+    if (Host.StandaloneNormalizedBlockCount[0]
+        != expectedFinalizedBlockCount)
+    {
+        return 3;
+    }
+    *hasNormalExitResult
+        = !conditionOmitted || bodyBreaksImmediately;
+    return 0;
 }
 
 int32 NormalizeStandaloneSourceIfReturns(int32 bodyId,
