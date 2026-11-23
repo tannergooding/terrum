@@ -1411,6 +1411,49 @@ int32 RewriteStandaloneSourceArenas()
     return 0;
 }
 
+bool IsStandaloneSourceLoopAncestorTarget(int32 transferStatementId,
+    int32 targetLoopNodeId, int32 bodyId)
+{
+    int32 statementCount
+        = Host.StandaloneSourceStatementCount[0];
+    if (transferStatementId < 0
+        || transferStatementId >= statementCount
+        || targetLoopNodeId < 0
+        || targetLoopNodeId >= Host.StandaloneSourceIfNodeCount[0]
+        || bodyId < 0 || bodyId >= Host.StandaloneSourceBodyCount[0]
+        || Host.StandaloneSourceIfNodes[targetLoopNodeId * 5] != bodyId)
+    {
+        return false;
+    }
+    mut int32 parentStatementId
+        = Host.StandaloneSourceStatementParentIds[
+            transferStatementId];
+    mut int32 depth = 0;
+    while (parentStatementId >= 0)
+    {
+        if (parentStatementId >= statementCount
+            || depth >= statementCount)
+        {
+            return false;
+        }
+        int32 parentKind
+            = Host.StandaloneSourceStatements[
+                parentStatementId * 3];
+        if ((parentKind == 7 || parentKind == 10
+                || parentKind == 11)
+            && Host.StandaloneSourceStatements[
+                parentStatementId * 3 + 2] == targetLoopNodeId)
+        {
+            return true;
+        }
+        parentStatementId
+            = Host.StandaloneSourceStatementParentIds[
+                parentStatementId];
+        depth = depth + 1;
+    }
+    return false;
+}
+
 int32 VerifyStandaloneRewrittenSourceArenas()
 {
     int32 bodyCount = Host.StandaloneSourceBodyCount[0];
@@ -1794,11 +1837,14 @@ int32 VerifyStandaloneRewrittenSourceArenas()
                 int32 conditionExpressionId
                     = Host.StandaloneSourceStatements[
                         childStatementOffset + 1];
+                int32 transferTargetNodeId
+                    = Host.StandaloneSourceStatements[
+                        childStatementOffset + 2];
                 if ((childOrdinal != 0
                         && childOrdinal != trueCount - 1)
                     || trueCount < 1
-                    || Host.StandaloneSourceStatements[
-                        childStatementOffset + 2] != ifNodeId
+                    || !IsStandaloneSourceLoopAncestorTarget(
+                        childStatementId, transferTargetNodeId, bodyId)
                     || conditionExpressionId < 0
                     || conditionExpressionId >= bodyExpressionCount)
                 {
@@ -1832,6 +1878,9 @@ int32 VerifyStandaloneRewrittenSourceArenas()
             if (controlIsLoop
                 && (currentChildKind == 8 || currentChildKind == 9))
             {
+                int32 transferTargetNodeId
+                    = Host.StandaloneSourceStatements[
+                        childStatementOffset + 2];
                 if (sawLoopTransfer || childOrdinal >= trueCount
                     || childOrdinal
                         != (controlStatementKind == 11
@@ -1839,8 +1888,8 @@ int32 VerifyStandaloneRewrittenSourceArenas()
                             : trueCount + falseCount - 1)
                     || Host.StandaloneSourceStatements[
                         childStatementOffset + 1] != -1
-                    || Host.StandaloneSourceStatements[
-                        childStatementOffset + 2] != ifNodeId)
+                    || !IsStandaloneSourceLoopAncestorTarget(
+                        childStatementId, transferTargetNodeId, bodyId))
                 {
                     return 3;
                 }
@@ -2732,9 +2781,7 @@ int32 VerifyStandaloneRewrittenSourceArenas()
         else if (Host.StandaloneSourceStatements[offset] == 6
             || Host.StandaloneSourceStatements[offset] == 7
             || Host.StandaloneSourceStatements[offset] == 10
-            || Host.StandaloneSourceStatements[offset] == 11
-            || Host.StandaloneSourceStatements[offset] == 12
-            || Host.StandaloneSourceStatements[offset] == 13)
+            || Host.StandaloneSourceStatements[offset] == 11)
         {
             int32 ifNodeId
                 = Host.StandaloneSourceStatements[offset + 2];
@@ -2746,6 +2793,21 @@ int32 VerifyStandaloneRewrittenSourceArenas()
                 || Host.StandaloneRewrittenSourceIfNodes[
                     ifNodeId * 5]
                     != Host.StandaloneRewriteBodyIds[ownerBody])
+            {
+                return 3;
+            }
+        }
+        else if (Host.StandaloneSourceStatements[offset] == 8
+            || Host.StandaloneSourceStatements[offset] == 9
+            || Host.StandaloneSourceStatements[offset] == 12
+            || Host.StandaloneSourceStatements[offset] == 13)
+        {
+            int32 targetLoopNodeId
+                = Host.StandaloneSourceStatements[offset + 2];
+            if (!IsStandaloneSourceLoopAncestorTarget(
+                    statementIndex, targetLoopNodeId, ownerBody)
+                || Host.StandaloneRewrittenSourceStatements[
+                    offset + 2] != targetLoopNodeId)
             {
                 return 3;
             }

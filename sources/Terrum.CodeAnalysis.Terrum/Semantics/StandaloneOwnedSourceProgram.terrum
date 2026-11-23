@@ -124,6 +124,13 @@ bool ValidateStandaloneSourceCallBuffers()
             == tokenCapacity * 3
         && Host.StandaloneSourceStatementParentIds.Length
             == tokenCapacity
+        && Host.StandaloneSourceLoopLabelTokens.Length
+            == tokenCapacity
+        && Host.StandaloneSourceTransferLabelTokens.Length
+            == tokenCapacity
+        && Host.StandaloneSourceLoopStackCount.Length == 1
+        && Host.StandaloneSourceLoopStack.Length
+            == tokenCapacity
         && Host.StandaloneSourceIfNodeCount.Length == 1
         && Host.StandaloneSourceIfNodes.Length
             == tokenCapacity * 5
@@ -189,6 +196,7 @@ void ClearStandaloneSourceCallProgram()
     Host.StandaloneSourceBodyCount[0] = 0;
     Host.StandaloneSourceExpressionCount[0] = 0;
     Host.StandaloneSourceStatementCount[0] = 0;
+    Host.StandaloneSourceLoopStackCount[0] = 0;
     Host.StandaloneSourceIfNodeCount[0] = 0;
     Host.StandaloneSourceIfChildCount[0] = 0;
     Host.StandaloneSourceLexicalScopeCount[0] = 0;
@@ -253,6 +261,24 @@ void ClearStandaloneSourceCallProgram()
         index = index + 1)
     {
         Host.StandaloneSourceStatementParentIds[index] = -1;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneSourceLoopLabelTokens.Length;
+        index = index + 1)
+    {
+        Host.StandaloneSourceLoopLabelTokens[index] = -1;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneSourceTransferLabelTokens.Length;
+        index = index + 1)
+    {
+        Host.StandaloneSourceTransferLabelTokens[index] = -1;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneSourceLoopStack.Length;
+        index = index + 1)
+    {
+        Host.StandaloneSourceLoopStack[index] = -1;
     }
     for (mut int32 index = 0;
         index < Host.StandaloneSourceIfNodes.Length;
@@ -2975,6 +3001,19 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
     mut bool sawDivergence = false;
     while (tokenIndex < bodyTokenEnd)
     {
+        init int32 loopPrefixToken;
+        init int32 loopLabelToken;
+        int32 loopPrefixStatus = TryGetStandaloneSourceLoopPrefix(
+            tokenIndex, bodyTokenEnd,
+            ref init loopPrefixToken, ref init loopLabelToken);
+        if (loopPrefixStatus > 1)
+        {
+            return loopPrefixStatus;
+        }
+        if (loopPrefixStatus == 0)
+        {
+            tokenIndex = loopPrefixToken;
+        }
         int32 kind = Host.Tokens[tokenIndex * 3];
         int32 declaredLocalId
             = FindStandaloneSourceLocalAtDeclaration(
@@ -3618,8 +3657,15 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
             }
             int32 loopStatementId
                 = Host.StandaloneSourceStatementCount[0] - 1;
+            int32 loopLabelStatus
+                = SetStandaloneSourceLoopLabel(
+                    loopStatementId, loopLabelToken);
+            if (loopLabelStatus != 0)
+            {
+                return loopLabelStatus;
+            }
             init int32 afterBodyToken;
-            int32 bodyStatus = ParseStandaloneSourceWhileBody(
+            int32 bodyStatus = ParseStandaloneSourceWhileBodyInLoop(
                 localCallableId, expressionFirst, controlNodeId,
                 loopStatementId, headerClose + 1, bodyTokenEnd,
                 false,
@@ -3749,8 +3795,15 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
             }
             int32 loopStatementId
                 = Host.StandaloneSourceStatementCount[0] - 1;
+            int32 loopLabelStatus
+                = SetStandaloneSourceLoopLabel(
+                    loopStatementId, loopLabelToken);
+            if (loopLabelStatus != 0)
+            {
+                return loopLabelStatus;
+            }
             init int32 afterBodyToken;
-            int32 bodyStatus = ParseStandaloneSourceWhileBody(
+            int32 bodyStatus = ParseStandaloneSourceWhileBodyInLoop(
                 localCallableId, expressionFirst, controlNodeId,
                 loopStatementId, tokenIndex + 1, bodyTokenEnd,
                 false,
@@ -3825,11 +3878,13 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
                 doBodyBreaksImmediately
                     = Host.StandaloneSourceStatementParentIds[
                         lastDoBodyChildId] == doStatementId
-                        && Host.StandaloneSourceStatements[
-                            lastDoBodyChildId * 3] == 8
-                        && Host.StandaloneSourceStatements[
-                            lastDoBodyChildId * 3 + 2]
-                            == controlNodeId;
+                        && (Host.StandaloneSourceStatements[
+                                lastDoBodyChildId * 3] == 8
+                            || (Host.StandaloneSourceStatements[
+                                    lastDoBodyChildId * 3] == 9
+                                && Host.StandaloneSourceStatements[
+                                    lastDoBodyChildId * 3 + 2]
+                                    != controlNodeId));
             }
             init bool conditionDoesNotReturn;
             int32 conditionDoesNotReturnStatus
@@ -3956,8 +4011,15 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
             }
             int32 loopStatementId
                 = Host.StandaloneSourceStatementCount[0] - 1;
+            int32 loopLabelStatus
+                = SetStandaloneSourceLoopLabel(
+                    loopStatementId, loopLabelToken);
+            if (loopLabelStatus != 0)
+            {
+                return loopLabelStatus;
+            }
             init int32 afterBodyToken;
-            int32 loopBodyStatus = ParseStandaloneSourceWhileBody(
+            int32 loopBodyStatus = ParseStandaloneSourceWhileBodyInLoop(
                 localCallableId, expressionFirst, controlNodeId,
                 loopStatementId, conditionClose + 1, bodyTokenEnd,
                 false,
@@ -4606,6 +4668,8 @@ int32 AppendStandaloneSourceStatement(int32 bodyId,
     Host.StandaloneSourceStatements[offset + 1] = expressionId;
     Host.StandaloneSourceStatements[offset + 2] = locationId;
     Host.StandaloneSourceStatementParentIds[count] = -1;
+    Host.StandaloneSourceLoopLabelTokens[count] = -1;
+    Host.StandaloneSourceTransferLabelTokens[count] = -1;
     Host.StandaloneSourceStatementCount[0] = count + 1;
     return 0;
 }
@@ -5177,22 +5241,41 @@ int32 ParseStandaloneSourceConditionalLoopTransfer(
     {
         return semicolonStatus;
     }
-    if (conditionalTransferKind == 0
-        || semicolonToken != transferToken + 1)
+    if (conditionalTransferKind == 0)
     {
         return 1;
+    }
+    init int32 transferLabelToken;
+    int32 transferLabelStatus
+        = GetStandaloneSourceTransferLabelToken(
+            transferToken, semicolonToken,
+            ref init transferLabelToken);
+    if (transferLabelStatus != 0)
+    {
+        return transferLabelStatus;
+    }
+    init int32 transferControlNodeId;
+    int32 transferTargetStatus
+        = ResolveStandaloneSourceLoopTransferTarget(
+            transferLabelToken,
+            ref init transferControlNodeId);
+    if (transferTargetStatus != 0)
+    {
+        return transferTargetStatus;
     }
 
     // Kinds 12 and 13 carry eager conditional loop transfers.
     int32 statementStatus = AppendStandaloneSourceStatement(
         localCallableId, expressionFirst, conditionalTransferKind,
-        conditionExpressionId, controlNodeId);
+        conditionExpressionId, transferControlNodeId);
     if (statementStatus != 0)
     {
         return statementStatus;
     }
     int32 conditionalTransferStatementId
         = Host.StandaloneSourceStatementCount[0] - 1;
+    Host.StandaloneSourceTransferLabelTokens[
+        conditionalTransferStatementId] = transferLabelToken;
     int32 childStatus = AppendStandaloneSourceIfChild(
         localCallableId, controlNodeId, loopStatementId, true,
         conditionalTransferStatementId);
@@ -5275,7 +5358,7 @@ int32 ParseStandaloneSourceConditionalLoopTransfer(
 int32 ParseStandaloneSourceNestedWhile(
     int32 localCallableId, int32 expressionFirst,
     int32 parentControlNodeId, int32 parentStatementId,
-    int32 tokenStart, int32 tokenEnd,
+    int32 tokenStart, int32 tokenEnd, int32 loopLabelToken,
     ref<init int32> nextTokenResult)
     ensure return == 0 ? *nextTokenResult is init : true
 {
@@ -5384,9 +5467,7 @@ int32 ParseStandaloneSourceNestedWhile(
             || Host.StandaloneSourceStatements[
                 priorTransferStatementId * 3] != 8
             || Host.StandaloneSourceStatements[
-                priorTransferStatementId * 3 + 1] != -1
-            || Host.StandaloneSourceStatements[
-                priorTransferStatementId * 3 + 2] != priorLoopNodeId)
+                priorTransferStatementId * 3 + 1] != -1)
         {
             return 2;
         }
@@ -5474,8 +5555,15 @@ int32 ParseStandaloneSourceNestedWhile(
     }
     int32 nestedStatementId
         = Host.StandaloneSourceStatementCount[0] - 1;
+    int32 loopLabelStatus
+        = SetStandaloneSourceLoopLabel(
+            nestedStatementId, loopLabelToken);
+    if (loopLabelStatus != 0)
+    {
+        return loopLabelStatus;
+    }
     init int32 afterNestedBody;
-    int32 nestedBodyStatus = ParseStandaloneSourceWhileBody(
+    int32 nestedBodyStatus = ParseStandaloneSourceWhileBodyInLoop(
         localCallableId, expressionFirst, nestedControlNodeId,
         nestedStatementId, conditionClose + 1, tokenEnd,
         false,
@@ -5536,9 +5624,7 @@ int32 ParseStandaloneSourceNestedWhile(
             && Host.StandaloneSourceStatements[
                 transferStatementId * 3] != 9)
         || Host.StandaloneSourceStatements[
-            transferStatementId * 3 + 1] != -1
-        || Host.StandaloneSourceStatements[
-            transferStatementId * 3 + 2] != nestedControlNodeId)
+            transferStatementId * 3 + 1] != -1)
     {
         return 2;
     }
@@ -5560,7 +5646,7 @@ int32 ParseStandaloneSourceNestedWhile(
 int32 ParseStandaloneSourceNestedDo(
     int32 localCallableId, int32 expressionFirst,
     int32 parentControlNodeId, int32 parentStatementId,
-    int32 tokenStart, int32 tokenEnd,
+    int32 tokenStart, int32 tokenEnd, int32 loopLabelToken,
     ref<init int32> nextTokenResult)
     ensure return == 0 ? *nextTokenResult is init : true
 {
@@ -5599,8 +5685,15 @@ int32 ParseStandaloneSourceNestedDo(
     }
     int32 nestedStatementId
         = Host.StandaloneSourceStatementCount[0] - 1;
+    int32 loopLabelStatus
+        = SetStandaloneSourceLoopLabel(
+            nestedStatementId, loopLabelToken);
+    if (loopLabelStatus != 0)
+    {
+        return loopLabelStatus;
+    }
     init int32 afterBodyToken;
-    int32 bodyStatus = ParseStandaloneSourceWhileBody(
+    int32 bodyStatus = ParseStandaloneSourceWhileBodyInLoop(
         localCallableId, expressionFirst, nestedControlNodeId,
         nestedStatementId, tokenStart + 1, tokenEnd,
         true,
@@ -5704,12 +5797,15 @@ int32 ParseStandaloneSourceNestedDo(
         return 2;
     }
     bool doBodyBreaksImmediately
-        = Host.StandaloneSourceStatements[
-            breakStatementId * 3] == 8
+        = (Host.StandaloneSourceStatements[
+                breakStatementId * 3] == 8
+            || (Host.StandaloneSourceStatements[
+                    breakStatementId * 3] == 9
+                && Host.StandaloneSourceStatements[
+                    breakStatementId * 3 + 2]
+                    != nestedControlNodeId))
             && Host.StandaloneSourceStatements[
-                breakStatementId * 3 + 1] == -1
-            && Host.StandaloneSourceStatements[
-                breakStatementId * 3 + 2] == nestedControlNodeId;
+                breakStatementId * 3 + 1] == -1;
     if (!doBodyBreaksImmediately)
     {
         return 2;
@@ -5814,20 +5910,38 @@ int32 ParseStandaloneSourceWhileBody(int32 localCallableId,
                 cursor = cursor + 1;
                 continue;
             }
+            init int32 nestedLoopToken;
+            init int32 nestedLoopLabelToken;
+            int32 nestedLoopPrefixStatus
+                = TryGetStandaloneSourceLoopPrefix(
+                    cursor, blockClose,
+                    ref init nestedLoopToken,
+                    ref init nestedLoopLabelToken);
+            if (nestedLoopPrefixStatus > 1)
+            {
+                return nestedLoopPrefixStatus;
+            }
             if (allowConditionalBreakThenBreak
                 && conditionalTransferKind != 0
-                && (IsStandaloneSourceWhileKeyword(cursor)
-                    || IsStandaloneSourceDoKeyword(cursor)
+                && ((nestedLoopPrefixStatus == 0
+                        && (IsStandaloneSourceWhileKeyword(
+                                nestedLoopToken)
+                            || IsStandaloneSourceDoKeyword(
+                                nestedLoopToken)
+                            || IsStandaloneSourceForKeyword(
+                                nestedLoopToken)))
                     || IsStandaloneSourceIfKeyword(cursor)))
             {
                 return 2;
             }
-            if (IsStandaloneSourceWhileKeyword(cursor))
+            if (nestedLoopPrefixStatus == 0
+                && IsStandaloneSourceWhileKeyword(nestedLoopToken))
             {
                 init int32 afterNestedWhile;
                 int32 nestedWhileStatus = ParseStandaloneSourceNestedWhile(
                     localCallableId, expressionFirst, controlNodeId,
-                    loopStatementId, cursor, blockClose,
+                    loopStatementId, nestedLoopToken, blockClose,
+                    nestedLoopLabelToken,
                     ref init afterNestedWhile);
                 if (nestedWhileStatus != 0)
                 {
@@ -5841,12 +5955,14 @@ int32 ParseStandaloneSourceWhileBody(int32 localCallableId,
                 }
                 continue;
             }
-            if (IsStandaloneSourceDoKeyword(cursor))
+            if (nestedLoopPrefixStatus == 0
+                && IsStandaloneSourceDoKeyword(nestedLoopToken))
             {
                 init int32 afterNestedDo;
                 int32 nestedDoStatus = ParseStandaloneSourceNestedDo(
                     localCallableId, expressionFirst, controlNodeId,
-                    loopStatementId, cursor, blockClose,
+                    loopStatementId, nestedLoopToken, blockClose,
+                    nestedLoopLabelToken,
                     ref init afterNestedDo);
                 if (nestedDoStatus != 0)
                 {
@@ -5859,6 +5975,11 @@ int32 ParseStandaloneSourceWhileBody(int32 localCallableId,
                     cursor = cursor + 1;
                 }
                 continue;
+            }
+            if (nestedLoopPrefixStatus == 0
+                && IsStandaloneSourceForKeyword(nestedLoopToken))
+            {
+                return 2;
             }
             if (IsStandaloneSourceIfKeyword(cursor))
             {
@@ -5919,9 +6040,25 @@ int32 ParseStandaloneSourceWhileBody(int32 localCallableId,
                     }
                     break;
                 }
+                init int32 followingLoopToken;
+                init int32 followingLoopLabelToken;
+                int32 followingLoopPrefixStatus
+                    = TryGetStandaloneSourceLoopPrefix(
+                        cursor, blockClose,
+                        ref init followingLoopToken,
+                        ref init followingLoopLabelToken);
+                if (followingLoopPrefixStatus > 1)
+                {
+                    return followingLoopPrefixStatus;
+                }
                 if (allowConditionalBreakThenBreak
-                    && (IsStandaloneSourceWhileKeyword(cursor)
-                        || IsStandaloneSourceDoKeyword(cursor)
+                    && ((followingLoopPrefixStatus == 0
+                            && (IsStandaloneSourceWhileKeyword(
+                                    followingLoopToken)
+                                || IsStandaloneSourceDoKeyword(
+                                    followingLoopToken)
+                                || IsStandaloneSourceForKeyword(
+                                    followingLoopToken)))
                         || IsStandaloneSourceIfKeyword(cursor)))
                 {
                     return 2;
@@ -5966,19 +6103,40 @@ int32 ParseStandaloneSourceWhileBody(int32 localCallableId,
             int32 statementStatus;
             if (transferKind != 0)
             {
-                if (semicolonToken != cursor + 1)
+                init int32 transferLabelToken;
+                int32 transferLabelStatus
+                    = GetStandaloneSourceTransferLabelToken(
+                        cursor, semicolonToken,
+                        ref init transferLabelToken);
+                if (transferLabelStatus != 0)
                 {
-                    return 1;
+                    return transferLabelStatus;
+                }
+                init int32 targetControlNodeId;
+                int32 targetStatus
+                    = ResolveStandaloneSourceLoopTransferTarget(
+                        transferLabelToken,
+                        ref init targetControlNodeId);
+                if (targetStatus != 0)
+                {
+                    return targetStatus;
+                }
+                if (allowConditionalBreakThenBreak
+                    && targetControlNodeId != controlNodeId)
+                {
+                    return 2;
                 }
                 statementStatus = AppendStandaloneSourceStatement(
                     localCallableId, expressionFirst, transferKind, -1,
-                    controlNodeId);
+                    targetControlNodeId);
                 if (statementStatus != 0)
                 {
                     return statementStatus;
                 }
                 childStatementId
                     = Host.StandaloneSourceStatementCount[0] - 1;
+                Host.StandaloneSourceTransferLabelTokens[
+                    childStatementId] = transferLabelToken;
                 afterStatementToken = semicolonToken + 1;
             }
             else
@@ -6048,12 +6206,25 @@ int32 ParseStandaloneSourceWhileBody(int32 localCallableId,
         return 0;
     }
 
-    if (IsStandaloneSourceWhileKeyword(tokenStart))
+    init int32 directLoopToken;
+    init int32 directLoopLabelToken;
+    int32 directLoopPrefixStatus
+        = TryGetStandaloneSourceLoopPrefix(
+            tokenStart, tokenEnd,
+            ref init directLoopToken,
+            ref init directLoopLabelToken);
+    if (directLoopPrefixStatus > 1)
+    {
+        return directLoopPrefixStatus;
+    }
+    if (directLoopPrefixStatus == 0
+        && IsStandaloneSourceWhileKeyword(directLoopToken))
     {
         init int32 afterNestedWhile;
         int32 nestedWhileStatus = ParseStandaloneSourceNestedWhile(
             localCallableId, expressionFirst, controlNodeId,
-            loopStatementId, tokenStart, tokenEnd,
+            loopStatementId, directLoopToken, tokenEnd,
+            directLoopLabelToken,
             ref init afterNestedWhile);
         if (nestedWhileStatus != 0)
         {
@@ -6063,12 +6234,14 @@ int32 ParseStandaloneSourceWhileBody(int32 localCallableId,
         return 0;
     }
 
-    if (IsStandaloneSourceDoKeyword(tokenStart))
+    if (directLoopPrefixStatus == 0
+        && IsStandaloneSourceDoKeyword(directLoopToken))
     {
         init int32 afterNestedDo;
         int32 nestedDoStatus = ParseStandaloneSourceNestedDo(
             localCallableId, expressionFirst, controlNodeId,
-            loopStatementId, tokenStart, tokenEnd,
+            loopStatementId, directLoopToken, tokenEnd,
+            directLoopLabelToken,
             ref init afterNestedDo);
         if (nestedDoStatus != 0)
         {
@@ -6076,6 +6249,11 @@ int32 ParseStandaloneSourceWhileBody(int32 localCallableId,
         }
         *nextTokenResult = afterNestedDo;
         return 0;
+    }
+    if (directLoopPrefixStatus == 0
+        && IsStandaloneSourceForKeyword(directLoopToken))
+    {
+        return 2;
     }
 
     if (IsStandaloneSourceIfKeyword(tokenStart))
@@ -6109,19 +6287,35 @@ int32 ParseStandaloneSourceWhileBody(int32 localCallableId,
     int32 statementStatus;
     if (transferKind != 0)
     {
-        if (semicolonToken != tokenStart + 1)
+        init int32 transferLabelToken;
+        int32 transferLabelStatus
+            = GetStandaloneSourceTransferLabelToken(
+                tokenStart, semicolonToken,
+                ref init transferLabelToken);
+        if (transferLabelStatus != 0)
         {
-            return 1;
+            return transferLabelStatus;
+        }
+        init int32 targetControlNodeId;
+        int32 targetStatus
+            = ResolveStandaloneSourceLoopTransferTarget(
+                transferLabelToken,
+                ref init targetControlNodeId);
+        if (targetStatus != 0)
+        {
+            return targetStatus;
         }
         statementStatus = AppendStandaloneSourceStatement(
             localCallableId, expressionFirst, transferKind, -1,
-            controlNodeId);
+            targetControlNodeId);
         if (statementStatus != 0)
         {
             return statementStatus;
         }
         childStatementId
             = Host.StandaloneSourceStatementCount[0] - 1;
+        Host.StandaloneSourceTransferLabelTokens[
+            childStatementId] = transferLabelToken;
         afterStatementToken = semicolonToken + 1;
     }
     else
@@ -7494,6 +7688,332 @@ bool IsStandaloneSourceContinueKeyword(int32 tokenIndex)
         && Host.Source[start + 5] == char16(110)
         && Host.Source[start + 6] == char16(117)
         && Host.Source[start + 7] == char16(101);
+}
+
+int32 TryGetStandaloneSourceLoopPrefix(int32 tokenStart,
+    int32 tokenEnd, ref<init int32> loopTokenResult,
+    ref<init int32> labelTokenResult)
+    ensure return == 0 ? (*loopTokenResult is init
+        && *labelTokenResult is init) : true
+{
+    if (tokenStart < 0 || tokenStart >= tokenEnd
+        || tokenEnd > Host.Tokens.Length / 3)
+    {
+        return 2;
+    }
+    if (IsStandaloneSourceWhileKeyword(tokenStart)
+        || IsStandaloneSourceDoKeyword(tokenStart)
+        || IsStandaloneSourceForKeyword(tokenStart))
+    {
+        *loopTokenResult = tokenStart;
+        *labelTokenResult = -1;
+        return 0;
+    }
+    if (Host.Tokens[tokenStart * 3] != 2
+        || tokenStart + 2 >= tokenEnd)
+    {
+        return 1;
+    }
+
+    init int32 labelKind;
+    init int32 labelStart;
+    init int32 labelLength;
+    if (!TryReadStandaloneSourceToken(tokenStart,
+            ref init labelKind, ref init labelStart,
+            ref init labelLength)
+        || labelKind != 2)
+    {
+        return 2;
+    }
+    int32 colonToken = tokenStart + 1;
+    init int32 colonKind;
+    init int32 colonStart;
+    init int32 colonLength;
+    if (!TryReadStandaloneSourceToken(colonToken,
+            ref init colonKind, ref init colonStart,
+            ref init colonLength)
+        || colonKind != 55
+        || colonLength != 1
+        || Host.Source[colonStart] != char16(58))
+    {
+        return 1;
+    }
+    int32 loopToken = tokenStart + 2;
+    if (!IsStandaloneSourceWhileKeyword(loopToken)
+        && !IsStandaloneSourceDoKeyword(loopToken)
+        && !IsStandaloneSourceForKeyword(loopToken))
+    {
+        return 1;
+    }
+    if (labelStart + labelLength != colonStart)
+    {
+        return 2;
+    }
+
+    init int32 loopKind;
+    init int32 loopStart;
+    init int32 loopLength;
+    if (!TryReadStandaloneSourceToken(loopToken,
+            ref init loopKind, ref init loopStart,
+            ref init loopLength))
+    {
+        return 2;
+    }
+    mut int32 sourceOffset = colonStart + colonLength;
+    while (sourceOffset < loopStart)
+    {
+        char16 value = Host.Source[sourceOffset];
+        if (value == char16(10) || value == char16(13)
+            || value == char16(133) || value == char16(8232)
+            || value == char16(8233))
+        {
+            return 2;
+        }
+        sourceOffset = sourceOffset + 1;
+    }
+    *loopTokenResult = loopToken;
+    *labelTokenResult = tokenStart;
+    return 0;
+}
+
+bool StandaloneSourceIdentifierTokensEqual(int32 firstToken,
+    int32 secondToken)
+{
+    init int32 firstKind;
+    init int32 firstStart;
+    init int32 firstLength;
+    init int32 secondKind;
+    init int32 secondStart;
+    init int32 secondLength;
+    if (!TryReadStandaloneSourceToken(firstToken,
+            ref init firstKind, ref init firstStart,
+            ref init firstLength)
+        || !TryReadStandaloneSourceToken(secondToken,
+            ref init secondKind, ref init secondStart,
+            ref init secondLength)
+        || firstKind != 2 || secondKind != 2)
+    {
+        return false;
+    }
+    if (Host.Source[firstStart] == char16(64))
+    {
+        firstStart = firstStart + 1;
+        firstLength = firstLength - 1;
+    }
+    if (Host.Source[secondStart] == char16(64))
+    {
+        secondStart = secondStart + 1;
+        secondLength = secondLength - 1;
+    }
+    if (firstLength != secondLength)
+    {
+        return false;
+    }
+    for (mut int32 index = 0; index < firstLength;
+        index = index + 1)
+    {
+        if (Host.Source[firstStart + index]
+            != Host.Source[secondStart + index])
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+int32 SetStandaloneSourceLoopLabel(int32 loopStatementId,
+    int32 labelToken)
+{
+    int32 loopCount = Host.StandaloneSourceLoopStackCount[0];
+    if (loopStatementId < 0
+        || loopStatementId >= Host.StandaloneSourceStatementCount[0]
+        || (Host.StandaloneSourceStatements[
+                loopStatementId * 3] != 7
+            && Host.StandaloneSourceStatements[
+                loopStatementId * 3] != 10
+            && Host.StandaloneSourceStatements[
+                loopStatementId * 3] != 11)
+        || labelToken < -1
+        || labelToken >= Host.Tokens.Length / 3
+        || loopCount < 0
+        || loopCount > Host.StandaloneSourceLoopStack.Length)
+    {
+        return 3;
+    }
+    if (labelToken >= 0)
+    {
+        for (mut int32 depth = 0; depth < loopCount;
+            depth = depth + 1)
+        {
+            int32 activeLoopStatementId
+                = Host.StandaloneSourceLoopStack[depth];
+            if (activeLoopStatementId < 0
+                || activeLoopStatementId
+                    >= Host.StandaloneSourceStatementCount[0])
+            {
+                return 3;
+            }
+            int32 activeLabelToken
+                = Host.StandaloneSourceLoopLabelTokens[
+                    activeLoopStatementId];
+            if (activeLabelToken >= 0
+                && StandaloneSourceIdentifierTokensEqual(
+                    activeLabelToken, labelToken))
+            {
+                return 2;
+            }
+        }
+    }
+    Host.StandaloneSourceLoopLabelTokens[loopStatementId]
+        = labelToken;
+    return 0;
+}
+
+int32 PushStandaloneSourceLoop(int32 loopStatementId)
+{
+    int32 count = Host.StandaloneSourceLoopStackCount[0];
+    if (loopStatementId < 0
+        || loopStatementId >= Host.StandaloneSourceStatementCount[0]
+        || count < 0
+        || count >= Host.StandaloneSourceLoopStack.Length)
+    {
+        return 3;
+    }
+    Host.StandaloneSourceLoopStack[count] = loopStatementId;
+    Host.StandaloneSourceLoopStackCount[0] = count + 1;
+    return 0;
+}
+
+int32 PopStandaloneSourceLoop(int32 loopStatementId)
+{
+    int32 count = Host.StandaloneSourceLoopStackCount[0];
+    if (count < 1 || count > Host.StandaloneSourceLoopStack.Length
+        || Host.StandaloneSourceLoopStack[count - 1]
+            != loopStatementId)
+    {
+        return 3;
+    }
+    Host.StandaloneSourceLoopStackCount[0] = count - 1;
+    Host.StandaloneSourceLoopStack[count - 1] = -1;
+    return 0;
+}
+
+int32 ResolveStandaloneSourceLoopTransferTarget(int32 labelToken,
+    ref<init int32> controlNodeResult)
+    ensure return == 0 ? *controlNodeResult is init : true
+{
+    int32 count = Host.StandaloneSourceLoopStackCount[0];
+    if (labelToken < -1
+        || labelToken >= Host.Tokens.Length / 3
+        || count < 1
+        || count > Host.StandaloneSourceLoopStack.Length)
+    {
+        return 3;
+    }
+    mut int32 selectedLoopStatementId = -1;
+    for (mut int32 depth = count - 1; depth >= 0;
+        depth = depth - 1)
+    {
+        int32 loopStatementId
+            = Host.StandaloneSourceLoopStack[depth];
+        if (loopStatementId < 0
+            || loopStatementId
+                >= Host.StandaloneSourceStatementCount[0])
+        {
+            return 3;
+        }
+        if (labelToken == -1)
+        {
+            selectedLoopStatementId = loopStatementId;
+            break;
+        }
+        int32 loopLabelToken
+            = Host.StandaloneSourceLoopLabelTokens[
+                loopStatementId];
+        if (loopLabelToken >= 0
+            && StandaloneSourceIdentifierTokensEqual(
+                loopLabelToken, labelToken))
+        {
+            selectedLoopStatementId = loopStatementId;
+            break;
+        }
+    }
+    if (selectedLoopStatementId < 0)
+    {
+        return 2;
+    }
+    int32 loopKind
+        = Host.StandaloneSourceStatements[
+            selectedLoopStatementId * 3];
+    int32 controlNodeId
+        = Host.StandaloneSourceStatements[
+            selectedLoopStatementId * 3 + 2];
+    if ((loopKind != 7 && loopKind != 10 && loopKind != 11)
+        || controlNodeId < 0
+        || controlNodeId >= Host.StandaloneSourceIfNodeCount[0])
+    {
+        return 3;
+    }
+    *controlNodeResult = controlNodeId;
+    return 0;
+}
+
+int32 GetStandaloneSourceTransferLabelToken(int32 transferToken,
+    int32 semicolonToken, ref<init int32> labelTokenResult)
+    ensure return == 0 ? *labelTokenResult is init : true
+{
+    if (transferToken < 0
+        || transferToken >= Host.Tokens.Length / 3
+        || semicolonToken <= transferToken
+        || semicolonToken >= Host.Tokens.Length / 3)
+    {
+        return 2;
+    }
+    if (semicolonToken == transferToken + 1)
+    {
+        *labelTokenResult = -1;
+        return 0;
+    }
+    if (semicolonToken == transferToken + 2
+        && Host.Tokens[(transferToken + 1) * 3] == 2)
+    {
+        *labelTokenResult = transferToken + 1;
+        return 0;
+    }
+    return 1;
+}
+
+int32 ParseStandaloneSourceWhileBodyInLoop(
+    int32 localCallableId, int32 expressionFirst,
+    int32 controlNodeId, int32 loopStatementId,
+    int32 tokenStart, int32 tokenEnd,
+    bool allowConditionalBreakThenBreak,
+    ref<init int32> nextTokenResult)
+    ensure return == 0 ? *nextTokenResult is init : true
+{
+    int32 pushStatus = PushStandaloneSourceLoop(loopStatementId);
+    if (pushStatus != 0)
+    {
+        return pushStatus;
+    }
+    init int32 nextToken;
+    int32 bodyStatus = ParseStandaloneSourceWhileBody(
+        localCallableId, expressionFirst, controlNodeId,
+        loopStatementId, tokenStart, tokenEnd,
+        allowConditionalBreakThenBreak,
+        ref init nextToken);
+    int32 popStatus
+        = PopStandaloneSourceLoop(loopStatementId);
+    if (bodyStatus != 0)
+    {
+        return bodyStatus;
+    }
+    if (popStatus != 0)
+    {
+        return popStatus;
+    }
+    *nextTokenResult = nextToken;
+    return 0;
 }
 
 bool IsStandaloneSourceElseKeyword(int32 tokenIndex)
@@ -10363,6 +10883,192 @@ int32 TryGetStandaloneCallableSignature(int32 targetKind,
     return 3;
 }
 
+bool IsStandaloneSourceLoopStatementKind(int32 statementKind)
+{
+    return statementKind == 7
+        || statementKind == 10
+        || statementKind == 11;
+}
+
+bool IsStandaloneSourceLoopTransferKind(int32 statementKind)
+{
+    return statementKind == 8
+        || statementKind == 9
+        || statementKind == 12
+        || statementKind == 13;
+}
+
+int32 VerifyStandaloneSourceLoopLabels(int32 statementCount)
+{
+    if (statementCount < 0
+        || statementCount
+            > Host.StandaloneSourceStatementParentIds.Length
+        || statementCount
+            > Host.StandaloneSourceLoopLabelTokens.Length
+        || statementCount
+            > Host.StandaloneSourceTransferLabelTokens.Length
+        || Host.StandaloneSourceLoopStackCount[0] != 0)
+    {
+        return 3;
+    }
+
+    int32 tokenCount = Host.Tokens.Length / 3;
+    for (mut int32 statementId = 0;
+        statementId < statementCount;
+        statementId = statementId + 1)
+    {
+        int32 statementKind
+            = Host.StandaloneSourceStatements[statementId * 3];
+        int32 loopLabelToken
+            = Host.StandaloneSourceLoopLabelTokens[statementId];
+        int32 transferLabelToken
+            = Host.StandaloneSourceTransferLabelTokens[
+                statementId];
+        bool isLoop
+            = IsStandaloneSourceLoopStatementKind(statementKind);
+        bool isTransfer
+            = IsStandaloneSourceLoopTransferKind(statementKind);
+        if ((isLoop
+                ? loopLabelToken < -1
+                    || loopLabelToken >= tokenCount
+                : loopLabelToken != -1)
+            || (isTransfer
+                ? transferLabelToken < -1
+                    || transferLabelToken >= tokenCount
+                : transferLabelToken != -1))
+        {
+            return 3;
+        }
+        if (loopLabelToken >= 0
+            && Host.Tokens[loopLabelToken * 3] != 2)
+        {
+            return 3;
+        }
+        if (transferLabelToken >= 0
+            && Host.Tokens[transferLabelToken * 3] != 2)
+        {
+            return 3;
+        }
+
+        if (isLoop && loopLabelToken >= 0)
+        {
+            mut int32 ancestorStatementId
+                = Host.StandaloneSourceStatementParentIds[
+                    statementId];
+            mut int32 ancestorDepth = 0;
+            while (ancestorStatementId >= 0)
+            {
+                if (ancestorStatementId >= statementCount
+                    || ancestorDepth >= statementCount)
+                {
+                    return 3;
+                }
+                int32 ancestorKind
+                    = Host.StandaloneSourceStatements[
+                        ancestorStatementId * 3];
+                if (IsStandaloneSourceLoopStatementKind(
+                        ancestorKind))
+                {
+                    int32 ancestorLabelToken
+                        = Host.StandaloneSourceLoopLabelTokens[
+                            ancestorStatementId];
+                    if (ancestorLabelToken >= 0
+                        && StandaloneSourceIdentifierTokensEqual(
+                            loopLabelToken, ancestorLabelToken))
+                    {
+                        return 2;
+                    }
+                }
+                ancestorStatementId
+                    = Host.StandaloneSourceStatementParentIds[
+                        ancestorStatementId];
+                ancestorDepth = ancestorDepth + 1;
+            }
+        }
+
+        if (!isTransfer)
+        {
+            continue;
+        }
+        int32 targetNodeId
+            = Host.StandaloneSourceStatements[
+                statementId * 3 + 2];
+        if (targetNodeId < 0
+            || targetNodeId >= Host.StandaloneSourceIfNodeCount[0])
+        {
+            return 3;
+        }
+        int32 targetBodyId
+            = Host.StandaloneSourceIfNodes[targetNodeId * 5];
+        mut int32 ancestorStatementId
+            = Host.StandaloneSourceStatementParentIds[statementId];
+        mut int32 nearestLoopStatementId = -1;
+        mut int32 selectedLoopStatementId = -1;
+        mut int32 ancestorDepth = 0;
+        while (ancestorStatementId >= 0)
+        {
+            if (ancestorStatementId >= statementCount
+                || ancestorDepth >= statementCount)
+            {
+                return 3;
+            }
+            int32 ancestorKind
+                = Host.StandaloneSourceStatements[
+                    ancestorStatementId * 3];
+            if (IsStandaloneSourceLoopStatementKind(ancestorKind))
+            {
+                if (nearestLoopStatementId < 0)
+                {
+                    nearestLoopStatementId = ancestorStatementId;
+                }
+                int32 ancestorLoopNodeId
+                    = Host.StandaloneSourceStatements[
+                        ancestorStatementId * 3 + 2];
+                if (ancestorLoopNodeId < 0
+                    || ancestorLoopNodeId
+                        >= Host.StandaloneSourceIfNodeCount[0]
+                    || Host.StandaloneSourceIfNodes[
+                        ancestorLoopNodeId * 5] != targetBodyId)
+                {
+                    return 3;
+                }
+                if (transferLabelToken == -1)
+                {
+                    selectedLoopStatementId
+                        = nearestLoopStatementId;
+                    break;
+                }
+                int32 ancestorLabelToken
+                    = Host.StandaloneSourceLoopLabelTokens[
+                        ancestorStatementId];
+                if (ancestorLabelToken >= 0
+                    && StandaloneSourceIdentifierTokensEqual(
+                        transferLabelToken, ancestorLabelToken))
+                {
+                    selectedLoopStatementId
+                        = ancestorStatementId;
+                    break;
+                }
+            }
+            ancestorStatementId
+                = Host.StandaloneSourceStatementParentIds[
+                    ancestorStatementId];
+            ancestorDepth = ancestorDepth + 1;
+        }
+        if (nearestLoopStatementId < 0
+            || selectedLoopStatementId < 0)
+        {
+            return 2;
+        }
+        if (Host.StandaloneSourceStatements[
+                selectedLoopStatementId * 3 + 2] != targetNodeId)
+        {
+            return 3;
+        }
+    }
+    return 0;
+}
+
 int32 VerifyStandaloneDirectCalls()
 {
     int32 localCallableCount
@@ -10417,6 +11123,12 @@ int32 VerifyStandaloneDirectCalls()
             > Host.StandaloneSourceStatements.Length / 3)
     {
         return 3;
+    }
+    int32 loopLabelStatus
+        = VerifyStandaloneSourceLoopLabels(statementCount);
+    if (loopLabelStatus != 0)
+    {
+        return loopLabelStatus;
     }
 
     for (mut int32 localId = 0;
@@ -11581,8 +12293,13 @@ int32 VerifyStandaloneDirectCalls()
                     loopBodyBreaksImmediately
                         = Host.StandaloneSourceStatementParentIds[
                             lastChildStatementId] == statementId
-                            && Host.StandaloneSourceStatements[
-                                lastChildStatementId * 3] == 8;
+                            && (Host.StandaloneSourceStatements[
+                                    lastChildStatementId * 3] == 8
+                                || (Host.StandaloneSourceStatements[
+                                        lastChildStatementId * 3] == 9
+                                    && Host.StandaloneSourceStatements[
+                                        lastChildStatementId * 3 + 2]
+                                        != loopNodeId));
                 }
                 if (!conditionOmitted)
                 {
@@ -11809,10 +12526,7 @@ int32 VerifyStandaloneDirectCalls()
                                 && Host.StandaloneSourceStatements[
                                     nestedTransferStatementId * 3] != 9)
                             || Host.StandaloneSourceStatements[
-                                nestedTransferStatementId * 3 + 1] != -1
-                            || Host.StandaloneSourceStatements[
-                                nestedTransferStatementId * 3 + 2]
-                                != nestedLoopNodeId)
+                                nestedTransferStatementId * 3 + 1] != -1)
                         {
                             return 3;
                         }
@@ -11863,9 +12577,6 @@ int32 VerifyStandaloneDirectCalls()
                                         nestedDoBodyStatementId * 3 + 1];
                                 if (nestedDoChildCount < 2
                                     || childOrdinal != 0
-                                    || Host.StandaloneSourceStatements[
-                                        nestedDoBodyStatementId * 3 + 2]
-                                        != nestedDoNodeId
                                     || conditionalExpressionId < 0
                                     || conditionalExpressionId
                                         >= bodyExpressionCount)
@@ -12216,8 +12927,6 @@ int32 VerifyStandaloneDirectCalls()
                             || (childIndex != 0
                                 && childIndex != childCount - 1)
                             || sawLoopTransfer
-                            || Host.StandaloneSourceStatements[
-                                childStatementOffset + 2] != loopNodeId
                             || conditionExpressionId < 0
                             || conditionExpressionId
                                 >= bodyExpressionCount)
@@ -12265,9 +12974,7 @@ int32 VerifyStandaloneDirectCalls()
                         if (sawLoopTransfer
                             || childIndex != childCount - 1
                             || Host.StandaloneSourceStatements[
-                                childStatementOffset + 1] != -1
-                            || Host.StandaloneSourceStatements[
-                                childStatementOffset + 2] != loopNodeId)
+                                childStatementOffset + 1] != -1)
                         {
                             return 3;
                         }

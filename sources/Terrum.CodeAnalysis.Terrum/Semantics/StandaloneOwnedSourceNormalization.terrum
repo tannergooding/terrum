@@ -312,6 +312,10 @@ public static int32 NormalizeStandaloneOwnedSourceProgram()
         Host.StandaloneNormalizedBodyCount[0] = bodyId + 1;
     }
 
+    if (Host.StandaloneNormalizedLoopTargetCount[0] != 0)
+    {
+        return FailStandaloneNormalization(3);
+    }
     int32 verificationStatus = VerifyStandaloneNormalizedProgram();
     if (verificationStatus != 0)
     {
@@ -335,6 +339,9 @@ bool ValidateStandaloneNormalizationBuffers()
         && Host.StandaloneNormalizedBodies.Length
             == tokenCapacity * 12
         && Host.StandaloneNormalizedBlockCount.Length == 1
+        && Host.StandaloneNormalizedLoopTargetCount.Length == 1
+        && Host.StandaloneNormalizedLoopTargets.Length
+            == tokenCapacity * 4
         && Host.StandaloneNormalizedBlocks.Length
             == tokenCapacity * 16
         && Host.StandaloneNormalizedBodyBlockRanges.Length
@@ -382,6 +389,7 @@ void ClearStandaloneNormalizedProgram()
     Host.StandaloneNormalizedProgramStatus[0] = 0;
     Host.StandaloneNormalizedBodyCount[0] = 0;
     Host.StandaloneNormalizedBlockCount[0] = 0;
+    Host.StandaloneNormalizedLoopTargetCount[0] = 0;
     Host.StandaloneNormalizedHomeCount[0] = 0;
     Host.StandaloneNormalizedConstantCount[0] = 0;
     Host.StandaloneInvokeCount[0] = 0;
@@ -399,6 +407,12 @@ void ClearStandaloneNormalizedProgram()
         index = index + 1)
     {
         Host.StandaloneNormalizedBlocks[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneNormalizedLoopTargets.Length;
+        index = index + 1)
+    {
+        Host.StandaloneNormalizedLoopTargets[index] = -1;
     }
     for (mut int32 index = 0;
         index < Host.StandaloneNormalizedBodyBlockRanges.Length;
@@ -1044,6 +1058,95 @@ int32 NormalizeStandaloneSourceLoopCondition(int32 bodyId,
     return 0;
 }
 
+int32 PushStandaloneNormalizedLoopTarget(int32 statementId,
+    int32 loopNodeId, int32 continueTarget, int32 exitTarget)
+{
+    int32 count = Host.StandaloneNormalizedLoopTargetCount[0];
+    if (statementId < 0
+        || statementId >= Host.StandaloneSourceStatementCount[0]
+        || loopNodeId < 0
+        || loopNodeId >= Host.StandaloneSourceIfNodeCount[0]
+        || Host.StandaloneSourceStatements[
+            statementId * 3 + 2] != loopNodeId
+        || (Host.StandaloneSourceStatements[statementId * 3] != 7
+            && Host.StandaloneSourceStatements[statementId * 3] != 10
+            && Host.StandaloneSourceStatements[statementId * 3] != 11)
+        || continueTarget < 0 || continueTarget > 0xFFFF
+        || exitTarget < 0 || exitTarget > 0xFFFF
+        || count < 0
+        || count >= Host.StandaloneNormalizedLoopTargets.Length / 4)
+    {
+        return 3;
+    }
+    int32 offset = count * 4;
+    Host.StandaloneNormalizedLoopTargets[offset] = statementId;
+    Host.StandaloneNormalizedLoopTargets[offset + 1] = loopNodeId;
+    Host.StandaloneNormalizedLoopTargets[offset + 2] = continueTarget;
+    Host.StandaloneNormalizedLoopTargets[offset + 3] = exitTarget;
+    Host.StandaloneNormalizedLoopTargetCount[0] = count + 1;
+    return 0;
+}
+
+int32 PopStandaloneNormalizedLoopTarget(int32 statementId)
+{
+    int32 count = Host.StandaloneNormalizedLoopTargetCount[0];
+    if (count < 1
+        || count > Host.StandaloneNormalizedLoopTargets.Length / 4)
+    {
+        return 3;
+    }
+    int32 offset = (count - 1) * 4;
+    if (Host.StandaloneNormalizedLoopTargets[offset] != statementId)
+    {
+        return 3;
+    }
+    for (mut int32 field = 0; field < 4; field = field + 1)
+    {
+        Host.StandaloneNormalizedLoopTargets[offset + field] = -1;
+    }
+    Host.StandaloneNormalizedLoopTargetCount[0] = count - 1;
+    return 0;
+}
+
+int32 ResolveStandaloneNormalizedLoopTransferTarget(
+    int32 targetLoopNodeId, int32 transferKind,
+    ref<init int32> targetBlockResult)
+    ensure return == 0 ? *targetBlockResult is init : true
+{
+    int32 count = Host.StandaloneNormalizedLoopTargetCount[0];
+    if (targetLoopNodeId < 0
+        || targetLoopNodeId >= Host.StandaloneSourceIfNodeCount[0]
+        || (transferKind != 8 && transferKind != 9
+            && transferKind != 12 && transferKind != 13)
+        || count < 1
+        || count > Host.StandaloneNormalizedLoopTargets.Length / 4)
+    {
+        return 3;
+    }
+    for (mut int32 depth = count - 1; depth >= 0;
+        depth = depth - 1)
+    {
+        int32 offset = depth * 4;
+        if (Host.StandaloneNormalizedLoopTargets[
+                offset + 1] == targetLoopNodeId)
+        {
+            int32 targetBlock
+                = transferKind == 8 || transferKind == 12
+                    ? Host.StandaloneNormalizedLoopTargets[
+                        offset + 3]
+                    : Host.StandaloneNormalizedLoopTargets[
+                        offset + 2];
+            if (targetBlock < 0)
+            {
+                return 3;
+            }
+            *targetBlockResult = targetBlock;
+            return 0;
+        }
+    }
+    return 3;
+}
+
 int32 NormalizeStandaloneSourceLoopBody(int32 bodyId,
     int32 statementId, int32 loopNodeId, int32 bodyBlockId,
     int32 continueTarget, int32 exitBlockId,
@@ -1112,6 +1215,10 @@ int32 NormalizeStandaloneSourceLoopBody(int32 bodyId,
                 && childKind != 12 && childKind != 13))
         {
             return 3;
+        }
+        if (sawLoopTransfer)
+        {
+            continue;
         }
         if (childKind == 7)
         {
@@ -1185,10 +1292,7 @@ int32 NormalizeStandaloneSourceLoopBody(int32 bodyId,
                     && Host.StandaloneSourceStatements[
                         nestedTransferStatementId * 3] != 9)
                 || Host.StandaloneSourceStatements[
-                    nestedTransferStatementId * 3 + 1] != -1
-                || Host.StandaloneSourceStatements[
-                    nestedTransferStatementId * 3 + 2]
-                    != nestedControlNodeId)
+                    nestedTransferStatementId * 3 + 1] != -1)
             {
                 return 3;
             }
@@ -1250,7 +1354,7 @@ int32 NormalizeStandaloneSourceLoopBody(int32 bodyId,
             {
                 return 2;
             }
-            if (nestedChildCount == 1 && nestedTransferKind == 9)
+            if (nestedChildCount == 1)
             {
                 bool hasPrefix = childIndex > 0;
                 bool hasSuffix = childIndex < childCount - 1;
@@ -1262,72 +1366,105 @@ int32 NormalizeStandaloneSourceLoopBody(int32 bodyId,
                     = nestedConditionBlockId + 1;
                 int32 nestedContinuationTarget = hasSuffix
                     ? nestedContinuationBlockId : continueTarget;
-                if (hasPrefix)
+                mut int32 nestedTransferTargetBlock
+                    = nestedContinuationTarget;
+                if (Host.StandaloneSourceStatements[
+                        nestedTransferStatementId * 3 + 2]
+                    == nestedControlNodeId)
                 {
-                    int32 prefixOperationCount
-                        = nestedConditionOperationFirst
-                            - bodyOperationFirst;
-                    init int32 prefixBlockIndex;
-                    int32 prefixBlockStatus
-                        = AppendStandaloneNormalizedBlock(
-                            bodyId, nestedPrefixBlockId,
-                            bodyOperationFirst,
-                            prefixOperationCount,
-                            3, 0, 0, 0,
-                            nestedConditionBlockId, -1,
-                            0, 0, 0, -1, -1, 0,
-                            ref init prefixBlockIndex);
-                    if (prefixBlockStatus != 0)
+                    if (nestedTransferKind == 9)
                     {
-                        return prefixBlockStatus;
+                        nestedTransferTargetBlock
+                            = nestedConditionBlockId;
                     }
-                    if (prefixBlockIndex
-                        != bodyBlockFirst + nestedPrefixBlockId)
+                }
+                else
+                {
+                    init int32 resolvedTransferTarget;
+                    int32 transferTargetStatus
+                        = ResolveStandaloneNormalizedLoopTransferTarget(
+                            Host.StandaloneSourceStatements[
+                                nestedTransferStatementId * 3 + 2],
+                            nestedTransferKind,
+                            ref init resolvedTransferTarget);
+                    if (transferTargetStatus != 0)
+                    {
+                        return transferTargetStatus;
+                    }
+                    nestedTransferTargetBlock
+                        = resolvedTransferTarget;
+                }
+                if (nestedTransferTargetBlock
+                    != nestedContinuationTarget)
+                {
+                    if (hasPrefix)
+                    {
+                        int32 prefixOperationCount
+                            = nestedConditionOperationFirst
+                                - bodyOperationFirst;
+                        init int32 prefixBlockIndex;
+                        int32 prefixBlockStatus
+                            = AppendStandaloneNormalizedBlock(
+                                bodyId, nestedPrefixBlockId,
+                                bodyOperationFirst,
+                                prefixOperationCount,
+                                3, 0, 0, 0,
+                                nestedConditionBlockId, -1,
+                                0, 0, 0, -1, -1, 0,
+                                ref init prefixBlockIndex);
+                        if (prefixBlockStatus != 0)
+                        {
+                            return prefixBlockStatus;
+                        }
+                        if (prefixBlockIndex
+                            != bodyBlockFirst + nestedPrefixBlockId)
+                        {
+                            return 3;
+                        }
+                    }
+                    int32 nestedConditionOperationCount
+                        = Host.StandaloneNormalizedOperationCount[0]
+                            - nestedConditionOperationFirst;
+                    int32 nestedEdgeRecordIndex
+                        = edgeRecordFirst + nestedBranchOrdinal;
+                    if (nestedEdgeRecordIndex < 0
+                        || nestedEdgeRecordIndex > 0xFFFF)
                     {
                         return 3;
                     }
+                    init int32 nestedConditionBlockIndex;
+                    int32 nestedConditionBlockStatus
+                        = AppendStandaloneNormalizedBlock(
+                            bodyId, nestedConditionBlockId,
+                            nestedConditionOperationFirst,
+                            nestedConditionOperationCount,
+                            4, 0, 0, 0,
+                            nestedTransferTargetBlock,
+                            nestedContinuationTarget, 2,
+                            nestedConditionSelectorIndex,
+                            nestedConditionTypeId,
+                            nestedEdgeRecordIndex, -1, 0,
+                            ref init nestedConditionBlockIndex);
+                    if (nestedConditionBlockStatus != 0)
+                    {
+                        return nestedConditionBlockStatus;
+                    }
+                    if (nestedConditionBlockIndex
+                        != bodyBlockFirst + nestedConditionBlockId)
+                    {
+                        return 3;
+                    }
+                    nestedBranchOrdinal = nestedBranchOrdinal + 1;
+                    if (!hasSuffix)
+                    {
+                        return 0;
+                    }
+                    bodyOperationFirst
+                        = Host.StandaloneNormalizedOperationCount[0];
+                    finalBodyBlockId = nestedContinuationBlockId;
+                    currentBlockCountBeforeBody
+                        = Host.StandaloneNormalizedBlockCount[0];
                 }
-                int32 nestedConditionOperationCount
-                    = Host.StandaloneNormalizedOperationCount[0]
-                        - nestedConditionOperationFirst;
-                int32 nestedEdgeRecordIndex
-                    = edgeRecordFirst + nestedBranchOrdinal;
-                if (nestedEdgeRecordIndex < 0
-                    || nestedEdgeRecordIndex > 0xFFFF)
-                {
-                    return 3;
-                }
-                init int32 nestedConditionBlockIndex;
-                int32 nestedConditionBlockStatus
-                    = AppendStandaloneNormalizedBlock(
-                        bodyId, nestedConditionBlockId,
-                        nestedConditionOperationFirst,
-                        nestedConditionOperationCount,
-                        4, 0, 0, 0, nestedConditionBlockId,
-                        nestedContinuationTarget, 2,
-                        nestedConditionSelectorIndex,
-                        nestedConditionTypeId,
-                        nestedEdgeRecordIndex, -1, 0,
-                        ref init nestedConditionBlockIndex);
-                if (nestedConditionBlockStatus != 0)
-                {
-                    return nestedConditionBlockStatus;
-                }
-                if (nestedConditionBlockIndex
-                    != bodyBlockFirst + nestedConditionBlockId)
-                {
-                    return 3;
-                }
-                nestedBranchOrdinal = nestedBranchOrdinal + 1;
-                if (!hasSuffix)
-                {
-                    return 0;
-                }
-                bodyOperationFirst
-                    = Host.StandaloneNormalizedOperationCount[0];
-                finalBodyBlockId = nestedContinuationBlockId;
-                currentBlockCountBeforeBody
-                    = Host.StandaloneNormalizedBlockCount[0];
                 continue;
             }
             if (nestedChildCount > 1)
@@ -1344,9 +1481,29 @@ int32 NormalizeStandaloneSourceLoopBody(int32 bodyId,
                     = nestedAssignmentBlockId + 1;
                 int32 nestedContinuationTarget = hasSuffix
                     ? nestedContinuationBlockId : continueTarget;
-                int32 nestedAssignmentTarget = nestedTransferKind == 9
+                mut int32 nestedAssignmentTarget
+                    = nestedTransferKind == 9
                     ? nestedConditionBlockId
                     : nestedContinuationTarget;
+                int32 nestedTransferTargetNodeId
+                    = Host.StandaloneSourceStatements[
+                        nestedTransferStatementId * 3 + 2];
+                if (nestedTransferTargetNodeId
+                    != nestedControlNodeId)
+                {
+                    init int32 resolvedNestedAssignmentTarget;
+                    int32 nestedTargetStatus
+                        = ResolveStandaloneNormalizedLoopTransferTarget(
+                            nestedTransferTargetNodeId,
+                            nestedTransferKind,
+                            ref init resolvedNestedAssignmentTarget);
+                    if (nestedTargetStatus != 0)
+                    {
+                        return nestedTargetStatus;
+                    }
+                    nestedAssignmentTarget
+                        = resolvedNestedAssignmentTarget;
+                }
                 int32 nestedConditionOperationCount
                     = Host.StandaloneNormalizedOperationCount[0]
                         - nestedConditionOperationFirst;
@@ -1698,6 +1855,38 @@ int32 NormalizeStandaloneSourceLoopBody(int32 bodyId,
                         ? assignmentStatus : 2;
                 }
             }
+            int32 nestedDoTransferStatementId
+                = Host.StandaloneSourceIfChildren[
+                    nestedDoChildFirst + nestedDoChildCount - 1];
+            int32 nestedDoTransferKind
+                = Host.StandaloneSourceStatements[
+                    nestedDoTransferStatementId * 3];
+            int32 nestedDoTransferTargetNodeId
+                = Host.StandaloneSourceStatements[
+                    nestedDoTransferStatementId * 3 + 2];
+            if (nestedDoTransferTargetNodeId == nestedDoNodeId)
+            {
+                if (nestedDoTransferKind != 8)
+                {
+                    return 2;
+                }
+                bodyEndTarget = continueTarget;
+            }
+            else
+            {
+                init int32 nestedDoTargetBlock;
+                int32 nestedDoTargetStatus
+                    = ResolveStandaloneNormalizedLoopTransferTarget(
+                        nestedDoTransferTargetNodeId,
+                        nestedDoTransferKind,
+                        ref init nestedDoTargetBlock);
+                if (nestedDoTargetStatus != 0)
+                {
+                    return nestedDoTargetStatus;
+                }
+                bodyEndTarget = nestedDoTargetBlock;
+                sawLoopTransfer = true;
+            }
             continue;
         }
         if (childKind == 12 || childKind == 13)
@@ -1706,6 +1895,7 @@ int32 NormalizeStandaloneSourceLoopBody(int32 bodyId,
                 = Host.StandaloneSourceStatements[
                     childStatementOffset + 1];
             mut bool conditionalBodyEndsInBreak = false;
+            mut int32 conditionalBodyExitTarget = exitBlockId;
             if (childKind == 12 && childCount > 1)
             {
                 int32 finalChildId
@@ -1723,9 +1913,22 @@ int32 NormalizeStandaloneSourceLoopBody(int32 bodyId,
                     = Host.StandaloneSourceStatements[
                         finalChildId * 3] == 8
                         && Host.StandaloneSourceStatements[
-                            finalChildId * 3 + 1] == -1
-                        && Host.StandaloneSourceStatements[
-                            finalChildId * 3 + 2] == loopNodeId;
+                            finalChildId * 3 + 1] == -1;
+                if (conditionalBodyEndsInBreak)
+                {
+                    init int32 finalBreakTargetBlock;
+                    int32 finalBreakTargetStatus
+                        = ResolveStandaloneNormalizedLoopTransferTarget(
+                            Host.StandaloneSourceStatements[
+                                finalChildId * 3 + 2],
+                            8, ref init finalBreakTargetBlock);
+                    if (finalBreakTargetStatus != 0)
+                    {
+                        return finalBreakTargetStatus;
+                    }
+                    conditionalBodyExitTarget
+                        = finalBreakTargetBlock;
+                }
             }
             if ((childIndex != 0
                     && childIndex != childCount - 1)
@@ -1837,9 +2040,18 @@ int32 NormalizeStandaloneSourceLoopBody(int32 bodyId,
                 = bodyBlockCount == 2 && childIndex == 0
                     ? bodyBlockId + 1
                     : conditionalBodyEndsInBreak
-                        ? exitBlockId : continueTarget;
-            int32 conditionalTransferTarget
-                = childKind == 12 ? exitBlockId : continueTarget;
+                        ? conditionalBodyExitTarget : continueTarget;
+            init int32 conditionalTransferTarget;
+            int32 transferTargetStatus
+                = ResolveStandaloneNormalizedLoopTransferTarget(
+                    Host.StandaloneSourceStatements[
+                        childStatementId * 3 + 2],
+                    childKind,
+                    ref init conditionalTransferTarget);
+            if (transferTargetStatus != 0)
+            {
+                return transferTargetStatus;
+            }
             int32 conditionalBlockId
                 = childIndex == 0
                     ? bodyBlockId : bodyBlockId + 1;
@@ -1881,7 +2093,8 @@ int32 NormalizeStandaloneSourceLoopBody(int32 bodyId,
                         bodyId, conditionalBlockId,
                         conditionOperationFirst,
                         conditionOperationCount,
-                        3, 0, 0, 0, continueTarget, -1,
+                        3, 0, 0, 0,
+                        conditionalTransferTarget, -1,
                         0, 0, 0, -1, -1, 0,
                         ref init continueBlockIndex);
                 if (continueBlockStatus != 0)
@@ -1976,7 +2189,7 @@ int32 NormalizeStandaloneSourceLoopBody(int32 bodyId,
                     assignmentOperationCount,
                     3, 0, 0, 0,
                     conditionalBodyEndsInBreak
-                        ? exitBlockId : continueTarget,
+                        ? conditionalBodyExitTarget : continueTarget,
                     -1,
                     0, 0, 0, -1, -1, 0,
                     ref init assignmentBlockIndex);
@@ -1992,15 +2205,22 @@ int32 NormalizeStandaloneSourceLoopBody(int32 bodyId,
             if (sawLoopTransfer
                 || childIndex != childCount - 1
                 || Host.StandaloneSourceStatements[
-                    childStatementOffset + 1] != -1
-                || Host.StandaloneSourceStatements[
-                    childStatementOffset + 2] != loopNodeId)
+                    childStatementOffset + 1] != -1)
             {
                 return 3;
             }
             sawLoopTransfer = true;
-            bodyEndTarget = childKind == 8
-                ? exitBlockId : continueTarget;
+            init int32 transferTarget;
+            int32 transferTargetStatus
+                = ResolveStandaloneNormalizedLoopTransferTarget(
+                    Host.StandaloneSourceStatements[
+                        childStatementOffset + 2],
+                    childKind, ref init transferTarget);
+            if (transferTargetStatus != 0)
+            {
+                return transferTargetStatus;
+            }
+            bodyEndTarget = transferTarget;
             continue;
         }
         if (sawLoopTransfer || childKind != 5)
@@ -2082,12 +2302,43 @@ int32 GetStandaloneSourceNestedWhileBodyBlockCount(int32 bodyId,
             && Host.StandaloneSourceStatements[
                 transferStatementId * 3] != 9)
         || Host.StandaloneSourceStatements[
-            transferStatementId * 3 + 1] != -1
-        || Host.StandaloneSourceStatements[
-            transferStatementId * 3 + 2] != loopNodeId)
+            transferStatementId * 3 + 1] != -1)
     {
         return 3;
     }
+    int32 transferKind
+        = Host.StandaloneSourceStatements[
+            transferStatementId * 3];
+    int32 transferTargetNodeId
+        = Host.StandaloneSourceStatements[
+            transferStatementId * 3 + 2];
+    int32 parentLoopStatementId
+        = Host.StandaloneSourceStatementParentIds[statementId];
+    if (parentLoopStatementId < 0
+        || parentLoopStatementId
+            >= Host.StandaloneSourceStatementCount[0]
+        || !IsStandaloneSourceLoopStatementKind(
+            Host.StandaloneSourceStatements[
+                parentLoopStatementId * 3]))
+    {
+        return 3;
+    }
+    int32 parentLoopNodeId
+        = Host.StandaloneSourceStatements[
+            parentLoopStatementId * 3 + 2];
+    if (parentLoopNodeId < 0
+        || parentLoopNodeId >= Host.StandaloneSourceIfNodeCount[0]
+        || Host.StandaloneSourceIfNodes[parentLoopNodeId * 5]
+            != bodyId)
+    {
+        return 3;
+    }
+    bool needsConditionalEdge
+        = transferKind == 9
+            ? transferTargetNodeId == loopNodeId
+                || hasFollowingStatements
+                || transferTargetNodeId != parentLoopNodeId
+            : transferTargetNodeId != loopNodeId;
     for (mut int32 childOrdinal = 0;
         childOrdinal < childCount - 1;
         childOrdinal = childOrdinal + 1)
@@ -2109,9 +2360,7 @@ int32 GetStandaloneSourceNestedWhileBodyBlockCount(int32 bodyId,
     if (childCount == 1)
     {
         *blockCountResult
-            = (Host.StandaloneSourceStatements[
-                transferStatementId * 3] == 9
-                && hasFollowingStatements) ? 2 : 1;
+            = needsConditionalEdge && hasFollowingStatements ? 2 : 1;
     }
     else
     {
@@ -2172,6 +2421,29 @@ int32 GetStandaloneSourceNestedDoBodyBlockCount(int32 bodyId,
     {
         return 3;
     }
+    if (childCount >= 2)
+    {
+        int32 firstBodyStatementId
+            = Host.StandaloneSourceIfChildren[childFirst];
+        int32 lastBodyStatementId
+            = Host.StandaloneSourceIfChildren[
+                childFirst + childCount - 1];
+        if (firstBodyStatementId >= 0
+            && firstBodyStatementId
+                < Host.StandaloneSourceStatementCount[0]
+            && lastBodyStatementId >= 0
+            && lastBodyStatementId
+                < Host.StandaloneSourceStatementCount[0]
+            && Host.StandaloneSourceStatements[
+                firstBodyStatementId * 3] == 12
+            && Host.StandaloneSourceStatements[
+                lastBodyStatementId * 3] == 8)
+        {
+            return GetStandaloneSourceLoopBodyBlockCount(
+                statementId, loopNodeId,
+                ref init *blockCountResult);
+        }
+    }
     for (mut int32 childOrdinal = 0;
         childOrdinal < childCount - 1;
         childOrdinal = childOrdinal + 1)
@@ -2198,11 +2470,12 @@ int32 GetStandaloneSourceNestedDoBodyBlockCount(int32 bodyId,
             >= Host.StandaloneSourceStatementCount[0]
         || Host.StandaloneSourceStatementParentIds[
             breakStatementId] != statementId
-        || Host.StandaloneSourceStatements[breakStatementId * 3] != 8
+        || (Host.StandaloneSourceStatements[
+                breakStatementId * 3] != 8
+            && Host.StandaloneSourceStatements[
+                breakStatementId * 3] != 9)
         || Host.StandaloneSourceStatements[
-            breakStatementId * 3 + 1] != -1
-        || Host.StandaloneSourceStatements[
-            breakStatementId * 3 + 2] != loopNodeId)
+            breakStatementId * 3 + 1] != -1)
     {
         return 3;
     }
@@ -2365,9 +2638,22 @@ int32 GetStandaloneSourceLoopBodyBlockCount(int32 statementId,
                 int32 nestedTransferStatementId
                     = Host.StandaloneSourceIfChildren[
                         nestedChildFirst + nestedChildCount - 1];
+                int32 nestedTransferKind
+                    = Host.StandaloneSourceStatements[
+                        nestedTransferStatementId * 3];
+                int32 nestedTransferTargetNodeId
+                    = Host.StandaloneSourceStatements[
+                        nestedTransferStatementId * 3 + 2];
                 bool nestedNeedsBranch = nestedChildCount > 1
-                    || Host.StandaloneSourceStatements[
-                        nestedTransferStatementId * 3] == 9;
+                    || (nestedTransferKind == 9
+                        && nestedTransferTargetNodeId
+                            == nestedLoopNodeId)
+                    || (nestedTransferTargetNodeId
+                            != nestedLoopNodeId
+                        && (nestedTransferKind == 8
+                            || childOrdinal < childCount - 1
+                            || nestedTransferTargetNodeId
+                                != loopNodeId));
                 if (nestedNeedsBranch)
                 {
                     if (nestedBranchCount == 0 && childOrdinal > 0)
@@ -2418,9 +2704,7 @@ int32 GetStandaloneSourceLoopBodyBlockCount(int32 statementId,
             {
                 if (childOrdinal != childCount - 1
                     || Host.StandaloneSourceStatements[
-                        childOffset + 1] != -1
-                    || Host.StandaloneSourceStatements[
-                        childOffset + 2] != loopNodeId)
+                        childOffset + 1] != -1)
                 {
                     return 3;
                 }
@@ -2441,9 +2725,7 @@ int32 GetStandaloneSourceLoopBodyBlockCount(int32 statementId,
             return 0;
         }
         if (childCount >= 2 && firstChildKind == 12
-            && lastChildKind == 8
-            && Host.StandaloneSourceStatements[
-                firstChildId * 3 + 2] == loopNodeId)
+            && lastChildKind == 8)
         {
             for (mut int32 childOrdinal = 1;
                 childOrdinal < childCount - 1;
@@ -2516,6 +2798,140 @@ int32 GetStandaloneSourceLoopBodyBlockCount(int32 statementId,
     return 0;
 }
 
+int32 HasStandaloneSourceDoBodyUnconditionalBreakTarget(
+    int32 bodyId, int32 doStatementId, int32 targetLoopNodeId,
+    ref<init bool> result)
+    ensure return == 0 ? *result is init : true
+{
+    if (bodyId < 0
+        || bodyId >= Host.StandaloneSourceBodyCount[0]
+        || doStatementId < 0
+        || doStatementId >= Host.StandaloneSourceStatementCount[0]
+        || Host.StandaloneSourceStatements[doStatementId * 3] != 10
+        || targetLoopNodeId < 0
+        || targetLoopNodeId >= Host.StandaloneSourceIfNodeCount[0]
+        || Host.StandaloneSourceIfNodes[
+            targetLoopNodeId * 5] != bodyId)
+    {
+        return 3;
+    }
+    int32 doNodeId
+        = Host.StandaloneSourceStatements[doStatementId * 3 + 2];
+    if (doNodeId < 0
+        || doNodeId >= Host.StandaloneSourceIfNodeCount[0]
+        || Host.StandaloneSourceIfNodes[doNodeId * 5] != bodyId)
+    {
+        return 3;
+    }
+    int32 doNodeOffset = doNodeId * 5;
+    int32 childFirst
+        = Host.StandaloneSourceIfNodes[doNodeOffset + 1];
+    int32 childCount
+        = Host.StandaloneSourceIfNodes[doNodeOffset + 2];
+    if (childFirst < 0 || childCount < 1
+        || childFirst
+            > Host.StandaloneSourceIfChildCount[0] - childCount)
+    {
+        return 3;
+    }
+    *result = false;
+    if (childCount > 1)
+    {
+        int32 firstChildStatementId
+            = Host.StandaloneSourceIfChildren[childFirst];
+        if (firstChildStatementId < 0
+            || firstChildStatementId
+                >= Host.StandaloneSourceStatementCount[0])
+        {
+            return 3;
+        }
+        if (Host.StandaloneSourceStatements[
+                firstChildStatementId * 3] == 12)
+        {
+            bool everyPathBreaksTargetLoop
+                = Host.StandaloneSourceStatements[
+                    firstChildStatementId * 3 + 2]
+                    == targetLoopNodeId;
+            for (mut int32 childOrdinal = 1;
+                childOrdinal < childCount - 1;
+                childOrdinal = childOrdinal + 1)
+            {
+                int32 childStatementId
+                    = Host.StandaloneSourceIfChildren[
+                        childFirst + childOrdinal];
+                if (childStatementId < 0
+                    || childStatementId
+                        >= Host.StandaloneSourceStatementCount[0]
+                    || Host.StandaloneSourceStatementParentIds[
+                        childStatementId] != doStatementId
+                    || Host.StandaloneSourceStatements[
+                        childStatementId * 3] != 5)
+                {
+                    return 0;
+                }
+            }
+            int32 finalStatementId
+                = Host.StandaloneSourceIfChildren[
+                    childFirst + childCount - 1];
+            if (finalStatementId < 0
+                || finalStatementId
+                    >= Host.StandaloneSourceStatementCount[0]
+                || Host.StandaloneSourceStatementParentIds[
+                    finalStatementId] != doStatementId)
+            {
+                return 3;
+            }
+            everyPathBreaksTargetLoop
+                = everyPathBreaksTargetLoop
+                && Host.StandaloneSourceStatements[
+                    finalStatementId * 3] == 8
+                && Host.StandaloneSourceStatements[
+                    finalStatementId * 3 + 1] == -1
+                && Host.StandaloneSourceStatements[
+                    finalStatementId * 3 + 2]
+                    == targetLoopNodeId;
+            *result = everyPathBreaksTargetLoop;
+            return 0;
+        }
+    }
+    for (mut int32 childOrdinal = 0;
+        childOrdinal < childCount - 1;
+        childOrdinal = childOrdinal + 1)
+    {
+        int32 childStatementId
+            = Host.StandaloneSourceIfChildren[
+                childFirst + childOrdinal];
+        if (childStatementId < 0
+            || childStatementId
+                >= Host.StandaloneSourceStatementCount[0]
+            || Host.StandaloneSourceStatementParentIds[
+                childStatementId] != doStatementId
+            || Host.StandaloneSourceStatements[
+                childStatementId * 3] != 5)
+        {
+            return 0;
+        }
+    }
+    int32 finalStatementId
+        = Host.StandaloneSourceIfChildren[
+            childFirst + childCount - 1];
+    if (finalStatementId < 0
+        || finalStatementId
+            >= Host.StandaloneSourceStatementCount[0]
+        || Host.StandaloneSourceStatementParentIds[
+            finalStatementId] != doStatementId)
+    {
+        return 3;
+    }
+    *result = Host.StandaloneSourceStatements[
+            finalStatementId * 3] == 8
+        && Host.StandaloneSourceStatements[
+            finalStatementId * 3 + 1] == -1
+        && Host.StandaloneSourceStatements[
+            finalStatementId * 3 + 2] == targetLoopNodeId;
+    return 0;
+}
+
 int32 NormalizeStandaloneSourceLoop(int32 bodyId,
     int32 statementId, bool doWhile,
     int32 enclosingEdgeRecordFirst)
@@ -2580,7 +2996,7 @@ int32 NormalizeStandaloneSourceLoop(int32 bodyId,
         return loopBodyBlockCountStatus;
     }
 
-    mut bool doBodyBreaksImmediately = false;
+    mut bool doBodySkipsCondition = false;
     if (doWhile)
     {
         int32 loopNodeOffset = loopNodeId * 5;
@@ -2610,9 +3026,15 @@ int32 NormalizeStandaloneSourceLoop(int32 bodyId,
             {
                 return 3;
             }
-            doBodyBreaksImmediately
+            int32 finalTransferKind
                 = Host.StandaloneSourceStatements[
-                    lastChildStatementId * 3] == 8;
+                    lastChildStatementId * 3];
+            doBodySkipsCondition
+                = finalTransferKind == 8
+                    || (finalTransferKind == 9
+                        && Host.StandaloneSourceStatements[
+                            lastChildStatementId * 3 + 2]
+                            != loopNodeId);
         }
     }
     init bool conditionDoesNotReturn;
@@ -2622,15 +3044,15 @@ int32 NormalizeStandaloneSourceLoop(int32 bodyId,
             ref init conditionDoesNotReturn);
     if (conditionDoesNotReturnStatus != 0
         || (conditionDoesNotReturn
-            && !(doWhile && doBodyBreaksImmediately)))
+            && !(doWhile && doBodySkipsCondition)))
     {
         return conditionDoesNotReturnStatus != 0
             ? conditionDoesNotReturnStatus : 2;
     }
 
     mut int32 conditionBlockCount
-        = doBodyBreaksImmediately ? 0 : 1;
-    if (!doBodyBreaksImmediately
+        = doBodySkipsCondition ? 0 : 1;
+    if (!doBodySkipsCondition
         && (conditionKind == 35 || conditionKind == 36))
     {
         init int32 conditionLeafCount;
@@ -2657,7 +3079,7 @@ int32 NormalizeStandaloneSourceLoop(int32 bodyId,
     int32 conditionBlockStart = doWhile
         ? bodyBlockId + loopBodyBlockCount
         : bodyBlockLocalFirst + 1;
-    int32 exitBlockId = doBodyBreaksImmediately
+    int32 exitBlockId = doBodySkipsCondition
         ? bodyBlockId + loopBodyBlockCount
         : doWhile
             ? conditionBlockStart + conditionBlockCount
@@ -2727,17 +3149,29 @@ int32 NormalizeStandaloneSourceLoop(int32 bodyId,
         : bodyBlockFirst + bodyBlockLocalFirst
             + conditionBlockCount + 1;
     int32 continueTarget = conditionBlockStart;
+    int32 pushTargetStatus = PushStandaloneNormalizedLoopTarget(
+        statementId, loopNodeId, continueTarget, exitBlockId);
+    if (pushTargetStatus != 0)
+    {
+        return pushTargetStatus;
+    }
     int32 bodyStatus = NormalizeStandaloneSourceLoopBody(
         bodyId, statementId, loopNodeId, bodyBlockId,
         continueTarget, exitBlockId, expectedBlockCountBeforeBody,
         loopBodyBlockCount, conditionBlockCount,
         finalBodyBlockCount, loopBodyEdgeRecordFirst);
+    int32 popTargetStatus
+        = PopStandaloneNormalizedLoopTarget(statementId);
     if (bodyStatus != 0)
     {
         return bodyStatus;
     }
+    if (popTargetStatus != 0)
+    {
+        return popTargetStatus;
+    }
 
-    if (doWhile && !doBodyBreaksImmediately)
+    if (doWhile && !doBodySkipsCondition)
     {
         int32 conditionStatus = NormalizeStandaloneSourceLoopCondition(
             bodyId, conditionExpressionId, conditionTypeId,
@@ -2868,9 +3302,23 @@ int32 NormalizeStandaloneSourceForLoop(int32 bodyId,
         {
             return 3;
         }
-        bodyBreaksImmediately
+        int32 lastChildKind
             = Host.StandaloneSourceStatements[
-                lastChildStatementId * 3] == 8;
+                lastChildStatementId * 3];
+        bodyBreaksImmediately = lastChildKind == 8;
+        if (lastChildKind == 10)
+        {
+            init bool doBreaksImmediately;
+            int32 doBreakStatus
+                = HasStandaloneSourceDoBodyUnconditionalBreakTarget(
+                    bodyId, lastChildStatementId, loopNodeId,
+                    ref init doBreaksImmediately);
+            if (doBreakStatus != 0)
+            {
+                return doBreakStatus;
+            }
+            bodyBreaksImmediately = doBreaksImmediately;
+        }
     }
 
     mut int32 conditionBlockCount = conditionOmitted ? 0 : 1;
@@ -2964,6 +3412,12 @@ int32 NormalizeStandaloneSourceForLoop(int32 bodyId,
             + conditionBlockCount + 1;
     int32 bodyContinueTarget
         = includeStep ? stepBlockId : conditionBlockStart;
+    int32 pushTargetStatus = PushStandaloneNormalizedLoopTarget(
+        statementId, loopNodeId, bodyContinueTarget, exitBlockId);
+    if (pushTargetStatus != 0)
+    {
+        return pushTargetStatus;
+    }
     int32 bodyStatus = NormalizeStandaloneSourceLoopBody(
         bodyId, statementId, loopNodeId, bodyBlockId,
         bodyContinueTarget, exitBlockId,
@@ -2971,9 +3425,15 @@ int32 NormalizeStandaloneSourceForLoop(int32 bodyId,
         conditionBlockCount,
         finalBodyBlockCount,
         finalBodyBlockCount + conditionBlockCount);
+    int32 popTargetStatus
+        = PopStandaloneNormalizedLoopTarget(statementId);
     if (bodyStatus != 0)
     {
         return bodyStatus;
+    }
+    if (popTargetStatus != 0)
+    {
+        return popTargetStatus;
     }
 
     if (includeStep)
