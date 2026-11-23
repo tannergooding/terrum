@@ -7473,7 +7473,8 @@ internal sealed class NativeCoreRegistrationTests
     public void StandardForeignNativeInterfaceReadsFunctionPointerOutputUnderPs1()
     {
         var program = CreatePointerOutputConsumerProgram(
-            functionPointerOutput: true);
+            functionPointerOutput: true,
+            assertFunctionPointerProviderReplacement: true);
         var function = program.Functions.Single(
             static function => function.Name == "InvokePointer");
         Assert.That(NativeFunctionPointerTypes.IsType(function.ReturnType),
@@ -7540,7 +7541,8 @@ internal sealed class NativeCoreRegistrationTests
     private static BoundProgram CreatePointerOutputConsumerProgram(
         string outputCondition = "NonZero",
         string successPredicate = "status != 0",
-        bool functionPointerOutput = false)
+        bool functionPointerOutput = false,
+        bool assertFunctionPointerProviderReplacement = false)
     {
         const string schemaIdentity
             = "trrm/1-draft-foreign-native-interface-parameter-surface-1";
@@ -7655,6 +7657,55 @@ internal sealed class NativeCoreRegistrationTests
             Is.EqualTo(new byte[] { 0xD5, 0, 4, 0, 0x17, 0 }));
         Assert.That(body.GetBlockCode(2).ToArray(),
             Is.EqualTo(new byte[] { 0xD5, 0, 3, 0, 0x17, 0 }));
+
+        if (assertFunctionPointerProviderReplacement)
+        {
+            if (!functionPointerOutput)
+            {
+                throw new InvalidOperationException(
+                    "Function-pointer provider replacement requires a function-pointer output.");
+            }
+
+            var incompatibleProviderSource = providerSource.Replace(
+                outputValueType,
+                "[Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Cdecl)] fnptr<int64, int64>",
+                StringComparison.Ordinal);
+            var incompatibleProviderCompilation = Compilation.CreateLibrary(
+                SyntaxTree.Parse(incompatibleProviderSource), options);
+            Assert.That(incompatibleProviderCompilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine,
+                    incompatibleProviderCompilation.Diagnostics));
+            var incompatibleProviderProgram
+                = incompatibleProviderCompilation.Program!;
+            var incompatibleProviderMember
+                = incompatibleProviderProgram.Interfaces.Single().Members
+                    .Single();
+            var incompatibleProviderArtifact
+                = TrRmExecutableCompiler.EmitStandard(
+                    incompatibleProviderProgram, providerIdentity,
+                    schemaIdentity, 1, [
+                        new TrRmSourceTypeExport("", "IPointerProbe",
+                            "provider/IPointerProbe") {
+                            GenericArity = 0,
+                            InterfaceMethodExports = [
+                                new TrRmSourceInterfaceMethodExport(
+                                    incompatibleProviderMember
+                                        .SourceInputOrdinal,
+                                    incompatibleProviderMember
+                                        .SourceDeclarationSpan,
+                                    "provider/IPointerProbe.TryGetPointer"),
+                            ],
+                        },
+                    ]);
+            var incompatibleProviderInput
+                = new TrRmStandardArtifactInput(schemaIdentity,
+                    incompatibleProviderArtifact);
+            Assert.Throws<InvalidDataException>(() =>
+                TrRmExecutableCompiler.LoadStandard(
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        consumerArtifact), consumerIdentity,
+                    [incompatibleProviderInput]));
+        }
 
         var loaded = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(schemaIdentity, consumerArtifact),
