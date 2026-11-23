@@ -543,6 +543,13 @@ internal sealed class StandaloneMethodImportInputTests
             + "int32 copy = value; return Imported(copy); }",
         0, 16, false)]
     [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "int32 First(int32 value) { "
+            + "int32 copy = value; return copy; } "
+            + "int32 Second(int32 value) { "
+            + "int32 copy = value; return copy; } }",
+        0, 17, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
         "namespace client { int32 Main() { "
             + "return later; int32 later = 1; } }",
         2, 0, false)]
@@ -848,6 +855,148 @@ internal sealed class StandaloneMethodImportInputTests
                     || Host.StandaloneNormalizedOperations[4] != 4) {
                     return 71;
                 }
+                int32 callableBase
+                    = Host.StandaloneResolvedRootCount[0]
+                        + Host.StandaloneResolvedImports.Length / 32
+                        + Host.StandaloneResolvedProviderGroupCount[0];
+                int32 callableCount
+                    = callableBase + Host.StandaloneLocalCallableCount[0];
+                Host.StandaloneRewriteCallableCount[0] = callableCount;
+                for (mut int32 id = 0;
+                    id < Host.StandaloneModuleCount[0];
+                    id = id + 1) {
+                    Host.StandaloneRewriteModuleIds[id] = id;
+                }
+                for (mut int32 id = 0;
+                    id < Host.StandaloneLocalCallableCount[0];
+                    id = id + 1) {
+                    Host.StandaloneRewriteLocalCallableIds[id] = id;
+                }
+                for (mut int32 id = 0;
+                    id < Host.StandaloneSourceImportedCallableCount[0];
+                    id = id + 1) {
+                    Host.StandaloneRewriteImportedCallableIds[id] = id;
+                }
+                for (mut int32 id = 0;
+                    id < callableCount;
+                    id = id + 1) {
+                    Host.StandaloneRewriteCallableIds[id] = id;
+                }
+                Host.StandaloneRewriteTypeIds[0] = 0;
+                for (mut int32 id = 1;
+                    id <= Host.StandaloneTypeFactCount[0];
+                    id = id + 1) {
+                    Host.StandaloneRewriteTypeIds[id] = id;
+                }
+                for (mut int32 id = 0;
+                    id < Host.StandaloneSourceBodyCount[0];
+                    id = id + 1) {
+                    Host.StandaloneRewriteBodyIds[id] = id;
+                }
+                for (mut int32 id = 0;
+                    id < Host.StandaloneSourceExpressionCount[0];
+                    id = id + 1) {
+                    Host.StandaloneRewriteExpressionIds[id] = id;
+                }
+                status = RewriteStandaloneOwnedCallNodes();
+                if (status != 0
+                    || Host.StandaloneRewrittenSourceLocalCount[0] != 1
+                    || Host.StandaloneRewrittenSourcePlaceCount[0] != 1
+                    || Host.StandaloneRewrittenSourceStatements[2] != 0
+                    || Host.StandaloneRewrittenSourceExpressions[10]
+                        != 0
+                    || Host.StandaloneRewrittenNormalizedSourceLocalHomeIds[
+                        0] != 0) {
+                    return 72;
+                }
+                status = WriteStandaloneScalarModule();
+                if (status != 0
+                    || Host.StandaloneWriterStatus[0] != 0
+                    || Host.StandaloneWriterBodyPlanCount[0] != 1) {
+                    return 73;
+                }
+                return 0;
+            }
+            """;
+        const string localSourcePermutationVerificationSource = """
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                if (Scan() < 1) { return 100; }
+                int32 status = BindStandaloneOwnedSourceProgram();
+                if (status != 0) { return status; }
+                status = NormalizeStandaloneOwnedSourceProgram();
+                if (status != 0
+                    || Host.StandaloneSourceBodyCount[0] != 2
+                    || Host.StandaloneSourceLocalCount[0] != 2
+                    || Host.StandaloneSourcePlaceCount[0] != 2) {
+                    return 101;
+                }
+                int32 callableBase
+                    = Host.StandaloneResolvedRootCount[0]
+                        + Host.StandaloneResolvedImports.Length / 32
+                        + Host.StandaloneResolvedProviderGroupCount[0];
+                int32 callableCount
+                    = callableBase + Host.StandaloneLocalCallableCount[0];
+                Host.StandaloneRewriteCallableCount[0] = callableCount;
+                for (mut int32 id = 0;
+                    id < Host.StandaloneModuleCount[0];
+                    id = id + 1) {
+                    Host.StandaloneRewriteModuleIds[id] = id;
+                }
+                for (mut int32 id = 0;
+                    id < Host.StandaloneLocalCallableCount[0];
+                    id = id + 1) {
+                    Host.StandaloneRewriteLocalCallableIds[id] = id;
+                }
+                for (mut int32 id = 0;
+                    id < Host.StandaloneSourceImportedCallableCount[0];
+                    id = id + 1) {
+                    Host.StandaloneRewriteImportedCallableIds[id] = id;
+                }
+                for (mut int32 id = 0;
+                    id < callableCount;
+                    id = id + 1) {
+                    Host.StandaloneRewriteCallableIds[id] = id;
+                }
+                Host.StandaloneRewriteTypeIds[0] = 0;
+                for (mut int32 id = 1;
+                    id <= Host.StandaloneTypeFactCount[0];
+                    id = id + 1) {
+                    Host.StandaloneRewriteTypeIds[id] = id;
+                }
+                Host.StandaloneRewriteBodyIds[0] = 1;
+                Host.StandaloneRewriteBodyIds[1] = 0;
+                for (mut int32 id = 0;
+                    id < Host.StandaloneSourceExpressionCount[0];
+                    id = id + 1) {
+                    Host.StandaloneRewriteExpressionIds[id] = id;
+                }
+                status = RewriteStandaloneOwnedCallNodes();
+                if (status != 0
+                    || Host.StandaloneRewrittenSourceBodyScopeIds[0]
+                        != 1
+                    || Host.StandaloneRewrittenSourceBodyScopeIds[1]
+                        != 0
+                    || Host.StandaloneRewrittenSourceBodies[0] != 0
+                    || Host.StandaloneRewrittenSourceBodies[12] != 1
+                    || Host.StandaloneRewrittenSourceBodyLocalRanges[0]
+                        != 1
+                    || Host.StandaloneRewrittenSourceBodyLocalRanges[1]
+                        != 1
+                    || Host.StandaloneRewrittenSourceBodyLocalRanges[2]
+                        != 0
+                    || Host.StandaloneRewrittenSourceBodyLocalRanges[3]
+                        != 1
+                    || Host.StandaloneRewrittenSourceLocals[0] != 1
+                    || Host.StandaloneRewrittenSourceLocals[10] != 0
+                    || Host.StandaloneRewrittenSourcePlaces[0] != 1
+                    || Host.StandaloneRewrittenSourcePlaces[5] != 0
+                    || Host.StandaloneRewrittenSourceLexicalScopes[1]
+                        != 1
+                    || Host.StandaloneRewrittenSourceLexicalScopes[6]
+                        != 0) {
+                    return 102;
+                }
                 return 0;
             }
             """;
@@ -1023,9 +1172,11 @@ internal sealed class StandaloneMethodImportInputTests
                             ? localSourceArenaVerificationSource
                             : verificationMode == 16
                                 ? localSourceNormalizationVerificationSource
-                                : verificationMode == 1
-                                    ? localNamespaceCallVerificationSource
-                                    : successfulVerificationSource;
+                                : verificationMode == 17
+                                    ? localSourcePermutationVerificationSource
+                                    : verificationMode == 1
+                                        ? localNamespaceCallVerificationSource
+                                        : successfulVerificationSource;
 
         var root = RepositoryRoot();
         var components = new List<SyntaxTree>(sourcePaths.Length + 1);
@@ -1056,7 +1207,7 @@ internal sealed class StandaloneMethodImportInputTests
         {
             return;
         }
-        if (verificationMode == 15 || verificationMode == 16)
+        if (verificationMode == 15 || verificationMode == 17)
         {
             return;
         }
