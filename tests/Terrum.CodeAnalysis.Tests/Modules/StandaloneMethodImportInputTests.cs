@@ -2198,6 +2198,16 @@ internal sealed class StandaloneMethodImportInputTests
     [TestCase(BoundRuntimePolicy.FailFast,
         "namespace client { int32 Main(int32 limit) { "
             + "mut int32 counter = 0; "
+            + "outer: do { "
+            + "counter = counter + 1; "
+            + "inner: while (limit > 1) { break outer; } "
+            + "counter = counter + 1; "
+            + "} while (counter < limit); "
+            + "return counter; } }",
+        0, 277, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { int32 Main(int32 limit) { "
+            + "mut int32 counter = 0; "
             + "outer: for (; counter < limit; counter = counter + 1) { "
             + "inner: while (counter < limit) { continue outer; } "
             + "counter = counter + 1; } "
@@ -9871,16 +9881,18 @@ internal sealed class StandaloneMethodImportInputTests
                 return 0;
             }
             """;
-        const string nestedWhileOuterBreakVerificationSource = """
+        var nestedWhileOuterBreakVerificationSource = $$"""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
                 if (Scan() < 1) { return 87; }
                 int32 status = BindStandaloneOwnedSourceProgram();
                 if (status != 0
                     || Host.StandaloneSourceBodyCount[0] != 1
-                    || Host.StandaloneSourceStatementCount[0] != 8
+                    || Host.StandaloneSourceStatementCount[0]
+                        != {{verificationMode == 269 ? 8 : 7}}
                     || Host.StandaloneSourceLocalCount[0] != 1
-                    || Host.StandaloneSourceLexicalScopeCount[0] != 2
+                    || Host.StandaloneSourceLexicalScopeCount[0]
+                        != {{verificationMode == 269 ? 2 : 1}}
                     || Host.StandaloneSourceDirectCallCount[0] != 0
                     || Host.StandaloneSourceCallArgumentCount[0] != 0
                     || Host.StandaloneSourceIfNodeCount[0] != 2
@@ -9888,31 +9900,38 @@ internal sealed class StandaloneMethodImportInputTests
                     || Host.StandaloneSourceLoopLabelTokens[1] < 0
                     || Host.StandaloneSourceLoopLabelTokens[3] < 0
                     || Host.StandaloneSourceTransferLabelTokens[4] < 0
-                    || Host.StandaloneSourceStatements[3] != 11
+                    || Host.StandaloneSourceStatements[3]
+                        != {{verificationMode == 269 ? 11 : 10}}
                     || Host.StandaloneSourceStatements[6] != 5
                     || Host.StandaloneSourceStatements[9] != 7
                     || Host.StandaloneSourceStatements[12] != 8
                     || Host.StandaloneSourceStatements[15] != 5
-                    || Host.StandaloneSourceStatements[18] != 5
-                    || Host.StandaloneSourceStatements[21] != 1
+                    || Host.StandaloneSourceStatements[18]
+                        != {{verificationMode == 269 ? 5 : 1}}
+                    || ({{verificationMode == 269 ? "true" : "false"}}
+                        && Host.StandaloneSourceStatements[21] != 1)
                     || Host.StandaloneSourceStatementParentIds[2] != 1
                     || Host.StandaloneSourceStatementParentIds[3] != 1
                     || Host.StandaloneSourceStatementParentIds[4] != 3
                     || Host.StandaloneSourceStatementParentIds[5] != 1
-                    || Host.StandaloneSourceStatementParentIds[6] != 1
+                    || ({{verificationMode == 269 ? "true" : "false"}}
+                        && Host.StandaloneSourceStatementParentIds[6] != 1)
                     || Host.StandaloneSourceStatements[14]
                         != Host.StandaloneSourceStatements[5]
                     || Host.StandaloneSourceIfNodes[2] != 3
-                    || Host.StandaloneSourceIfNodes[4] != 1
+                    || Host.StandaloneSourceIfNodes[4]
+                        != {{verificationMode == 269 ? 1 : 0}}
                     || Host.StandaloneSourceIfNodes[7] != 1
                     || Host.StandaloneSourceIfNodes[9] != 0) {
                     return 88;
                 }
                 status = NormalizeStandaloneOwnedSourceProgram();
                 if (status != 0
-                    || Host.StandaloneNormalizedBlockCount[0] != 7
+                    || Host.StandaloneNormalizedBlockCount[0]
+                        != {{verificationMode == 269 ? 7 : 6}}
                     || Host.StandaloneNormalizedBodyBlockRanges[0] != 0
-                    || Host.StandaloneNormalizedBodyBlockRanges[1] != 7
+                    || Host.StandaloneNormalizedBodyBlockRanges[1]
+                        != {{verificationMode == 269 ? 7 : 6}}
                     || Host.StandaloneNormalizedConstantCount[0] != 2
                     || Host.StandaloneInvokeCount[0] != 0
                     || Host.StandaloneInvokeInputCount[0] != 0
@@ -10169,7 +10188,7 @@ internal sealed class StandaloneMethodImportInputTests
                 ? nestedDoConditionalBreakWithAssignmentVerificationSource
             : verificationMode is 268 or 275 or 276
                 ? nestedDoOuterContinueVerificationSource
-            : verificationMode == 269
+            : verificationMode is 269 or 277
                 ? nestedWhileOuterBreakVerificationSource
             : verificationMode == 270
                 ? siblingLoopLabelsVerificationSource
@@ -10802,6 +10821,7 @@ internal sealed class StandaloneMethodImportInputTests
                         : verificationMode == 274 ? 3
                         : verificationMode == 275 ? 4
                         : verificationMode == 276 ? 4
+                        : verificationMode == 277 ? 6
                         : verificationMode == 272 ? 6
                         : verificationMode == 228 ? 3
                         : verificationMode == 229 ? 3
@@ -10888,6 +10908,7 @@ internal sealed class StandaloneMethodImportInputTests
                             : verificationMode == 274 ? 0
                             : verificationMode == 275 ? 1
                             : verificationMode == 276 ? 1
+                            : verificationMode == 277 ? 2
                             : verificationMode == 272 ? 2
                             : verificationMode == 228 ? 0
                             : verificationMode == 229 ? 0
@@ -10958,6 +10979,7 @@ internal sealed class StandaloneMethodImportInputTests
                     and not 274
                     and not 275
                     and not 276
+                    and not 277
                     and not 272
                     and not 242
                     and not 228 and not 229)
@@ -11590,6 +11612,7 @@ internal sealed class StandaloneMethodImportInputTests
                         and not 274
                         and not 275
                         and not 276
+                        and not 277
                         and not 272
                         and not 243
                         and not 242
@@ -11879,7 +11902,7 @@ internal sealed class StandaloneMethodImportInputTests
                 expectedDecoderConstantMapCount = 1;
             }
             if (verificationMode is 263 or 268 or 269 or 270 or 272 or 275
-                or 276)
+                or 276 or 277)
             {
                 expectedDecoderConstantMapCount = 2;
             }
@@ -12220,6 +12243,7 @@ internal sealed class StandaloneMethodImportInputTests
                     or 274
                     or 275
                     or 276
+                    or 277
                     or 272
                     or 228 or 229)
             {
@@ -12423,6 +12447,7 @@ internal sealed class StandaloneMethodImportInputTests
                     or 274
                     or 275
                     or 276
+                    or 277
                     or 272
                     or 228 or 229 => 1,
                     161 => 2,
@@ -13260,6 +13285,11 @@ internal sealed class StandaloneMethodImportInputTests
                         Assert.That(Execute(0), Is.EqualTo(0));
                         Assert.That(Execute(1), Is.EqualTo(1));
                         Assert.That(Execute(3), Is.EqualTo(3));
+                        break;
+                    case 277:
+                        Assert.That(Execute(0), Is.EqualTo(2));
+                        Assert.That(Execute(1), Is.EqualTo(2));
+                        Assert.That(Execute(3), Is.EqualTo(1));
                         break;
                     case 272:
                         Assert.That(Execute(0), Is.EqualTo(0));
