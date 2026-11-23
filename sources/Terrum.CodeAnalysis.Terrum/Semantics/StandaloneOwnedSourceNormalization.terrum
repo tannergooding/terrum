@@ -1624,7 +1624,7 @@ int32 VerifyStandaloneNormalizedProgram()
             {
                 uint64 magnitude = uint64(uint32(valueLow))
                     | (uint64(uint32(valueHigh)) << 32);
-                if (!IsStandaloneIntegerValueBitsValid(
+                if (!IsStandaloneScalarLiteralBitsValid(
                         typeCode, magnitude))
                 {
                     return 3;

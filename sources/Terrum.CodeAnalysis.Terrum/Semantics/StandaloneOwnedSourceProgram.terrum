@@ -2502,6 +2502,112 @@ bool TryParseStandaloneIntegerToken(int32 tokenIndex,
     return true;
 }
 
+bool TryParseStandaloneFloatLiteralBits(int32 tokenIndex,
+    int32 typeCode, bool negative, ref<init uint64> valueBitsResult)
+    ensure return ? *valueBitsResult is init : true
+{
+    if ((typeCode != 0x14 && typeCode != 0x15)
+        || tokenIndex < 0
+        || tokenIndex >= Host.Tokens.Length / 3
+        || Host.Tokens[tokenIndex * 3] != 3)
+    {
+        return false;
+    }
+    int32 tokenStart
+        = Host.Tokens[tokenIndex * 3 + 1];
+    int32 tokenLength
+        = Host.Tokens[tokenIndex * 3 + 2];
+    if (tokenStart < 0 || tokenLength <= 0
+        || tokenStart > Host.Source.Length - tokenLength)
+    {
+        return false;
+    }
+
+    bool hexadecimalPrefix = tokenLength >= 2
+        && Host.Source[tokenStart] == 48
+        && (Host.Source[tokenStart + 1] == 120
+            || Host.Source[tokenStart + 1] == 88);
+    bool binaryPrefix = tokenLength >= 2
+        && Host.Source[tokenStart] == 48
+        && (Host.Source[tokenStart + 1] == 98
+            || Host.Source[tokenStart + 1] == 66);
+    bool floatingToken = IsFloatingPointToken(tokenIndex);
+    if (binaryPrefix && floatingToken)
+    {
+        return false;
+    }
+
+    mut int64 parsedBits = -1;
+    if (hexadecimalPrefix && floatingToken)
+    {
+        parsedBits = typeCode == 0x14
+            ? GetHexFloat32LiteralBitsOrMinusOne(
+                tokenStart, tokenLength)
+            : GetHexFloat64LiteralBitsOrMinusOne(
+                tokenStart, tokenLength);
+    }
+    else if (hexadecimalPrefix || binaryPrefix)
+    {
+        parsedBits = typeCode == 0x14
+            ? GetBasedIntegerFloat32BitsOrMinusOne(
+                tokenStart, tokenLength)
+            : GetBasedIntegerFloat64BitsOrMinusOne(
+                tokenStart, tokenLength);
+    }
+    else
+    {
+        parsedBits = typeCode == 0x14
+            ? GetDecimalFloat32LiteralBitsOrMinusOne(
+                tokenStart, tokenLength)
+            : GetDecimalFloat64LiteralBitsOrMinusOne(
+                tokenStart, tokenLength);
+    }
+    if (parsedBits < 0)
+    {
+        return false;
+    }
+
+    mut uint64 valueBits = uint64(parsedBits);
+    if (negative)
+    {
+        valueBits = valueBits
+            | (typeCode == 0x14
+                ? uint64(0x8000_0000)
+                : uint64(0x8000_0000_0000_0000));
+    }
+    *valueBitsResult = valueBits;
+    return true;
+}
+
+int32 AppendStandaloneSourceFloatLiteral(int32 bodyId,
+    int32 expressionFirst, int32 typeId, int32 tokenIndex,
+    bool negative, ref<init int32> expressionIdResult)
+    ensure return == 0 ? *expressionIdResult is init : true
+{
+    if (typeId <= 0 || typeId > Host.StandaloneTypeFactCount[0]
+        || Host.StandaloneTypeFacts[typeId * 3] != 0)
+    {
+        return 2;
+    }
+    int32 typeCode = Host.StandaloneTypeFacts[typeId * 3 + 1];
+    if (typeCode != 0x14 && typeCode != 0x15)
+    {
+        return 2;
+    }
+    init uint64 valueBits;
+    if (!TryParseStandaloneFloatLiteralBits(tokenIndex,
+            typeCode, negative, ref init valueBits))
+    {
+        return 2;
+    }
+    return AppendStandaloneSourceExpression(
+        bodyId, 2, typeId, 0, 0,
+        EncodeWord(uint32(valueBits
+            & uint64(uint32.MaxValue))),
+        EncodeWord(uint32(valueBits >> 32)),
+        -1, expressionFirst, ref init *expressionIdResult);
+}
+
 int32 GetStandaloneSourceUse(int32 typeId)
 {
     if (typeId <= 0 || typeId > Host.StandaloneTypeFactCount[0])
@@ -3012,6 +3118,29 @@ bool IsStandaloneIntegerSourceType(int32 typeCode)
         || typeCode == 0x10 || typeCode == 0x11
         || typeCode == 0x03;
 
+bool IsStandaloneFloatingSourceType(int32 typeCode)
+    => typeCode == 0x14 || typeCode == 0x15;
+
+bool CanBindStandaloneNumericLiteralType(int32 typeId,
+    int32 tokenIndex)
+{
+    if (typeId <= 0 || typeId > Host.StandaloneTypeFactCount[0]
+        || tokenIndex < 0
+        || tokenIndex >= Host.Tokens.Length / 3
+        || Host.Tokens[tokenIndex * 3] != 3
+        || Host.StandaloneTypeFacts[typeId * 3] != 0)
+    {
+        return false;
+    }
+    int32 typeCode = Host.StandaloneTypeFacts[typeId * 3 + 1];
+    if (IsFloatingPointToken(tokenIndex))
+    {
+        return IsStandaloneFloatingSourceType(typeCode);
+    }
+    return IsStandaloneIntegerSourceType(typeCode)
+        || IsStandaloneFloatingSourceType(typeCode);
+}
+
 bool IsStandaloneUnaryPlusType(int32 typeId)
 {
     if (typeId <= 0 || typeId > Host.StandaloneTypeFactCount[0]
@@ -3109,12 +3238,10 @@ bool CanBindStandaloneSourceArgument(int32 localCallableId,
             {
                 return false;
             }
-            int32 typeCode
-                = Host.StandaloneTypeFacts[
-                    expectedTypeId * 3 + 1];
             return Host.StandaloneTypeFacts[
                     expectedTypeId * 3] == 0
-                && IsStandaloneIntegerSourceType(typeCode);
+                && CanBindStandaloneNumericLiteralType(
+                    expectedTypeId, operandToken);
         }
         return tokenStart + 1 < tokenEnd
             && IsStandaloneUnaryPlusType(expectedTypeId)
@@ -3133,12 +3260,10 @@ bool CanBindStandaloneSourceArgument(int32 localCallableId,
             {
                 return false;
             }
-            int32 typeCode
-                = Host.StandaloneTypeFacts[
-                    expectedTypeId * 3 + 1];
             return Host.StandaloneTypeFacts[
                     expectedTypeId * 3] == 0
-                && IsStandaloneIntegerSourceType(typeCode);
+                && CanBindStandaloneNumericLiteralType(
+                    expectedTypeId, operandToken);
         }
         return tokenStart + 1 < tokenEnd
             && IsStandaloneUnaryMinusType(expectedTypeId)
@@ -3162,9 +3287,8 @@ bool CanBindStandaloneSourceArgument(int32 localCallableId,
     if (kind == 3)
     {
         return tokenEnd == tokenStart + 1
-            && Host.StandaloneTypeFacts[expectedTypeId * 3] == 0
-            && IsStandaloneIntegerSourceType(
-                Host.StandaloneTypeFacts[expectedTypeId * 3 + 1]);
+            && CanBindStandaloneNumericLiteralType(
+                expectedTypeId, tokenStart);
     }
     if (kind == 20 || kind == 21)
     {
@@ -4147,6 +4271,27 @@ int32 ParseStandaloneSourceExpression(int32 localCallableId,
             int32 typeCode
                 = Host.StandaloneTypeFacts[
                     expectedTypeId * 3 + 1];
+            if (Host.StandaloneTypeFacts[
+                    expectedTypeId * 3] != 0)
+            {
+                return 2;
+            }
+            if (IsStandaloneFloatingSourceType(typeCode))
+            {
+                init int32 literalExpressionId;
+                int32 literalAppendStatus
+                    = AppendStandaloneSourceFloatLiteral(
+                        bodyId, expressionFirst, expectedTypeId,
+                        operandToken, false,
+                        ref init literalExpressionId);
+                if (literalAppendStatus != 0)
+                {
+                    return literalAppendStatus;
+                }
+                *expressionIdResult = literalExpressionId;
+                *nextTokenResult = tokenIndex + 2;
+                return 0;
+            }
             init int32 literalRadix;
             init uint64 magnitude;
             if (!TryParseStandaloneIntegerToken(operandToken,
@@ -4246,6 +4391,27 @@ int32 ParseStandaloneSourceExpression(int32 localCallableId,
             int32 typeCode
                 = Host.StandaloneTypeFacts[
                     expectedTypeId * 3 + 1];
+            if (Host.StandaloneTypeFacts[
+                    expectedTypeId * 3] != 0)
+            {
+                return 2;
+            }
+            if (IsStandaloneFloatingSourceType(typeCode))
+            {
+                init int32 literalExpressionId;
+                int32 literalAppendStatus
+                    = AppendStandaloneSourceFloatLiteral(
+                        bodyId, expressionFirst, expectedTypeId,
+                        operandToken, true,
+                        ref init literalExpressionId);
+                if (literalAppendStatus != 0)
+                {
+                    return literalAppendStatus;
+                }
+                *expressionIdResult = literalExpressionId;
+                *nextTokenResult = tokenIndex + 2;
+                return 0;
+            }
             init int32 literalRadix;
             init uint64 magnitude;
             if (!TryParseStandaloneIntegerToken(operandToken,
@@ -4415,6 +4581,22 @@ int32 ParseStandaloneSourceExpression(int32 localCallableId,
         }
         int32 metadataTypeCode
             = Host.StandaloneTypeFacts[expectedTypeId * 3 + 1];
+        if (IsStandaloneFloatingSourceType(metadataTypeCode))
+        {
+            init int32 literalExpressionId;
+            int32 literalAppendStatus
+                = AppendStandaloneSourceFloatLiteral(
+                    bodyId, expressionFirst, expectedTypeId,
+                    tokenIndex, false,
+                    ref init literalExpressionId);
+            if (literalAppendStatus != 0)
+            {
+                return literalAppendStatus;
+            }
+            *expressionIdResult = literalExpressionId;
+            *nextTokenResult = tokenIndex + 1;
+            return 0;
+        }
         init int32 radix;
         init uint64 magnitude;
         if (!TryParseStandaloneIntegerToken(tokenIndex,
@@ -4971,6 +5153,20 @@ bool IsStandaloneIntegerValueBitsValid(int32 typeCode,
     }
     return typeCode == 0x09 || typeCode == 0x0E
         || typeCode == 0x10 || typeCode == 0x11;
+}
+
+bool IsStandaloneScalarLiteralBitsValid(int32 typeCode,
+    uint64 valueBits)
+{
+    if (typeCode == 0x14)
+    {
+        return valueBits <= uint64(0xFFFF_FFFF);
+    }
+    if (typeCode == 0x15)
+    {
+        return true;
+    }
+    return IsStandaloneIntegerValueBitsValid(typeCode, valueBits);
 }
 
 int32 TryGetStandaloneCallableSignature(int32 targetKind,
@@ -5622,7 +5818,7 @@ int32 VerifyStandaloneDirectCalls()
                 {
                     uint64 magnitude = uint64(uint32(valueLow))
                         | (uint64(uint32(valueHigh)) << 32);
-                    if (!IsStandaloneIntegerValueBitsValid(
+                    if (!IsStandaloneScalarLiteralBitsValid(
                             typeCode, magnitude))
                     {
                         return 3;
