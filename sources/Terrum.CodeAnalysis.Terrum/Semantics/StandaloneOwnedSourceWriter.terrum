@@ -4129,6 +4129,9 @@ int32 WriteStandaloneWriterBodyCode(int32 bodyId,
             int32 localTypeId
                 = Host.StandaloneRewrittenSourceLocals[
                     localOffset + 2];
+            int32 bindingKind
+                = Host.StandaloneRewrittenSourceLocals[
+                    localOffset + 3];
             int32 localHomeId
                 = Host.StandaloneRewrittenNormalizedSourceLocalHomeIds[
                     operand2];
@@ -4147,8 +4150,9 @@ int32 WriteStandaloneWriterBodyCode(int32 bodyId,
                 || typeId <= 0
                 || typeId
                     > Host.StandaloneRewrittenTypeFactCount[0]
-                || Host.StandaloneRewrittenSourceLocals[
-                    localOffset + 3] != 1
+                || (kind == 30
+                    ? (bindingKind < 1 || bindingKind > 3)
+                    : (bindingKind != 1 && bindingKind != 3))
                 || Host.StandaloneRewrittenSourceLocalStates[
                     operand2] != 1
                 || localTypeId != typeId
@@ -4161,7 +4165,13 @@ int32 WriteStandaloneWriterBodyCode(int32 bodyId,
                 || Host.StandaloneRewrittenNormalizedHomes[
                     destinationHomeOffset + 1] != 3
                 || Host.StandaloneRewrittenNormalizedHomes[
-                    destinationHomeOffset + 2] != 0
+                    destinationHomeOffset + 2]
+                    != (kind == 30
+                        ? (bindingKind == 2 ? 0 : 1)
+                        : 0)
+                || (kind == 31
+                    && Host.StandaloneRewrittenNormalizedHomes[
+                        sourceHomeOffset + 2] != 1)
                 || Host.StandaloneRewrittenTypeFacts[
                     typeId * 3] != 0
                 || Host.StandaloneRewrittenTypeFacts[

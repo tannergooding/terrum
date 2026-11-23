@@ -2209,7 +2209,7 @@ int32 AppendStandaloneSourcePlace(int32 bodyId, int32 typeId,
         || count >= Host.StandaloneSourcePlaces.Length / 5
         || bodyId < 0 || bodyId >= Host.StandaloneSourceBodyCount[0]
         || typeId <= 0 || typeId > Host.StandaloneTypeFactCount[0]
-        || placeKind != 1
+        || (placeKind != 1 && placeKind != 2)
         || targetIndex < 0
         || targetIndex >= Host.StandaloneSourceLocalCount[0])
     {
@@ -2394,9 +2394,17 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
             int32 localOffset = localId * 10;
             int32 typeId
                 = Host.StandaloneSourceLocals[localOffset + 2];
+            int32 bindingKind
+                = Host.StandaloneSourceLocals[localOffset + 3];
+            int32 localNameToken
+                = Host.StandaloneSourceLocals[localOffset + 6];
+            int32 localState
+                = Host.StandaloneSourceLocalStates[localId];
             if (Host.StandaloneSourceLocals[localOffset] != localCallableId
-                || Host.StandaloneSourceLocals[localOffset + 3] != 1
-                || Host.StandaloneSourceLocalStates[localId] != 1
+                || tokenIndex < localNameToken
+                || !((bindingKind == 1 && localState == 1)
+                    || (bindingKind == 2 && localState == 0)
+                    || bindingKind == 3)
                 || typeId <= 0
                 || typeId > Host.StandaloneTypeFactCount[0])
             {
@@ -2413,7 +2421,7 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
             }
             init int32 placeId;
             int32 placeStatus = AppendStandaloneSourcePlace(
-                localCallableId, typeId, 1, localId, -1,
+                localCallableId, typeId, 2, localId, -1,
                 ref init placeId);
             if (placeStatus != 0)
             {
@@ -2433,6 +2441,20 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
             if (nextToken != semicolonToken)
             {
                 return 1;
+            }
+            init bool expressionDoesNotReturn;
+            int32 doesNotReturnStatus
+                = TryGetStandaloneSourceExpressionDoesNotReturn(
+                    localCallableId, expressionId,
+                    ref init expressionDoesNotReturn);
+            if (doesNotReturnStatus != 0)
+            {
+                return doesNotReturnStatus;
+            }
+            if (!expressionDoesNotReturn
+                && (bindingKind == 2 || bindingKind == 3))
+            {
+                Host.StandaloneSourceLocalStates[localId] = 1;
             }
             int32 statementStatus = AppendStandaloneSourceStatement(
                 localCallableId, expressionFirst, 5, expressionId,
@@ -6040,8 +6062,6 @@ int32 VerifyStandaloneDirectCalls()
                     && semicolonToken != nameToken + 1)
                 || Host.StandaloneSourceLocalStates[localId] < 0
                 || Host.StandaloneSourceLocalStates[localId] > 1
-                || ((bindingKind == 2 || bindingKind == 3)
-                    && Host.StandaloneSourceLocalStates[localId] != 0)
                 || ((bindingKind == 0 || bindingKind == 1)
                     && Host.StandaloneSourceLocalStates[localId] != 1))
             {
@@ -6060,10 +6080,14 @@ int32 VerifyStandaloneDirectCalls()
                 = Host.StandaloneSourcePlaces[placeOffset + 2];
             int32 localId
                 = Host.StandaloneSourcePlaces[placeOffset + 3];
+            int32 localState
+                = localId >= 0
+                    && localId < localCount
+                    ? Host.StandaloneSourceLocalStates[localId] : -1;
             if (Host.StandaloneSourcePlaces[placeOffset] != bodyId
                 || placeTypeId <= 0
                 || placeTypeId > Host.StandaloneTypeFactCount[0]
-                || placeKind != 1
+                || (placeKind != 1 && placeKind != 2)
                 || localId < bodyLocalFirst
                 || localId >= bodyLocalFirst + bodyLocalCount
                 || Host.StandaloneSourcePlaces[placeOffset + 4] != -1)
@@ -6074,7 +6098,11 @@ int32 VerifyStandaloneDirectCalls()
             if (Host.StandaloneSourceLocals[localOffset] != bodyId
                 || Host.StandaloneSourceLocals[
                     localOffset + 2] != placeTypeId
-                || Host.StandaloneSourceLocalStates[localId] != 1
+                || localState < 0 || localState > 1
+                || (placeKind == 1 && localState != 1)
+                || (placeKind == 2
+                    && Host.StandaloneSourceLocals[
+                        localOffset + 3] == 0)
                 || GetStandaloneSourceUse(placeTypeId) == 5)
             {
                 return 3;
@@ -6592,23 +6620,50 @@ int32 VerifyStandaloneDirectCalls()
                 int32 expressionTypeId
                     = Host.StandaloneSourceExpressions[
                         (bodyExpressionFirst + expressionId) * 8 + 1];
+                int32 bindingKind
+                    = Host.StandaloneSourceLocals[localOffset + 3];
+                int32 localState
+                    = Host.StandaloneSourceLocalStates[localId];
+                int32 localUseCount
+                    = Host.StandaloneSourceLocalDeclarationUseCounts[
+                        localId];
                 if (Host.StandaloneSourcePlaces[placeOffset] != bodyId
                     || Host.StandaloneSourcePlaces[
-                        placeOffset + 2] != 1
+                        placeOffset + 2] != 2
                     || localId < bodyLocalFirst
                     || localId >= bodyLocalFirst + bodyLocalCount
                     || Host.StandaloneSourceLocals[localOffset] != bodyId
                     || Host.StandaloneSourceLocals[
                         localOffset + 2]
                         != Host.StandaloneSourcePlaces[placeOffset + 1]
-                    || Host.StandaloneSourceLocals[
-                        localOffset + 3] != 1
-                    || Host.StandaloneSourceLocalStates[localId] != 1
+                    || (bindingKind == 1
+                        ? localState != 1
+                        : bindingKind == 2
+                            ? (localState != 0 && localState != 1)
+                                || localUseCount != 1
+                            : bindingKind == 3
+                                ? localState != 0 && localState != 1
+                                : true)
                     || expressionTypeId
                         != Host.StandaloneSourcePlaces[
                             placeOffset + 1])
                 {
                     return 3;
+                }
+                init bool expressionDoesNotReturn;
+                int32 doesNotReturnStatus
+                    = TryGetStandaloneSourceExpressionDoesNotReturn(
+                        bodyId, expressionId,
+                        ref init expressionDoesNotReturn);
+                if (doesNotReturnStatus != 0)
+                {
+                    return doesNotReturnStatus;
+                }
+                if (!expressionDoesNotReturn
+                    && (bindingKind == 2 || bindingKind == 3))
+                {
+                    Host.StandaloneSourceLocalDeclarationUseCounts[
+                        localId] = localUseCount + 1;
                 }
                 Host.StandaloneSourcePlaceUseCounts[placeId] = 1;
                 continue;
@@ -6632,9 +6687,7 @@ int32 VerifyStandaloneDirectCalls()
                     = Host.StandaloneSourceLocals[localOffset + 2];
                 if (expressionId < 0)
                 {
-                    if ((bindingKind != 2 && bindingKind != 3)
-                        || Host.StandaloneSourceLocalStates[localId]
-                            != 0)
+                    if (bindingKind != 2 && bindingKind != 3)
                     {
                         return 3;
                     }
@@ -6710,8 +6763,22 @@ int32 VerifyStandaloneDirectCalls()
             localOrdinal < bodyLocalCount;
             localOrdinal = localOrdinal + 1)
         {
-            if (Host.StandaloneSourceLocalDeclarationUseCounts[
-                    bodyLocalFirst + localOrdinal] != 1)
+            int32 localId = bodyLocalFirst + localOrdinal;
+            int32 bindingKind
+                = Host.StandaloneSourceLocals[localId * 10 + 3];
+            int32 localState
+                = Host.StandaloneSourceLocalStates[localId];
+            int32 localUseCount
+                = Host.StandaloneSourceLocalDeclarationUseCounts[
+                    localId];
+            bool validLocalUseCount = bindingKind == 2
+                ? (localUseCount == 1 && localState == 0)
+                    || (localUseCount == 2 && localState == 1)
+                : bindingKind == 3
+                    ? (localUseCount == 1 && localState == 0)
+                        || (localUseCount > 1 && localState == 1)
+                    : localUseCount == 1 && localState == 1;
+            if (!validLocalUseCount)
             {
                 return 3;
             }
