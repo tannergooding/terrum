@@ -6244,7 +6244,6 @@ int32 ParseStandaloneSourceExpression(int32 localCallableId,
             || conditionalColon <= conditionalQuestion + 1
             || conditionalColon >= tokenEnd - 1
             || !IsStandaloneBinaryOperatorSeparated(conditionalColon)
-            || depth != 0
             || expectedTypeId <= 0
             || expectedTypeId > Host.StandaloneTypeFactCount[0]
             || GetStandaloneSourceUse(expectedTypeId) != 1
@@ -6360,8 +6359,7 @@ int32 ParseStandaloneSourceExpression(int32 localCallableId,
         int32 operatorKind
             = Host.Tokens[lazyBooleanOperator * 3];
         mut int32 boolTypeId = expectedTypeId;
-        if (depth != 0
-            || lazyBooleanOperator <= tokenIndex
+        if (lazyBooleanOperator <= tokenIndex
             || lazyBooleanOperator + 1 >= tokenEnd)
         {
             return 2;
