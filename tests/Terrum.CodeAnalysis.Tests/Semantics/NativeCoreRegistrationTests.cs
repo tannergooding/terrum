@@ -11019,6 +11019,19 @@ internal sealed class NativeCoreRegistrationTests
                 ?? throw new AssertionException(
                     "Expected a source-free FNI consumer."),
             "forwarder.module", schemaIdentity, 1, []);
+        var reemittedTables = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
+                reemittedArtifact, schema));
+        var reemittedReadRow = FindReadMethodRow(reemittedTables);
+        Assert.That(reemittedTables.MethodParameterLabels
+            .TryGetNameStringRow(reemittedReadRow, 0,
+                out var reemittedNameRow), Is.True);
+        Assert.That(reemittedTables.Strings.DecodeName(reemittedNameRow),
+            Is.EqualTo("source"));
+        Assert.That(reemittedTables.MethodParameterLabels
+            .TryGetDefaultConstantSourceRow(reemittedReadRow, 1,
+                out var reemittedDefaultRow), Is.True);
+        AssertDefaultPayload(reemittedTables, reemittedDefaultRow, 1);
         var reloadedReference
             = TrRmExecutableCompiler.CreateStandardReference(
                 new TrRmStandardArtifactInput(schemaIdentity,

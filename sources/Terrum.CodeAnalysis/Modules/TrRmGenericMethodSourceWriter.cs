@@ -33,7 +33,8 @@ public static partial class TrRmExecutableCompiler
         BoundInterfaceDefinition Definition, TrRmSourceTypeExport Export);
 
     private readonly record struct GenericImportedInterfaceEmission(
-        BoundInterfaceDefinition Definition, BoundModuleImport Import);
+        BoundInterfaceDefinition Definition, BoundModuleImport Import,
+        int ExpectedTypeDefRow = -1);
 
     private readonly record struct GenericImportedMethodEmission(
         BoundGenericMethodImport Source,
@@ -385,7 +386,9 @@ public static partial class TrRmExecutableCompiler
         {
             var importedInterfaceMethodImportRows
                 = ReadImportedInterfaceMethodImportRows(artifact, schema,
-                    standardSchemaIdentity);
+                    standardSchemaIdentity,
+                    allowDuplicateForeignNativeInterfaceViews:
+                        schema.UsesForeignNativeInterface());
             artifact = RemapForeignNativeInterfaceCallMethodMapTokens(
                 artifact, schema, exportedInterfaceMethodDefRows,
                 importedInterfaceMethodImportRows,
@@ -4872,7 +4875,9 @@ public static partial class TrRmExecutableCompiler
         var importedInterfaceImportRows
             = ReadImportedInterfaceImportRows(sections, stringRows);
         var importedInterfaceMethodImportRows
-            = ReadImportedInterfaceMethodImportRows(sections, stringRows);
+            = ReadImportedInterfaceMethodImportRows(sections, stringRows,
+                allowDuplicateForeignNativeInterfaceViews:
+                    foreignNativeInterface);
 
         var methodSection = TryGetSection(sections, 0x0016,
             out var foundMethodSection) ? foundMethodSection : default;
@@ -7623,7 +7628,7 @@ public static partial class TrRmExecutableCompiler
             var importedFni = new List<GenericImportedInterfaceEmission>();
             var selectors = new HashSet<(string ProducerIdentity,
                 string ExportKey, string QualifiedName, uint TargetRequirement,
-                uint RuntimePolicy)>();
+                uint RuntimePolicy, int ExpectedTypeDefRow)>();
             foreach (var definition in program.Interfaces)
             {
                 if (definition.ForeignNativeInterface is null)
@@ -7639,16 +7644,103 @@ public static partial class TrRmExecutableCompiler
 
                 ValidateImportedGenericInterface(definition, schema,
                     program);
-                if (!selectors.Add((import.ProducerIdentity,
-                        import.ExportKey, definition.QualifiedName,
-                        import.TargetRequirement, import.RuntimePolicy)))
+
+                var expectedViews
+                    = definition.ForeignNativeInterfaceExpectedViews;
+                if (expectedViews.IsDefaultOrEmpty)
                 {
-                    throw Unsupported(
-                        "F+I imported interface references contain a duplicate owner identity.");
+                    if (!selectors.Add((import.ProducerIdentity,
+                            import.ExportKey, definition.QualifiedName,
+                            import.TargetRequirement, import.RuntimePolicy,
+                            -1)))
+                    {
+                        throw Unsupported(
+                            "F+I imported interface references contain a duplicate owner identity.");
+                    }
+
+                    importedFni.Add(new GenericImportedInterfaceEmission(
+                        definition, import));
+                    continue;
                 }
 
-                importedFni.Add(new GenericImportedInterfaceEmission(
-                    definition, import));
+                var providerMembersByKey = new Dictionary<string,
+                    BoundInterfaceMemberDefinition>(
+                        definition.Members.Length, StringComparer.Ordinal);
+                foreach (var member in definition.Members)
+                {
+                    if (!providerMembersByKey.TryAdd(member.DeclarationKey,
+                            member))
+                    {
+                        throw Invalid(
+                            "An imported FNI provider has duplicate method ExportKeys.");
+                    }
+
+                    foreach (var alias in member.AdditionalDeclarationKeys)
+                    {
+                        if (!providerMembersByKey.TryAdd(alias, member))
+                        {
+                            throw Invalid(
+                                "An imported FNI provider has conflicting method aliases.");
+                        }
+                    }
+                }
+
+                foreach (var expectedView in expectedViews)
+                {
+                    var expectedDefinition = expectedView.Definition;
+                    if (expectedView.SourceTypeDefRow <= 0
+                        || expectedDefinition.ModuleImport != import
+                        || expectedDefinition.ForeignNativeInterface
+                            is null)
+                    {
+                        throw Invalid(
+                            "An imported FNI expected surface has an invalid owner identity.");
+                    }
+
+                    ValidateImportedGenericInterface(expectedDefinition,
+                        schema, program);
+                    ValidateForeignNativeInterfaceProviderContract(
+                        expectedDefinition, definition,
+                        providerMembersByKey);
+                    if (!selectors.Add((import.ProducerIdentity,
+                            import.ExportKey,
+                            expectedDefinition.QualifiedName,
+                            import.TargetRequirement, import.RuntimePolicy,
+                            expectedView.SourceTypeDefRow)))
+                    {
+                        throw Invalid(
+                            "An imported FNI expected surface is retained more than once.");
+                    }
+
+                    importedFni.Add(new GenericImportedInterfaceEmission(
+                        expectedDefinition, import,
+                        expectedView.SourceTypeDefRow));
+                }
+
+                if (!expectedViews.Any(expectedView =>
+                        StringComparer.Ordinal.Equals(
+                            expectedView.Definition.QualifiedName,
+                            definition.QualifiedName)))
+                {
+                    if (!selectors.Add((import.ProducerIdentity,
+                            import.ExportKey, definition.QualifiedName,
+                            import.TargetRequirement, import.RuntimePolicy,
+                            -1)))
+                    {
+                        throw Invalid(
+                            "An imported FNI provider call target is retained more than once.");
+                    }
+
+                    importedFni.Add(new GenericImportedInterfaceEmission(
+                        definition, import));
+                }
+
+                if (importedFni.Count
+                    > SemanticVerifier.MaximumAnalysisVisits)
+                {
+                    throw Unsupported(
+                        "Imported FNI expected views exceed the supported declaration limit.");
+                }
             }
 
             return [.. importedFni.OrderBy(
@@ -7657,7 +7749,8 @@ public static partial class TrRmExecutableCompiler
                 .ThenBy(static emission => emission.Import.ExportKey,
                     StringComparer.Ordinal)
                 .ThenBy(static emission => emission.Definition.QualifiedName,
-                    StringComparer.Ordinal)];
+                    StringComparer.Ordinal)
+                .ThenBy(static emission => emission.ExpectedTypeDefRow)];
         }
 
         var required = new Dictionary<(
@@ -9507,7 +9600,8 @@ public static partial class TrRmExecutableCompiler
 
     private static Dictionary<GenericImportedInterfaceMethodKey, uint>
         ReadImportedInterfaceMethodImportRows(byte[] artifact,
-            TrRmArtifactSchema schema, string? standardSchemaIdentity)
+            TrRmArtifactSchema schema, string? standardSchemaIdentity,
+            bool allowDuplicateForeignNativeInterfaceViews = false)
     {
         var index = new TrRmArtifactIndex(artifact, schema,
             standardSchemaIdentity: standardSchemaIdentity);
@@ -9525,7 +9619,8 @@ public static partial class TrRmExecutableCompiler
         var stringSection = GetSection(sections, 0x0002);
         var strings = new TrRmStringTableReader(stringSection.Bytes.Span,
             checked((int)stringSection.RecordCount));
-        return ReadImportedInterfaceMethodImportRows(sections, strings);
+        return ReadImportedInterfaceMethodImportRows(sections, strings,
+            allowDuplicateForeignNativeInterfaceViews);
     }
 
     private static byte[] RemapForeignNativeInterfaceCallMethodMapTokens(
@@ -9672,7 +9767,8 @@ public static partial class TrRmExecutableCompiler
     private static Dictionary<GenericImportedInterfaceMethodKey, uint>
         ReadImportedInterfaceMethodImportRows(
             IReadOnlyList<TrRmSection> sections,
-            TrRmStringTableReader strings)
+            TrRmStringTableReader strings,
+            bool allowDuplicateForeignNativeInterfaceViews = false)
     {
         var result
             = new Dictionary<GenericImportedInterfaceMethodKey, uint>();
@@ -9877,7 +9973,10 @@ public static partial class TrRmExecutableCompiler
                 interfaceMethod.Ordinal,
                 strings.DecodeName(ReadInt(import, 4)),
                 typeImport.TargetRequirement, typeImport.RuntimePolicy);
-            if (!result.TryAdd(key, checked((uint)importRow)))
+            // A completed FNI call is provider-keyed; identical expected views
+            // may therefore share one deterministic MethodMap target.
+            if (!result.TryAdd(key, checked((uint)importRow))
+                && !allowDuplicateForeignNativeInterfaceViews)
             {
                 throw Unsupported(
                     "A G1L1 imported InterfaceMethod has an ambiguous expected Import.");

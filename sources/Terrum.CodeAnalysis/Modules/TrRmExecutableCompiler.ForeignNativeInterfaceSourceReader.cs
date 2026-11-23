@@ -208,8 +208,9 @@ public static partial class TrRmExecutableCompiler
             BoundInterfaceDefinition>();
         var exposedDefinitions = ImmutableArray.CreateBuilder<
             BoundInterfaceDefinition>();
-        var exposedProviderViews = new HashSet<(
-            string ProducerIdentity, string ExportKey)>();
+        var exposedProviderViews = new Dictionary<(
+            string ProducerIdentity, string ExportKey), int>();
+        var expectedViewCount = 0;
         for (var typeDef = firstTypeDef; typeDef < endTypeDef; typeDef++)
         {
             var interfaceDef
@@ -295,10 +296,50 @@ public static partial class TrRmExecutableCompiler
                 var providerImport = providerView.ModuleImport
                     ?? throw Invalid(
                         "A selected ForeignNativeInterface provider has no module identity.");
-                if (exposedProviderViews.Add((
-                        providerImport.ProducerIdentity,
-                        providerImport.ExportKey)))
+                var providerViewKey = (providerImport.ProducerIdentity,
+                    providerImport.ExportKey);
+                var expectedViews
+                    = providerView.ForeignNativeInterfaceExpectedViews;
+                if (expectedViews.Length != 1
+                    || expectedViews[0].SourceTypeDefRow != typeDef)
                 {
+                    throw Invalid(
+                        "A selected ForeignNativeInterface provider view has no exact expected TypeDef surface.");
+                }
+                if (expectedViewCount
+                    >= SemanticVerifier.MaximumAnalysisVisits)
+                {
+                    throw Unsupported(
+                        "The retained FNI expected-view count exceeds the supported declaration limit.");
+                }
+                expectedViewCount++;
+
+                if (exposedProviderViews.TryGetValue(providerViewKey,
+                        out var exposedIndex))
+                {
+                    var exposedProviderView
+                        = exposedDefinitions[exposedIndex];
+                    var retainedExpectedViews
+                        = exposedProviderView
+                            .ForeignNativeInterfaceExpectedViews;
+                    if (retainedExpectedViews.Any(expectedView =>
+                            expectedView.SourceTypeDefRow == typeDef))
+                    {
+                        throw Invalid(
+                            "A ForeignNativeInterface TypeDef expectation is retained more than once.");
+                    }
+
+                    exposedDefinitions[exposedIndex]
+                        = exposedProviderView with {
+                            ForeignNativeInterfaceExpectedViews = [
+                                .. retainedExpectedViews, expectedViews[0],
+                            ],
+                        };
+                }
+                else
+                {
+                    exposedProviderViews.Add(providerViewKey,
+                        exposedDefinitions.Count);
                     exposedDefinitions.Add(providerView);
                 }
 
@@ -1282,7 +1323,12 @@ public static partial class TrRmExecutableCompiler
             selectedType.ProducerIdentity);
         ValidateForeignNativeInterfaceProviderContract(expected,
             providerInterface, providerMembersByKey);
-        return providerInterface;
+        return providerInterface with {
+            ForeignNativeInterfaceExpectedViews = [
+                new BoundForeignNativeInterfaceExpectedView(typeDef,
+                    expected),
+            ],
+        };
     }
 
     private static void ValidateForeignNativeInterfaceProviderContract(

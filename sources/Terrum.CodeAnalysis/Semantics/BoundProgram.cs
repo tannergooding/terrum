@@ -403,12 +403,17 @@ internal sealed record BoundInterfaceDefinition(
     internal ImmutableArray<string> AttributeTokens { get; init; } = [];
     internal BoundModuleImport? ModuleImport { get; init; }
     internal BoundForeignNativeInterfaceLayout? ForeignNativeInterface { get; init; }
+    internal ImmutableArray<BoundForeignNativeInterfaceExpectedView>
+        ForeignNativeInterfaceExpectedViews { get; init; } = [];
     internal BoundSourceInterfaceDeclarationHandle? SourceDeclaration
         { get; init; }
     internal BoundPrivateForeignInterfaceOrigin?
         PrivateForeignInterfaceOrigin { get; init; }
     internal int SourceInputOrdinal { get; init; } = -1;
 }
+
+internal sealed record BoundForeignNativeInterfaceExpectedView(
+    int SourceTypeDefRow, BoundInterfaceDefinition Definition);
 
 internal sealed record BoundForeignNativeInterfaceLayout(
     uint VTableByteOffset);
