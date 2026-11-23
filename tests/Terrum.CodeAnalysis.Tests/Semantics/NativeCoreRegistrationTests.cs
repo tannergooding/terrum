@@ -73,6 +73,9 @@ internal sealed class NativeCoreRegistrationTests
     private delegate int NativeFniUpdateFunction(IntPtr receiver, int value);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int NativeFniUpdateReceiverFunction(IntPtr receiver);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int NativeFunctionPointerTarget(int value);
 
     [StructLayout(LayoutKind.Sequential)]
@@ -1812,6 +1815,10 @@ internal sealed class NativeCoreRegistrationTests
             (Name: "PrefixIncrementThenRead", UpdateArgument: 0,
                 IsPrefix: true, Operator: TokenKind.PlusPlus,
                 UpdateFirst: true, FirstFormal: 0, SecondFormal: 1),
+            (Name: "ConstantInitializedPrefixIncrementThenRead",
+                UpdateArgument: 0, IsPrefix: true,
+                Operator: TokenKind.PlusPlus, UpdateFirst: true,
+                FirstFormal: 0, SecondFormal: 1),
             (Name: "ReadThenPrefixIncrement", UpdateArgument: 1,
                 IsPrefix: true, Operator: TokenKind.PlusPlus,
                 UpdateFirst: false, FirstFormal: 0, SecondFormal: 1),
@@ -1844,6 +1851,17 @@ internal sealed class NativeCoreRegistrationTests
             AssertUpdateInstructionOrder(reemittedArtifact, testCase,
                 isChecked);
         }
+
+        var constantInitializedFunction = program.Functions.Single(
+            static function => function.Name
+                == "ConstantInitializedPrefixIncrementThenRead");
+        var constantInitializedLocal
+            = constantInitializedFunction.Body.Statements
+                .OfType<BoundLocal>().Single();
+        Assert.That(constantInitializedLocal.Initializer,
+            Is.TypeOf<BoundConstant>());
+        Assert.That(((BoundConstant)constantInitializedLocal.Initializer)
+            .Bits.Low, Is.EqualTo(10UL));
 
         var image = NativeEmitter.EmitLibrary(program,
             [.. cases.Select(static testCase => testCase.Name)],
@@ -2012,6 +2030,7 @@ internal sealed class NativeCoreRegistrationTests
             SourceArithmeticProfile.Development);
         var functionNames = new[] {
             "PrefixIncrementThenRead",
+            "ConstantInitializedPrefixIncrementThenRead",
             "ReadThenPrefixIncrement",
             "PostfixIncrementThenRead",
             "ReadThenPostfixIncrement",
@@ -2079,6 +2098,14 @@ internal sealed class NativeCoreRegistrationTests
                 int32 PrefixIncrementThenRead(ptr<void> receiver,
                     int32 value) {
                     mut int32 current = value;
+                    unsafe {
+                        return IUpdateProbe.Read(receiver, ++current,
+                            current);
+                    }
+                }
+                int32 ConstantInitializedPrefixIncrementThenRead(
+                    ptr<void> receiver) {
+                    mut int32 current = 10;
                     unsafe {
                         return IUpdateProbe.Read(receiver, ++current,
                             current);
@@ -2181,6 +2208,8 @@ internal sealed class NativeCoreRegistrationTests
 
             var expectedResults = new[] {
                 (Name: "PrefixIncrementThenRead", Value: 1111),
+                (Name: "ConstantInitializedPrefixIncrementThenRead",
+                    Value: 1111),
                 (Name: "ReadThenPrefixIncrement", Value: 1011),
                 (Name: "PostfixIncrementThenRead", Value: 1011),
                 (Name: "ReadThenPostfixIncrement", Value: 1010),
@@ -2193,10 +2222,20 @@ internal sealed class NativeCoreRegistrationTests
             };
             foreach (var (name, value) in expectedResults)
             {
-                var function = Marshal.GetDelegateForFunctionPointer<
-                    NativeFniUpdateFunction>(
-                    NativeLibrary.GetExport(module, name));
-                Assert.That(function(receiver, 10), Is.EqualTo(value), name);
+                var address = NativeLibrary.GetExport(module, name);
+                if (name == "ConstantInitializedPrefixIncrementThenRead")
+                {
+                    var function = Marshal.GetDelegateForFunctionPointer<
+                        NativeFniUpdateReceiverFunction>(address);
+                    Assert.That(function(receiver), Is.EqualTo(value), name);
+                }
+                else
+                {
+                    var function = Marshal.GetDelegateForFunctionPointer<
+                        NativeFniUpdateFunction>(address);
+                    Assert.That(function(receiver, 10), Is.EqualTo(value),
+                        name);
+                }
             }
         }
         finally

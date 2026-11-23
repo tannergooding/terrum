@@ -3329,16 +3329,31 @@ public static partial class TrRmExecutableCompiler
                 || function.Variables[local.Variable].IsInit
                 || function.Variables[local.Variable]
                     .IsInitializationLocal
-                || local.Initializer is not BoundRead read
-                || (uint)read.Variable >= (uint)function.ParameterCount
-                || (uint)read.Variable >= 16u
-                || read.Type != function.Variables[read.Variable].Type
-                || function.Variables[read.Variable].IsOut
-                || function.Variables[read.Variable].IsInit
                 || local.Initializer.Type
                     != function.Variables[local.Variable].Type
                 || !DirectNativeImportContract.IsScalar(
                     local.Initializer.Type)
+                || stagedLocalVariables.Contains(local.Variable))
+            {
+                return false;
+            }
+
+            var initializerMatchesSource
+                = local.Initializer switch {
+                    BoundRead read =>
+                        (uint)read.Variable < (uint)function.ParameterCount
+                        && read.Variable < 16
+                        && read.Type
+                            == function.Variables[read.Variable].Type
+                        && !function.Variables[read.Variable].IsOut
+                        && !function.Variables[read.Variable].IsInit,
+                    BoundConstant constant =>
+                        constant.Type == local.Initializer.Type
+                        && constant.RepresentationType == constant.Type
+                        && constant.Bits.IsCanonicalFor(constant.Type),
+                    _ => false,
+                };
+            if (!initializerMatchesSource
                 || !stagedLocalVariables.Add(local.Variable))
             {
                 return false;
@@ -3455,6 +3470,19 @@ public static partial class TrRmExecutableCompiler
         var hasThrowingScalarExpression = false;
         var availableInputRegisters
             = 13 - (stagedLocalVariables.Count == 0 ? 0 : 1);
+        foreach (var stagedLocal in stagedLocalBuilder)
+        {
+            if (stagedLocal.Initializer is BoundConstant constant)
+            {
+                _ = constantInputs.Add((constant.Type, constant.Bits));
+            }
+        }
+
+        if (constantInputs.Count > availableInputRegisters)
+        {
+            return false;
+        }
+
         for (var sourceArgument = 0;
             sourceArgument < boundCall.Arguments.Length;
             sourceArgument++)
@@ -5192,6 +5220,14 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
+        foreach (var local in stagedLocals)
+        {
+            if (local.Initializer is BoundConstant constant)
+            {
+                _ = GetConstantRegister(constant);
+            }
+        }
+
         if (nestedCalls.Count + constantLoads.Count
             > 13 - (stagedLocals.IsEmpty ? 0 : 1))
         {
@@ -5489,26 +5525,6 @@ public static partial class TrRmExecutableCompiler
             + (constantLoads.Count * 2)
             + argumentPreparationCode.Count
             + (outputReservations.Count * 4) + 4));
-        foreach (var local in stagedLocals)
-        {
-            if (local.Initializer is not BoundRead read
-                || (uint)read.Variable >= 16u)
-            {
-                throw Unsupported(
-                    $"Function '{function.Name}' has a staged F+I input outside the parameter-load Body subset.");
-            }
-
-            var homeIndex = checked((ushort)local.Variable);
-            const byte stagedInputRegister = 1;
-            code.Add(0x11);
-            code.Add(checked((byte)((read.Variable << 4)
-                | stagedInputRegister)));
-            code.Add(0xD6);
-            code.Add((byte)(0x10 | stagedInputRegister));
-            code.Add((byte)homeIndex);
-            code.Add((byte)(homeIndex >> 8));
-        }
-
         foreach (var (constantMapIndex, register) in constantLoads)
         {
             if (constantMapIndex >= 16)
@@ -5519,6 +5535,37 @@ public static partial class TrRmExecutableCompiler
 
             code.Add(0x16);
             code.Add(checked((byte)((constantMapIndex << 4) | register)));
+        }
+
+        foreach (var local in stagedLocals)
+        {
+            var homeIndex = checked((ushort)local.Variable);
+            byte stagedInputRegister;
+            if (local.Initializer is BoundRead read
+                && (uint)read.Variable < 16u)
+            {
+                stagedInputRegister = 1;
+                code.Add(0x11);
+                code.Add(checked((byte)((read.Variable << 4)
+                    | stagedInputRegister)));
+            }
+            else if (local.Initializer is BoundConstant constant
+                && constantRegisterByValue.TryGetValue(
+                    (constant.Type, constant.Bits),
+                    out var constantRegister))
+            {
+                stagedInputRegister = constantRegister;
+            }
+            else
+            {
+                throw Unsupported(
+                    $"Function '{function.Name}' has a staged F+I input outside the parameter or scalar ConstantMap subset.");
+            }
+
+            code.Add(0xD6);
+            code.Add((byte)(0x10 | stagedInputRegister));
+            code.Add((byte)homeIndex);
+            code.Add((byte)(homeIndex >> 8));
         }
 
         foreach (var (operandOffset, nestedInputCall) in nestedRecordPatches)
@@ -9442,20 +9489,38 @@ public static partial class TrRmExecutableCompiler
                             || variables[variable].IsInitializationLocal
                             || initializedLocals.Contains(variable)
                             || !DirectNativeImportContract.IsScalar(
-                                homeTypes[homeIndex])
-                            || !valueByRegister.TryGetValue(sourceRegister,
+                                homeTypes[homeIndex]))
+                        {
+                            throw Invalid(
+                                "A Standard F+I staged input Home does not match its parameter or ConstantMap initializer.");
+                        }
+
+                        if (!valueByRegister.TryGetValue(sourceRegister,
                                 out var initializer)
-                            || initializer is not BoundRead read
-                            || (uint)read.Variable
-                                >= (uint)function.ParameterCount
-                            || read.Type != homeTypes[homeIndex]
                             || initializer.Type != homeTypes[homeIndex]
-                            || function.Variables[read.Variable].IsOut
-                            || function.Variables[read.Variable].IsInit
+                            || !(initializer switch {
+                                BoundRead read =>
+                                    (uint)read.Variable
+                                        < (uint)function.ParameterCount
+                                    && read.Type == homeTypes[homeIndex]
+                                    && function.Variables[read.Variable]
+                                        .Type == read.Type
+                                    && !function.Variables[read.Variable]
+                                        .IsOut
+                                    && !function.Variables[read.Variable]
+                                        .IsInit,
+                                BoundConstant constant =>
+                                    constant.Type == homeTypes[homeIndex]
+                                    && constant.RepresentationType
+                                        == constant.Type
+                                    && constant.Bits.IsCanonicalFor(
+                                        constant.Type),
+                                _ => false,
+                            })
                             || !initializedValueLocals.Add(variable))
                         {
                             throw Invalid(
-                                "A Standard F+I staged input Home does not match its direct scalar source.");
+                                "A Standard F+I staged input Home does not match its parameter or ConstantMap initializer.");
                         }
 
                         statements.Add(new BoundLocal(variable,
