@@ -2945,10 +2945,13 @@ bool CanBindStandaloneSourceArgument(int32 localCallableId,
         init int32 closingToken;
         if (!FindStandaloneMatchingClose(tokenStart, tokenEnd,
                 46, 47, ref init closingToken)
-            || closingToken + 1 != tokenEnd
-            || closingToken == tokenStart + 1)
+            || closingToken + 1 != tokenEnd)
         {
             return false;
+        }
+        if (closingToken == tokenStart + 1)
+        {
+            return IsStandaloneUnitType(expectedTypeId);
         }
         return CanBindStandaloneSourceArgument(localCallableId,
             tokenStart + 1, closingToken, expectedTypeId, depth + 1);
@@ -3848,10 +3851,39 @@ int32 ParseStandaloneSourceExpression(int32 localCallableId,
     {
         init int32 closingToken;
         if (!FindStandaloneMatchingClose(tokenIndex, tokenEnd,
-                46, 47, ref init closingToken)
-            || closingToken == tokenIndex + 1)
+                46, 47, ref init closingToken))
         {
             return 1;
+        }
+        if (closingToken == tokenIndex + 1)
+        {
+            mut int32 unitTypeId = expectedTypeId;
+            if (unitTypeId < 0)
+            {
+                int32 unitTypeStatus
+                    = InternStandaloneCallableTypeFact(
+                        0, 0, false, ref init unitTypeId);
+                if (unitTypeStatus != 0)
+                {
+                    return unitTypeStatus;
+                }
+            }
+            if (unitTypeId <= 0
+                || !IsStandaloneUnitType(unitTypeId))
+            {
+                return 2;
+            }
+            init int32 expressionId;
+            int32 appendStatus = AppendStandaloneSourceExpression(
+                bodyId, 7, unitTypeId, 0, 0, 0, 0,
+                -1, expressionFirst, ref init expressionId);
+            if (appendStatus != 0)
+            {
+                return appendStatus;
+            }
+            *expressionIdResult = expressionId;
+            *nextTokenResult = closingToken + 1;
+            return 0;
         }
         init int32 childExpressionId;
         init int32 nextChildToken;
@@ -4842,6 +4874,22 @@ int32 VerifyStandaloneDirectCalls()
                         childGlobalId * 8 + 7] != bodyId
                     || Host.StandaloneSourceExpressionUseCounts[
                         childGlobalId] != 1)
+                {
+                    return 3;
+                }
+            }
+            else if (expressionKind == 7)
+            {
+                if (!IsStandaloneUnitType(expressionTypeId)
+                    || operand0 != 0
+                    || Host.StandaloneSourceExpressions[
+                        expressionOffset + 3] != 0
+                    || Host.StandaloneSourceExpressions[
+                        expressionOffset + 4] != 0
+                    || Host.StandaloneSourceExpressions[
+                        expressionOffset + 5] != 0
+                    || Host.StandaloneSourceExpressions[
+                        expressionOffset + 6] != -1)
                 {
                     return 3;
                 }

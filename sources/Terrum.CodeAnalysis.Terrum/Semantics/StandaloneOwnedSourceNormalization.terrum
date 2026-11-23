@@ -941,6 +941,18 @@ int32 NormalizeStandaloneSourceExpression(int32 bodyId,
         *terminatedResult = false;
         return 0;
     }
+    if (expressionKind == 7)
+    {
+        if (!IsStandaloneUnitType(typeId))
+        {
+            return 3;
+        }
+        *selectorKindResult = 0;
+        *sourceUseResult = 0;
+        *selectorIndexResult = 0;
+        *terminatedResult = false;
+        return 0;
+    }
     if (expressionKind == 3)
     {
         return NormalizeStandaloneCallExpression(bodyId,
