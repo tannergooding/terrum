@@ -488,7 +488,7 @@ public static partial class TrRmExecutableCompiler
 
         var program = LoadStandardProgram(artifacts, schemaIdentities,
             moduleIdentity, false, selectedA3LayoutResourceLedger,
-            out _, out _, out _, out _,
+            out _, out _, out var typeProviderBindings, out _,
             out var a3LayoutResourceLedger,
             coreExceptionIdentitySelections,
             coreContractFailureIdentitySelections);
@@ -497,6 +497,29 @@ public static partial class TrRmExecutableCompiler
         var tables = ValidateForeignInvocationArtifact(index,
             input.SchemaIdentity, a3LayoutResourceLedger);
         var moduleRow = FindModuleRow(tables.Modules, moduleIdentity);
+        var requiresStructureTypeClosure = program.NativePointerTypes.Any(
+            static pointer => (int)pointer.PointeeType is
+                >= 100 and < BoundEnumTypes.First);
+        if (requiresStructureTypeClosure)
+        {
+            program = RetainLoadedA2SourceTypeFacts(program, artifacts,
+                schemaIdentities, tables, moduleRow, typeProviderBindings,
+                retainExecutableTypes: true,
+                retainHiddenExecutableTypeOrigins: true);
+            if (program.StandardFieldProviderClosure
+                is BoundStandardFieldProviderClosure fieldProviderClosure)
+            {
+                program = program with {
+                    StandardFieldProviderClosure
+                        = fieldProviderClosure with {
+                            OriginalProgram = program with {
+                                StandardFieldProviderClosure = null,
+                            },
+                        },
+                };
+            }
+        }
+
         var (targetRequirement, runtimePolicy)
             = tables.Modules.GetRequirements(moduleRow);
         var (methodStart, methodEnd)
@@ -544,11 +567,27 @@ public static partial class TrRmExecutableCompiler
             throw Unsupported("The selected F Module has no supported exported declarations.");
         }
 
-        return new CompilationReference([], functions.ToImmutable(),
+        var standardQuerySourceAssociation
+            = requiresStructureTypeClosure
+                && program.StandardFieldProviderClosure
+                    is BoundStandardFieldProviderClosure fieldProviderClosure
+                ? new BoundStandardQuerySourceAssociation([
+                    fieldProviderClosure,
+                ])
+                : null;
+        return new CompilationReference(
+            requiresStructureTypeClosure ? program.Structures : [],
+            functions.ToImmutable(),
             (BoundRuntimePolicy)runtimePolicy,
             nativeFunctionPointerSignatures: program.NativeFunctionPointerSignatures,
             nativePointerTypes: program.NativePointerTypes,
+            enumDefinitions: requiresStructureTypeClosure
+                ? program.EnumDefinitions : [],
+            nativeFixedArrayTypes: requiresStructureTypeClosure
+                ? program.NativeFixedArrayTypes : [],
             checkedReferenceTypes: program.CheckedReferenceTypes,
+            standardQuerySourceAssociation:
+                standardQuerySourceAssociation,
             coreExceptionIdentitySelections:
                 coreExceptionIdentitySelections,
             coreContractFailureIdentitySelections:

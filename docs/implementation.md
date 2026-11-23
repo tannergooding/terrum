@@ -850,8 +850,11 @@ references now retain function-pointer field signatures through provider
 projection and composition. Provider replacement checks the complete anchor
 signature across TypeDef-row and anchor-MethodDef-row relocation; source,
 composition and replacement regressions are added but remain unverified under
-the active hold. Other consumer routes, NativeAddress eligibility, independent
-ABI support and broader re-encoding/remapping remain open.
+the active hold. Standard method references also retain hidden TypeDef closure
+and provider origins for pointer-to-structure signatures without making those
+types lookup roots; a consumer regression remains unverified under the hold.
+Other consumer routes, cross-Module anchor contexts, NativeAddress eligibility,
+independent ABI support and broader re-encoding/remapping remain open.
 The Standard Contract reader also consumes the assigned 20-byte OutputState
 row, requiring Param mode `00`, a complete `ref<init T>` or `Span<init T>`
 type, and a phase-3 PredicateGraph attached to the same MethodDef. Its bounded

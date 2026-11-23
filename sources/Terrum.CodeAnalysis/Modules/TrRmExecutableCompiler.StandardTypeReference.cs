@@ -8233,6 +8233,7 @@ public static partial class TrRmExecutableCompiler
         int moduleRow,
         ImmutableArray<TrRmStandardTypeProviderBinding> typeProviderBindings,
         bool retainExecutableTypes = false,
+        bool retainHiddenExecutableTypeOrigins = false,
         int consumerArtifactIndex = 0)
     {
         if ((uint)consumerArtifactIndex >= (uint)artifacts.Length
@@ -8373,8 +8374,10 @@ public static partial class TrRmExecutableCompiler
 
         var isMethodTypeSchema = IsC1M1MethodTypeSchemaIdentity(
             schemaIdentities[consumerArtifactIndex]);
+        var retainTypeOriginsWithoutPublications = isMethodTypeSchema
+            || retainHiddenExecutableTypeOrigins;
         var localTypeExportKeys = new Dictionary<int, List<string>>();
-        if (isMethodTypeSchema)
+        if (retainTypeOriginsWithoutPublications)
         {
             foreach (var (definition, exportKey) in
                 tables.Exports.GetExportsForModule(moduleRow))
@@ -8407,7 +8410,7 @@ public static partial class TrRmExecutableCompiler
             if (!bindingsByExpectedTypeDef.TryGetValue(typeDefRow,
                     out var bindings))
             {
-                if (!isMethodTypeSchema)
+                if (!retainTypeOriginsWithoutPublications)
                 {
                     structures.Add(structure);
                     continue;
@@ -8536,7 +8539,7 @@ public static partial class TrRmExecutableCompiler
             });
         }
 
-        if (isMethodTypeSchema)
+        if (retainTypeOriginsWithoutPublications)
         {
             return program with {
                 Structures = structures.MoveToImmutable(),

@@ -364,6 +364,64 @@ internal sealed class TrRmExecutableCompilerTests
     }
 
     [Test]
+    public void StandardTerrumFunctionPointerMethodReferenceRetainsPointeeTypes()
+    {
+        var schemaIdentity = TrRmArtifactSchemaFacts
+            .StandardTerrumFunctionPointerSchemaIdentity;
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        var layoutOptions = new CompilationOptions {
+            LayoutCoreRegistration
+                = LayoutCoreRegistrationTestData.Create(),
+        };
+        var providerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                namespace Example {
+                    [Blittable]
+                    [Layout(LayoutKind.Sequential, Packing: 1)]
+                    public struct Payload {
+                        public int32 Value;
+                    }
+
+                    public int32 Accept(
+                        fnptr<ptr<Payload>, int32> callback) {
+                        return 0;
+                    }
+                }
+                """), layoutOptions);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            providerCompilation.Program!, "method-fnptr-provider",
+            schemaIdentity, targetRequirement, [
+                new TrRmSourceTypeExport("Example", "Payload", "payload"),
+            ]);
+        var input = new TrRmStandardArtifactInput(schemaIdentity, artifact);
+        var methodReference = TrRmExecutableCompiler.CreateStandardReference(
+            input, "method-fnptr-provider",
+            Array.Empty<TrRmStandardArtifactInput>());
+
+        var hiddenPayload = methodReference.Structures.Single(
+            static structure => structure.Name == "Example.Payload");
+        var typeOrigin = hiddenPayload.StandardTypeOrigin;
+        Assert.That(typeOrigin, Is.Not.Null);
+        Assert.That(typeOrigin!.IsLookupRoot, Is.False);
+        Assert.That(methodReference.NativePointerTypes, Has.Length.EqualTo(1));
+        var payloadStructureIndex = Enumerable.Range(0,
+                methodReference.Structures.Length)
+            .Single(index => methodReference.Structures[index].Name
+                == "Example.Payload");
+        Assert.That((int)methodReference.NativePointerTypes[0].PointeeType,
+            Is.EqualTo(100 + payloadStructureIndex));
+
+        var consumer = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "int32 Main() { return 0; }"), methodReference);
+        Assert.That(consumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumer.Diagnostics));
+    }
+
+    [Test]
     public void TerrumFunctionPointerFieldReferencesComposeAcrossProviders()
     {
         var schemaIdentity = TrRmArtifactSchemaFacts
