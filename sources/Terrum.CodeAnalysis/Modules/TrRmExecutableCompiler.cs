@@ -7804,7 +7804,10 @@ public static partial class TrRmExecutableCompiler
         BoundProgram? standardClassQueryProgram = null,
         bool standardConstruction2MethodLinking = false,
         IReadOnlyDictionary<uint, PrimitiveType>?
-            nominalClassTypesByTypeSpecReference = null)
+            nominalClassTypesByTypeSpecReference = null,
+        IReadOnlyDictionary<int,
+            (int ArtifactIndex, int ModuleRow, int TypeDefRow)>?
+            standardFunctionPointerProviderTypeIdentities = null)
     {
         var standardInitializationReferenceBodies
             = standardSchemaIdentity is not null
@@ -8264,10 +8267,67 @@ public static partial class TrRmExecutableCompiler
                         typeDefRow] = nextStructureIndex++;
                 }
 
+                var signatureStructureTypeByTypeDef
+                    = standardFunctionPointerStructureTypeByTypeDef;
+                if (TrRmArtifactSchemaFacts
+                        .IsSelectedTerrumFunctionPointerSchemaIdentity(
+                            standardSchemaIdentity)
+                    && standardFunctionPointerProviderTypeIdentities
+                        is { Count: > 0 })
+                {
+                    var canonicalStructureIndexesByProviderType
+                        = new Dictionary<(int ArtifactIndex, int ModuleRow,
+                            int TypeDefRow), int>();
+                    var aliasStructureIndexesByTypeDef
+                        = new Dictionary<int, int>();
+                    for (var typeDefRow = 1;
+                        typeDefRow < standardFunctionPointerStructureTypeByTypeDef
+                            .Length;
+                        typeDefRow++)
+                    {
+                        if (standardFunctionPointerStructureTypeByTypeDef[
+                                typeDefRow] < 0
+                            || !standardFunctionPointerProviderTypeIdentities
+                                .TryGetValue(typeDefRow,
+                                    out var providerTypeIdentity))
+                        {
+                            continue;
+                        }
+
+                        if (canonicalStructureIndexesByProviderType.TryGetValue(
+                                providerTypeIdentity,
+                                out var canonicalStructureIndex))
+                        {
+                            aliasStructureIndexesByTypeDef[typeDefRow]
+                                = canonicalStructureIndex;
+                        }
+                        else
+                        {
+                            canonicalStructureIndexesByProviderType.Add(
+                                providerTypeIdentity,
+                                standardFunctionPointerStructureTypeByTypeDef[
+                                    typeDefRow]);
+                        }
+                    }
+
+                    if (aliasStructureIndexesByTypeDef.Count != 0)
+                    {
+                        signatureStructureTypeByTypeDef
+                            = (int[])standardFunctionPointerStructureTypeByTypeDef
+                                .Clone();
+                        foreach (var (typeDefRow, canonicalStructureIndex)
+                            in aliasStructureIndexesByTypeDef)
+                        {
+                            signatureStructureTypeByTypeDef[typeDefRow]
+                                = canonicalStructureIndex;
+                        }
+                    }
+                }
+
                 standardFunctionPointerSignatures
                     = LoadStandardFunctionPointerSignatures(validatedTables,
                         selectedModuleRow,
-                        standardFunctionPointerStructureTypeByTypeDef,
+                        signatureStructureTypeByTypeDef,
                         nativePointerTypeDefinitions,
                         functionPointerSignatureIndexByTypeSpecRow,
                         anchorClosure.AnchorTypeSpecRows);

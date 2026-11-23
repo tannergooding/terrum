@@ -884,6 +884,40 @@ public static partial class TrRmExecutableCompiler
         var allTypeProviderBindings = typeProviderBindings.AddRange(
                 standardFieldProviderValidation.TypeBindings)
             .Distinct().ToImmutableArray();
+        IReadOnlyDictionary<int,
+            (int ArtifactIndex, int ModuleRow, int TypeDefRow)>?
+            standardFunctionPointerProviderTypeIdentities = null;
+        if (TrRmArtifactSchemaFacts
+            .IsSelectedTerrumFunctionPointerSchemaIdentity(
+                schemaIdentities[0]))
+        {
+            var providerTypeIdentities = new Dictionary<int,
+                (int ArtifactIndex, int ModuleRow, int TypeDefRow)>();
+            foreach (var binding in allTypeProviderBindings)
+            {
+                if (binding.ConsumerArtifactIndex != 0)
+                {
+                    continue;
+                }
+
+                var identity = (binding.ProviderArtifactIndex,
+                    binding.ProviderModuleRow, binding.ProviderTypeDefRow);
+                if (providerTypeIdentities.TryGetValue(
+                        binding.ExpectedTypeDefRow,
+                        out var existingIdentity)
+                    && existingIdentity != identity)
+                {
+                    throw Invalid(
+                        "A function-pointer TypeDef Import has conflicting provider identities.");
+                }
+
+                providerTypeIdentities[binding.ExpectedTypeDefRow]
+                    = identity;
+            }
+
+            standardFunctionPointerProviderTypeIdentities
+                = providerTypeIdentities;
+        }
 
         var includesInitializationReferencePointerLoads
             = schemaIdentities.Length != 0
@@ -1300,7 +1334,9 @@ public static partial class TrRmExecutableCompiler
             var loadedProgram = LoadDevelopment(artifacts[0],
                 TrRmArtifactSchema.Standard,
                 standardSchemaIdentity: schemaIdentities[0],
-                selectedModuleRow: rootModuleRow);
+                selectedModuleRow: rootModuleRow,
+                standardFunctionPointerProviderTypeIdentities:
+                    standardFunctionPointerProviderTypeIdentities);
             loadedProgram = RetainLoadedA2SourceTypeFacts(loadedProgram,
                 artifacts, schemaIdentities, tables, rootModuleRow,
                 allTypeProviderBindings,

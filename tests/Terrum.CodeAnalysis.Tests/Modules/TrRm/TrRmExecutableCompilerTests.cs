@@ -475,8 +475,25 @@ internal sealed class TrRmExecutableCompilerTests
                         public int32 Value;
                     }
 
+                    [Blittable]
+                    [Layout(LayoutKind.Sequential, Packing: 1)]
+                    public struct OwnerPayload {
+                        public int32 Value;
+                    }
+
+                    [Blittable]
+                    [Layout(LayoutKind.Sequential, Packing: 1)]
+                    public struct OwnerPayloadAlias {
+                        public int32 Value;
+                    }
+
                     public int32 Accept(
-                        fnptr<ptr<Payload>, int32> callback) {
+                        fnptr<ptr<OwnerPayload>, int32> callback) {
+                        return 0;
+                    }
+
+                    public int32 AcceptAlias(
+                        fnptr<ptr<OwnerPayloadAlias>, int32> callback) {
                         return 0;
                     }
                 }
@@ -489,6 +506,8 @@ internal sealed class TrRmExecutableCompilerTests
                 new TrRmSourceTypeExport("Example", "Payload", "payload"),
                 new TrRmSourceTypeExport("Example", "OwnerPayload",
                     "owner-payload"),
+                new TrRmSourceTypeExport("Example", "OwnerPayloadAlias",
+                    "owner-payload-alias"),
             ]);
         var artifactIndex = TrRmExecutableCompiler.CreateForeignInvocationIndex(
             artifact, schemaIdentity);
@@ -502,7 +521,7 @@ internal sealed class TrRmExecutableCompilerTests
             .Where(sourceTables.NativeFunctionPointerAnchors
                 .IsAnchorMethodDef)
             .ToArray();
-        Assert.That(anchorMethodRows, Has.Length.EqualTo(1));
+        Assert.That(anchorMethodRows, Has.Length.EqualTo(2));
         var anchorMethodRow = anchorMethodRows[0];
         var consumerTypeDefRow = Enumerable.Range(1,
                 sourceTables.TypeDefs.Count)
@@ -511,8 +530,13 @@ internal sealed class TrRmExecutableCompilerTests
                 sourceTables.TypeDefs.Count)
             .Single(row => sourceTables.TypeDefs.GetName(row)
                 == "OwnerPayload");
+        var ownerAliasTypeDefRow = Enumerable.Range(1,
+                sourceTables.TypeDefs.Count)
+            .Single(row => sourceTables.TypeDefs.GetName(row)
+                == "OwnerPayloadAlias");
         Assert.That(consumerTypeDefRow, Is.EqualTo(1));
         Assert.That(ownerTypeDefRow, Is.EqualTo(2));
+        Assert.That(ownerAliasTypeDefRow, Is.EqualTo(3));
         var rootIdentityRow = Enumerable.Range(1,
                 sourceTables.Strings.Count)
             .Single(row => sourceTables.Strings.DecodeNamespace(row)
@@ -568,7 +592,7 @@ internal sealed class TrRmExecutableCompilerTests
                 = sourceTables.TypeDefs.GetContractRange(row);
             typeDefRows[row - 1] = new TrRmTypeDefRow(
                 stringRowByText[sourceTables.TypeDefs.GetNamespace(row)],
-                row == ownerTypeDefRow ? payloadNameStringRow
+                row >= ownerTypeDefRow ? payloadNameStringRow
                     : stringRowByText[sourceTables.TypeDefs.GetName(row)],
                 sourceTables.TypeDefs.GetFlags(row), fieldStart,
                 fieldEnd - fieldStart, genericFirst, genericCount,
@@ -615,7 +639,7 @@ internal sealed class TrRmExecutableCompilerTests
             standardSchemaIdentity: schemaIdentity);
 
         byte[] AddOwnerTypeDefImport(string providerIdentity,
-            string exportKey)
+            string exportKey, string aliasExportKey)
         {
             var inputIndex = TrRmExecutableCompiler
                 .CreateForeignInvocationIndex(splitArtifact, schemaIdentity);
@@ -635,7 +659,7 @@ internal sealed class TrRmExecutableCompilerTests
             var inputStrings = new TrRmStringTableReader(inputStringBytes,
                 inputStringCount);
             var textRows = new List<(string Text, int Encoding)>(
-                inputStringCount + 2);
+                inputStringCount + 3);
             var stringRowsByText = new Dictionary<string, int>(
                 StringComparer.Ordinal);
             for (var row = 1; row <= inputStrings.Count; row++)
@@ -660,6 +684,7 @@ internal sealed class TrRmExecutableCompilerTests
 
             var providerIdentityRow = AddString(providerIdentity);
             var exportKeyRow = AddString(exportKey);
+            var aliasExportKeyRow = AddString(aliasExportKey);
             var stringsBytes
                 = TrRmStringTableWriter.EncodeTextRows(textRows);
             var strings = new TrRmStringTableReader(stringsBytes,
@@ -716,8 +741,32 @@ internal sealed class TrRmExecutableCompilerTests
                 inputTables.Contracts.Count, TrRmArtifactSchema.Standard);
             var importBytes = TrRmImportTableWriter.Encode([
                 new TrRmImportRow(1, exportKeyRow, 0x1300_0002),
+                new TrRmImportRow(1, aliasExportKeyRow, 0x1300_0003),
             ], strings, moduleRefs, typeDefs, inputTables.Methods,
                 default, default, default, inputTables.Fields);
+            var imports = new TrRmImportTableReader(importBytes, 2, strings,
+                moduleRefs, typeDefs, inputTables.Methods, default, default,
+                default, inputTables.Fields);
+            _ = inputIndex.TryGetSection(0x001D, out var inputExportBytes,
+                out var inputExportCount);
+            var exportRows = new List<TrRmExportRow>(inputExportCount);
+            for (var index = 0; index < inputExportCount; index++)
+            {
+                var exportRow = inputExportBytes.Slice(index * 8, 8);
+                var definition
+                    = BinaryPrimitives.ReadUInt32LittleEndian(exportRow);
+                if (definition is 0x1300_0002u or 0x1300_0003u)
+                {
+                    continue;
+                }
+
+                exportRows.Add(new TrRmExportRow(definition,
+                    checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+                        exportRow[4..]))));
+            }
+            var exportBytes = TrRmExportTableWriter.Encode(exportRows,
+                strings, typeDefs, inputTables.Methods, default, imports,
+                default, default, inputTables.Fields);
             var sections = new List<TrRmSection>(
                 inputIndex.SectionCount + 2);
             for (var entry = 0; entry < inputIndex.SectionCount; entry++)
@@ -741,13 +790,15 @@ internal sealed class TrRmExecutableCompilerTests
                         checked((uint)moduleRows.Length), moduleBytes),
                     0x0002 => new TrRmSection(kind, flags,
                         checked((uint)textRows.Count), stringsBytes),
+                    0x001D => new TrRmSection(kind, flags,
+                        checked((uint)exportRows.Count), exportBytes),
                     _ => new TrRmSection(kind, flags,
                         checked((uint)recordCount), section.ToArray()),
                 });
             }
 
             sections.Add(new TrRmSection(0x0010, 0, 1, moduleRefBytes));
-            sections.Add(new TrRmSection(0x001C, 0, 1, importBytes));
+            sections.Add(new TrRmSection(0x001C, 0, 2, importBytes));
             sections.Sort(static (left, right)
                 => left.Kind.CompareTo(right.Kind));
             return TrRmArtifactWriter.Encode(sections,
@@ -786,6 +837,8 @@ internal sealed class TrRmExecutableCompilerTests
                 targetRequirement, [
                     new TrRmSourceTypeExport("Example", "Payload",
                         "owner-payload"),
+                    new TrRmSourceTypeExport("Example", "Payload",
+                        "owner-payload-alias"),
                 ]);
         }
 
@@ -797,38 +850,55 @@ internal sealed class TrRmExecutableCompilerTests
             Is.EqualTo(2));
         Assert.That(splitTables.TypeDefs.GetOwnerModule(ownerTypeDefRow),
             Is.EqualTo(2));
+        Assert.That(splitTables.TypeDefs.GetOwnerModule(
+            ownerAliasTypeDefRow), Is.EqualTo(2));
         Assert.That(splitTables.TypeDefs.GetName(ownerTypeDefRow),
+            Is.EqualTo(splitTables.TypeDefs.GetName(consumerTypeDefRow)));
+        Assert.That(splitTables.TypeDefs.GetName(ownerAliasTypeDefRow),
             Is.EqualTo(splitTables.TypeDefs.GetName(consumerTypeDefRow)));
         var reference = TrRmExecutableCompiler.CreateStandardReference(
             new TrRmStandardArtifactInput(schemaIdentity, splitArtifact),
             "cross-module-consumer",
             Array.Empty<TrRmStandardArtifactInput>());
-        var signature = reference.NativeFunctionPointerSignatures.Single();
-        Assert.That(signature.CallingConvention,
-            Is.EqualTo(NativeCallingConvention.Native));
-        var pointerType = signature.ParameterTypes.Single();
-        Assert.That(NativePointerTypes.IsType(pointerType), Is.True);
+        int[] GetPointeeStructureIndexes(CompilationReference sourceReference)
+            => [.. sourceReference.NativeFunctionPointerSignatures.Select(
+                signature =>
+                {
+                    var type = signature.ParameterTypes.Single();
+                    Assert.That(NativePointerTypes.IsType(type), Is.True);
+                    return (int)sourceReference.NativePointerTypes[
+                        NativePointerTypes.Index(type)].PointeeType - 100;
+                })];
+
+        Assert.That(reference.NativeFunctionPointerSignatures,
+            Has.Length.EqualTo(2));
+        Assert.That(reference.NativeFunctionPointerSignatures.All(
+            static signature => signature.CallingConvention
+                == NativeCallingConvention.Native), Is.True);
         var sameNamedPayloads = reference.Structures.Where(
             static structure => structure.Name == "Example.Payload")
             .ToArray();
-        Assert.That(sameNamedPayloads, Has.Length.EqualTo(2));
-        var payloadStructure = reference.Structures.Single(
+        Assert.That(sameNamedPayloads, Has.Length.EqualTo(3));
+        var ownerPayloadStructures = reference.Structures.Where(
             static structure => structure.StandardTypeOrigin?.Provider
                 .ModuleIdentity == "cross-module-anchor-owner");
+        var ownerPayloadStructureIndexes = Enumerable.Range(0,
+                reference.Structures.Length)
+            .Where(index => reference.Structures[index].StandardTypeOrigin
+                ?.Provider.ModuleIdentity == "cross-module-anchor-owner")
+            .ToArray();
+        Assert.That(ownerPayloadStructureIndexes, Has.Length.EqualTo(2));
         var rootPayloadStructure = reference.Structures.Single(
             static structure => structure.StandardTypeOrigin?.Provider
                 .ModuleIdentity == "cross-module-consumer");
-        Assert.That(reference.Structures.IndexOf(payloadStructure),
-            Is.Not.EqualTo(reference.Structures.IndexOf(
+        Assert.That(ownerPayloadStructureIndexes,
+            Does.Not.Contain(reference.Structures.IndexOf(
                 rootPayloadStructure)));
-        Assert.That(payloadStructure.StandardTypeOrigin?.IsLookupRoot,
-            Is.False);
-        var pointeeType = reference.NativePointerTypes[
-            NativePointerTypes.Index(pointerType)].PointeeType;
-        var payloadStructureIndex = reference.Structures.IndexOf(
-            payloadStructure);
-        Assert.That((int)pointeeType,
-            Is.EqualTo(100 + payloadStructureIndex));
+        Assert.That(ownerPayloadStructures.All(
+            static structure => structure.StandardTypeOrigin?.IsLookupRoot
+                == false), Is.True);
+        Assert.That(GetPointeeStructureIndexes(reference),
+            Is.EquivalentTo(ownerPayloadStructureIndexes));
         var consumer = Compilation.CreateLibrary(SyntaxTree.Parse(
             "int32 Main() { return 0; }"), reference);
         Assert.That(consumer.HasErrors, Is.False,
@@ -848,24 +918,23 @@ internal sealed class TrRmExecutableCompilerTests
                     new TrRmStandardArtifactInput(schemaIdentity,
                         splitArtifact),
                 ]);
-        var reemittedSignature
-            = reemittedReference.NativeFunctionPointerSignatures.Single();
-        var reemittedPointerType
-            = reemittedSignature.ParameterTypes.Single();
-        var reemittedPointeeType = reemittedReference.NativePointerTypes[
-            NativePointerTypes.Index(reemittedPointerType)].PointeeType;
-        var reemittedOwnerStructureIndex = Enumerable.Range(0,
+        Assert.That(reemittedReference.NativeFunctionPointerSignatures,
+            Has.Length.EqualTo(2));
+        var reemittedOwnerStructureIndexes = Enumerable.Range(0,
                 reemittedReference.Structures.Length)
-            .Single(index =>
+            .Where(index =>
                 reemittedReference.Structures[index].StandardTypeOrigin
                     ?.Provider.ModuleIdentity
-                    == "cross-module-anchor-owner");
-        Assert.That((int)reemittedPointeeType,
-            Is.EqualTo(100 + reemittedOwnerStructureIndex));
+                    == "cross-module-anchor-owner")
+            .ToArray();
+        Assert.That(reemittedOwnerStructureIndexes, Has.Length.EqualTo(2));
+        Assert.That(GetPointeeStructureIndexes(reemittedReference),
+            Is.EquivalentTo(reemittedOwnerStructureIndexes));
 
         var ownerProviderArtifact = EmitOwnerTypeProvider();
         var importedArtifact = AddOwnerTypeDefImport(
-            "cross-module-type-provider", "owner-payload");
+            "cross-module-type-provider", "owner-payload",
+            "owner-payload-alias");
         var importedInput = new TrRmStandardArtifactInput(schemaIdentity,
             importedArtifact);
         var ownerProviderInput = new TrRmStandardArtifactInput(schemaIdentity,
@@ -873,23 +942,38 @@ internal sealed class TrRmExecutableCompilerTests
         var importedReference
             = TrRmExecutableCompiler.CreateStandardReference(importedInput,
                 "cross-module-consumer", [ownerProviderInput]);
-        var importedOwnerStructure = importedReference.Structures.Single(
+        var importedOwnerStructures = importedReference.Structures.Where(
             static structure => structure.StandardTypeOrigin?.Provider
-                .ModuleIdentity == "cross-module-type-provider");
-        var importedOwnerOrigin
-            = importedOwnerStructure.StandardTypeOrigin!;
-        Assert.That(importedOwnerOrigin.DefinitionId & 0x00FF_FFFFu,
-            Is.EqualTo(1u));
-        Assert.That(importedOwnerOrigin.IsLookupRoot, Is.False);
-        var importedSignature
-            = importedReference.NativeFunctionPointerSignatures.Single();
-        var importedPointerType
-            = importedSignature.ParameterTypes.Single();
-        var importedPointeeType = importedReference.NativePointerTypes[
-            NativePointerTypes.Index(importedPointerType)].PointeeType;
-        Assert.That((int)importedPointeeType,
-            Is.EqualTo(100 + importedReference.Structures.IndexOf(
-                importedOwnerStructure)));
+                .ModuleIdentity == "cross-module-type-provider")
+            .ToArray();
+        Assert.That(importedOwnerStructures, Has.Length.EqualTo(2));
+        Assert.That(importedOwnerStructures.All(static structure =>
+        {
+            var origin = structure.StandardTypeOrigin!;
+            return (origin.DefinitionId & 0x00FF_FFFFu) == 1u
+                && !origin.IsLookupRoot;
+        }), Is.True);
+        Assert.That(importedOwnerStructures.SelectMany(
+                static structure => structure.StandardTypeOrigin!.ExportKeys),
+            Is.EquivalentTo(["owner-payload", "owner-payload-alias"]));
+        Assert.That(importedReference.NativeFunctionPointerSignatures,
+            Has.Length.EqualTo(1));
+        var importedPointeeStructureIndexes
+            = GetPointeeStructureIndexes(importedReference);
+        var importedOwnerStructureIndexes = Enumerable.Range(0,
+                importedReference.Structures.Length)
+            .Where(index => importedReference.Structures[index]
+                .StandardTypeOrigin?.Provider.ModuleIdentity
+                == "cross-module-type-provider")
+            .ToArray();
+        Assert.That(importedPointeeStructureIndexes, Has.Length.EqualTo(1));
+        Assert.That(importedOwnerStructureIndexes,
+            Does.Contain(importedPointeeStructureIndexes[0]));
+        var importedAcceptType = importedReference.Functions.Single(
+            static function => function.Name == "Accept").Variables[0].Type;
+        var importedAcceptAliasType = importedReference.Functions.Single(
+            static function => function.Name == "AcceptAlias").Variables[0].Type;
+        Assert.That(importedAcceptAliasType, Is.EqualTo(importedAcceptType));
         var importedConsumer = Compilation.CreateLibrary(SyntaxTree.Parse(
             "int32 Main() { return 0; }"), importedReference);
         Assert.That(importedConsumer.HasErrors, Is.False,
@@ -903,12 +987,16 @@ internal sealed class TrRmExecutableCompilerTests
         var shiftedOwnerReference
             = TrRmExecutableCompiler.CreateStandardReference(importedInput,
                 "cross-module-consumer", [shiftedOwnerProviderInput]);
-        var shiftedOwnerOrigin = shiftedOwnerReference.Structures.Single(
+        var shiftedOwnerOrigins = shiftedOwnerReference.Structures.Where(
             static structure => structure.StandardTypeOrigin?.Provider
                 .ModuleIdentity == "cross-module-type-provider")
-            .StandardTypeOrigin!;
-        Assert.That(shiftedOwnerOrigin.DefinitionId & 0x00FF_FFFFu,
-            Is.EqualTo(2u));
+            .Select(static structure => structure.StandardTypeOrigin!)
+            .ToArray();
+        Assert.That(shiftedOwnerOrigins, Has.Length.EqualTo(2));
+        Assert.That(shiftedOwnerOrigins.All(static origin =>
+            (origin.DefinitionId & 0x00FF_FFFFu) == 2u), Is.True);
+        Assert.That(shiftedOwnerReference.NativeFunctionPointerSignatures,
+            Has.Length.EqualTo(1));
         var incompatibleOwnerProviderInput
             = new TrRmStandardArtifactInput(schemaIdentity,
                 EmitOwnerTypeProvider(changeFieldType: true));
@@ -928,13 +1016,16 @@ internal sealed class TrRmExecutableCompilerTests
                 new TrRmStandardArtifactInput(schemaIdentity,
                     importedReemittedArtifact),
                 "cross-module-reemitted", [ownerProviderInput]);
-        var importedReemittedOwner = importedReemittedReference.Structures
-            .Single(static structure => structure.StandardTypeOrigin?.Provider
-                .ModuleIdentity == "cross-module-type-provider");
-        var importedReemittedOrigin
-            = importedReemittedOwner.StandardTypeOrigin!;
-        Assert.That(importedReemittedOrigin.DefinitionId & 0x00FF_FFFFu,
-            Is.EqualTo(1u));
+        var importedReemittedOrigins = importedReemittedReference.Structures
+            .Where(static structure => structure.StandardTypeOrigin?.Provider
+                .ModuleIdentity == "cross-module-type-provider")
+            .Select(static structure => structure.StandardTypeOrigin!)
+            .ToArray();
+        Assert.That(importedReemittedOrigins, Has.Length.EqualTo(2));
+        Assert.That(importedReemittedOrigins.All(static origin =>
+            (origin.DefinitionId & 0x00FF_FFFFu) == 1u), Is.True);
+        Assert.That(importedReemittedReference
+            .NativeFunctionPointerSignatures, Has.Length.EqualTo(1));
     }
 
     [Test]
