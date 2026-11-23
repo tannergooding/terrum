@@ -2575,7 +2575,8 @@ public static partial class TrRmExecutableCompiler
         BoundFunction function, int parameterLimit,
         HashSet<(PrimitiveType Type, ScalarBits Bits)> expressionConstantInputs,
         out int temporaryRegisterCount,
-        HashSet<int>? stagedLocalVariables = null)
+        HashSet<int>? stagedLocalVariables = null,
+        IReadOnlyList<BoundVariable>? variableDefinitions = null)
     {
         temporaryRegisterCount = 0;
         if ((uint)parameterLimit > (uint)function.ParameterCount)
@@ -2583,6 +2584,8 @@ public static partial class TrRmExecutableCompiler
             return false;
         }
 
+        IReadOnlyList<BoundVariable> variableFacts
+            = variableDefinitions ?? function.Variables;
         while (expression is BoundUnsafeExpression unsafeExpression)
         {
             expression = unsafeExpression.Expression;
@@ -2616,10 +2619,10 @@ public static partial class TrRmExecutableCompiler
             {
                 if (read.Type != type
                     || (uint)read.Variable
-                        >= (uint)function.Variables.Length
-                    || function.Variables[read.Variable].Type != type
-                    || function.Variables[read.Variable].IsOut
-                    || function.Variables[read.Variable].IsInit)
+                        >= (uint)variableFacts.Count
+                    || variableFacts[read.Variable].Type != type
+                    || variableFacts[read.Variable].IsOut
+                    || variableFacts[read.Variable].IsInit)
                 {
                     return (false, 0, false);
                 }
@@ -2632,8 +2635,7 @@ public static partial class TrRmExecutableCompiler
 
                 if (read.Variable >= function.ParameterCount
                     && stagedLocalVariables?.Contains(read.Variable) == true
-                    && !function.Variables[read.Variable]
-                        .IsInitializationLocal)
+                    && !variableFacts[read.Variable].IsInitializationLocal)
                 {
                     return (true, 1, true);
                 }
@@ -2662,15 +2664,14 @@ public static partial class TrRmExecutableCompiler
                     || update.Place is not BoundRead place
                     || place.Type != update.Type
                     || (uint)place.Variable
-                        >= (uint)function.Variables.Length
+                        >= (uint)variableFacts.Count
                     || stagedLocalVariables is null
                     || !stagedLocalVariables.Contains(place.Variable)
-                    || !function.Variables[place.Variable].IsMutable
-                    || function.Variables[place.Variable].IsOut
-                    || function.Variables[place.Variable].IsInit
-                    || function.Variables[place.Variable]
-                        .IsInitializationLocal
-                    || function.Variables[place.Variable].Type != update.Type
+                    || !variableFacts[place.Variable].IsMutable
+                    || variableFacts[place.Variable].IsOut
+                    || variableFacts[place.Variable].IsInit
+                    || variableFacts[place.Variable].IsInitializationLocal
+                    || variableFacts[place.Variable].Type != update.Type
                     || !TryGetForeignInterfaceScalarUpdateEncoding(update,
                         out _, out _))
                 {
@@ -2847,6 +2848,51 @@ public static partial class TrRmExecutableCompiler
             CollectForeignInterfaceScalarInputConversionTypes(binary.Right,
                 addType);
         }
+    }
+
+    private static bool IsSupportedForeignInterfaceScalarLocalInitializer(
+        BoundExpression expression)
+    {
+        var pending = new Stack<(BoundExpression Expression, int Depth)>();
+        pending.Push((expression, 0));
+        var remaining = SemanticVerifier.MaximumAnalysisVisits;
+        while (pending.TryPop(out var item))
+        {
+            if (item.Depth > SemanticVerifier.MaximumDepth
+                || --remaining < 0
+                || !item.Expression.HasValidNestedExpressions)
+            {
+                return false;
+            }
+
+            var depth = item.Depth + 1;
+            switch (item.Expression)
+            {
+                case BoundRead or BoundConstant:
+                    break;
+                case BoundUnsafeExpression unsafeExpression:
+                    pending.Push((unsafeExpression.Expression, depth));
+                    break;
+                case BoundUnary unary:
+                    pending.Push((unary.Operand, depth));
+                    break;
+                case BoundBinary {
+                    PatternObservation: null,
+                    IsPatternComposition: false,
+                    IsConstantPatternTest: false,
+                } binary:
+                    pending.Push((binary.Left, depth));
+                    pending.Push((binary.Right, depth));
+                    break;
+                case BoundCast cast:
+                    pending.Push((cast.Operand, depth));
+                    break;
+                default:
+                    return false;
+            }
+        }
+
+        return true;
     }
 
     private static uint[] GetStandardForeignInterfaceBodyTypeTokens(
@@ -3318,6 +3364,9 @@ public static partial class TrRmExecutableCompiler
         var stagedLocalBuilder
             = ImmutableArray.CreateBuilder<BoundLocal>();
         var stagedLocalVariables = new HashSet<int>();
+        var stagedLocalInitializerConstants
+            = new HashSet<(PrimitiveType Type, ScalarBits Bits)>();
+        var stagedLocalInitializerRegisterCount = 0;
 
         bool TryAddStagedLocal(BoundStatement statement)
         {
@@ -3338,23 +3387,53 @@ public static partial class TrRmExecutableCompiler
                 return false;
             }
 
-            var initializerMatchesSource
-                = local.Initializer switch {
-                    BoundRead read =>
-                        (uint)read.Variable < (uint)function.ParameterCount
-                        && read.Variable < 16
-                        && read.Type
-                            == function.Variables[read.Variable].Type
-                        && !function.Variables[read.Variable].IsOut
-                        && !function.Variables[read.Variable].IsInit,
-                    BoundConstant constant =>
-                        constant.Type == local.Initializer.Type
-                        && constant.RepresentationType == constant.Type
-                        && constant.Bits.IsCanonicalFor(constant.Type),
-                    _ => false,
-                };
-            if (!initializerMatchesSource
-                || !stagedLocalVariables.Add(local.Variable))
+            var isDirectParameterRead
+                = local.Initializer is BoundRead parameterRead
+                && (uint)parameterRead.Variable
+                    < (uint)function.ParameterCount
+                && parameterRead.Variable < 16
+                && parameterRead.Type
+                    == function.Variables[parameterRead.Variable].Type
+                && !function.Variables[parameterRead.Variable].IsOut
+                && !function.Variables[parameterRead.Variable].IsInit;
+            if (!isDirectParameterRead)
+            {
+                if (local.Initializer is BoundConstant constant
+                    && constant.Type == local.Initializer.Type
+                    && constant.RepresentationType == constant.Type
+                    && constant.Bits.IsCanonicalFor(constant.Type))
+                {
+                    _ = stagedLocalInitializerConstants.Add(
+                        (constant.Type, constant.Bits));
+                }
+                else if (IsSupportedForeignInterfaceScalarLocalInitializer(
+                            local.Initializer))
+                {
+                    var expressionConstants
+                        = new HashSet<(PrimitiveType Type, ScalarBits Bits)>();
+                    if (!TryAnalyzeForeignInterfaceScalarInputExpression(
+                            local.Initializer, local.Initializer.Type,
+                            function, function.ParameterCount,
+                            expressionConstants,
+                            out var expressionRegisterCount,
+                            stagedLocalVariables))
+                    {
+                        return false;
+                    }
+
+                    stagedLocalInitializerRegisterCount = Math.Max(
+                        stagedLocalInitializerRegisterCount,
+                        expressionRegisterCount);
+                    stagedLocalInitializerConstants.UnionWith(
+                        expressionConstants);
+                }
+                else
+                {
+                    return false;
+                }
+            }
+
+            if (!stagedLocalVariables.Add(local.Variable))
             {
                 return false;
             }
@@ -3470,15 +3549,11 @@ public static partial class TrRmExecutableCompiler
         var hasThrowingScalarExpression = false;
         var availableInputRegisters
             = 13 - (stagedLocalVariables.Count == 0 ? 0 : 1);
-        foreach (var stagedLocal in stagedLocalBuilder)
-        {
-            if (stagedLocal.Initializer is BoundConstant constant)
-            {
-                _ = constantInputs.Add((constant.Type, constant.Bits));
-            }
-        }
+        constantInputs.UnionWith(stagedLocalInitializerConstants);
 
-        if (constantInputs.Count > availableInputRegisters)
+        if (constantInputs.Count
+                + stagedLocalInitializerRegisterCount
+            > availableInputRegisters)
         {
             return false;
         }
@@ -3621,6 +3696,11 @@ public static partial class TrRmExecutableCompiler
             || !outputVariables.SetEquals(vacantLocals)
             || !stagedLocalVariables.SetEquals(
                 stagedLocalBuilder.Select(static local => local.Variable))
+            || constantInputs.Count
+                + nestedForeignInterfaceCalls.Count
+                + Math.Max(stagedLocalInitializerRegisterCount,
+                    scalarExpressionRegisterCount)
+                > availableInputRegisters
             || (hasThrowingScalarExpression
                 && nestedForeignInterfaceCalls.Count != 0
                 && !CanMixCheckedForeignInterfaceExpressionsWithNestedCalls(
@@ -5159,7 +5239,8 @@ public static partial class TrRmExecutableCompiler
             GetStandardBodyTypeMapToken(variable.Type, typeSpecRowFor))
             .ToArray();
         var typeTokens = GetStandardForeignInterfaceBodyTypeTokens(function,
-            call.Arguments, typeSpecRowFor);
+            call.Arguments.Concat(stagedLocals.Select(
+                static local => local.Initializer)), typeSpecRowFor);
         var stagedLocalVariables = stagedLocals.Select(
                 static local => local.Variable)
             .ToHashSet();
@@ -5222,10 +5303,9 @@ public static partial class TrRmExecutableCompiler
 
         foreach (var local in stagedLocals)
         {
-            if (local.Initializer is BoundConstant constant)
-            {
-                _ = GetConstantRegister(constant);
-            }
+            CollectForeignInterfaceScalarInputConstants(
+                local.Initializer,
+                constant => _ = GetConstantRegister(constant));
         }
 
         if (nestedCalls.Count + constantLoads.Count
@@ -5335,6 +5415,65 @@ public static partial class TrRmExecutableCompiler
             }
 
             return nextExpressionRegister++;
+        }
+
+        var stagedLocalInitializationCode = new List<byte>();
+        var stagedInitializerRegisterStart = nextExpressionRegister;
+        var nextStagedInitializerRegister = stagedInitializerRegisterStart;
+
+        int AllocateStagedInitializerRegister()
+        {
+            if (nextStagedInitializerRegister >= 14)
+            {
+                throw Unsupported(
+                    $"Function '{function.Name}' uses too many F+I staged-local expression registers.");
+            }
+
+            return nextStagedInitializerRegister++;
+        }
+
+        foreach (var local in stagedLocals)
+        {
+            var homeIndex = checked((ushort)local.Variable);
+            byte sourceRegister;
+            if (local.Initializer is BoundRead read
+                && (uint)read.Variable < (uint)function.ParameterCount
+                && read.Variable < 16)
+            {
+                sourceRegister = 1;
+                stagedLocalInitializationCode.Add(0x11);
+                stagedLocalInitializationCode.Add(checked((byte)(
+                    (read.Variable << 4) | sourceRegister)));
+            }
+            else if (local.Initializer is BoundConstant constant
+                && constantRegisterByValue.TryGetValue(
+                    (constant.Type, constant.Bits),
+                    out var constantRegister))
+            {
+                sourceRegister = constantRegister;
+            }
+            else
+            {
+                nextStagedInitializerRegister
+                    = stagedInitializerRegisterStart;
+                sourceRegister = checked((byte)
+                    EmitForeignInterfaceScalarInputExpression(
+                        function, local.Initializer,
+                        local.Initializer.Type,
+                        AllocateStagedInitializerRegister,
+                        GetConstantRegister,
+                        type => maps.GetTypeMapIndex(
+                            GetStandardBodyTypeMapToken(type,
+                                typeSpecRowFor)),
+                        stagedLocalInitializationCode,
+                        stagedLocalVariables));
+            }
+
+            stagedLocalInitializationCode.Add(0xD6);
+            stagedLocalInitializationCode.Add(
+                checked((byte)(0x10 | sourceRegister)));
+            stagedLocalInitializationCode.Add((byte)homeIndex);
+            stagedLocalInitializationCode.Add((byte)(homeIndex >> 8));
         }
 
         for (var sourceArgument = 0;
@@ -5521,7 +5660,7 @@ public static partial class TrRmExecutableCompiler
         var callSiteRecordIndex = checked((ushort)records.Count);
         records.Add(new(callSite));
         var code = new List<byte>(checked(
-            (stagedLocals.Length * 6)
+            stagedLocalInitializationCode.Count
             + (constantLoads.Count * 2)
             + argumentPreparationCode.Count
             + (outputReservations.Count * 4) + 4));
@@ -5537,36 +5676,7 @@ public static partial class TrRmExecutableCompiler
             code.Add(checked((byte)((constantMapIndex << 4) | register)));
         }
 
-        foreach (var local in stagedLocals)
-        {
-            var homeIndex = checked((ushort)local.Variable);
-            byte stagedInputRegister;
-            if (local.Initializer is BoundRead read
-                && (uint)read.Variable < 16u)
-            {
-                stagedInputRegister = 1;
-                code.Add(0x11);
-                code.Add(checked((byte)((read.Variable << 4)
-                    | stagedInputRegister)));
-            }
-            else if (local.Initializer is BoundConstant constant
-                && constantRegisterByValue.TryGetValue(
-                    (constant.Type, constant.Bits),
-                    out var constantRegister))
-            {
-                stagedInputRegister = constantRegister;
-            }
-            else
-            {
-                throw Unsupported(
-                    $"Function '{function.Name}' has a staged F+I input outside the parameter or scalar ConstantMap subset.");
-            }
-
-            code.Add(0xD6);
-            code.Add((byte)(0x10 | stagedInputRegister));
-            code.Add((byte)homeIndex);
-            code.Add((byte)(homeIndex >> 8));
-        }
+        code.AddRange(stagedLocalInitializationCode);
 
         foreach (var (operandOffset, nestedInputCall) in nestedRecordPatches)
         {
@@ -8818,6 +8928,7 @@ public static partial class TrRmExecutableCompiler
             };
         }
 
+        var bodyVariableDefinitions = variables.ToImmutable();
         var entryStateIndex = BinaryPrimitives.ReadUInt16LittleEndian(
             body.GetBlock(0)[8..]);
         var entryState = body.GetRecord(entryStateIndex);
@@ -8887,7 +8998,7 @@ public static partial class TrRmExecutableCompiler
         var code = body.GetBlockCode(0);
 
         void TrackForeignInterfaceUpdate(BoundBinary binary,
-            int destinationRegister, bool followedByHomeStore)
+            int destinationRegister, int? immediateHomeStoreIndex)
         {
             if (!TryGetForeignInterfaceScalarUpdateFromBinary(binary,
                     out var update))
@@ -8901,18 +9012,18 @@ public static partial class TrRmExecutableCompiler
                 return;
             }
 
-            if (!followedByHomeStore)
+            var place = (BoundRead)update.Place;
+            if (immediateHomeStoreIndex != place.Variable)
             {
                 if (pendingUpdateMove is not null)
                 {
                     throw Invalid(
-                        "A Standard F+I postfix update arithmetic result is not stored to its mutable Home.");
+                        "A Standard F+I postfix update arithmetic result is not stored back to its source Home.");
                 }
 
                 return;
             }
 
-            var place = (BoundRead)update.Place;
             if ((uint)place.Variable >= (uint)variables.Count
                 || !initializedValueLocals.Contains(place.Variable)
                 || !variables[place.Variable].IsMutable)
@@ -8953,6 +9064,20 @@ public static partial class TrRmExecutableCompiler
                 throw Invalid(
                     "A Standard F+I update result is stored more than once.");
             }
+        }
+
+        static int? GetImmediateHomeStoreIndex(ReadOnlySpan<byte> code,
+            int instructionPosition)
+        {
+            if (instructionPosition > code.Length - 4
+                || code[instructionPosition] != 0xD6
+                || code[instructionPosition + 1] >> 4 != 1)
+            {
+                return null;
+            }
+
+            return BinaryPrimitives.ReadUInt16LittleEndian(
+                code[(instructionPosition + 2)..]);
         }
 
         for (var position = 0; position < code.Length;)
@@ -9159,8 +9284,8 @@ public static partial class TrRmExecutableCompiler
                     valueRegisterWriteOrder[destinationRegister] = position;
                     TrackForeignInterfaceUpdate(binary,
                         destinationRegister,
-                        position + instructionLength < code.Length
-                            && code[position + instructionLength] == 0xD6);
+                        GetImmediateHomeStoreIndex(code,
+                            position + instructionLength));
                     break;
                 }
                 case 0xC0:
@@ -9257,8 +9382,8 @@ public static partial class TrRmExecutableCompiler
                     valueRegisterWriteOrder[destinationRegister] = position;
                     TrackForeignInterfaceUpdate(binary,
                         destinationRegister,
-                        position + instructionLength < code.Length
-                            && code[position + instructionLength] == 0xD6);
+                        GetImmediateHomeStoreIndex(code,
+                            position + instructionLength));
                     break;
                 }
                 case 0xC2:
@@ -9498,29 +9623,46 @@ public static partial class TrRmExecutableCompiler
                         if (!valueByRegister.TryGetValue(sourceRegister,
                                 out var initializer)
                             || initializer.Type != homeTypes[homeIndex]
-                            || !(initializer switch {
-                                BoundRead read =>
-                                    (uint)read.Variable
-                                        < (uint)function.ParameterCount
-                                    && read.Type == homeTypes[homeIndex]
-                                    && function.Variables[read.Variable]
-                                        .Type == read.Type
-                                    && !function.Variables[read.Variable]
-                                        .IsOut
-                                    && !function.Variables[read.Variable]
-                                        .IsInit,
-                                BoundConstant constant =>
-                                    constant.Type == homeTypes[homeIndex]
-                                    && constant.RepresentationType
-                                        == constant.Type
-                                    && constant.Bits.IsCanonicalFor(
-                                        constant.Type),
-                                _ => false,
-                            })
-                            || !initializedValueLocals.Add(variable))
+                            || !IsSupportedForeignInterfaceScalarLocalInitializer(
+                                initializer))
                         {
                             throw Invalid(
                                 "A Standard F+I staged input Home does not match its parameter or ConstantMap initializer.");
+                        }
+
+                        if (initializer is BoundConstant constant)
+                        {
+                            if (constant.Type != homeTypes[homeIndex]
+                                || constant.RepresentationType
+                                    != constant.Type
+                                || !constant.Bits.IsCanonicalFor(
+                                    constant.Type))
+                            {
+                                throw Invalid(
+                                    "A Standard F+I staged input ConstantMap value is not canonical for its Home.");
+                            }
+                        }
+                        else
+                        {
+                            var expressionConstants
+                                = new HashSet<(PrimitiveType Type,
+                                    ScalarBits Bits)>();
+                            if (!TryAnalyzeForeignInterfaceScalarInputExpression(
+                                    initializer, homeTypes[homeIndex],
+                                    function, function.ParameterCount,
+                                    expressionConstants, out _,
+                                    initializedValueLocals,
+                                    bodyVariableDefinitions))
+                            {
+                                throw Invalid(
+                                    "A Standard F+I staged input expression is outside the checked scalar subset.");
+                            }
+                        }
+
+                        if (!initializedValueLocals.Add(variable))
+                        {
+                            throw Invalid(
+                                "A Standard F+I staged input Home is initialized more than once.");
                         }
 
                         statements.Add(new BoundLocal(variable,
@@ -10070,7 +10212,8 @@ public static partial class TrRmExecutableCompiler
                                                 function,
                                                 function.ParameterCount,
                                                 expressionConstants, out _,
-                                                initializedValueLocals))
+                                                initializedValueLocals,
+                                                bodyVariableDefinitions))
                                         {
                                             throw Invalid(
                                                 "A ForeignNativeInterface CallSite contains an unsupported scalar expression input.");

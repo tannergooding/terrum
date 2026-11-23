@@ -76,6 +76,10 @@ internal sealed class NativeCoreRegistrationTests
     private delegate int NativeFniUpdateReceiverFunction(IntPtr receiver);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int NativeFniUpdateWithDeltaFunction(IntPtr receiver,
+        int value, int delta);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int NativeFunctionPointerTarget(int value);
 
     [StructLayout(LayoutKind.Sequential)]
@@ -914,6 +918,7 @@ internal sealed class NativeCoreRegistrationTests
                 Assert.That(binary.Right.Type, Is.EqualTo(expectedType));
             }
         }
+
     }
 
     [Test]
@@ -1843,6 +1848,11 @@ internal sealed class NativeCoreRegistrationTests
                 IsPrefix: false, Operator: TokenKind.MinusMinus,
                 UpdateFirst: true, FirstFormal: 0, SecondFormal: 1),
         };
+        var expressionInitializerCase
+            = (Name: "ExpressionInitializedPrefixIncrementThenRead",
+                UpdateArgument: 0, IsPrefix: true,
+                Operator: TokenKind.PlusPlus, UpdateFirst: true,
+                FirstFormal: 0, SecondFormal: 1);
 
         foreach (var testCase in cases)
         {
@@ -1851,6 +1861,36 @@ internal sealed class NativeCoreRegistrationTests
             AssertUpdateInstructionOrder(reemittedArtifact, testCase,
                 isChecked);
         }
+
+        AssertUpdateCall(program, expressionInitializerCase, isChecked);
+        AssertStagedExpressionInitializerInstructionOrder(artifact,
+            expressionInitializerCase.Name, isChecked);
+        AssertStagedExpressionInitializerInstructionOrder(reemittedArtifact,
+            expressionInitializerCase.Name, isChecked);
+        var expressionInitializedFunction = program.Functions.Single(
+            static function => function.Name
+                == "ExpressionInitializedPrefixIncrementThenRead");
+        var expressionInitializedLocal
+            = expressionInitializedFunction.Body.Statements
+                .OfType<BoundLocal>().Single(
+                    static local => local.Initializer is BoundBinary);
+        Assert.That(expressionInitializedLocal.Initializer,
+            Is.TypeOf<BoundBinary>());
+        var localInitializer
+            = (BoundBinary)expressionInitializedLocal.Initializer;
+        Assert.That(localInitializer.Operator, Is.EqualTo(TokenKind.Plus));
+        Assert.That(localInitializer.OverflowBehavior,
+            Is.EqualTo(isChecked
+                ? BoundIntegerOverflowBehavior.Checked
+                : BoundIntegerOverflowBehavior.Wrapping));
+        var firstStagedLocal
+            = expressionInitializedFunction.Body.Statements
+                .OfType<BoundLocal>().Single(
+                    static local => local.Initializer is BoundRead);
+        Assert.That(((BoundRead)localInitializer.Left).Variable,
+            Is.EqualTo(firstStagedLocal.Variable));
+        Assert.That(((BoundRead)localInitializer.Right).Variable,
+            Is.EqualTo(2));
 
         var constantInitializedFunction = program.Functions.Single(
             static function => function.Name
@@ -1864,7 +1904,8 @@ internal sealed class NativeCoreRegistrationTests
             .Bits.Low, Is.EqualTo(10UL));
 
         var image = NativeEmitter.EmitLibrary(program,
-            [.. cases.Select(static testCase => testCase.Name)],
+            [.. cases.Select(static testCase => testCase.Name)
+                .Append(expressionInitializerCase.Name)],
             NativeRuntimePolicy.FailFast);
         Assert.That(image[..2], Is.EqualTo(new byte[] {
             (byte)'M', (byte)'Z',
@@ -2020,6 +2061,79 @@ internal sealed class NativeCoreRegistrationTests
         }
     }
 
+    private static void AssertStagedExpressionInitializerInstructionOrder(
+        byte[] artifact, string name, bool checkedArithmetic)
+    {
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
+                artifact, TrRmArtifactSchema
+                    .ForeignNativeInterfaceParameterSurfaceDraft));
+        var row = Enumerable.Range(1, tables.Methods.Count)
+            .Single(candidate => tables.Methods.GetName(candidate) == name);
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(row), tables.Contracts.Count);
+        var code = body.GetBlockCode(0).ToArray();
+        var parameterLoads = new List<int>();
+        var homeLoads = new List<int>();
+        var homeStores = new List<int>();
+        var arithmetic = new List<int>();
+        var callSites = new List<int>();
+        for (var index = 0; index < code.Length;)
+        {
+            var opcode = code[index];
+            if (opcode == 0x11)
+            {
+                parameterLoads.Add(index);
+            }
+            else if (opcode == 0xD5)
+            {
+                homeLoads.Add(index);
+            }
+            else if (opcode == 0xD6)
+            {
+                homeStores.Add(index);
+            }
+            else if (opcode is 0xC0 or 0x21)
+            {
+                arithmetic.Add(index);
+            }
+            else if (opcode == 0x90)
+            {
+                callSites.Add(index);
+            }
+
+            index += opcode is 0xC0 or 0xD5 or 0xD6 ? 4 : 2;
+        }
+
+        Assert.That(parameterLoads, Has.Count.EqualTo(2), name);
+        Assert.That(homeLoads, Has.Count.EqualTo(3), name);
+        Assert.That(homeStores, Has.Count.EqualTo(3), name);
+        Assert.That(arithmetic, Has.Count.EqualTo(2), name);
+        Assert.That(callSites, Has.Count.EqualTo(1), name);
+        var expectedOpcode = checkedArithmetic ? (byte)0xC0 : (byte)0x21;
+        Assert.That(code[arithmetic[0]], Is.EqualTo(expectedOpcode), name);
+        Assert.That(code[arithmetic[1]], Is.EqualTo(expectedOpcode), name);
+        if (checkedArithmetic)
+        {
+            Assert.That(code[arithmetic[0] + 1], Is.EqualTo((byte)0x01),
+                name);
+            Assert.That(code[arithmetic[1] + 1], Is.EqualTo((byte)0x01),
+                name);
+        }
+
+        Assert.That(parameterLoads[0], Is.LessThan(arithmetic[0]), name);
+        Assert.That(parameterLoads[1], Is.LessThan(arithmetic[0]), name);
+        Assert.That(homeStores[0], Is.LessThan(homeLoads[0]), name);
+        Assert.That(homeLoads[0], Is.LessThan(parameterLoads[1]), name);
+        Assert.That(homeLoads[0], Is.LessThan(arithmetic[0]), name);
+        Assert.That(arithmetic[0], Is.LessThan(homeStores[1]), name);
+        Assert.That(homeStores[1], Is.LessThan(homeLoads[1]), name);
+        Assert.That(homeLoads[1], Is.LessThan(arithmetic[1]), name);
+        Assert.That(arithmetic[1], Is.LessThan(homeStores[2]), name);
+        Assert.That(homeStores[2], Is.LessThan(homeLoads[2]), name);
+        Assert.That(homeLoads[2], Is.LessThan(callSites[0]), name);
+    }
+
     [Test]
     public async Task StandardForeignNativeInterfaceMutableUpdatesExecuteOnWindowsX64()
     {
@@ -2031,6 +2145,7 @@ internal sealed class NativeCoreRegistrationTests
         var functionNames = new[] {
             "PrefixIncrementThenRead",
             "ConstantInitializedPrefixIncrementThenRead",
+            "ExpressionInitializedPrefixIncrementThenRead",
             "ReadThenPrefixIncrement",
             "PostfixIncrementThenRead",
             "ReadThenPostfixIncrement",
@@ -2106,6 +2221,15 @@ internal sealed class NativeCoreRegistrationTests
                 int32 ConstantInitializedPrefixIncrementThenRead(
                     ptr<void> receiver) {
                     mut int32 current = 10;
+                    unsafe {
+                        return IUpdateProbe.Read(receiver, ++current,
+                            current);
+                    }
+                }
+                int32 ExpressionInitializedPrefixIncrementThenRead(
+                    ptr<void> receiver, int32 value, int32 delta) {
+                    mut int32 first = value;
+                    mut int32 current = first + delta;
                     unsafe {
                         return IUpdateProbe.Read(receiver, ++current,
                             current);
@@ -2210,6 +2334,8 @@ internal sealed class NativeCoreRegistrationTests
                 (Name: "PrefixIncrementThenRead", Value: 1111),
                 (Name: "ConstantInitializedPrefixIncrementThenRead",
                     Value: 1111),
+                (Name: "ExpressionInitializedPrefixIncrementThenRead",
+                    Value: 1313),
                 (Name: "ReadThenPrefixIncrement", Value: 1011),
                 (Name: "PostfixIncrementThenRead", Value: 1011),
                 (Name: "ReadThenPostfixIncrement", Value: 1010),
@@ -2228,6 +2354,14 @@ internal sealed class NativeCoreRegistrationTests
                     var function = Marshal.GetDelegateForFunctionPointer<
                         NativeFniUpdateReceiverFunction>(address);
                     Assert.That(function(receiver), Is.EqualTo(value), name);
+                }
+                else if (name
+                    == "ExpressionInitializedPrefixIncrementThenRead")
+                {
+                    var function = Marshal.GetDelegateForFunctionPointer<
+                        NativeFniUpdateWithDeltaFunction>(address);
+                    Assert.That(function(receiver, 10, 2),
+                        Is.EqualTo(value), name);
                 }
                 else
                 {
