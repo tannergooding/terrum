@@ -1107,6 +1107,7 @@ int32 NormalizeStandaloneSourceLoopBody(int32 bodyId,
         if (Host.StandaloneSourceStatementParentIds[
                 childStatementId] != statementId
             || (childKind != 5 && childKind != 7
+                && childKind != 10
                 && childKind != 8 && childKind != 9
                 && childKind != 12 && childKind != 13))
         {
@@ -1461,6 +1462,23 @@ int32 NormalizeStandaloneSourceLoopBody(int32 bodyId,
             }
             continue;
         }
+        if (childKind == 10)
+        {
+            init int32 nestedDoBlockCount;
+            int32 nestedDoStatus
+                = GetStandaloneSourceNestedDoBodyBlockCount(
+                    bodyId, childStatementId,
+                    Host.StandaloneSourceStatements[
+                        childStatementOffset + 2],
+                    ref init nestedDoBlockCount);
+            if (nestedDoStatus != 0
+                || nestedDoBlockCount != 1)
+            {
+                return nestedDoStatus != 0
+                    ? nestedDoStatus : 3;
+            }
+            continue;
+        }
         if (childKind == 12 || childKind == 13)
         {
             int32 conditionExpressionId
@@ -1805,6 +1823,77 @@ int32 GetStandaloneSourceNestedWhileBodyBlockCount(int32 bodyId,
     return 0;
 }
 
+int32 GetStandaloneSourceNestedDoBodyBlockCount(int32 bodyId,
+    int32 statementId, int32 loopNodeId,
+    ref<init int32> blockCountResult)
+    ensure return == 0 ? *blockCountResult is init : true
+{
+    if (bodyId < 0
+        || bodyId >= Host.StandaloneSourceBodyCount[0]
+        || statementId < 0
+        || statementId >= Host.StandaloneSourceStatementCount[0]
+        || Host.StandaloneSourceStatements[statementId * 3] != 10
+        || loopNodeId < 0
+        || loopNodeId >= Host.StandaloneSourceIfNodeCount[0]
+        || Host.StandaloneSourceStatements[
+            statementId * 3 + 2] != loopNodeId
+        || Host.StandaloneSourceIfNodes[loopNodeId * 5] != bodyId)
+    {
+        return 3;
+    }
+    int32 bodyExpressionCount
+        = Host.StandaloneSourceBodies[bodyId * 12 + 4];
+    int32 bodyExpressionFirst
+        = Host.StandaloneSourceBodies[bodyId * 12 + 3];
+    int32 conditionExpressionId
+        = Host.StandaloneSourceStatements[statementId * 3 + 1];
+    if (conditionExpressionId < 0
+        || conditionExpressionId >= bodyExpressionCount)
+    {
+        return 3;
+    }
+    int32 conditionExpressionOffset
+        = (bodyExpressionFirst + conditionExpressionId) * 8;
+    int32 conditionTypeId
+        = Host.StandaloneSourceExpressions[
+            conditionExpressionOffset + 1];
+    int32 nodeOffset = loopNodeId * 5;
+    int32 childFirst
+        = Host.StandaloneSourceIfNodes[nodeOffset + 1];
+    int32 childCount
+        = Host.StandaloneSourceIfNodes[nodeOffset + 2];
+    int32 falseFirst
+        = Host.StandaloneSourceIfNodes[nodeOffset + 3];
+    int32 falseCount
+        = Host.StandaloneSourceIfNodes[nodeOffset + 4];
+    if (!IsStandaloneLogicalNotType(conditionTypeId)
+        || childFirst < 0 || childCount != 1
+        || falseCount != 0
+        || childFirst
+            > Host.StandaloneSourceIfChildCount[0] - 1
+        || falseFirst != childFirst + 1)
+    {
+        return 3;
+    }
+    int32 breakStatementId
+        = Host.StandaloneSourceIfChildren[childFirst];
+    if (breakStatementId < 0
+        || breakStatementId
+            >= Host.StandaloneSourceStatementCount[0]
+        || Host.StandaloneSourceStatementParentIds[
+            breakStatementId] != statementId
+        || Host.StandaloneSourceStatements[breakStatementId * 3] != 8
+        || Host.StandaloneSourceStatements[
+            breakStatementId * 3 + 1] != -1
+        || Host.StandaloneSourceStatements[
+            breakStatementId * 3 + 2] != loopNodeId)
+    {
+        return 3;
+    }
+    *blockCountResult = 1;
+    return 0;
+}
+
 int32 GetStandaloneSourceLoopBodyBlockCount(int32 statementId,
     int32 loopNodeId, ref<init int32> blockCountResult)
     ensure return == 0 ? *blockCountResult is init : true
@@ -1951,6 +2040,23 @@ int32 GetStandaloneSourceLoopBodyBlockCount(int32 statementId,
                         = nestedBodyBlockCount + candidateBlockCount;
                 }
                 sawNestedLoop = true;
+            }
+            else if (childKind == 10)
+            {
+                init int32 nestedDoBlockCount;
+                int32 nestedDoStatus
+                    = GetStandaloneSourceNestedDoBodyBlockCount(
+                        Host.StandaloneSourceIfNodes[loopNodeOffset],
+                        childId,
+                        Host.StandaloneSourceStatements[
+                            childOffset + 2],
+                        ref init nestedDoBlockCount);
+                if (nestedDoStatus != 0
+                    || nestedDoBlockCount != 1)
+                {
+                    return nestedDoStatus != 0
+                        ? nestedDoStatus : 3;
+                }
             }
             else if (childKind == 8 || childKind == 9)
             {

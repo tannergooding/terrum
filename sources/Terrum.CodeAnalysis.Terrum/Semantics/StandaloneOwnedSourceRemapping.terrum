@@ -1772,7 +1772,8 @@ int32 VerifyStandaloneRewrittenSourceArenas()
                 = controlStatementKind == 7
                     || controlStatementKind == 10
                     || controlStatementKind == 11;
-            if (controlIsLoop && currentChildKind == 7)
+            if (controlIsLoop
+                && (currentChildKind == 7 || currentChildKind == 10))
             {
                 int32 nestedLoopNodeId
                     = Host.StandaloneSourceStatements[

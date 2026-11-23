@@ -3092,6 +3092,22 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
             {
                 return 1;
             }
+            int32 bodyExpressionFirst
+                = Host.StandaloneSourceBodies[
+                    localCallableId * 12 + 3];
+            int32 bodyExpressionCount
+                = Host.StandaloneSourceBodies[
+                    localCallableId * 12 + 4];
+            int32 conditionGlobalExpressionId
+                = bodyExpressionFirst + conditionExpressionId;
+            if (conditionExpressionId < 0
+                || conditionExpressionId >= bodyExpressionCount
+                || conditionGlobalExpressionId < expressionFirst
+                || conditionGlobalExpressionId
+                    >= Host.StandaloneSourceExpressionCount[0])
+            {
+                return 3;
+            }
             init bool conditionDoesNotReturn;
             int32 conditionDoesNotReturnStatus
                 = TryGetStandaloneSourceExpressionDoesNotReturn(
@@ -5521,6 +5537,162 @@ int32 ParseStandaloneSourceNestedWhile(
     return 0;
 }
 
+int32 ParseStandaloneSourceNestedDo(
+    int32 localCallableId, int32 expressionFirst,
+    int32 parentControlNodeId, int32 parentStatementId,
+    int32 tokenStart, int32 tokenEnd,
+    ref<init int32> nextTokenResult)
+    ensure return == 0 ? *nextTokenResult is init : true
+{
+    if (!IsStandaloneSourceDoKeyword(tokenStart)
+        || parentControlNodeId < 0
+        || parentControlNodeId
+            >= Host.StandaloneSourceIfNodeCount[0]
+        || parentStatementId < 0
+        || parentStatementId
+            >= Host.StandaloneSourceStatementCount[0]
+        || (Host.StandaloneSourceStatements[
+                parentStatementId * 3] != 7
+            && Host.StandaloneSourceStatements[
+                parentStatementId * 3] != 10
+            && Host.StandaloneSourceStatements[
+                parentStatementId * 3] != 11)
+        || Host.StandaloneSourceIfNodes[
+            parentControlNodeId * 5 + 2] != 0)
+    {
+        return 2;
+    }
+
+    init int32 nestedControlNodeId;
+    int32 nestedNodeStatus = AppendStandaloneSourceIfNode(
+        localCallableId, ref init nestedControlNodeId);
+    if (nestedNodeStatus != 0)
+    {
+        return nestedNodeStatus;
+    }
+    int32 nestedStatementStatus = AppendStandaloneSourceStatement(
+        localCallableId, expressionFirst, 10, -1,
+        nestedControlNodeId);
+    if (nestedStatementStatus != 0)
+    {
+        return nestedStatementStatus;
+    }
+    int32 nestedStatementId
+        = Host.StandaloneSourceStatementCount[0] - 1;
+    init int32 afterBodyToken;
+    int32 bodyStatus = ParseStandaloneSourceWhileBody(
+        localCallableId, expressionFirst, nestedControlNodeId,
+        nestedStatementId, tokenStart + 1, tokenEnd,
+        ref init afterBodyToken);
+    if (bodyStatus != 0)
+    {
+        return bodyStatus;
+    }
+    if (!IsStandaloneSourceWhileKeyword(afterBodyToken)
+        || afterBodyToken + 1 >= tokenEnd
+        || Host.Tokens[(afterBodyToken + 1) * 3] != 46)
+    {
+        return 1;
+    }
+    init int32 conditionClose;
+    if (!FindStandaloneMatchingClose(
+            afterBodyToken + 1, tokenEnd, 46, 47,
+            ref init conditionClose)
+        || conditionClose + 1 >= tokenEnd
+        || Host.Tokens[(conditionClose + 1) * 3] != 52)
+    {
+        return 1;
+    }
+
+    int32 nestedNodeOffset = nestedControlNodeId * 5;
+    int32 nestedChildFirst
+        = Host.StandaloneSourceIfNodes[nestedNodeOffset + 1];
+    int32 nestedChildCount
+        = Host.StandaloneSourceIfNodes[nestedNodeOffset + 2];
+    if (nestedChildFirst < 0 || nestedChildCount != 1
+        || nestedChildFirst
+            > Host.StandaloneSourceIfChildCount[0] - 1)
+    {
+        return 2;
+    }
+    int32 breakStatementId
+        = Host.StandaloneSourceIfChildren[nestedChildFirst];
+    if (breakStatementId < 0
+        || breakStatementId
+            >= Host.StandaloneSourceStatementCount[0]
+        || Host.StandaloneSourceStatementParentIds[
+            breakStatementId] != nestedStatementId)
+    {
+        return 2;
+    }
+    bool doBodyBreaksImmediately
+        = Host.StandaloneSourceStatements[
+            breakStatementId * 3] == 8
+            && Host.StandaloneSourceStatements[
+                breakStatementId * 3 + 1] == -1
+            && Host.StandaloneSourceStatements[
+                breakStatementId * 3 + 2] == nestedControlNodeId;
+    if (!doBodyBreaksImmediately)
+    {
+        return 2;
+    }
+
+    init int32 boolTypeId;
+    int32 boolTypeStatus = InternStandaloneCallableTypeFact(
+        0, 1, false, ref init boolTypeId);
+    if (boolTypeStatus != 0)
+    {
+        return boolTypeStatus;
+    }
+    init int32 conditionExpressionId;
+    init int32 nextConditionToken;
+    int32 conditionStatus = ParseStandaloneSourceExpression(
+        localCallableId, localCallableId, expressionFirst,
+        boolTypeId, afterBodyToken + 2, conditionClose, 1,
+        ref init conditionExpressionId,
+        ref init nextConditionToken);
+    if (conditionStatus != 0)
+    {
+        return conditionStatus;
+    }
+    if (nextConditionToken != conditionClose)
+    {
+        return 1;
+    }
+    init bool conditionDoesNotReturn;
+    int32 doesNotReturnStatus
+        = TryGetStandaloneSourceExpressionDoesNotReturn(
+            localCallableId, conditionExpressionId,
+            ref init conditionDoesNotReturn);
+    if (doesNotReturnStatus != 0
+        || (conditionDoesNotReturn && !doBodyBreaksImmediately))
+    {
+        return doesNotReturnStatus != 0
+            ? doesNotReturnStatus : 2;
+    }
+    if (Host.StandaloneSourceExpressionUseCounts[
+            conditionGlobalExpressionId] != 0)
+    {
+        return 3;
+    }
+    Host.StandaloneSourceStatements[
+        nestedStatementId * 3 + 1] = conditionExpressionId;
+    Host.StandaloneSourceExpressionUseCounts[
+        conditionGlobalExpressionId] = 1;
+    Host.StandaloneSourceIfNodes[nestedNodeOffset + 3]
+        = Host.StandaloneSourceIfChildCount[0];
+    Host.StandaloneSourceIfNodes[nestedNodeOffset + 4] = 0;
+    int32 childStatus = AppendStandaloneSourceIfChild(
+        localCallableId, parentControlNodeId, parentStatementId,
+        true, nestedStatementId);
+    if (childStatus != 0)
+    {
+        return childStatus;
+    }
+    *nextTokenResult = conditionClose + 2;
+    return 0;
+}
+
 int32 ParseStandaloneSourceWhileBody(int32 localCallableId,
     int32 expressionFirst, int32 controlNodeId,
     int32 loopStatementId,
@@ -5575,6 +5747,25 @@ int32 ParseStandaloneSourceWhileBody(int32 localCallableId,
                     return nestedWhileStatus;
                 }
                 cursor = afterNestedWhile;
+                while (cursor < blockClose
+                    && Host.Tokens[cursor * 3] == 52)
+                {
+                    cursor = cursor + 1;
+                }
+                continue;
+            }
+            if (IsStandaloneSourceDoKeyword(cursor))
+            {
+                init int32 afterNestedDo;
+                int32 nestedDoStatus = ParseStandaloneSourceNestedDo(
+                    localCallableId, expressionFirst, controlNodeId,
+                    loopStatementId, cursor, blockClose,
+                    ref init afterNestedDo);
+                if (nestedDoStatus != 0)
+                {
+                    return nestedDoStatus;
+                }
+                cursor = afterNestedDo;
                 while (cursor < blockClose
                     && Host.Tokens[cursor * 3] == 52)
                 {
@@ -5728,6 +5919,21 @@ int32 ParseStandaloneSourceWhileBody(int32 localCallableId,
             return nestedWhileStatus;
         }
         *nextTokenResult = afterNestedWhile;
+        return 0;
+    }
+
+    if (IsStandaloneSourceDoKeyword(tokenStart))
+    {
+        init int32 afterNestedDo;
+        int32 nestedDoStatus = ParseStandaloneSourceNestedDo(
+            localCallableId, expressionFirst, controlNodeId,
+            loopStatementId, tokenStart, tokenEnd,
+            ref init afterNestedDo);
+        if (nestedDoStatus != 0)
+        {
+            return nestedDoStatus;
+        }
+        *nextTokenResult = afterNestedDo;
         return 0;
     }
 
@@ -11471,6 +11677,57 @@ int32 VerifyStandaloneDirectCalls()
                         }
                         Host.StandaloneSourceExpressionUseCounts[
                             nestedExpressionIndex] = 1;
+                        continue;
+                    }
+                    if (childKind == 10)
+                    {
+                        init int32 nestedDoBlockCount;
+                        int32 nestedDoStatus
+                            = GetStandaloneSourceNestedDoBodyBlockCount(
+                                bodyId, childStatementId,
+                                Host.StandaloneSourceStatements[
+                                    childStatementOffset + 2],
+                                ref init nestedDoBlockCount);
+                        if (nestedDoStatus != 0
+                            || nestedDoBlockCount != 1)
+                        {
+                            return nestedDoStatus != 0
+                                ? nestedDoStatus : 3;
+                        }
+                        int32 nestedDoConditionExpressionId
+                            = Host.StandaloneSourceStatements[
+                                childStatementOffset + 1];
+                        int32 nestedDoConditionExpressionIndex
+                            = bodyExpressionFirst
+                                + nestedDoConditionExpressionId;
+                        if (nestedDoConditionExpressionId < 0
+                            || nestedDoConditionExpressionId
+                                >= bodyExpressionCount
+                            || nestedDoConditionExpressionIndex
+                                < bodyExpressionFirst
+                            || nestedDoConditionExpressionIndex
+                                >= bodyExpressionFirst
+                                    + bodyExpressionCount
+                            || Host.StandaloneSourceExpressionUseCounts[
+                                nestedDoConditionExpressionIndex] != 1)
+                        {
+                            return 3;
+                        }
+                        init bool nestedDoConditionDoesNotReturn;
+                        int32 nestedDoConditionStatus
+                            = TryGetStandaloneSourceExpressionDoesNotReturn(
+                                bodyId,
+                                nestedDoConditionExpressionId,
+                                ref init nestedDoConditionDoesNotReturn);
+                        if (nestedDoConditionStatus != 0)
+                        {
+                            return nestedDoConditionStatus;
+                        }
+                        if (nestedDoConditionDoesNotReturn
+                            && nestedDoBlockCount != 1)
+                        {
+                            return 3;
+                        }
                         continue;
                     }
                     if (childKind == 12 || childKind == 13)
