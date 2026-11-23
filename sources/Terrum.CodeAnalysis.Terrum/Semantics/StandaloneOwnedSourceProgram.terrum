@@ -2922,8 +2922,9 @@ bool IsStandaloneUnaryPlusType(int32 typeId)
         return false;
     }
     int32 typeCode = Host.StandaloneTypeFacts[typeId * 3 + 1];
-    return (typeCode != 0x03
-            && IsStandaloneIntegerSourceType(typeCode))
+    return (typeCode >= 0x06 && typeCode <= 0x09)
+        || (typeCode >= 0x0B && typeCode <= 0x0E)
+        || typeCode == 0x10 || typeCode == 0x11
         || typeCode == 0x14 || typeCode == 0x15;
 }
 

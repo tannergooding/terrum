@@ -554,7 +554,23 @@ internal sealed class StandaloneMethodImportInputTests
         0, 17, false)]
     [TestCase(BoundRuntimePolicy.FailFast,
         "namespace client { "
+            + "int8 Main(int8 value) { return +value; } }",
+        0, 18, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "int16 Main(int16 value) { return +value; } }",
+        0, 18, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
             + "int32 Main(int32 value) { return +value; } }",
+        0, 18, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "uint8 Main(uint8 value) { return +value; } }",
+        0, 18, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "uint16 Main(uint16 value) { return +value; } }",
         0, 18, false)]
     [TestCase(BoundRuntimePolicy.FailFast,
         "namespace client { "
@@ -567,6 +583,14 @@ internal sealed class StandaloneMethodImportInputTests
     [TestCase(BoundRuntimePolicy.FailFast,
         "namespace client { "
             + "uint64 Main(uint64 value) { return +value; } }",
+        0, 18, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "nint Main(nint value) { return +value; } }",
+        0, 18, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "nuint Main(nuint value) { return +value; } }",
         0, 18, false)]
     [TestCase(BoundRuntimePolicy.FailFast,
         "namespace client { "
@@ -1059,10 +1083,16 @@ internal sealed class StandaloneMethodImportInputTests
                     || Host.StandaloneSourceExpressions[8] != 6
                     || Host.StandaloneSourceExpressions[1] !=
                         Host.StandaloneSourceExpressions[9]
-                    || (resultTypeCode != 0x08
+                    || (resultTypeCode != 0x06
+                        && resultTypeCode != 0x07
+                        && resultTypeCode != 0x08
                         && resultTypeCode != 0x0D
                         && resultTypeCode != 0x09
+                        && resultTypeCode != 0x0B
+                        && resultTypeCode != 0x0C
                         && resultTypeCode != 0x0E
+                        && resultTypeCode != 0x10
+                        && resultTypeCode != 0x11
                         && resultTypeCode != 0x14
                         && resultTypeCode != 0x15)) {
                     return 111;
