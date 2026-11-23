@@ -476,7 +476,11 @@ public static int32 RewriteStandaloneOwnedCallNodes()
                 || Host.StandaloneSourceExpressions[
                     sourceOffset] == 32
                 || Host.StandaloneSourceExpressions[
-                    sourceOffset] == 33)
+                    sourceOffset] == 33
+                || Host.StandaloneSourceExpressions[
+                    sourceOffset] == 35
+                || Host.StandaloneSourceExpressions[
+                    sourceOffset] == 36)
             {
                 int32 leftExpressionId
                     = Host.StandaloneSourceExpressions[
@@ -1850,7 +1854,8 @@ int32 VerifyStandaloneRewrittenSourceArenas()
             || expressionKind == 20 || expressionKind == 21
             || expressionKind == 22 || expressionKind == 23
             || expressionKind == 24 || expressionKind == 25
-            || (expressionKind >= 31 && expressionKind <= 33))
+            || (expressionKind >= 31 && expressionKind <= 33)
+            || expressionKind == 35 || expressionKind == 36)
         {
             int32 leftExpressionId
                 = Host.StandaloneSourceExpressions[oldOffset + 2];
@@ -1898,7 +1903,10 @@ int32 VerifyStandaloneRewrittenSourceArenas()
                 = expressionKind >= 21 && expressionKind <= 25;
             bool shift
                 = expressionKind >= 31 && expressionKind <= 33;
-            bool sameTypeBinary = bitwise || arithmetic;
+            bool lazyBoolean
+                = expressionKind == 35 || expressionKind == 36;
+            bool sameTypeBinary
+                = bitwise || arithmetic || lazyBoolean;
             bool validResultType = bitwise
                 ? IsStandaloneNotType(expressionTypeId)
                 : arithmetic

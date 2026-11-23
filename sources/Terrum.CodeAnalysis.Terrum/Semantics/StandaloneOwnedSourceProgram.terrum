@@ -1747,6 +1747,15 @@ int32 TryGetStandaloneSourceExpressionDoesNotReturn(int32 bodyId,
             = trueDoesNotReturn && falseDoesNotReturn;
         return 0;
     }
+    if (expressionKind == 35 || expressionKind == 36)
+    {
+        int32 leftExpressionId
+            = Host.StandaloneSourceExpressions[
+                expressionIndex * 8 + 2];
+        return TryGetStandaloneSourceExpressionDoesNotReturn(
+            bodyId, leftExpressionId,
+            ref init *doesNotReturnResult);
+    }
     if (expressionKind == 12 || expressionKind == 13
         || expressionKind == 14 || expressionKind == 15
         || expressionKind == 16 || expressionKind == 17
@@ -1754,7 +1763,8 @@ int32 TryGetStandaloneSourceExpressionDoesNotReturn(int32 bodyId,
         || expressionKind == 20 || expressionKind == 21
         || expressionKind == 22 || expressionKind == 23
         || expressionKind == 24 || expressionKind == 25
-        || (expressionKind >= 31 && expressionKind <= 33))
+        || (expressionKind >= 31 && expressionKind <= 33)
+        || expressionKind == 35 || expressionKind == 36)
     {
         int32 leftExpressionId
             = Host.StandaloneSourceExpressions[
@@ -4123,6 +4133,55 @@ int32 FindStandaloneBinaryOperator(int32 tokenStart,
     return parenthesisDepth == 0 ? selectedIndex : -1;
 }
 
+int32 FindStandaloneLazyBooleanOperator(int32 tokenStart,
+    int32 tokenEnd)
+{
+    if (tokenStart < 0 || tokenStart >= tokenEnd
+        || tokenEnd > Host.Tokens.Length / 3)
+    {
+        return -1;
+    }
+
+    mut int32 parenthesisDepth = 0;
+    mut int32 selectedIndex = -1;
+    mut int32 selectedPrecedence = 3;
+    for (mut int32 tokenIndex = tokenStart;
+        tokenIndex < tokenEnd;
+        tokenIndex = tokenIndex + 1)
+    {
+        int32 kind = Host.Tokens[tokenIndex * 3];
+        if (kind == 46)
+        {
+            parenthesisDepth = parenthesisDepth + 1;
+        }
+        else if (kind == 47)
+        {
+            if (parenthesisDepth == 0)
+            {
+                return -1;
+            }
+            parenthesisDepth = parenthesisDepth - 1;
+        }
+        else if (parenthesisDepth == 0)
+        {
+            int32 precedence = kind == 74 ? 1
+                : kind == 72 ? 2 : 0;
+            bool hasLeftOperand = tokenIndex > tokenStart
+                && IsStandaloneSourceOperandEndKind(
+                    Host.Tokens[(tokenIndex - 1) * 3]);
+            if (precedence != 0 && hasLeftOperand
+                && precedence <= selectedPrecedence
+                && IsStandaloneBinaryOperatorSeparated(tokenIndex))
+            {
+                selectedIndex = tokenIndex;
+                selectedPrecedence = precedence;
+            }
+        }
+    }
+
+    return parenthesisDepth == 0 ? selectedIndex : -1;
+}
+
 bool IsStandaloneWritableUpdatePlace(int32 localCallableId,
     int32 tokenStart, int32 tokenEnd, int32 expectedTypeId)
 {
@@ -4622,6 +4681,22 @@ bool CanBindStandaloneSourceArgument(int32 localCallableId,
             && CanBindStandaloneSourceArgument(localCallableId,
                 conditionalColon + 1, tokenEnd,
                 expectedTypeId, depth + 1);
+    }
+
+    int32 lazyBooleanOperator
+        = FindStandaloneLazyBooleanOperator(tokenStart, tokenEnd);
+    if (lazyBooleanOperator >= 0)
+    {
+        return depth == 0
+            && IsStandaloneLogicalNotType(expectedTypeId)
+            && lazyBooleanOperator > tokenStart
+            && lazyBooleanOperator + 1 < tokenEnd
+            && CanBindStandaloneSourceArgument(localCallableId,
+                tokenStart, lazyBooleanOperator, expectedTypeId,
+                depth + 1)
+            && CanBindStandaloneSourceArgument(localCallableId,
+                lazyBooleanOperator + 1, tokenEnd, expectedTypeId,
+                depth + 1);
     }
 
     int32 binaryOperator
@@ -5909,6 +5984,98 @@ int32 ParseStandaloneSourceExpression(int32 localCallableId,
         Host.StandaloneSourceExpressionUseCounts[trueGlobalId] = 1;
         Host.StandaloneSourceExpressionUseCounts[falseGlobalId] = 1;
         *expressionIdResult = conditionalExpressionId;
+        *nextTokenResult = tokenEnd;
+        return 0;
+    }
+
+    int32 lazyBooleanOperator
+        = FindStandaloneLazyBooleanOperator(tokenIndex, tokenEnd);
+    if (lazyBooleanOperator >= 0)
+    {
+        int32 operatorKind
+            = Host.Tokens[lazyBooleanOperator * 3];
+        mut int32 boolTypeId = expectedTypeId;
+        if (depth != 0
+            || lazyBooleanOperator <= tokenIndex
+            || lazyBooleanOperator + 1 >= tokenEnd)
+        {
+            return 2;
+        }
+        if (boolTypeId >= 0)
+        {
+            if (!IsStandaloneLogicalNotType(boolTypeId))
+            {
+                return 2;
+            }
+        }
+        else
+        {
+            int32 boolTypeStatus
+                = InternStandaloneCallableTypeFact(
+                    0, 1, false, ref init boolTypeId);
+            if (boolTypeStatus != 0)
+            {
+                return boolTypeStatus;
+            }
+        }
+        init int32 leftExpressionId;
+        init int32 nextLeftToken;
+        int32 leftStatus = ParseStandaloneSourceExpression(
+            localCallableId, bodyId, expressionFirst, boolTypeId,
+            tokenIndex, lazyBooleanOperator, depth + 1,
+            ref init leftExpressionId, ref init nextLeftToken);
+        if (leftStatus != 0)
+        {
+            return leftStatus;
+        }
+        init int32 rightExpressionId;
+        init int32 nextRightToken;
+        int32 rightStatus = ParseStandaloneSourceExpression(
+            localCallableId, bodyId, expressionFirst, boolTypeId,
+            lazyBooleanOperator + 1, tokenEnd, depth + 1,
+            ref init rightExpressionId, ref init nextRightToken);
+        if (rightStatus != 0)
+        {
+            return rightStatus;
+        }
+        if (nextLeftToken != lazyBooleanOperator
+            || nextRightToken != tokenEnd
+            || leftExpressionId == rightExpressionId)
+        {
+            return 1;
+        }
+        int32 leftGlobalId = expressionFirst + leftExpressionId;
+        int32 rightGlobalId = expressionFirst + rightExpressionId;
+        if (leftGlobalId < expressionFirst
+            || leftGlobalId
+                >= Host.StandaloneSourceExpressionCount[0]
+            || rightGlobalId < expressionFirst
+            || rightGlobalId
+                >= Host.StandaloneSourceExpressionCount[0]
+            || Host.StandaloneSourceExpressions[
+                leftGlobalId * 8 + 1] != boolTypeId
+            || Host.StandaloneSourceExpressions[
+                rightGlobalId * 8 + 1] != boolTypeId
+            || Host.StandaloneSourceExpressionUseCounts[
+                leftGlobalId] != 0
+            || Host.StandaloneSourceExpressionUseCounts[
+                rightGlobalId] != 0)
+        {
+            return 3;
+        }
+        init int32 lazyExpressionId;
+        int32 appendStatus = AppendStandaloneSourceExpression(
+            bodyId, operatorKind == 72 ? 35 : 36,
+            boolTypeId, leftExpressionId, rightExpressionId,
+            0, 0, -1, expressionFirst,
+            ref init lazyExpressionId);
+        if (appendStatus != 0)
+        {
+            return appendStatus;
+        }
+        Host.StandaloneSourceExpressionUseCounts[leftGlobalId] = 1;
+        Host.StandaloneSourceExpressionUseCounts[rightGlobalId] = 1;
+        *expressionIdResult = lazyExpressionId;
         *nextTokenResult = tokenEnd;
         return 0;
     }
@@ -8046,7 +8213,8 @@ int32 VerifyStandaloneDirectCalls()
                 || expressionKind == 21 || expressionKind == 22
                 || expressionKind == 23 || expressionKind == 24
                 || expressionKind == 25
-                || (expressionKind >= 31 && expressionKind <= 33))
+                || (expressionKind >= 31 && expressionKind <= 33)
+                || expressionKind == 35 || expressionKind == 36)
             {
                 int32 rightExpressionId
                     = Host.StandaloneSourceExpressions[
@@ -8081,7 +8249,10 @@ int32 VerifyStandaloneDirectCalls()
                     = expressionKind >= 21 && expressionKind <= 25;
                 bool shift
                     = expressionKind >= 31 && expressionKind <= 33;
-                bool sameTypeBinary = bitwise || arithmetic;
+                bool lazyBoolean
+                    = expressionKind == 35 || expressionKind == 36;
+                bool sameTypeBinary
+                    = bitwise || arithmetic || lazyBoolean;
                 bool validResultType = bitwise
                     ? IsStandaloneNotType(expressionTypeId)
                     : arithmetic
