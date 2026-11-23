@@ -9215,12 +9215,29 @@ public static partial class TrRmExecutableCompiler
                     var registerBody = bodies.GetRegisterBody(
                         defs.GetBodyRow(row), contractTable.Count,
                         generalPredicateGraphsInitializationReferenceBodies);
+                    var standardRegisteredQueryBody
+                        = standardSchemaIdentity is { } classQuerySchema
+                            && IsSelectedC1ClassInstanceLayoutSchemaIdentity(
+                                classQuerySchema)
+                            && registerBody.HasLayoutQueryOperation;
+                    var standardScalarControlFlowBody
+                        = generalPredicateGraphsInitializationReferenceBodies
+                            && !standardConstruction2MethodLinkingProfile
+                            && !standardRegisteredQueryBody
+                            && IsStandardScalarControlFlowBody(registerBody,
+                                declaration, types, imports,
+                                nativePointerTypeDefinitions,
+                                structureTypeByTypeDef,
+                                checkedReferenceTypeDefinitions,
+                                checkedReferenceTypeIndexes,
+                                nominalClassTypesByTypeSpecReference);
                     var scalarConstants
                         = ImmutableArray<BoundConstant>.Empty;
                     if (registerBody.ConstantCount != 0
                         && (standardConstruction2MethodLinkingProfile
                             || registerBody.Schema
-                                .UsesForeignNativeInterface()))
+                                .UsesForeignNativeInterface()
+                            || standardScalarControlFlowBody))
                     {
                         var constants
                             = ImmutableArray.CreateBuilder<BoundConstant>(
@@ -9260,10 +9277,7 @@ public static partial class TrRmExecutableCompiler
                         scalarConstants = constants.MoveToImmutable();
                     }
 
-                    if (standardSchemaIdentity is { } classQuerySchema
-                        && IsSelectedC1ClassInstanceLayoutSchemaIdentity(
-                            classQuerySchema)
-                        && registerBody.HasLayoutQueryOperation)
+                    if (standardRegisteredQueryBody)
                     {
                         statements = DecodeStandardRegisteredQueryBody(
                             registerBody, declaration, variables, modules,
@@ -9273,6 +9287,17 @@ public static partial class TrRmExecutableCompiler
                             structureTypeByTypeDef,
                             standardClassQueryProgram,
                             modules.GetIdentity(defs.GetOwnerModule(row)));
+                    }
+                    else if (standardScalarControlFlowBody)
+                    {
+                        indexed = DecodeStandardScalarControlFlowBody(
+                            registerBody, declaration, variables, types,
+                            imports, nativePointerTypeDefinitions,
+                            structureTypeByTypeDef,
+                            checkedReferenceTypeDefinitions,
+                            checkedReferenceTypeIndexes,
+                            nominalClassTypesByTypeSpecReference,
+                            scalarConstants);
                     }
                     else
                     {

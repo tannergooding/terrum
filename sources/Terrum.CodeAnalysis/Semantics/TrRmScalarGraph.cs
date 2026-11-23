@@ -94,7 +94,8 @@ internal sealed record TrRmScalarBlock(ImmutableArray<int> Parameters,
 internal sealed record TrRmScalarRegion(byte Kind, int Parent, int Header,
     int Exit);
 
-/// <summary>Immutable, source-free scalar SSA body admitted only after compact Body validation.</summary>
+/// <summary>Immutable, source-free scalar SSA body admitted only after its
+/// selected Body has been validated.</summary>
 internal sealed class TrRmScalarGraph
 {
     internal ImmutableArray<TrRmScalarBlock> Blocks { get; }

@@ -5608,6 +5608,11 @@ internal sealed class StandaloneMethodImportInputTests
                 void AssertMalformedBodyRejected(byte[] malformedArtifact,
                     string sourcePath)
                 {
+                    _ = Assert.Throws<InvalidDataException>(() =>
+                        TrRmExecutableCompiler.LoadStandard(
+                            new TrRmStandardArtifactInput(SchemaIdentity,
+                                malformedArtifact),
+                            input.UsingModuleIdentity, input.Artifacts));
                     var malformedInput
                         = new StandaloneMethodImportArtifactInput(
                             Agreement, "consumer/module",
@@ -5657,6 +5662,105 @@ internal sealed class StandaloneMethodImportInputTests
                     ushort.MaxValue);
                 AssertMalformedBodyRejected(malformedEdgeArtifact,
                     "standalone-malformed-conditional-edge-tests.terrum");
+
+                var loaded = TrRmExecutableCompiler.LoadStandard(
+                    new TrRmStandardArtifactInput(SchemaIdentity, artifact),
+                    input.UsingModuleIdentity, input.Artifacts);
+                var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
+                    input.UsingModuleIdentity, SchemaIdentity, 1);
+                loaded = TrRmExecutableCompiler.LoadStandard(
+                    new TrRmStandardArtifactInput(SchemaIdentity,
+                        reemitted), input.UsingModuleIdentity,
+                    input.Artifacts);
+                var parameterCount = verificationMode switch {
+                    130 => 1,
+                    131 => 3,
+                    132 or 133 => 2,
+                    _ => 4,
+                };
+                var mainIndex = -1;
+                for (var functionIndex = 0;
+                    functionIndex < loaded.Functions.Length;
+                    functionIndex++)
+                {
+                    var function = loaded.Functions[functionIndex];
+                    if (!function.IsExternal
+                        && function.ParameterCount == parameterCount
+                        && function.Name.EndsWith("Main",
+                            StringComparison.Ordinal))
+                    {
+                        Assert.That(mainIndex, Is.EqualTo(-1),
+                            "Expected one emitted source Main function.");
+                        mainIndex = functionIndex;
+                    }
+                }
+                Assert.That(mainIndex, Is.GreaterThanOrEqualTo(0));
+                var main = loaded.Functions[mainIndex];
+
+                BoundProgram CreateInvocation(params long[] values)
+                {
+                    Assert.That(values.Length,
+                        Is.EqualTo(main.ParameterCount));
+                    var arguments
+                        = ImmutableArray.CreateBuilder<BoundExpression>(
+                            values.Length);
+                    for (var parameter = 0;
+                        parameter < values.Length; parameter++)
+                    {
+                        arguments.Add(new BoundConstant(values[parameter],
+                            main.Variables[parameter].Type, default));
+                    }
+
+                    var call = new BoundCall(mainIndex,
+                        arguments.MoveToImmutable(), main.ReturnType,
+                        default);
+                    BoundExpression result = main.ReturnType
+                        == PrimitiveType.Bool
+                        ? new BoundConditional(call,
+                            new BoundConstant(1, PrimitiveType.Int32, default),
+                            new BoundConstant(0, PrimitiveType.Int32, default),
+                            PrimitiveType.Int32, default)
+                        : call;
+                    var entry = new BoundFunction("$runtimeEntry",
+                        PrimitiveType.Int32, [], 0,
+                        new BoundBlock([
+                            new BoundReturn(result, default),
+                        ], default), default);
+                    return loaded with {
+                        Functions = loaded.Functions.Add(entry),
+                        EntryPoint = loaded.Functions.Length,
+                    };
+                }
+
+                int Execute(params long[] values)
+                    => NativeJit.Execute(CreateInvocation(values),
+                        (NativeRuntimePolicy)policy);
+
+                switch (verificationMode)
+                {
+                    case 130:
+                        Assert.That(Execute(1), Is.EqualTo(1));
+                        Assert.That(Execute(0), Is.EqualTo(0));
+                        break;
+                    case 131:
+                        Assert.That(Execute(1, 42, 99), Is.EqualTo(42));
+                        Assert.That(Execute(0, 42, 99), Is.EqualTo(99));
+                        break;
+                    case 132:
+                        Assert.That(Execute(1, 1), Is.EqualTo(1));
+                        Assert.That(Execute(0, 1), Is.EqualTo(0));
+                        break;
+                    case 133:
+                        Assert.That(Execute(0, 0), Is.EqualTo(0));
+                        Assert.That(Execute(0, 1), Is.EqualTo(1));
+                        break;
+                    case 134:
+                        Assert.That(Execute(1, 7, 11, 13),
+                            Is.EqualTo(11));
+                        Assert.That(Execute(0, 7, 11, 13),
+                            Is.EqualTo(13));
+                        break;
+                }
             }
             if (verificationMode == 60)
             {
