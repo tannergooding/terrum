@@ -2164,6 +2164,13 @@ internal sealed class StandaloneMethodImportInputTests
             + "return counter; } }",
         0, 271, false)]
     [TestCase(BoundRuntimePolicy.FailFast,
+        "using api; namespace client { int32 Main(int32 limit) { "
+            + "mut int32 counter = 0; "
+            + "outer: while (counter < limit) { "
+            + "inner: do { break outer; } while (Imported(limit)); } "
+            + "return counter; } }",
+        0, 273, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
         "namespace client { int32 Main(int32 limit) { "
             + "mut int32 counter = 0; "
             + "outer: for (; counter < limit; counter = counter + 1) { "
@@ -2280,11 +2287,13 @@ internal sealed class StandaloneMethodImportInputTests
                             or 246 or 247 or 248 or 249 or 250 or 251 or 252
                             or 253 or 254 or 255 or 256 or 257 or 258 or 259
                             or 260 or 261 or 262 or 263 or 268 or 270 or 271
+                            or 273
                             ? 0xF200_0001u : 0xF200_0008u,
                     effectsMask: verificationMode is 198 or 212
                         or 228 or 229 or 246 or 247 or 248 or 249 or 250
                         or 252 or 253 or 254 or 255 or 256 or 257 or 258 or 259
                         or 261 or 263 or 268 or 270 or 271
+                        or 273
                         ? 2u : 0u,
                     scalarParameter: true,
                     executableBody: verificationMode is 161 or 211 or 251
@@ -9943,7 +9952,7 @@ internal sealed class StandaloneMethodImportInputTests
                 return 0;
             }
             """;
-        const string nestedDoOuterBreakVerificationSource = """
+        var nestedDoOuterBreakVerificationSource = $$"""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
                 if (Scan() < 1) { return 87; }
@@ -9959,7 +9968,8 @@ internal sealed class StandaloneMethodImportInputTests
                     || Host.StandaloneSourceLoopLabelTokens[1] < 0
                     || Host.StandaloneSourceLoopLabelTokens[2] < 0
                     || Host.StandaloneSourceTransferLabelTokens[3] < 0
-                    || Host.StandaloneSourceStatements[3] != 11
+                    || Host.StandaloneSourceStatements[3]
+                        != {{verificationMode == 271 ? 11 : 7}}
                     || Host.StandaloneSourceStatements[6] != 10
                     || Host.StandaloneSourceStatements[9] != 8
                     || Host.StandaloneSourceStatements[12] != 5
@@ -10120,7 +10130,7 @@ internal sealed class StandaloneMethodImportInputTests
                 ? nestedWhileOuterBreakVerificationSource
             : verificationMode == 270
                 ? siblingLoopLabelsVerificationSource
-            : verificationMode == 271
+            : verificationMode is 271 or 273
                 ? nestedDoOuterBreakVerificationSource
             : verificationMode == 272
                 ? nestedWhileOuterContinueVerificationSource
@@ -10745,6 +10755,7 @@ internal sealed class StandaloneMethodImportInputTests
                         : verificationMode == 269 ? 7
                         : verificationMode == 270 ? 6
                         : verificationMode == 271 ? 4
+                        : verificationMode == 273 ? 4
                         : verificationMode == 272 ? 6
                         : verificationMode == 228 ? 3
                         : verificationMode == 229 ? 3
@@ -10827,6 +10838,7 @@ internal sealed class StandaloneMethodImportInputTests
                             : verificationMode == 269 ? 2
                             : verificationMode == 270 ? 1
                             : verificationMode == 271 ? 1
+                            : verificationMode == 273 ? 1
                             : verificationMode == 272 ? 2
                             : verificationMode == 228 ? 0
                             : verificationMode == 229 ? 0
@@ -10893,6 +10905,7 @@ internal sealed class StandaloneMethodImportInputTests
                     and not 269
                     and not 270
                     and not 271
+                    and not 273
                     and not 272
                     and not 242
                     and not 228 and not 229)
@@ -11521,6 +11534,7 @@ internal sealed class StandaloneMethodImportInputTests
                         and not 269
                         and not 270
                         and not 271
+                        and not 273
                         and not 272
                         and not 243
                         and not 242
@@ -11805,7 +11819,7 @@ internal sealed class StandaloneMethodImportInputTests
             {
                 expectedDecoderConstantMapCount = 2;
             }
-            if (verificationMode == 271)
+            if (verificationMode is 271 or 273)
             {
                 expectedDecoderConstantMapCount = 1;
             }
@@ -12146,6 +12160,7 @@ internal sealed class StandaloneMethodImportInputTests
                     or 269
                     or 270
                     or 271
+                    or 273
                     or 272
                     or 228 or 229)
             {
@@ -12345,6 +12360,7 @@ internal sealed class StandaloneMethodImportInputTests
                     or 269
                     or 270
                     or 271
+                    or 273
                     or 272
                     or 228 or 229 => 1,
                     161 => 2,
@@ -13161,6 +13177,10 @@ internal sealed class StandaloneMethodImportInputTests
                         Assert.That(Execute(3), Is.EqualTo(1));
                         break;
                     case 271:
+                        Assert.That(Execute(0), Is.EqualTo(0));
+                        Assert.That(Execute(3), Is.EqualTo(0));
+                        break;
+                    case 273:
                         Assert.That(Execute(0), Is.EqualTo(0));
                         Assert.That(Execute(3), Is.EqualTo(0));
                         break;
