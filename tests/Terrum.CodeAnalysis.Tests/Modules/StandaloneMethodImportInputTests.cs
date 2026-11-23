@@ -1474,7 +1474,8 @@ internal sealed class StandaloneMethodImportInputTests
             "standalone-owned-source-program-tests.terrum"));
 
         var buffers = ScannerHost.CreateBuffers(source).AddRange(
-            input.Capture().CreateSourceCallHostBuffers(source));
+            input.Capture().CreateSourceCallHostBuffers(
+                source, SourceArithmeticProfile.Development));
         var compilation = Compilation.Create(components, buffers, policy);
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -1668,7 +1669,8 @@ internal sealed class StandaloneMethodImportInputTests
             "standalone-owned-source-contract-writer-tests.terrum"));
         var contractBuffers = ScannerHost.CreateBuffers(contractSource)
             .AddRange(contractInput.Capture()
-                .CreateSourceCallHostBuffers(contractSource));
+                .CreateSourceCallHostBuffers(contractSource,
+                    SourceArithmeticProfile.Development));
         var contractCompilation = Compilation.Create(contractComponents,
             contractBuffers, policy);
         Assert.That(contractCompilation.HasErrors, Is.False,
@@ -1730,7 +1732,8 @@ internal sealed class StandaloneMethodImportInputTests
             "standalone-owned-source-assertion-writer-tests.terrum"));
         var assertionBuffers = ScannerHost.CreateBuffers(assertionSource)
             .AddRange(assertionInput.Capture()
-                .CreateSourceCallHostBuffers(assertionSource));
+                .CreateSourceCallHostBuffers(assertionSource,
+                    SourceArithmeticProfile.Development));
         var assertionCompilation = Compilation.Create(assertionComponents,
             assertionBuffers, policy);
         Assert.That(assertionCompilation.HasErrors, Is.False,
@@ -1796,7 +1799,9 @@ internal sealed class StandaloneMethodImportInputTests
         var malformedTypeSpecBuffers
             = ScannerHost.CreateBuffers(malformedTypeSpecSource).AddRange(
                 malformedTypeSpecInput.Capture()
-                    .CreateSourceCallHostBuffers(malformedTypeSpecSource));
+                    .CreateSourceCallHostBuffers(
+                        malformedTypeSpecSource,
+                        SourceArithmeticProfile.Development));
         var malformedTypeSpecCompilation = Compilation.Create(
             malformedTypeSpecComponents, malformedTypeSpecBuffers, policy);
         Assert.That(malformedTypeSpecCompilation.HasErrors, Is.False,
@@ -1900,7 +1905,9 @@ internal sealed class StandaloneMethodImportInputTests
         var witnessProjectionBuffers
             = ScannerHost.CreateBuffers(witnessProjectionSource).AddRange(
                 witnessProjectionInput.Capture()
-                    .CreateSourceCallHostBuffers(witnessProjectionSource));
+                    .CreateSourceCallHostBuffers(
+                        witnessProjectionSource,
+                        SourceArithmeticProfile.Development));
         var witnessProjectionCompilation = Compilation.Create(
             witnessProjectionComponents, witnessProjectionBuffers, policy);
         Assert.That(witnessProjectionCompilation.HasErrors, Is.False,
@@ -2402,7 +2409,8 @@ internal sealed class StandaloneMethodImportInputTests
         aliasComponents.Add(SyntaxTree.Parse(aliasVerificationSource,
             "standalone-owned-source-alias-writer-tests.terrum"));
         var aliasBuffers = ScannerHost.CreateBuffers(aliasSource).AddRange(
-            aliasInput.Capture().CreateSourceCallHostBuffers(aliasSource));
+            aliasInput.Capture().CreateSourceCallHostBuffers(aliasSource,
+                SourceArithmeticProfile.Development));
         var aliasCompilation = Compilation.Create(aliasComponents,
             aliasBuffers, policy);
         Assert.That(aliasCompilation.HasErrors, Is.False,
@@ -2584,7 +2592,8 @@ internal sealed class StandaloneMethodImportInputTests
             "standalone-owned-source-remapping-tests.terrum"));
 
         var remapBuffers = ScannerHost.CreateBuffers(remapSource).AddRange(
-            remapInput.Capture().CreateSourceCallHostBuffers(remapSource));
+            remapInput.Capture().CreateSourceCallHostBuffers(remapSource,
+                SourceArithmeticProfile.Development));
         var remapCompilation = Compilation.Create(remapComponents,
             remapBuffers, policy);
         Assert.That(remapCompilation.HasErrors, Is.False,
@@ -2686,8 +2695,8 @@ internal sealed class StandaloneMethodImportInputTests
 
         var callVariantBuffers = ScannerHost.CreateBuffers(
             callVariantSource).AddRange(
-            callVariantInput.Capture().CreateSourceCallHostBuffers(
-                callVariantSource));
+            callVariantInput.Capture()            .CreateSourceCallHostBuffers(callVariantSource,
+                SourceArithmeticProfile.Development));
         var callVariantCompilation = Compilation.Create(
             callVariantComponents, callVariantBuffers, policy);
         Assert.That(callVariantCompilation.HasErrors, Is.False,
@@ -2735,8 +2744,8 @@ internal sealed class StandaloneMethodImportInputTests
 
         var unauthorizedUnsafeBuffers = ScannerHost.CreateBuffers(
             unauthorizedUnsafeSource).AddRange(
-            callVariantInput.Capture().CreateSourceCallHostBuffers(
-                unauthorizedUnsafeSource));
+            callVariantInput.Capture()            .CreateSourceCallHostBuffers(unauthorizedUnsafeSource,
+                SourceArithmeticProfile.Development));
         var unauthorizedUnsafeCompilation = Compilation.Create(
             unauthorizedUnsafeComponents, unauthorizedUnsafeBuffers,
             policy);
@@ -2893,7 +2902,8 @@ internal sealed class StandaloneMethodImportInputTests
 
         var captured = input.Capture();
         var buffers = ScannerHost.CreateBuffers(source).AddRange(
-            captured.CreateSourceCallHostBuffers(source));
+            captured.CreateSourceCallHostBuffers(
+                source, SourceArithmeticProfile.Development));
         var compilation = Compilation.Create(components, buffers, policy);
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -5105,5 +5115,23 @@ internal sealed class StandaloneMethodImportInputTests
         BinaryPrimitives.WriteUInt32LittleEndian(artifact.AsSpan(72),
             firstStart);
         return artifact;
+    }
+
+    [Test]
+    public void SourceCallHostBuffersPreserveArithmeticProfile()
+    {
+        var source = SourceText.From("int32 Main() { return 0; }");
+        var input = new StandaloneMethodImportInput(
+            Agreement, "consumer/module", [], []).Capture();
+        var buffers = input.CreateSourceCallHostBuffers(source,
+            SourceArithmeticProfile.Release);
+        var arithmeticProfile = buffers.Single(buffer =>
+            buffer.Name == "StandaloneSourceArithmeticProfile");
+
+        Assert.That(arithmeticProfile.Values,
+            Is.EqualTo(new[] { (int)SourceArithmeticProfile.Release }));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            input.CreateSourceCallHostBuffers(source,
+                (SourceArithmeticProfile)2));
     }
 }

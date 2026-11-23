@@ -93,6 +93,9 @@ bool ValidateStandaloneSourceCallBuffers()
         return false;
     }
     return Host.StandaloneSourceProgramStatus.Length == 1
+        && Host.StandaloneSourceArithmeticProfile.Length == 1
+        && (Host.StandaloneSourceArithmeticProfile[0] == 0
+            || Host.StandaloneSourceArithmeticProfile[0] == 1)
         && Host.StandaloneLocalCallableCount.Length == 1
         && Host.StandaloneLocalCallables.Length == tokenCapacity * 3
         && Host.StandaloneSourceCallableInfo.Length

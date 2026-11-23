@@ -445,9 +445,16 @@ internal readonly record struct CapturedStandaloneMethodImportInput(
     }
 
     internal ImmutableArray<HostBuffer> CreateSourceCallHostBuffers(
-        SourceText source)
+        SourceText source, SourceArithmeticProfile sourceArithmeticProfile)
     {
         ArgumentNullException.ThrowIfNull(source);
+        if (sourceArithmeticProfile is not (
+                SourceArithmeticProfile.Development
+                or SourceArithmeticProfile.Release))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(sourceArithmeticProfile));
+        }
         if (source.Length > ScannerHost.MaximumSourceLength)
         {
             throw new ArgumentException(
@@ -559,6 +566,8 @@ internal readonly record struct CapturedStandaloneMethodImportInput(
         var writerTextCapacity = checked(artifactByteLength
             + standaloneTextLength + source.Length);
         return hostBuffers.AddRange([
+            new HostBuffer("StandaloneSourceArithmeticProfile",
+                PrimitiveType.Int32, [(int)sourceArithmeticProfile], true),
             new HostBuffer("StandaloneSourceProgramStatus",
                 PrimitiveType.Int32, [0], true),
             new HostBuffer("StandaloneLocalCallableCount",
