@@ -2373,23 +2373,28 @@ int32 InventoryStandaloneSourceForHeaderLocals(int32 bodyId,
                 = TryInventoryStandaloneSourceLocal(
                     bodyId, forScopeId, headerStart, headerClose,
                     ref init localId, ref init afterLocalToken);
-            if (localStatus != 1)
+            if (localStatus == 1)
             {
-                return localStatus == 0 ? 2 : localStatus;
+                int32 localOffset = localId * 10;
+                int32 bindingKind
+                    = Host.StandaloneSourceLocals[localOffset + 3];
+                if (afterLocalToken != initializerSemicolon + 1
+                    || Host.StandaloneSourceLocals[
+                        localOffset + 8] < 0
+                    || (bindingKind != 0 && bindingKind != 1))
+                {
+                    return 2;
+                }
+                int32 scopeOffset = forScopeId * 5;
+                Host.StandaloneSourceLexicalScopes[scopeOffset + 2]
+                    = forLocalFirst;
+                Host.StandaloneSourceLexicalScopes[
+                    scopeOffset + 3] = 1;
             }
-            int32 localOffset = localId * 10;
-            int32 bindingKind
-                = Host.StandaloneSourceLocals[localOffset + 3];
-            if (afterLocalToken != initializerSemicolon + 1
-                || Host.StandaloneSourceLocals[localOffset + 8] < 0
-                || (bindingKind != 0 && bindingKind != 1))
+            else if (localStatus != 0)
             {
-                return 2;
+                return localStatus;
             }
-            int32 scopeOffset = forScopeId * 5;
-            Host.StandaloneSourceLexicalScopes[scopeOffset + 2]
-                = forLocalFirst;
-            Host.StandaloneSourceLexicalScopes[scopeOffset + 3] = 1;
         }
         tokenIndex = afterForToken;
     }
@@ -2485,12 +2490,12 @@ int32 VerifyStandaloneForLocalNames(int32 bodyId,
             || scopeLocalFirst
                 > bodyLocalFirst + bodyLocalCount - scopeLocalCount
             || scopeEndStatus != 0
-            || (hasInitializer && scopeLocalCount != 1)
+            || scopeLocalCount > 1
             || (!hasInitializer && scopeLocalCount != 0))
         {
             return 3;
         }
-        if (hasInitializer)
+        if (scopeLocalCount == 1)
         {
             int32 localId = scopeLocalFirst;
             int32 localOffset = localId * 10;
@@ -2712,6 +2717,155 @@ int32 AppendStandaloneSourcePlace(int32 bodyId, int32 typeId,
     Host.StandaloneSourcePlaces[placeOffset + 4] = locationId;
     Host.StandaloneSourcePlaceCount[0] = count + 1;
     *placeIdResult = count;
+    return 0;
+}
+
+int32 BindStandaloneSourceForHeaderLocal(int32 localCallableId,
+    int32 expressionFirst, int32 initializerLocalId,
+    int32 initializerSemicolon)
+{
+    if (initializerLocalId < 0
+        || initializerLocalId >= Host.StandaloneSourceLocalCount[0])
+    {
+        return 3;
+    }
+    int32 initializerLocalOffset = initializerLocalId * 10;
+    mut int32 initializerTypeId
+        = Host.StandaloneSourceLocals[initializerLocalOffset + 2];
+    int32 initializerBindingKind
+        = Host.StandaloneSourceLocals[initializerLocalOffset + 3];
+    int32 initializerExpressionStart
+        = Host.StandaloneSourceLocals[initializerLocalOffset + 8];
+    if ((initializerBindingKind != 0 && initializerBindingKind != 1)
+        || initializerExpressionStart < 0
+        || Host.StandaloneSourceLocals[initializerLocalOffset + 9]
+            != initializerSemicolon)
+    {
+        return 2;
+    }
+    init int32 initializerExpressionId;
+    init int32 nextInitializerToken;
+    int32 initializerStatus = ParseStandaloneSourceExpression(
+        localCallableId, localCallableId, expressionFirst,
+        initializerTypeId == 0 ? -1 : initializerTypeId,
+        initializerExpressionStart, initializerSemicolon, 1,
+        ref init initializerExpressionId,
+        ref init nextInitializerToken);
+    if (initializerStatus != 0)
+    {
+        return initializerStatus;
+    }
+    if (nextInitializerToken != initializerSemicolon)
+    {
+        return 1;
+    }
+    int32 initializerValueTypeId
+        = Host.StandaloneSourceExpressions[
+            (expressionFirst + initializerExpressionId) * 8 + 1];
+    if (initializerTypeId == 0)
+    {
+        if (!IsStandaloneSourceConstructionType(
+                initializerValueTypeId)
+            || GetStandaloneSourceUse(initializerValueTypeId) == 5)
+        {
+            return 2;
+        }
+        Host.StandaloneSourceLocals[initializerLocalOffset + 2]
+            = initializerValueTypeId;
+        initializerTypeId = initializerValueTypeId;
+    }
+    else if (initializerValueTypeId != initializerTypeId)
+    {
+        return 2;
+    }
+    init bool initializerDoesNotReturn;
+    int32 doesNotReturnStatus
+        = TryGetStandaloneSourceExpressionDoesNotReturn(
+            localCallableId, initializerExpressionId,
+            ref init initializerDoesNotReturn);
+    if (doesNotReturnStatus != 0 || initializerDoesNotReturn)
+    {
+        return doesNotReturnStatus != 0 ? doesNotReturnStatus : 2;
+    }
+    int32 initializerStatementStatus
+        = AppendStandaloneSourceStatement(
+            localCallableId, expressionFirst, 4,
+            initializerExpressionId, initializerLocalId);
+    if (initializerStatementStatus != 0)
+    {
+        return initializerStatementStatus;
+    }
+    Host.StandaloneSourceLocalStates[initializerLocalId] = 1;
+    return 0;
+}
+
+int32 ParseStandaloneSourceForValueStep(int32 localCallableId,
+    int32 expressionFirst, int32 tokenStart, int32 expressionEnd,
+    bool resultDiscard,
+    ref<init int32> statementIdResult,
+    ref<init int32> nextTokenResult)
+    ensure return == 0 ? (*statementIdResult is init
+        && *nextTokenResult is init) : true
+{
+    if (tokenStart < 0 || tokenStart >= expressionEnd
+        || expressionEnd > Host.Tokens.Length / 3)
+    {
+        return 2;
+    }
+    int32 expressionStart = resultDiscard ? tokenStart + 2 : tokenStart;
+    if (expressionStart < tokenStart || expressionStart >= expressionEnd)
+    {
+        return 2;
+    }
+
+    init int32 expressionId;
+    init int32 nextExpressionToken;
+    int32 expressionStatus = ParseStandaloneSourceExpression(
+        localCallableId, localCallableId, expressionFirst, -1,
+        expressionStart, expressionEnd, 1,
+        ref init expressionId, ref init nextExpressionToken);
+    if (expressionStatus != 0)
+    {
+        return expressionStatus;
+    }
+    int32 expressionGlobalId = expressionFirst + expressionId;
+    if (nextExpressionToken != expressionEnd
+        || expressionGlobalId < expressionFirst
+        || expressionGlobalId
+            >= Host.StandaloneSourceExpressionCount[0])
+    {
+        return 2;
+    }
+    int32 typeId
+        = Host.StandaloneSourceExpressions[
+            expressionGlobalId * 8 + 1];
+    if (typeId <= 0 || typeId > Host.StandaloneTypeFactCount[0])
+    {
+        return 3;
+    }
+    init bool doesNotReturn;
+    int32 doesNotReturnStatus
+        = TryGetStandaloneSourceExpressionDoesNotReturn(
+            localCallableId, expressionId, ref init doesNotReturn);
+    int32 sourceUse = GetStandaloneSourceUse(typeId);
+    if (doesNotReturnStatus != 0 || doesNotReturn
+        || (resultDiscard
+            ? (sourceUse != 0 && sourceUse != 1)
+            : (!IsStandaloneUnitType(typeId)
+                || sourceUse != 0)))
+    {
+        return doesNotReturnStatus != 0 ? doesNotReturnStatus : 2;
+    }
+    int32 statementStatus = AppendStandaloneSourceStatement(
+        localCallableId, expressionFirst,
+        resultDiscard ? 3 : 2, expressionId, -1);
+    if (statementStatus != 0)
+    {
+        return statementStatus;
+    }
+    *statementIdResult
+        = Host.StandaloneSourceStatementCount[0] - 1;
+    *nextTokenResult = expressionEnd;
     return 0;
 }
 
@@ -3258,92 +3412,74 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
                 int32 initializerLocalId
                     = FindStandaloneSourceLocalAtDeclaration(
                         localCallableId, headerStart);
-                if (initializerLocalId < 0)
+                if (initializerLocalId == -2)
                 {
-                    return 2;
+                    return 3;
                 }
-                int32 initializerLocalOffset = initializerLocalId * 10;
-                mut int32 initializerTypeId
-                    = Host.StandaloneSourceLocals[
-                        initializerLocalOffset + 2];
-                int32 initializerBindingKind
-                    = Host.StandaloneSourceLocals[
-                        initializerLocalOffset + 3];
-                int32 initializerExpressionStart
-                    = Host.StandaloneSourceLocals[
-                        initializerLocalOffset + 8];
-                if ((initializerBindingKind != 0
-                        && initializerBindingKind != 1)
-                    || initializerExpressionStart < 0
-                    || Host.StandaloneSourceLocals[
-                        initializerLocalOffset + 9]
-                        != initializerSemicolon)
+                if (initializerLocalId >= 0)
                 {
-                    return 2;
-                }
-                init int32 initializerExpressionId;
-                init int32 nextInitializerToken;
-                int32 initializerStatus
-                    = ParseStandaloneSourceExpression(
-                        localCallableId, localCallableId,
-                        expressionFirst,
-                        initializerTypeId == 0
-                            ? -1 : initializerTypeId,
-                        initializerExpressionStart,
-                        initializerSemicolon, 1,
-                        ref init initializerExpressionId,
-                        ref init nextInitializerToken);
-                if (initializerStatus != 0)
-                {
-                    return initializerStatus;
-                }
-                if (nextInitializerToken != initializerSemicolon)
-                {
-                    return 1;
-                }
-                int32 initializerValueTypeId
-                    = Host.StandaloneSourceExpressions[
-                        (expressionFirst
-                            + initializerExpressionId) * 8 + 1];
-                if (initializerTypeId == 0)
-                {
-                    if (!IsStandaloneSourceConstructionType(
-                            initializerValueTypeId)
-                        || GetStandaloneSourceUse(
-                            initializerValueTypeId) == 5)
+                    int32 initializerStatus
+                        = BindStandaloneSourceForHeaderLocal(
+                            localCallableId, expressionFirst,
+                            initializerLocalId, initializerSemicolon);
+                    if (initializerStatus != 0)
                     {
-                        return 2;
+                        return initializerStatus;
                     }
-                    Host.StandaloneSourceLocals[
-                        initializerLocalOffset + 2]
-                        = initializerValueTypeId;
-                    initializerTypeId = initializerValueTypeId;
                 }
-                else if (initializerValueTypeId != initializerTypeId)
+                else
                 {
-                    return 2;
+                    int32 initializerFirstTokenKind
+                        = Host.Tokens[headerStart * 3];
+                    int32 initializerAssignmentTokenKind
+                        = headerStart + 1 < initializerSemicolon
+                            ? Host.Tokens[(headerStart + 1) * 3] : 0;
+                    bool assignmentInitializer
+                        = initializerFirstTokenKind == 2
+                            && (initializerAssignmentTokenKind == 64
+                                || GetStandaloneSourceCompoundAssignmentExpressionKind(
+                                    initializerAssignmentTokenKind) != 0);
+                    bool resultDiscardInitializer
+                        = initializerFirstTokenKind == 81
+                            && headerStart + 1 < initializerSemicolon
+                            && initializerAssignmentTokenKind == 64;
+                    init int32 initializerStatementId;
+                    init int32 nextInitializerToken;
+                    int32 initializerStatus;
+                    if (assignmentInitializer)
+                    {
+                        initializerStatus
+                            = ParseStandaloneSourceAssignmentBranch(
+                                localCallableId, localCallableId,
+                                expressionFirst, headerStart,
+                                headerClose, true,
+                                ref init initializerStatementId,
+                                ref init nextInitializerToken);
+                    }
+                    else
+                    {
+                        initializerStatus
+                            = ParseStandaloneSourceForValueStep(
+                                localCallableId, expressionFirst,
+                                headerStart, initializerSemicolon,
+                                resultDiscardInitializer,
+                                ref init initializerStatementId,
+                                ref init nextInitializerToken);
+                    }
+                    if (initializerStatus != 0)
+                    {
+                        return initializerStatus;
+                    }
+                    int32 expectedNextInitializerToken
+                        = assignmentInitializer
+                            ? initializerSemicolon + 1
+                            : initializerSemicolon;
+                    if (nextInitializerToken
+                        != expectedNextInitializerToken)
+                    {
+                        return 1;
+                    }
                 }
-                init bool initializerDoesNotReturn;
-                int32 initializerDoesNotReturnStatus
-                    = TryGetStandaloneSourceExpressionDoesNotReturn(
-                        localCallableId, initializerExpressionId,
-                        ref init initializerDoesNotReturn);
-                if (initializerDoesNotReturnStatus != 0
-                    || initializerDoesNotReturn)
-                {
-                    return initializerDoesNotReturnStatus != 0
-                        ? initializerDoesNotReturnStatus : 2;
-                }
-                int32 initializerStatementStatus
-                    = AppendStandaloneSourceStatement(
-                        localCallableId, expressionFirst, 4,
-                        initializerExpressionId, initializerLocalId);
-                if (initializerStatementStatus != 0)
-                {
-                    return initializerStatementStatus;
-                }
-                Host.StandaloneSourceLocalStates[
-                    initializerLocalId] = 1;
             }
             init int32 conditionSemicolon;
             int32 conditionSemicolonStatus
@@ -3456,124 +3592,7 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
                     = stepStart + 1 < headerClose
                         && stepFirstTokenKind == 81
                         && Host.Tokens[(stepStart + 1) * 3] == 64;
-                bool unitStep = !assignmentStep && !resultDiscardStep;
-                if (unitStep)
-                {
-                    init int32 stepExpressionId;
-                    init int32 parsedNextStepToken;
-                    int32 expressionStatus
-                        = ParseStandaloneSourceExpression(
-                            localCallableId, localCallableId,
-                            expressionFirst, -1, stepStart, headerClose,
-                            1, ref init stepExpressionId,
-                            ref init parsedNextStepToken);
-                    if (expressionStatus != 0)
-                    {
-                        return expressionStatus;
-                    }
-                    int32 stepExpressionGlobalId
-                        = expressionFirst + stepExpressionId;
-                    if (parsedNextStepToken != headerClose
-                        || stepExpressionGlobalId < expressionFirst
-                        || stepExpressionGlobalId
-                            >= Host.StandaloneSourceExpressionCount[0])
-                    {
-                        return 3;
-                    }
-                    int32 stepExpressionTypeId
-                        = Host.StandaloneSourceExpressions[
-                            stepExpressionGlobalId * 8 + 1];
-                    if (stepExpressionTypeId <= 0
-                        || stepExpressionTypeId
-                            > Host.StandaloneTypeFactCount[0])
-                    {
-                        return 3;
-                    }
-                    init bool stepDoesNotReturn;
-                    int32 stepDoesNotReturnStatus
-                        = TryGetStandaloneSourceExpressionDoesNotReturn(
-                            localCallableId, stepExpressionId,
-                            ref init stepDoesNotReturn);
-                    if (!IsStandaloneUnitType(stepExpressionTypeId)
-                        || stepDoesNotReturnStatus != 0
-                        || stepDoesNotReturn)
-                    {
-                        return stepDoesNotReturnStatus != 0
-                            ? stepDoesNotReturnStatus : 2;
-                    }
-                    int32 stepStatementStatus
-                        = AppendStandaloneSourceStatement(
-                            localCallableId, expressionFirst, 2,
-                            stepExpressionId, -1);
-                    if (stepStatementStatus != 0)
-                    {
-                        return stepStatementStatus;
-                    }
-                    stepStatementId
-                        = Host.StandaloneSourceStatementCount[0] - 1;
-                    nextStepToken = headerClose;
-                }
-                else if (resultDiscardStep)
-                {
-                    init int32 stepExpressionId;
-                    init int32 parsedNextStepToken;
-                    int32 expressionStatus
-                        = ParseStandaloneSourceExpression(
-                            localCallableId, localCallableId,
-                            expressionFirst, -1, stepStart + 2,
-                            headerClose, 1,
-                            ref init stepExpressionId,
-                            ref init parsedNextStepToken);
-                    if (expressionStatus != 0)
-                    {
-                        return expressionStatus;
-                    }
-                    int32 stepExpressionGlobalId
-                        = expressionFirst + stepExpressionId;
-                    if (parsedNextStepToken != headerClose
-                        || stepExpressionGlobalId < expressionFirst
-                        || stepExpressionGlobalId
-                            >= Host.StandaloneSourceExpressionCount[0])
-                    {
-                        return 2;
-                    }
-                    int32 stepExpressionTypeId
-                        = Host.StandaloneSourceExpressions[
-                            stepExpressionGlobalId * 8 + 1];
-                    if (stepExpressionTypeId <= 0
-                        || stepExpressionTypeId
-                            > Host.StandaloneTypeFactCount[0])
-                    {
-                        return 3;
-                    }
-                    init bool stepDoesNotReturn;
-                    int32 stepDoesNotReturnStatus
-                        = TryGetStandaloneSourceExpressionDoesNotReturn(
-                            localCallableId, stepExpressionId,
-                            ref init stepDoesNotReturn);
-                    int32 stepSourceUse
-                        = GetStandaloneSourceUse(
-                            stepExpressionTypeId);
-                    if (stepDoesNotReturnStatus != 0
-                        || stepDoesNotReturn
-                        || (stepSourceUse != 0 && stepSourceUse != 1))
-                    {
-                        return stepDoesNotReturnStatus != 0
-                            ? stepDoesNotReturnStatus : 2;
-                    }
-                    int32 stepStatementStatus
-                        = AppendStandaloneSourceStatement(
-                            localCallableId, expressionFirst, 3,
-                            stepExpressionId, -1);
-                    if (stepStatementStatus != 0)
-                    {
-                        return stepStatementStatus;
-                    }
-                    stepStatementId
-                        = Host.StandaloneSourceStatementCount[0] - 1;
-                    nextStepToken = headerClose;
-                }
-                else
+                if (assignmentStep)
                 {
                     int32 stepStatus
                         = ParseStandaloneSourceAssignmentBranch(
@@ -3585,10 +3604,6 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
                     {
                         return stepStatus;
                     }
-                    if (nextStepToken != headerClose)
-                    {
-                        return 1;
-                    }
                     int32 stepValidationStatus
                         = ValidateStandaloneSourceWhileAssignment(
                             localCallableId, stepStatementId);
@@ -3596,6 +3611,22 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
                     {
                         return stepValidationStatus;
                     }
+                }
+                else
+                {
+                    int32 stepStatus = ParseStandaloneSourceForValueStep(
+                        localCallableId, expressionFirst, stepStart,
+                        headerClose, resultDiscardStep,
+                        ref init stepStatementId,
+                        ref init nextStepToken);
+                    if (stepStatus != 0)
+                    {
+                        return stepStatus;
+                    }
+                }
+                if (nextStepToken != headerClose)
+                {
+                    return 1;
                 }
                 int32 stepAppendStatus = AppendStandaloneSourceIfChild(
                     localCallableId, controlNodeId, loopStatementId,

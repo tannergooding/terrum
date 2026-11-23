@@ -1590,6 +1590,24 @@ internal sealed class StandaloneMethodImportInputTests
         0, 193, false)]
     [TestCase(BoundRuntimePolicy.FailFast,
         "namespace client { int32 Main(int32 limit) { "
+            + "init mut int32 counter; "
+            + "for (counter = 1; counter < limit; "
+            + "counter = counter + 1) { } return counter; } }",
+        0, 194, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { int32 Main(int32 limit) { "
+            + "mut int32 counter = 0; "
+            + "for (_ = counter; counter < limit; "
+            + "counter = counter + 1) { } return counter; } }",
+        0, 195, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { int32 Main(int32 limit) { "
+            + "mut int32 counter = 0; "
+            + "for ((); counter < limit; "
+            + "counter = counter + 1) { } return counter; } }",
+        0, 196, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { int32 Main(int32 limit) { "
             + "for (mut int32 index = 0; index < limit; "
             + "index = index + 1) { } return index; } }",
         2, 0, false)]
@@ -6472,7 +6490,8 @@ internal sealed class StandaloneMethodImportInputTests
                 if (Scan() < 1) { return 87; }
                 int32 status = BindStandaloneOwnedSourceProgram();
                 int32 loopStatementId
-                    = {{verificationMode == 189 ? 2 : 1}};
+                    = {{verificationMode is 189 or 194 or 195 or 196
+                        ? 2 : 1}};
                 if (status != 0
                     || Host.StandaloneSourceBodyCount[0] < 1
                     || Host.StandaloneSourceStatementCount[0] < 3
@@ -6509,7 +6528,13 @@ internal sealed class StandaloneMethodImportInputTests
                             || Host.StandaloneSourceLocals[3] != 0
                             || Host.StandaloneTypeFacts[
                                 Host.StandaloneSourceLocals[2] * 3 + 1]
-                                != 0x08))) {
+                                != 0x08))
+                    || ({{verificationMode == 194 ? "true" : "false"}}
+                        && Host.StandaloneSourceStatements[3] != 5)
+                    || ({{verificationMode == 195 ? "true" : "false"}}
+                        && Host.StandaloneSourceStatements[3] != 3)
+                    || ({{verificationMode == 196 ? "true" : "false"}}
+                        && Host.StandaloneSourceStatements[3] != 2)) {
                     return 88;
                 }
                 int32 sourceStatementCount
@@ -6585,7 +6610,8 @@ internal sealed class StandaloneMethodImportInputTests
                         > Host.StandaloneSourceIfChildCount[0]
                             - stepCount
                     || sourceStatementCount
-                        != {{verificationMode == 189 ? 4 : 3}}
+                        != {{verificationMode is 189 or 194 or 195 or 196
+                            ? 4 : 3}}
                             + bodyCount + stepCount
                     || Host.StandaloneSourceLocalCount[0]
                         != {{verificationMode == 189 ? 2 : 1}}
@@ -6608,7 +6634,8 @@ internal sealed class StandaloneMethodImportInputTests
                     int32 stepStatementId
                         = Host.StandaloneSourceIfChildren[stepFirst];
                     if (stepStatementId
-                            != {{verificationMode == 189 ? 3 : 2}}
+                            != {{verificationMode is 189 or 194 or 195 or 196
+                                ? 3 : 2}}
                                 + bodyCount
                         || Host.StandaloneSourceStatements[
                             stepStatementId * 3]
@@ -6968,7 +6995,7 @@ internal sealed class StandaloneMethodImportInputTests
             : verificationMode is >= 178 and <= 181
                 ? doLoopVerificationSource
             : verificationMode is >= 182 and <= 187
-                or 189 or 190 or 191 or 192 or 193
+                or 189 or 190 or 191 or 192 or 193 or 194 or 195 or 196
                 ? forLoopVerificationSource
             : verificationMode == 188
                 ? infiniteForVerificationSource
@@ -7422,7 +7449,8 @@ internal sealed class StandaloneMethodImportInputTests
                     or 172 or 173 or 174 or 175 or 176 or 177
                     or 178 or 179 or 180 or 181
                     or 182 or 183 or 184 or 185 or 186 or 187
-                    or 188 or 189 or 190 or 191 or 192 or 193)
+                    or 188 or 189 or 190 or 191 or 192 or 193 or 194
+                    or 195 or 196)
             {
                 var expectedBlockCount
                     = verificationMode is 159 or 160 or 165 or 166
@@ -7440,6 +7468,9 @@ internal sealed class StandaloneMethodImportInputTests
                         : verificationMode == 191 ? 5
                         : verificationMode == 192 ? 5
                         : verificationMode == 193 ? 5
+                        : verificationMode == 194 ? 5
+                        : verificationMode == 195 ? 5
+                        : verificationMode == 196 ? 5
                         : verificationMode is 184 or 185 ? 4
                         : verificationMode == 169 ? 4
                         : verificationMode is 172 or 173 or 174 ? 4
@@ -7453,11 +7484,14 @@ internal sealed class StandaloneMethodImportInputTests
                         + (verificationMode == 180 ? 0
                             : verificationMode == 187 ? 0
                             : verificationMode == 188 ? 0
-                            : verificationMode == 189 ? 2
+                            : verificationMode == 189 ? 3
                             : verificationMode == 190 ? 2
                             : verificationMode == 191 ? 1
                             : verificationMode == 192 ? 1
                             : verificationMode == 193 ? 1
+                            : verificationMode == 194 ? 2
+                            : verificationMode == 195 ? 2
+                            : verificationMode == 196 ? 2
                             : verificationMode is 175 or 176 ? 2
                             : verificationMode == 177 ? 3
                             : verificationMode == 181 ? 2
@@ -7479,7 +7513,8 @@ internal sealed class StandaloneMethodImportInputTests
                     and not 178 and not 179 and not 180 and not 181
                     and not 182 and not 183 and not 184 and not 185
                     and not 186 and not 187 and not 188 and not 189
-                    and not 190 and not 191 and not 192 and not 193)
+                    and not 190 and not 191 and not 192 and not 193
+                    and not 194 and not 195 and not 196)
                 {
                     Assert.That(bodyReader.GetBlockCode(0)
                         .IndexOf((byte)0xB1),
@@ -8052,6 +8087,7 @@ internal sealed class StandaloneMethodImportInputTests
                         and not 182 and not 183 and not 184 and not 185
                         and not 186 and not 187 and not 188 and not 189
                         and not 190 and not 191 and not 192 and not 193
+                        and not 194 and not 195 and not 196
                         and not 170 and not 171)
                 {
                     var edgeRecord
@@ -8120,7 +8156,11 @@ internal sealed class StandaloneMethodImportInputTests
                     or 178 or 179 or 180 or 181
                     or 182 or 183 or 184 or 185 or 186 or 187
                     ? 1 : 0;
-            if (verificationMode is 189 or 190)
+            if (verificationMode == 189)
+            {
+                expectedDecoderConstantMapCount = 3;
+            }
+            if (verificationMode == 190)
             {
                 expectedDecoderConstantMapCount = 2;
             }
@@ -8135,6 +8175,14 @@ internal sealed class StandaloneMethodImportInputTests
             if (verificationMode == 193)
             {
                 expectedDecoderConstantMapCount = 1;
+            }
+            if (verificationMode == 194)
+            {
+                expectedDecoderConstantMapCount = 2;
+            }
+            if (verificationMode is 195 or 196)
+            {
+                expectedDecoderConstantMapCount = 2;
             }
             if (verificationMode is 71 or 130 or 144 or 145 or 146
                 or 148 or 149 or 152 or 153)
@@ -8235,7 +8283,7 @@ internal sealed class StandaloneMethodImportInputTests
                 188 => "Host.StandaloneDecoderBodies[19] != 2 || "
                     + "Host.StandaloneDecoderBodies[21] != 2",
                 189 => "Host.StandaloneDecoderBodies[19] != 5 || "
-                    + "Host.StandaloneDecoderBodies[21] != 7",
+                    + "Host.StandaloneDecoderBodies[21] != 8",
                 190 => "Host.StandaloneDecoderBodies[19] != 4 || "
                     + "Host.StandaloneDecoderBodies[21] != 6",
                 191 => "Host.StandaloneDecoderBodies[19] != 5 || "
@@ -8244,6 +8292,11 @@ internal sealed class StandaloneMethodImportInputTests
                     + "Host.StandaloneDecoderBodies[21] != 6",
                 193 => "Host.StandaloneDecoderBodies[19] != 5 || "
                     + "Host.StandaloneDecoderBodies[21] != 6",
+                194 => "Host.StandaloneDecoderBodies[19] != 5 || "
+                    + "Host.StandaloneDecoderBodies[21] != 7",
+                195 or 196
+                    => "Host.StandaloneDecoderBodies[19] != 5 || "
+                        + "Host.StandaloneDecoderBodies[21] != 7",
                 149 => "Host.StandaloneDecoderBodies[19] != 6 || "
                     + "Host.StandaloneDecoderBodies[21] != 9",
                 _ => "false",
@@ -8337,7 +8390,8 @@ internal sealed class StandaloneMethodImportInputTests
                     or 172 or 173 or 174 or 175 or 176 or 177
                     or 178 or 179 or 180 or 181
                     or 182 or 183 or 184 or 185 or 186 or 187
-                    or 188 or 189 or 190 or 191 or 192 or 193)
+                    or 188 or 189 or 190 or 191 or 192 or 193 or 194
+                    or 195 or 196)
             {
                 var artifactIndex = new TrRmArtifactIndex(artifact);
                 Assert.That(artifactIndex.TryGetSection(0x0020,
@@ -8524,6 +8578,9 @@ internal sealed class StandaloneMethodImportInputTests
                     191 => 2,
                     192 => 2,
                     193 => 2,
+                    194 => 1,
+                    195 => 1,
+                    196 => 1,
                     _ => 4,
                 };
                 var mainIndex = -1;
@@ -8979,6 +9036,17 @@ internal sealed class StandaloneMethodImportInputTests
                         Assert.That(Execute(0, 3), Is.EqualTo(3));
                         Assert.That(Execute(3, 5), Is.EqualTo(5));
                         Assert.That(Execute(5, 2), Is.EqualTo(5));
+                        break;
+                    case 194:
+                        Assert.That(Execute(0), Is.EqualTo(1));
+                        Assert.That(Execute(3), Is.EqualTo(3));
+                        Assert.That(Execute(5), Is.EqualTo(5));
+                        break;
+                    case 195:
+                    case 196:
+                        Assert.That(Execute(0), Is.EqualTo(0));
+                        Assert.That(Execute(3), Is.EqualTo(3));
+                        Assert.That(Execute(5), Is.EqualTo(5));
                         break;
                 }
             }
