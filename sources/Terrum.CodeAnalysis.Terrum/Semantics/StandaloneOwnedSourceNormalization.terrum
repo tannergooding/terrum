@@ -2785,28 +2785,43 @@ int32 NormalizeStandaloneSourceStatement(int32 bodyId,
         }
         return 0;
     }
-    if (statementKind == 2)
+    if (statementKind == 2 || statementKind == 3)
     {
+        int32 expressionCount
+            = Host.StandaloneSourceBodies[bodyId * 12 + 4];
+        if (expressionId < 0 || expressionId >= expressionCount)
+        {
+            return 3;
+        }
         int32 expressionOffset
             = (Host.StandaloneSourceBodies[bodyId * 12 + 3]
                 + expressionId) * 8;
         int32 expressionTypeId
             = Host.StandaloneSourceExpressions[expressionOffset + 1];
-        if (IsStandaloneUnitType(expressionTypeId))
+        init int32 selectorKind;
+        init int32 sourceUse;
+        init int32 selectorIndex;
+        init bool terminated;
+        int32 expressionStatus = NormalizeStandaloneSourceExpression(
+            bodyId, expressionId, 0,
+            ref init selectorKind, ref init sourceUse,
+            ref init selectorIndex, ref init terminated);
+        if (expressionStatus != 0)
         {
+            return expressionStatus;
+        }
+        if (terminated)
+        {
+            *terminalKind = 1;
             return 0;
         }
-        init bool expressionDoesNotReturn;
-        if (TryGetStandaloneSourceExpressionDoesNotReturn(bodyId,
-                expressionId, ref init expressionDoesNotReturn) != 0
-            || !expressionDoesNotReturn)
+        if (statementKind == 2
+            ? !IsStandaloneUnitType(expressionTypeId)
+                || sourceUse != 0
+            : (sourceUse != 0 && sourceUse != 1))
         {
             return 3;
         }
-        return 0;
-    }
-    if (statementKind == 3)
-    {
         return 0;
     }
     return 3;
@@ -4680,6 +4695,30 @@ int32 NormalizeStandaloneSourceExpression(int32 bodyId,
     if (typeId <= 0 || typeId > Host.StandaloneTypeFactCount[0])
     {
         return 3;
+    }
+
+    if (expressionKind == 7)
+    {
+        if (!IsStandaloneUnitType(typeId)
+            || GetStandaloneSourceUse(typeId) != 0
+            || Host.StandaloneSourceExpressions[
+                expressionOffset + 2] != 0
+            || Host.StandaloneSourceExpressions[
+                expressionOffset + 3] != 0
+            || Host.StandaloneSourceExpressions[
+                expressionOffset + 4] != 0
+            || Host.StandaloneSourceExpressions[
+                expressionOffset + 5] != 0
+            || Host.StandaloneSourceExpressions[
+                expressionOffset + 6] != -1)
+        {
+            return 3;
+        }
+        *selectorKindResult = 0;
+        *sourceUseResult = 0;
+        *selectorIndexResult = 0;
+        *terminatedResult = false;
+        return 0;
     }
 
     if (expressionKind == 34)

@@ -3442,10 +3442,21 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
             {
                 init int32 stepStatementId;
                 init int32 nextStepToken;
-                bool unitStep
-                    = stepStart + 2 == headerClose
-                        && Host.Tokens[stepStart * 3] == 46
-                        && Host.Tokens[(stepStart + 1) * 3] == 47;
+                int32 stepFirstTokenKind
+                    = Host.Tokens[stepStart * 3];
+                int32 stepAssignmentTokenKind
+                    = stepStart + 1 < headerClose
+                        ? Host.Tokens[(stepStart + 1) * 3] : 0;
+                bool assignmentStep
+                    = stepFirstTokenKind == 2
+                        && (stepAssignmentTokenKind == 64
+                            || GetStandaloneSourceCompoundAssignmentExpressionKind(
+                                stepAssignmentTokenKind) != 0);
+                bool resultDiscardStep
+                    = stepStart + 1 < headerClose
+                        && stepFirstTokenKind == 81
+                        && Host.Tokens[(stepStart + 1) * 3] == 64;
+                bool unitStep = !assignmentStep && !resultDiscardStep;
                 if (unitStep)
                 {
                     init int32 stepExpressionId;
@@ -3465,16 +3476,94 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
                     if (parsedNextStepToken != headerClose
                         || stepExpressionGlobalId < expressionFirst
                         || stepExpressionGlobalId
-                            >= Host.StandaloneSourceExpressionCount[0]
-                        || !IsStandaloneUnitType(
-                            Host.StandaloneSourceExpressions[
-                                stepExpressionGlobalId * 8 + 1]))
+                            >= Host.StandaloneSourceExpressionCount[0])
                     {
-                        return 2;
+                        return 3;
+                    }
+                    int32 stepExpressionTypeId
+                        = Host.StandaloneSourceExpressions[
+                            stepExpressionGlobalId * 8 + 1];
+                    if (stepExpressionTypeId <= 0
+                        || stepExpressionTypeId
+                            > Host.StandaloneTypeFactCount[0])
+                    {
+                        return 3;
+                    }
+                    init bool stepDoesNotReturn;
+                    int32 stepDoesNotReturnStatus
+                        = TryGetStandaloneSourceExpressionDoesNotReturn(
+                            localCallableId, stepExpressionId,
+                            ref init stepDoesNotReturn);
+                    if (!IsStandaloneUnitType(stepExpressionTypeId)
+                        || stepDoesNotReturnStatus != 0
+                        || stepDoesNotReturn)
+                    {
+                        return stepDoesNotReturnStatus != 0
+                            ? stepDoesNotReturnStatus : 2;
                     }
                     int32 stepStatementStatus
                         = AppendStandaloneSourceStatement(
                             localCallableId, expressionFirst, 2,
+                            stepExpressionId, -1);
+                    if (stepStatementStatus != 0)
+                    {
+                        return stepStatementStatus;
+                    }
+                    stepStatementId
+                        = Host.StandaloneSourceStatementCount[0] - 1;
+                    nextStepToken = headerClose;
+                }
+                else if (resultDiscardStep)
+                {
+                    init int32 stepExpressionId;
+                    init int32 parsedNextStepToken;
+                    int32 expressionStatus
+                        = ParseStandaloneSourceExpression(
+                            localCallableId, localCallableId,
+                            expressionFirst, -1, stepStart + 2,
+                            headerClose, 1,
+                            ref init stepExpressionId,
+                            ref init parsedNextStepToken);
+                    if (expressionStatus != 0)
+                    {
+                        return expressionStatus;
+                    }
+                    int32 stepExpressionGlobalId
+                        = expressionFirst + stepExpressionId;
+                    if (parsedNextStepToken != headerClose
+                        || stepExpressionGlobalId < expressionFirst
+                        || stepExpressionGlobalId
+                            >= Host.StandaloneSourceExpressionCount[0])
+                    {
+                        return 2;
+                    }
+                    int32 stepExpressionTypeId
+                        = Host.StandaloneSourceExpressions[
+                            stepExpressionGlobalId * 8 + 1];
+                    if (stepExpressionTypeId <= 0
+                        || stepExpressionTypeId
+                            > Host.StandaloneTypeFactCount[0])
+                    {
+                        return 3;
+                    }
+                    init bool stepDoesNotReturn;
+                    int32 stepDoesNotReturnStatus
+                        = TryGetStandaloneSourceExpressionDoesNotReturn(
+                            localCallableId, stepExpressionId,
+                            ref init stepDoesNotReturn);
+                    int32 stepSourceUse
+                        = GetStandaloneSourceUse(
+                            stepExpressionTypeId);
+                    if (stepDoesNotReturnStatus != 0
+                        || stepDoesNotReturn
+                        || (stepSourceUse != 0 && stepSourceUse != 1))
+                    {
+                        return stepDoesNotReturnStatus != 0
+                            ? stepDoesNotReturnStatus : 2;
+                    }
+                    int32 stepStatementStatus
+                        = AppendStandaloneSourceStatement(
+                            localCallableId, expressionFirst, 3,
                             stepExpressionId, -1);
                     if (stepStatementStatus != 0)
                     {
@@ -10568,8 +10657,9 @@ int32 VerifyStandaloneDirectCalls()
                     int32 stepStatementKind
                         = Host.StandaloneSourceStatements[
                             stepStatementOffset];
-                    if ((stepStatementKind != 5
-                            && stepStatementKind != 2))
+                    if (stepStatementKind != 5
+                        && stepStatementKind != 2
+                        && stepStatementKind != 3)
                     {
                         return 3;
                     }
@@ -10588,26 +10678,31 @@ int32 VerifyStandaloneDirectCalls()
                         = Host.StandaloneSourceExpressions[
                             (bodyExpressionFirst
                                 + stepExpressionId) * 8 + 1];
+                    if (stepExpressionTypeId <= 0
+                        || stepExpressionTypeId
+                            > Host.StandaloneTypeFactCount[0])
+                    {
+                        return 3;
+                    }
                     if (stepStatementKind == 2)
                     {
-                        int32 stepExpressionOffset
-                            = (bodyExpressionFirst
-                                + stepExpressionId) * 8;
                         if (stepPlaceId != -1
                             || !IsStandaloneUnitType(
                                 stepExpressionTypeId)
-                            || Host.StandaloneSourceExpressions[
-                                stepExpressionOffset] != 7
-                            || Host.StandaloneSourceExpressions[
-                                stepExpressionOffset + 2] != 0
-                            || Host.StandaloneSourceExpressions[
-                                stepExpressionOffset + 3] != 0
-                            || Host.StandaloneSourceExpressions[
-                                stepExpressionOffset + 4] != 0
-                            || Host.StandaloneSourceExpressions[
-                                stepExpressionOffset + 5] != 0
-                            || Host.StandaloneSourceExpressions[
-                                stepExpressionOffset + 6] != -1)
+                            || GetStandaloneSourceUse(
+                                stepExpressionTypeId) != 0)
+                        {
+                            return 3;
+                        }
+                    }
+                    else if (stepStatementKind == 3)
+                    {
+                        int32 stepSourceUse
+                            = GetStandaloneSourceUse(
+                                stepExpressionTypeId);
+                        if (stepPlaceId != -1
+                            || (stepSourceUse != 0
+                                && stepSourceUse != 1))
                         {
                             return 3;
                         }

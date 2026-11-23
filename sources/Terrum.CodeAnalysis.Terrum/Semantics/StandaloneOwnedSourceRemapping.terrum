@@ -1712,7 +1712,11 @@ int32 VerifyStandaloneRewrittenSourceArenas()
                 = controlStatementKind == 11
                     && childOrdinal >= trueCount
                     && currentChildKind == 2;
-            if (unitForStep)
+            bool discardedForStep
+                = controlStatementKind == 11
+                    && childOrdinal >= trueCount
+                    && currentChildKind == 3;
+            if (unitForStep || discardedForStep)
             {
                 int32 stepExpressionId
                     = Host.StandaloneSourceStatements[
@@ -1730,28 +1734,25 @@ int32 VerifyStandaloneRewrittenSourceArenas()
                 int32 stepLocationId
                     = Host.StandaloneSourceStatements[
                         childStatementOffset + 2];
+                if (stepExpressionTypeId <= 0
+                    || stepExpressionTypeId
+                        > Host.StandaloneTypeFactCount[0])
+                {
+                    return 3;
+                }
                 init bool stepDoesNotReturn;
                 int32 stepStatus
                     = TryGetStandaloneSourceExpressionDoesNotReturn(
                         bodyId, stepExpressionId,
                         ref init stepDoesNotReturn);
+                int32 stepSourceUse
+                    = GetStandaloneSourceUse(stepExpressionTypeId);
                 if (stepLocationId != -1
-                    || stepExpressionTypeId <= 0
-                    || stepExpressionTypeId
-                        > Host.StandaloneTypeFactCount[0]
-                    || !IsStandaloneUnitType(stepExpressionTypeId)
-                    || Host.StandaloneSourceExpressions[
-                        stepExpressionOffset] != 7
-                    || Host.StandaloneSourceExpressions[
-                        stepExpressionOffset + 2] != 0
-                    || Host.StandaloneSourceExpressions[
-                        stepExpressionOffset + 3] != 0
-                    || Host.StandaloneSourceExpressions[
-                        stepExpressionOffset + 4] != 0
-                    || Host.StandaloneSourceExpressions[
-                        stepExpressionOffset + 5] != 0
-                    || Host.StandaloneSourceExpressions[
-                        stepExpressionOffset + 6] != -1
+                    || (unitForStep
+                        && !IsStandaloneUnitType(stepExpressionTypeId))
+                    || (unitForStep && stepSourceUse != 0)
+                    || (discardedForStep
+                        && stepSourceUse != 0 && stepSourceUse != 1)
                     || stepStatus != 0 || stepDoesNotReturn)
                 {
                     return 3;
@@ -1761,7 +1762,8 @@ int32 VerifyStandaloneRewrittenSourceArenas()
                 ? (childOrdinal < trueCount
                     ? sawLoopTransfer || currentChildKind != 5
                     : controlStatementKind != 11
-                        || (currentChildKind != 5 && !unitForStep))
+                    || (currentChildKind != 5 && !unitForStep
+                        && !discardedForStep))
                 : currentChildKind != 1 && currentChildKind != 5)
             {
                 return 3;

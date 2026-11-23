@@ -1583,6 +1583,12 @@ internal sealed class StandaloneMethodImportInputTests
             + "counter = counter + 1; } return counter; } }",
         0, 192, false)]
     [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { int32 Main(int32 initial, int32 limit) { "
+            + "mut int32 counter = initial; "
+            + "for (; counter < limit; _ = counter) { "
+            + "counter = counter + 1; } return counter; } }",
+        0, 193, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
         "namespace client { int32 Main(int32 limit) { "
             + "for (mut int32 index = 0; index < limit; "
             + "index = index + 1) { } return index; } }",
@@ -6606,7 +6612,8 @@ internal sealed class StandaloneMethodImportInputTests
                                 + bodyCount
                         || Host.StandaloneSourceStatements[
                             stepStatementId * 3]
-                            != {{verificationMode == 192 ? 2 : 5}}) {
+                            != {{verificationMode == 192 ? 2
+                                : verificationMode == 193 ? 3 : 5}}) {
                         return 88;
                     }
                 }
@@ -6961,7 +6968,7 @@ internal sealed class StandaloneMethodImportInputTests
             : verificationMode is >= 178 and <= 181
                 ? doLoopVerificationSource
             : verificationMode is >= 182 and <= 187
-                or 189 or 190 or 191 or 192
+                or 189 or 190 or 191 or 192 or 193
                 ? forLoopVerificationSource
             : verificationMode == 188
                 ? infiniteForVerificationSource
@@ -7415,7 +7422,7 @@ internal sealed class StandaloneMethodImportInputTests
                     or 172 or 173 or 174 or 175 or 176 or 177
                     or 178 or 179 or 180 or 181
                     or 182 or 183 or 184 or 185 or 186 or 187
-                    or 188 or 189 or 190 or 191 or 192)
+                    or 188 or 189 or 190 or 191 or 192 or 193)
             {
                 var expectedBlockCount
                     = verificationMode is 159 or 160 or 165 or 166
@@ -7432,6 +7439,7 @@ internal sealed class StandaloneMethodImportInputTests
                         : verificationMode == 190 ? 4
                         : verificationMode == 191 ? 5
                         : verificationMode == 192 ? 5
+                        : verificationMode == 193 ? 5
                         : verificationMode is 184 or 185 ? 4
                         : verificationMode == 169 ? 4
                         : verificationMode is 172 or 173 or 174 ? 4
@@ -7449,6 +7457,7 @@ internal sealed class StandaloneMethodImportInputTests
                             : verificationMode == 190 ? 2
                             : verificationMode == 191 ? 1
                             : verificationMode == 192 ? 1
+                            : verificationMode == 193 ? 1
                             : verificationMode is 175 or 176 ? 2
                             : verificationMode == 177 ? 3
                             : verificationMode == 181 ? 2
@@ -7470,7 +7479,7 @@ internal sealed class StandaloneMethodImportInputTests
                     and not 178 and not 179 and not 180 and not 181
                     and not 182 and not 183 and not 184 and not 185
                     and not 186 and not 187 and not 188 and not 189
-                    and not 190 and not 191 and not 192)
+                    and not 190 and not 191 and not 192 and not 193)
                 {
                     Assert.That(bodyReader.GetBlockCode(0)
                         .IndexOf((byte)0xB1),
@@ -8042,7 +8051,7 @@ internal sealed class StandaloneMethodImportInputTests
                         and not 178 and not 179 and not 180 and not 181
                         and not 182 and not 183 and not 184 and not 185
                         and not 186 and not 187 and not 188 and not 189
-                        and not 190 and not 191 and not 192
+                        and not 190 and not 191 and not 192 and not 193
                         and not 170 and not 171)
                 {
                     var edgeRecord
@@ -8120,6 +8129,10 @@ internal sealed class StandaloneMethodImportInputTests
                 expectedDecoderConstantMapCount = 1;
             }
             if (verificationMode == 192)
+            {
+                expectedDecoderConstantMapCount = 1;
+            }
+            if (verificationMode == 193)
             {
                 expectedDecoderConstantMapCount = 1;
             }
@@ -8229,6 +8242,8 @@ internal sealed class StandaloneMethodImportInputTests
                     + "Host.StandaloneDecoderBodies[21] != 6",
                 192 => "Host.StandaloneDecoderBodies[19] != 5 || "
                     + "Host.StandaloneDecoderBodies[21] != 6",
+                193 => "Host.StandaloneDecoderBodies[19] != 5 || "
+                    + "Host.StandaloneDecoderBodies[21] != 6",
                 149 => "Host.StandaloneDecoderBodies[19] != 6 || "
                     + "Host.StandaloneDecoderBodies[21] != 9",
                 _ => "false",
@@ -8322,7 +8337,7 @@ internal sealed class StandaloneMethodImportInputTests
                     or 172 or 173 or 174 or 175 or 176 or 177
                     or 178 or 179 or 180 or 181
                     or 182 or 183 or 184 or 185 or 186 or 187
-                    or 188 or 189 or 190 or 191 or 192)
+                    or 188 or 189 or 190 or 191 or 192 or 193)
             {
                 var artifactIndex = new TrRmArtifactIndex(artifact);
                 Assert.That(artifactIndex.TryGetSection(0x0020,
@@ -8508,6 +8523,7 @@ internal sealed class StandaloneMethodImportInputTests
                     190 => 1,
                     191 => 2,
                     192 => 2,
+                    193 => 2,
                     _ => 4,
                 };
                 var mainIndex = -1;
@@ -8955,6 +8971,11 @@ internal sealed class StandaloneMethodImportInputTests
                         Assert.That(Execute(5, 2), Is.EqualTo(5));
                         break;
                     case 192:
+                        Assert.That(Execute(0, 3), Is.EqualTo(3));
+                        Assert.That(Execute(3, 5), Is.EqualTo(5));
+                        Assert.That(Execute(5, 2), Is.EqualTo(5));
+                        break;
+                    case 193:
                         Assert.That(Execute(0, 3), Is.EqualTo(3));
                         Assert.That(Execute(3, 5), Is.EqualTo(5));
                         Assert.That(Execute(5, 2), Is.EqualTo(5));
