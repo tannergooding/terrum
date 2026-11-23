@@ -1336,6 +1336,10 @@ int32 VerifyStandaloneRewrittenSourceArenas()
         = Host.StandaloneSourceExpressionCount[0];
     int32 statementCount
         = Host.StandaloneSourceStatementCount[0];
+    int32 ifNodeCount
+        = Host.StandaloneSourceIfNodeCount[0];
+    int32 ifChildCount
+        = Host.StandaloneSourceIfChildCount[0];
     if (Host.StandaloneRewrittenSourceBodyCount[0] != bodyCount
         || Host.StandaloneRewrittenSourceLexicalScopeCount[0]
             != scopeCount
@@ -1413,14 +1417,135 @@ int32 VerifyStandaloneRewrittenSourceArenas()
         {
             return 3;
         }
+        int32 bodyId = oldBodyId;
         int32 bodyStatementFirst
             = Host.StandaloneSourceBodies[bodyId * 12 + 9];
         int32 bodyStatementCount
             = Host.StandaloneSourceBodies[bodyId * 12 + 10];
-        mut int32 childStatementKind = -1;
-        mut int32 assignedLocalId = -1;
-        mut int32 assignedTypeId = -1;
-        for (mut int32 childOrdinal = 0;
+        for (mut int32 ifNodeId = 0;
+            ifNodeId < ifNodeCount;
+            ifNodeId = ifNodeId + 1)
+        {
+            int32 ifNodeOffset = ifNodeId * 5;
+            int32 ifNodeBodyId
+                = Host.StandaloneSourceIfNodes[ifNodeOffset];
+            if (ifNodeBodyId != oldBodyId)
+            {
+                continue;
+            }
+            int32 trueFirst
+                = Host.StandaloneSourceIfNodes[ifNodeOffset + 1];
+            int32 trueCount
+                = Host.StandaloneSourceIfNodes[ifNodeOffset + 2];
+            int32 falseFirst
+                = Host.StandaloneSourceIfNodes[ifNodeOffset + 3];
+            int32 falseCount
+                = Host.StandaloneSourceIfNodes[ifNodeOffset + 4];
+            if (trueFirst < 0 || trueCount < 0
+                || trueFirst > ifChildCount - trueCount
+                || falseFirst < 0 || falseCount < 0
+                || falseFirst > ifChildCount - falseCount
+                || trueFirst + trueCount != falseFirst
+                || Host.StandaloneRewrittenSourceIfNodes[
+                    ifNodeOffset]
+                    != Host.StandaloneRewriteBodyIds[bodyId]
+                || Host.StandaloneRewrittenSourceIfNodes[
+                    ifNodeOffset + 1] != trueFirst
+                || Host.StandaloneRewrittenSourceIfNodes[
+                    ifNodeOffset + 2] != trueCount
+                || Host.StandaloneRewrittenSourceIfNodes[
+                    ifNodeOffset + 3] != falseFirst
+                || Host.StandaloneRewrittenSourceIfNodes[
+                    ifNodeOffset + 4] != falseCount)
+            {
+                return 3;
+            }
+
+            int32 controlStatementId = -1;
+            int32 controlStatementKind = 0;
+            for (mut int32 statementOrdinal = 0;
+                statementOrdinal < bodyStatementCount;
+                statementOrdinal = statementOrdinal + 1)
+            {
+                int32 candidateStatementId
+                    = bodyStatementFirst + statementOrdinal;
+                int32 candidateOffset = candidateStatementId * 3;
+                int32 candidateKind
+                    = Host.StandaloneSourceStatements[
+                        candidateOffset];
+                if (Host.StandaloneSourceStatementParentIds[
+                        candidateStatementId] == -1
+                    && (candidateKind == 6 || candidateKind == 7)
+                    && Host.StandaloneSourceStatements[
+                        candidateOffset + 2] == ifNodeId)
+                {
+                    if (controlStatementId >= 0)
+                    {
+                        return 3;
+                    }
+                    controlStatementId = candidateStatementId;
+                    controlStatementKind = candidateKind;
+                }
+            }
+            if (controlStatementId < 0
+                || Host.StandaloneRewrittenSourceStatements[
+                    controlStatementId * 3 + 2] != ifNodeId
+                || (controlStatementKind == 7
+                    && falseCount != 0))
+            {
+                return 3;
+            }
+
+            int32 bodyExpressionFirst
+                = Host.StandaloneSourceBodies[bodyId * 12 + 3];
+            int32 bodyExpressionCount
+                = Host.StandaloneSourceBodies[bodyId * 12 + 4];
+            int32 conditionExpressionId
+                = Host.StandaloneSourceStatements[
+                    controlStatementId * 3 + 1];
+            if (conditionExpressionId < 0
+                || conditionExpressionId >= bodyExpressionCount
+                || !IsStandaloneLogicalNotType(
+                    Host.StandaloneSourceExpressions[
+                        (bodyExpressionFirst
+                            + conditionExpressionId) * 8 + 1]))
+            {
+                return 3;
+            }
+            int32 conditionKind
+                = Host.StandaloneSourceExpressions[
+                    (bodyExpressionFirst
+                        + conditionExpressionId) * 8];
+            if (controlStatementKind == 7
+                && (conditionKind == 34 || conditionKind == 35
+                    || conditionKind == 36))
+            {
+                return 3;
+            }
+
+            if (controlStatementKind == 6 && trueCount <= 0)
+            {
+                return 3;
+            }
+            int32 trueStatementKind = trueCount == 0
+                ? -1
+                : Host.StandaloneSourceStatements[
+                    Host.StandaloneSourceIfChildren[trueFirst] * 3];
+            int32 falseStatementKind = falseCount == 0
+                ? -1
+                : Host.StandaloneSourceStatements[
+                    Host.StandaloneSourceIfChildren[falseFirst] * 3];
+            bool trueReturns
+                = trueCount == 1 && trueStatementKind == 1;
+            bool falseReturns
+                = falseCount == 1 && falseStatementKind == 1;
+            mut bool trueAssignments = trueCount > 0;
+            mut bool falseAssignments = falseCount > 0;
+            mut int32 assignedLocalId = -1;
+            mut int32 assignedTypeId = -1;
+            mut bool sameAssignedLocal = true;
+            mut bool allAssignedLocalsMutable = true;
+            for (mut int32 childOrdinal = 0;
             childOrdinal < trueCount + falseCount;
             childOrdinal = childOrdinal + 1)
         {
@@ -1435,22 +1560,10 @@ int32 VerifyStandaloneRewrittenSourceArenas()
             {
                 return 3;
             }
-            int32 rootStatementId
-                = Host.StandaloneSourceStatementParentIds[
-                    childStatementId];
-            if (rootStatementId < bodyStatementFirst
-                || rootStatementId
-                    >= bodyStatementFirst + bodyStatementCount
-                || Host.StandaloneSourceStatementParentIds[
-                    rootStatementId] != -1)
-            {
-                return 3;
-            }
-            int32 rootStatementOffset = rootStatementId * 3;
-            if (Host.StandaloneSourceStatements[
-                    rootStatementOffset] != 6
-                || Host.StandaloneSourceStatements[
-                    rootStatementOffset + 2] != ifNodeId)
+            if (Host.StandaloneSourceStatementParentIds[
+                    childStatementId] != controlStatementId
+                || childStatementId
+                    != controlStatementId + childOrdinal + 1)
             {
                 return 3;
             }
@@ -1459,12 +1572,24 @@ int32 VerifyStandaloneRewrittenSourceArenas()
                 = Host.StandaloneSourceStatements[
                     childStatementOffset];
             if ((currentChildKind != 1 && currentChildKind != 5)
-                || (childStatementKind >= 0
-                    && currentChildKind != childStatementKind))
+                || (controlStatementKind == 7
+                    && currentChildKind != 5))
             {
                 return 3;
             }
-            childStatementKind = currentChildKind;
+            int32 branchIndex = childOrdinal < trueCount ? 0 : 1;
+            if (currentChildKind != 5)
+            {
+                if (branchIndex == 0)
+                {
+                    trueAssignments = false;
+                }
+                else
+                {
+                    falseAssignments = false;
+                }
+                continue;
+            }
             if (currentChildKind == 5)
             {
                 int32 placeId
@@ -1483,6 +1608,9 @@ int32 VerifyStandaloneRewrittenSourceArenas()
                 int32 typeId
                     = Host.StandaloneSourcePlaces[
                         placeOffset + 1];
+                int32 childExpressionId
+                    = Host.StandaloneSourceStatements[
+                        childStatementOffset + 1];
                 int32 localRangeOffset = bodyId * 2;
                 int32 localFirst
                     = Host.StandaloneSourceBodyLocalRanges[
@@ -1498,29 +1626,103 @@ int32 VerifyStandaloneRewrittenSourceArenas()
                     || typeId <= 0
                     || typeId
                         > Host.StandaloneTypeFactCount[0]
+                    || GetStandaloneSourceUse(typeId) != 1
                     || Host.StandaloneSourceLocals[localId * 10]
                         != bodyId
                     || Host.StandaloneSourceLocals[
                         localId * 10 + 2] != typeId
                     || Host.StandaloneSourceLocalStates[localId] != 1
-                    || (assignedLocalId >= 0
-                        && (assignedLocalId != localId
-                            || assignedTypeId != typeId)))
+                    || Host.StandaloneSourcePlaceUseCounts[placeId] != 1
+                    || (assignedLocalId == localId
+                        && assignedTypeId != typeId)
+                    || childExpressionId < 0
+                    || childExpressionId
+                        >= bodyExpressionCount
+                    || Host.StandaloneSourceExpressions[
+                        (bodyExpressionFirst
+                            + childExpressionId) * 8 + 1] != typeId)
                 {
                     return 3;
                 }
                 int32 bindingKind
                     = Host.StandaloneSourceLocals[localId * 10 + 3];
-                if ((bindingKind != 1 && bindingKind != 2
-                        && bindingKind != 3)
-                    || (bindingKind == 2
-                        && (falseCount == 0 || trueCount != 1
-                            || falseCount != 1)))
+                if (bindingKind != 1 && bindingKind != 2
+                    && bindingKind != 3)
                 {
                     return 3;
                 }
-                assignedLocalId = localId;
-                assignedTypeId = typeId;
+                if (assignedLocalId < 0)
+                {
+                    assignedLocalId = localId;
+                    assignedTypeId = typeId;
+                }
+                else if (assignedLocalId != localId)
+                {
+                    sameAssignedLocal = false;
+                }
+                if (bindingKind != 1 && bindingKind != 3)
+                {
+                    allAssignedLocalsMutable = false;
+                }
+                init bool assignmentDoesNotReturn;
+                int32 assignmentStatus
+                    = TryGetStandaloneSourceExpressionDoesNotReturn(
+                        bodyId, childExpressionId,
+                        ref init assignmentDoesNotReturn);
+                if (assignmentStatus != 0 || assignmentDoesNotReturn)
+                {
+                    return assignmentStatus != 0
+                        ? assignmentStatus : 3;
+                }
+            }
+        }
+
+            if (controlStatementKind == 7)
+            {
+                if (falseCount != 0
+                    || !allAssignedLocalsMutable)
+                {
+                    return 3;
+                }
+            }
+            else
+            {
+                bool bothReturns
+                    = trueCount == 1 && falseCount == 1
+                        && trueReturns && falseReturns;
+                bool bothAssignments
+                    = trueAssignments
+                        && (falseCount == 0 || falseAssignments);
+                bool oneReturnOneAssignments
+                    = (trueReturns && falseAssignments)
+                        || (falseReturns && trueAssignments);
+                bool oneReturnNoElse
+                    = trueReturns && falseCount == 0;
+                if (!bothReturns && !bothAssignments
+                    && !oneReturnOneAssignments && !oneReturnNoElse)
+                {
+                    return 3;
+                }
+                if (assignedLocalId >= 0 && !sameAssignedLocal
+                    && !allAssignedLocalsMutable)
+                {
+                    return 3;
+                }
+                if (assignedLocalId >= 0 && sameAssignedLocal)
+                {
+                    int32 bindingKind
+                        = Host.StandaloneSourceLocals[
+                            assignedLocalId * 10 + 3];
+                    if (bindingKind == 2
+                        && !(bothAssignments
+                            && trueCount == 1 && falseCount == 1)
+                        && !(oneReturnOneAssignments
+                            && (trueReturns
+                                ? falseCount == 1 : trueCount == 1)))
+                    {
+                        return 3;
+                    }
+                }
             }
         }
     }
@@ -2113,7 +2315,8 @@ int32 VerifyStandaloneRewrittenSourceArenas()
                 return 3;
             }
         }
-        else if (Host.StandaloneSourceStatements[offset] == 6)
+        else if (Host.StandaloneSourceStatements[offset] == 6
+            || Host.StandaloneSourceStatements[offset] == 7)
         {
             int32 ifNodeId
                 = Host.StandaloneSourceStatements[offset + 2];

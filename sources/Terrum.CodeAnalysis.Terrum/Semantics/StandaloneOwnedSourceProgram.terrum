@@ -2858,6 +2858,97 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
             continue;
         }
 
+        if (IsStandaloneSourceWhileKeyword(tokenIndex))
+        {
+            if (sawReturn || tokenIndex + 1 >= bodyTokenEnd
+                || Host.Tokens[(tokenIndex + 1) * 3] != 46)
+            {
+                return 1;
+            }
+            init int32 conditionClose;
+            if (!FindStandaloneMatchingClose(
+                    tokenIndex + 1, bodyTokenEnd, 46, 47,
+                    ref init conditionClose))
+            {
+                return 1;
+            }
+            init int32 boolTypeId;
+            int32 boolTypeStatus = InternStandaloneCallableTypeFact(
+                0, 1, false, ref init boolTypeId);
+            if (boolTypeStatus != 0)
+            {
+                return boolTypeStatus;
+            }
+            init int32 conditionExpressionId;
+            init int32 nextConditionToken;
+            int32 conditionStatus = ParseStandaloneSourceExpression(
+                localCallableId, localCallableId, expressionFirst,
+                boolTypeId, tokenIndex + 2, conditionClose, 1,
+                ref init conditionExpressionId,
+                ref init nextConditionToken);
+            if (conditionStatus != 0)
+            {
+                return conditionStatus;
+            }
+            if (nextConditionToken != conditionClose)
+            {
+                return 1;
+            }
+            init bool conditionDoesNotReturn;
+            int32 conditionDoesNotReturnStatus
+                = TryGetStandaloneSourceExpressionDoesNotReturn(
+                    localCallableId, conditionExpressionId,
+                    ref init conditionDoesNotReturn);
+            if (conditionDoesNotReturnStatus != 0
+                || conditionDoesNotReturn)
+            {
+                return conditionDoesNotReturnStatus != 0
+                    ? conditionDoesNotReturnStatus : 2;
+            }
+
+            init int32 controlNodeId;
+            int32 controlNodeStatus = AppendStandaloneSourceIfNode(
+                localCallableId, ref init controlNodeId);
+            if (controlNodeStatus != 0)
+            {
+                return controlNodeStatus;
+            }
+            int32 loopStatementStatus
+                = AppendStandaloneSourceStatement(
+                    localCallableId, expressionFirst, 7,
+                    conditionExpressionId, controlNodeId);
+            if (loopStatementStatus != 0)
+            {
+                return loopStatementStatus;
+            }
+            int32 loopStatementId
+                = Host.StandaloneSourceStatementCount[0] - 1;
+            init int32 afterBodyToken;
+            int32 loopBodyStatus = ParseStandaloneSourceWhileBody(
+                localCallableId, expressionFirst, controlNodeId,
+                loopStatementId, conditionClose + 1, bodyTokenEnd,
+                ref init afterBodyToken);
+            if (loopBodyStatus != 0)
+            {
+                return loopBodyStatus;
+            }
+            int32 controlNodeOffset = controlNodeId * 5;
+            if (Host.StandaloneSourceIfNodes[
+                    controlNodeOffset + 2] == 0)
+            {
+                Host.StandaloneSourceIfNodes[
+                    controlNodeOffset + 1]
+                    = Host.StandaloneSourceIfChildCount[0];
+            }
+            Host.StandaloneSourceIfNodes[
+                controlNodeOffset + 3]
+                = Host.StandaloneSourceIfChildCount[0];
+            Host.StandaloneSourceIfNodes[
+                controlNodeOffset + 4] = 0;
+            tokenIndex = afterBodyToken;
+            continue;
+        }
+
         int32 assignmentTokenKind
             = tokenIndex + 1 < bodyTokenEnd
                 ? Host.Tokens[(tokenIndex + 1) * 3] : 0;
@@ -3810,6 +3901,165 @@ int32 ParseStandaloneSourceIfBranch(int32 localCallableId,
     return 0;
 }
 
+int32 ParseStandaloneSourceWhileBody(int32 localCallableId,
+    int32 expressionFirst, int32 controlNodeId,
+    int32 loopStatementId,
+    int32 tokenStart, int32 tokenEnd,
+    ref<init int32> nextTokenResult)
+    ensure return == 0 ? *nextTokenResult is init : true
+{
+    if (tokenStart < 0 || tokenStart >= tokenEnd
+        || tokenEnd > Host.Tokens.Length / 3)
+    {
+        return 2;
+    }
+
+    int32 blockClose = -1;
+    if (Host.Tokens[tokenStart * 3] == 52)
+    {
+        *nextTokenResult = tokenStart + 1;
+        return 0;
+    }
+    if (Host.Tokens[tokenStart * 3] == 48)
+    {
+        if (!FindStandaloneMatchingClose(tokenStart, tokenEnd,
+                48, 49, ref init blockClose))
+        {
+            return 1;
+        }
+
+        mut int32 cursor = tokenStart + 1;
+        while (cursor < blockClose)
+        {
+            if (Host.Tokens[cursor * 3] == 52)
+            {
+                cursor = cursor + 1;
+                continue;
+            }
+            init int32 semicolonToken;
+            int32 semicolonStatus
+                = FindStandaloneSourceStatementSemicolon(
+                    cursor, blockClose, ref init semicolonToken);
+            if (semicolonStatus != 0)
+            {
+                return semicolonStatus;
+            }
+            init int32 childStatementId;
+            init int32 afterStatementToken;
+            int32 statementStatus
+                = ParseStandaloneSourceAssignmentBranch(
+                    localCallableId, localCallableId, expressionFirst,
+                    cursor, semicolonToken + 1,
+                    ref init childStatementId,
+                    ref init afterStatementToken);
+            if (statementStatus != 0)
+            {
+                return statementStatus;
+            }
+            if (afterStatementToken != semicolonToken + 1)
+            {
+                return 1;
+            }
+            int32 childStatus = ValidateStandaloneSourceWhileAssignment(
+                localCallableId, childStatementId);
+            if (childStatus != 0)
+            {
+                return childStatus;
+            }
+            int32 appendStatus = AppendStandaloneSourceIfChild(
+                localCallableId, controlNodeId, loopStatementId, true,
+                childStatementId);
+            if (appendStatus != 0)
+            {
+                return appendStatus;
+            }
+            cursor = afterStatementToken;
+        }
+        *nextTokenResult = blockClose + 1;
+        return 0;
+    }
+
+    init int32 semicolonToken;
+    int32 semicolonStatus = FindStandaloneSourceStatementSemicolon(
+        tokenStart, tokenEnd, ref init semicolonToken);
+    if (semicolonStatus != 0)
+    {
+        return semicolonStatus;
+    }
+    init int32 childStatementId;
+    init int32 afterStatementToken;
+    int32 statementStatus = ParseStandaloneSourceAssignmentBranch(
+        localCallableId, localCallableId, expressionFirst,
+        tokenStart, semicolonToken + 1,
+        ref init childStatementId, ref init afterStatementToken);
+    if (statementStatus != 0)
+    {
+        return statementStatus;
+    }
+    if (afterStatementToken != semicolonToken + 1)
+    {
+        return 1;
+    }
+    int32 childStatus = ValidateStandaloneSourceWhileAssignment(
+        localCallableId, childStatementId);
+    if (childStatus != 0)
+    {
+        return childStatus;
+    }
+    int32 appendStatus = AppendStandaloneSourceIfChild(
+        localCallableId, controlNodeId, loopStatementId, true,
+        childStatementId);
+    if (appendStatus != 0)
+    {
+        return appendStatus;
+    }
+    *nextTokenResult = afterStatementToken;
+    return 0;
+}
+
+int32 ValidateStandaloneSourceWhileAssignment(int32 bodyId,
+    int32 statementId)
+{
+    if (statementId < 0
+        || statementId >= Host.StandaloneSourceStatementCount[0]
+        || Host.StandaloneSourceStatements[statementId * 3] != 5)
+    {
+        return 2;
+    }
+    int32 placeId
+        = Host.StandaloneSourceStatements[statementId * 3 + 2];
+    if (placeId < 0
+        || placeId >= Host.StandaloneSourcePlaceCount[0])
+    {
+        return 3;
+    }
+    int32 placeOffset = placeId * 5;
+    int32 localId
+        = Host.StandaloneSourcePlaces[placeOffset + 3];
+    if (localId < 0
+        || localId >= Host.StandaloneSourceLocalCount[0])
+    {
+        return 3;
+    }
+    int32 localOffset = localId * 10;
+    int32 typeId
+        = Host.StandaloneSourceLocals[localOffset + 2];
+    int32 bindingKind
+        = Host.StandaloneSourceLocals[localOffset + 3];
+    if (Host.StandaloneSourceLocals[localOffset] != bodyId
+        || Host.StandaloneSourcePlaces[placeOffset] != bodyId
+        || Host.StandaloneSourcePlaces[placeOffset + 2] != 2
+        || Host.StandaloneSourcePlaces[placeOffset + 1] != typeId
+        || (bindingKind != 1 && bindingKind != 3)
+        || Host.StandaloneSourceLocalStates[localId] != 1
+        || GetStandaloneSourceUse(typeId) != 1)
+    {
+        return 2;
+    }
+    return 0;
+}
+
+// Structured statement nodes share ranges; while stores its body in the first.
 int32 AppendStandaloneSourceIfNode(int32 bodyId,
     ref<init int32> ifNodeIdResult)
     ensure return == 0 ? *ifNodeIdResult is init : true
@@ -3847,6 +4097,12 @@ int32 AppendStandaloneSourceIfChild(int32 bodyId, int32 ifNodeId,
         || childStatementId < 0
         || childStatementId
             >= Host.StandaloneSourceStatementCount[0]
+        || (Host.StandaloneSourceStatements[
+                parentStatementId * 3] != 6
+            && Host.StandaloneSourceStatements[
+                parentStatementId * 3] != 7)
+        || Host.StandaloneSourceStatements[
+            parentStatementId * 3 + 2] != ifNodeId
         || Host.StandaloneSourceIfNodes[ifNodeId * 5] != bodyId
         || Host.StandaloneSourceStatementParentIds[
             childStatementId] != -1)
@@ -5017,6 +5273,21 @@ bool IsStandaloneSourceIfKeyword(int32 tokenIndex)
         && length == 2
         && Host.Source[start] == char16(105)
         && Host.Source[start + 1] == char16(102);
+}
+
+bool IsStandaloneSourceWhileKeyword(int32 tokenIndex)
+{
+    init int32 kind;
+    init int32 start;
+    init int32 length;
+    return TryReadStandaloneSourceToken(tokenIndex,
+            ref init kind, ref init start, ref init length)
+        && length == 5
+        && Host.Source[start] == char16(119)
+        && Host.Source[start + 1] == char16(104)
+        && Host.Source[start + 2] == char16(105)
+        && Host.Source[start + 3] == char16(108)
+        && Host.Source[start + 4] == char16(101);
 }
 
 bool IsStandaloneSourceElseKeyword(int32 tokenIndex)
@@ -8852,8 +9123,10 @@ int32 VerifyStandaloneDirectCalls()
                 if (parentStatementId < bodyStatementFirst
                     || parentStatementId
                         >= bodyStatementFirst + bodyStatementCount
-                    || Host.StandaloneSourceStatements[
-                        parentStatementId * 3] != 6
+                    || (Host.StandaloneSourceStatements[
+                            parentStatementId * 3] != 6
+                        && Host.StandaloneSourceStatements[
+                            parentStatementId * 3] != 7)
                     || Host.StandaloneSourceStatementParentIds[
                         parentStatementId] != -1)
                 {
@@ -8862,7 +9135,7 @@ int32 VerifyStandaloneDirectCalls()
                 continue;
             }
             if (parentStatementId != -1
-                || statementKind < 1 || statementKind > 6)
+                || statementKind < 1 || statementKind > 7)
             {
                 return 3;
             }
@@ -8965,6 +9238,160 @@ int32 VerifyStandaloneDirectCalls()
                         != localTypeId)
                 {
                     return 3;
+                }
+                continue;
+            }
+            if (statementKind == 7)
+            {
+                int32 loopNodeId = statementLocationId;
+                if (sawReturn
+                    || expressionId < 0
+                    || expressionId >= bodyExpressionCount
+                    || loopNodeId < 0
+                    || loopNodeId
+                        >= Host.StandaloneSourceIfNodeCount[0]
+                    || !IsStandaloneLogicalNotType(
+                        Host.StandaloneSourceExpressions[
+                            (bodyExpressionFirst + expressionId) * 8 + 1])
+                    || Host.StandaloneSourceIfNodes[
+                        loopNodeId * 5] != bodyId
+                    || Host.StandaloneSourceIfNodes[
+                        loopNodeId * 5 + 3] < 0
+                    || Host.StandaloneSourceIfNodes[
+                        loopNodeId * 5 + 4] != 0)
+                {
+                    return 3;
+                }
+                int32 loopConditionKind
+                    = Host.StandaloneSourceExpressions[
+                        (bodyExpressionFirst + expressionId) * 8];
+                if (loopConditionKind == 34
+                    || loopConditionKind == 35
+                    || loopConditionKind == 36)
+                {
+                    return 2;
+                }
+                init bool conditionDoesNotReturn;
+                int32 conditionStatus
+                    = TryGetStandaloneSourceExpressionDoesNotReturn(
+                        bodyId, expressionId,
+                        ref init conditionDoesNotReturn);
+                if (conditionStatus != 0 || conditionDoesNotReturn)
+                {
+                    return conditionStatus != 0 ? conditionStatus : 2;
+                }
+
+                int32 loopNodeOffset = loopNodeId * 5;
+                int32 childFirst
+                    = Host.StandaloneSourceIfNodes[
+                        loopNodeOffset + 1];
+                int32 childCount
+                    = Host.StandaloneSourceIfNodes[
+                        loopNodeOffset + 2];
+                int32 falseFirst
+                    = Host.StandaloneSourceIfNodes[
+                        loopNodeOffset + 3];
+                if (childFirst < 0 || childCount < 0
+                    || childFirst
+                        > Host.StandaloneSourceIfChildCount[0]
+                            - childCount
+                    || falseFirst != childFirst + childCount)
+                {
+                    return 3;
+                }
+
+                for (mut int32 childIndex = 0;
+                    childIndex < childCount;
+                    childIndex = childIndex + 1)
+                {
+                    int32 childStatementId
+                        = Host.StandaloneSourceIfChildren[
+                            childFirst + childIndex];
+                    if (childStatementId != statementId + childIndex + 1
+                        || childStatementId < bodyStatementFirst
+                        || childStatementId
+                            >= bodyStatementFirst + bodyStatementCount
+                        || Host.StandaloneSourceStatementParentIds[
+                            childStatementId] != statementId
+                        || Host.StandaloneSourceStatements[
+                            childStatementId * 3] != 5)
+                    {
+                        return 3;
+                    }
+                    int32 childPlaceId
+                        = Host.StandaloneSourceStatements[
+                            childStatementId * 3 + 2];
+                    int32 childExpressionId
+                        = Host.StandaloneSourceStatements[
+                            childStatementId * 3 + 1];
+                    if (childPlaceId < bodyPlaceFirst
+                        || childPlaceId
+                            >= bodyPlaceFirst + bodyPlaceCount
+                        || Host.StandaloneSourcePlaceUseCounts[
+                            childPlaceId] != 0
+                        || childExpressionId < 0
+                        || childExpressionId
+                            >= bodyExpressionCount)
+                    {
+                        return 3;
+                    }
+                    int32 childPlaceOffset = childPlaceId * 5;
+                    int32 childLocalId
+                        = Host.StandaloneSourcePlaces[
+                            childPlaceOffset + 3];
+                    if (childLocalId < bodyLocalFirst
+                        || childLocalId
+                            >= bodyLocalFirst + bodyLocalCount)
+                    {
+                        return 3;
+                    }
+                    int32 childLocalOffset = childLocalId * 10;
+                    int32 childTypeId
+                        = Host.StandaloneSourceLocals[
+                            childLocalOffset + 2];
+                    int32 bindingKind
+                        = Host.StandaloneSourceLocals[
+                            childLocalOffset + 3];
+                    if (Host.StandaloneSourcePlaces[
+                            childPlaceOffset] != bodyId
+                        || Host.StandaloneSourcePlaces[
+                            childPlaceOffset + 1] != childTypeId
+                        || Host.StandaloneSourcePlaces[
+                            childPlaceOffset + 2] != 2
+                        || Host.StandaloneSourceLocals[
+                            childLocalOffset] != bodyId
+                        || (bindingKind != 1 && bindingKind != 3)
+                        || Host.StandaloneSourceLocalStates[
+                            childLocalId] != 1
+                        || GetStandaloneSourceUse(childTypeId) != 1
+                        || Host.StandaloneSourceExpressions[
+                            (bodyExpressionFirst
+                                + childExpressionId) * 8 + 1]
+                            != childTypeId)
+                    {
+                        return 3;
+                    }
+                    init bool assignmentDoesNotReturn;
+                    int32 assignmentStatus
+                        = TryGetStandaloneSourceExpressionDoesNotReturn(
+                            bodyId, childExpressionId,
+                            ref init assignmentDoesNotReturn);
+                    if (assignmentStatus != 0
+                        || assignmentDoesNotReturn)
+                    {
+                        return assignmentStatus != 0
+                            ? assignmentStatus : 3;
+                    }
+                    Host.StandaloneSourcePlaceUseCounts[
+                        childPlaceId] = 1;
+                    int32 localUseCount
+                        = Host.StandaloneSourceLocalDeclarationUseCounts[
+                            childLocalId];
+                    if (bindingKind == 3 && localUseCount == 1)
+                    {
+                        Host.StandaloneSourceLocalDeclarationUseCounts[
+                            childLocalId] = localUseCount + 1;
+                    }
                 }
                 continue;
             }
