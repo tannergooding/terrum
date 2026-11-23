@@ -1063,8 +1063,47 @@ internal sealed class StandaloneMethodImportInputTests
     [TestCase(BoundRuntimePolicy.FailFast,
         "namespace client { "
             + "int32 Main(int32 initial) { "
+            + "mut int32 value = initial; return ++value; } }",
+        0, 104, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "int32 Main(int32 initial) { "
+            + "mut int32 value = initial; return value++; } }",
+        0, 105, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "int32 Main(int32 initial) { "
+            + "mut int32 value = initial; return --value; } }",
+        0, 106, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "int32 Main(int32 initial) { "
+            + "mut int32 value = initial; return value--; } }",
+        0, 107, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "int32 Main(int32 initial) { "
+            + "mut int32 value = initial; return ++value; } }",
+        0, 108, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "float32 Main(float32 initial) { "
+            + "mut float32 value = initial; return ++value; } }",
+        0, 109, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "int32 Main(int32 initial) { "
             + "int32 value = initial; value += 1; "
             + "return value; } }", 2, 0, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "int32 Main(int32 initial) { "
+            + "int32 value = initial; return ++value; } }",
+        2, 0, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "int32 Main() { init mut int32 value; "
+            + "return value++; } }", 2, 0, false)]
     [TestCase(BoundRuntimePolicy.FailFast,
         "namespace client { "
             + "int32 Main() { init mut int32 value; "
@@ -3714,6 +3753,148 @@ internal sealed class StandaloneMethodImportInputTests
                 return 0;
             }
             """;
+        var updateExpressionKind = verificationMode switch
+        {
+            104 => 27,
+            105 => 29,
+            106 => 28,
+            108 or 109 => 27,
+            _ => 30,
+        };
+        var updateOperationKind = verificationMode is 106 or 107
+            ? 18 : verificationMode == 108 ? 20
+                : verificationMode == 109 ? 25 : 17;
+        var updateResultHome = verificationMode is 104 or 106 or 108 or 109
+            ? 4 : 2;
+        var updateTypeCode = verificationMode == 109 ? 0x14 : 0x08;
+        var updateConstantLow = verificationMode == 109
+            ? 0x3F800000 : 1;
+        var updateSourceProfile = verificationMode == 108 ? 1 : 0;
+        var updateExpressionVerificationSource = $$"""
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                if (Scan() < 1) { return 297; }
+                int32 status = BindStandaloneOwnedSourceProgram();
+                if (status != 0
+                    || Host.StandaloneSourceLocalCount[0] != 1
+                    || Host.StandaloneSourcePlaceCount[0] != 2
+                    || Host.StandaloneSourceExpressionCount[0] != 3
+                    || Host.StandaloneSourceStatementCount[0] != 2
+                    || Host.StandaloneSourceLocals[3] != 1
+                    || Host.StandaloneSourceLocalStates[0] != 1
+                    || Host.StandaloneSourceExpressions[16]
+                        != {{updateExpressionKind}}
+                    || Host.StandaloneSourceExpressions[18] != 1
+                    || Host.StandaloneSourceExpressions[19] != 1
+                    || Host.StandaloneSourceExpressions[8] != 5
+                    || Host.StandaloneSourceExpressions[10] != 0
+                    || Host.StandaloneSourceArithmeticProfile[0]
+                        != {{updateSourceProfile}}
+                    || Host.StandaloneSourcePlaces[2] != 1
+                    || Host.StandaloneSourcePlaces[7] != 2
+                    || Host.StandaloneSourcePlaces[8] != 0) {
+                    return 298;
+                }
+                int32 typeId = Host.StandaloneSourceLocals[2];
+                if (typeId <= 0
+                    || typeId > Host.StandaloneTypeFactCount[0]
+                    || Host.StandaloneTypeFacts[typeId * 3 + 1]
+                        != {{updateTypeCode}}) {
+                    return 299;
+                }
+                status = NormalizeStandaloneOwnedSourceProgram();
+                if (status != 0
+                    || Host.StandaloneNormalizedHomeCount[0] != 5
+                    || Host.StandaloneNormalizedOperationCount[0] != 7
+                    || Host.StandaloneNormalizedConstantCount[0] != 1
+                    || Host.StandaloneNormalizedSourceLocalHomeIds[0] != 1
+                    || Host.StandaloneNormalizedConstants[2]
+                        != {{updateConstantLow}}
+                    || Host.StandaloneNormalizedConstants[3] != 0
+                    || Host.StandaloneNormalizedOperations[20]
+                        != {{updateOperationKind}}
+                    || Host.StandaloneNormalizedOperations[21] != 2
+                    || Host.StandaloneNormalizedOperations[22] != 3
+                    || Host.StandaloneNormalizedOperations[23] != 4
+                    || Host.StandaloneNormalizedOperations[25] != 30
+                    || Host.StandaloneNormalizedOperations[26] != 4
+                    || Host.StandaloneNormalizedOperations[27] != 1
+                    || Host.StandaloneNormalizedOperations[30] != 4
+                    || Host.StandaloneNormalizedOperations[31]
+                        != {{updateResultHome}}) {
+                    return 300;
+                }
+                int32 callableBase
+                    = Host.StandaloneResolvedRootCount[0]
+                        + Host.StandaloneResolvedImports.Length / 32
+                        + Host.StandaloneResolvedProviderGroupCount[0];
+                int32 callableCount
+                    = callableBase + Host.StandaloneLocalCallableCount[0];
+                Host.StandaloneRewriteCallableCount[0] = callableCount;
+                for (mut int32 id = 0;
+                    id < Host.StandaloneModuleCount[0];
+                    id = id + 1) {
+                    Host.StandaloneRewriteModuleIds[id] = id;
+                }
+                for (mut int32 id = 0;
+                    id < Host.StandaloneLocalCallableCount[0];
+                    id = id + 1) {
+                    Host.StandaloneRewriteLocalCallableIds[id] = id;
+                }
+                for (mut int32 id = 0;
+                    id < Host.StandaloneSourceImportedCallableCount[0];
+                    id = id + 1) {
+                    Host.StandaloneRewriteImportedCallableIds[id] = id;
+                }
+                for (mut int32 id = 0;
+                    id < callableCount;
+                    id = id + 1) {
+                    Host.StandaloneRewriteCallableIds[id] = id;
+                }
+                Host.StandaloneRewriteTypeIds[0] = 0;
+                for (mut int32 id = 1;
+                    id <= Host.StandaloneTypeFactCount[0];
+                    id = id + 1) {
+                    Host.StandaloneRewriteTypeIds[id] = id;
+                }
+                Host.StandaloneRewriteBodyIds[0] = 0;
+                for (mut int32 id = 0;
+                    id < Host.StandaloneSourceExpressionCount[0];
+                    id = id + 1) {
+                    Host.StandaloneRewriteExpressionIds[id] = id;
+                }
+                for (mut int32 id = 0;
+                    id < Host.StandaloneSourceLexicalScopeCount[0];
+                    id = id + 1) {
+                    Host.StandaloneRewriteScopeIds[id] = id;
+                }
+                for (mut int32 id = 0;
+                    id < Host.StandaloneSourceLocalCount[0];
+                    id = id + 1) {
+                    Host.StandaloneRewriteLocalIds[id] = id;
+                }
+                for (mut int32 id = 0;
+                    id < Host.StandaloneSourcePlaceCount[0];
+                    id = id + 1) {
+                    Host.StandaloneRewritePlaceIds[id]
+                        = (id + 1)
+                            % Host.StandaloneSourcePlaceCount[0];
+                }
+                status = RewriteStandaloneOwnedCallNodes();
+                if (status != 0
+                    || Host.StandaloneRewrittenSourceExpressions[10] != 1
+                    || Host.StandaloneRewrittenSourceExpressions[19] != 0) {
+                    return 301;
+                }
+                status = WriteStandaloneScalarModule();
+                if (status != 0
+                    || Host.StandaloneWriterStatus[0] != 0
+                    || Host.StandaloneWriterBodyPlanCount[0] != 1) {
+                    return 302;
+                }
+                return 0;
+            }
+            """;
         var initializationLocalVerificationSource = $$"""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
@@ -4122,6 +4303,8 @@ internal sealed class StandaloneMethodImportInputTests
                                                         ? comparisonPrecedenceVerificationSource
                                                     : verificationMode is >= 90 and <= 95
                                                         ? localInitTestVerificationSource
+                                                    : verificationMode is >= 104 and <= 109
+                                                        ? updateExpressionVerificationSource
                                                     : verificationMode is 81 or 82
                                                         ? initializationLocalVerificationSource
                                                     : verificationMode is 75 or 77
@@ -4164,7 +4347,8 @@ internal sealed class StandaloneMethodImportInputTests
         components.Add(SyntaxTree.Parse(verificationSource,
             "standalone-owned-source-program-tests.terrum"));
 
-        var sourceArithmeticProfile = verificationMode is 22 or 61 or 62 or 63
+        var sourceArithmeticProfile = verificationMode is 22 or 61 or 62
+            or 63 or 108
             ? SourceArithmeticProfile.Release
             : SourceArithmeticProfile.Development;
         var buffers = ScannerHost.CreateBuffers(source).AddRange(
@@ -4230,7 +4414,8 @@ internal sealed class StandaloneMethodImportInputTests
             or 45 or 46 or 47 or 48 or 49 or 50 or 51 or 52 or 53
             or 54 or 55 or 56 or 57 or 58 or 59
             or >= 60 and <= 74 or 75 or 77 or 81 or 82
-            or >= 90 and <= 95 or >= 96 and <= 103)
+            or >= 90 and <= 95 or >= 96 and <= 103
+            or >= 104 and <= 109)
         {
             var artifactIndex = new TrRmArtifactIndex(artifact);
             Assert.That(artifactIndex.TryGetSection(0x0020,
@@ -4356,7 +4541,8 @@ internal sealed class StandaloneMethodImportInputTests
                     Is.EqualTo(-1));
             }
             else if (verificationMode is >= 60 and <= 74 or 75 or 77
-                or 81 or 82 or >= 96 and <= 100)
+                or 81 or 82 or >= 96 and <= 100
+                or >= 104 and <= 109)
             {
                 var code = bodyReader.Code;
                 var arithmeticOffset = code.IndexOf((byte)0xC0);
@@ -4381,6 +4567,10 @@ internal sealed class StandaloneMethodImportInputTests
                     98 => 0x03,
                     99 => 0x0C,
                     100 => 0x0D,
+                    104 or 105 => 0x01,
+                    106 or 107 => 0x02,
+                    108 => 0x05,
+                    109 => 0x20,
                     61 => 0x05,
                     62 => 0x06,
                     63 => 0x07,
@@ -4408,7 +4598,8 @@ internal sealed class StandaloneMethodImportInputTests
                         Is.EqualTo((byte)0x01));
                 }
                 if (verificationMode is 75 or 77 or 82
-                    or >= 96 and <= 100)
+                    or >= 96 and <= 100
+                    or >= 104 and <= 109)
                 {
                     Assert.That(code.IndexOf((byte)0xD5),
                         Is.GreaterThanOrEqualTo(0));
@@ -4484,6 +4675,7 @@ internal sealed class StandaloneMethodImportInputTests
                     or 52 or 53 or 58 or 59 or 71 or 72 or 73
                     or 75 or 77 or 82 or >= 90 and <= 95
                     or >= 96 and <= 103
+                    or >= 104 and <= 109
                     ? 1 : 0;
             if (verificationMode == 71)
             {

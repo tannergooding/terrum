@@ -470,7 +470,8 @@ int32 VisitStandaloneSourceExpression(int32 bodyId,
     }
     else if (expressionKind == 6 || expressionKind == 8
         || expressionKind == 9 || expressionKind == 10
-        || expressionKind == 11)
+        || expressionKind == 11
+        || (expressionKind >= 27 && expressionKind <= 30))
     {
         int32 childExpressionId
             = Host.StandaloneSourceExpressions[
@@ -1271,6 +1272,183 @@ int32 NormalizeStandaloneSourceExpression(int32 bodyId,
         *selectorKindResult = operandSelectorKind;
         *sourceUseResult = operandSourceUse;
         *selectorIndexResult = operandSelectorIndex;
+        *terminatedResult = false;
+        return 0;
+    }
+    if (expressionKind >= 27 && expressionKind <= 30)
+    {
+        int32 operandExpressionId
+            = Host.StandaloneSourceExpressions[
+                expressionOffset + 2];
+        int32 writePlaceId
+            = Host.StandaloneSourceExpressions[
+                expressionOffset + 3];
+        if (!IsStandaloneArithmeticType(typeId)
+            || operandExpressionId < 0
+            || operandExpressionId >= expressionId)
+        {
+            return 3;
+        }
+        init int32 operandSelectorKind;
+        init int32 operandSourceUse;
+        init int32 operandSelectorIndex;
+        init bool operandTerminated;
+        int32 operandStatus = NormalizeStandaloneSourceExpression(
+            bodyId, operandExpressionId, depth + 1,
+            ref init operandSelectorKind,
+            ref init operandSourceUse,
+            ref init operandSelectorIndex,
+            ref init operandTerminated);
+        if (operandStatus != 0)
+        {
+            return operandStatus;
+        }
+        if (operandTerminated)
+        {
+            *selectorKindResult = 0;
+            *sourceUseResult = 0;
+            *selectorIndexResult = 0;
+            *terminatedResult = true;
+            return 0;
+        }
+        if (operandSelectorKind != 2 || operandSourceUse != 1
+            || operandSelectorIndex < 0
+            || writePlaceId < 0
+            || writePlaceId
+                >= Host.StandaloneSourcePlaceCount[0])
+        {
+            return 3;
+        }
+        int32 writePlaceOffset = writePlaceId * 5;
+        int32 localId
+            = Host.StandaloneSourcePlaces[writePlaceOffset + 3];
+        int32 localOffset = localId * 10;
+        int32 localHomeId
+            = localId >= 0
+                && localId
+                    < Host.StandaloneSourceLocalCount[0]
+                ? Host.StandaloneNormalizedSourceLocalHomeIds[
+                    localId] : -1;
+        int32 homeFirst
+            = Host.StandaloneNormalizedBodies[bodyId * 12 + 1];
+        int32 bodyHomeCount
+            = Host.StandaloneNormalizedHomeCount[0] - homeFirst;
+        int32 operandHomeOffset
+            = (homeFirst + operandSelectorIndex) * 5;
+        if (Host.StandaloneSourcePlaces[writePlaceOffset] != bodyId
+            || Host.StandaloneSourcePlaces[
+                writePlaceOffset + 1] != typeId
+            || Host.StandaloneSourcePlaces[
+                writePlaceOffset + 2] != 2
+            || localId < 0
+            || localId
+                >= Host.StandaloneSourceLocalCount[0]
+            || Host.StandaloneSourceLocals[localOffset] != bodyId
+            || Host.StandaloneSourceLocals[
+                localOffset + 2] != typeId
+            || (Host.StandaloneSourceLocals[
+                    localOffset + 3] != 1
+                && Host.StandaloneSourceLocals[
+                    localOffset + 3] != 3)
+            || Host.StandaloneSourceLocalStates[localId] != 1
+            || localHomeId < 0
+            || localHomeId >= bodyHomeCount
+            || operandSelectorIndex >= bodyHomeCount
+            || Host.StandaloneNormalizedHomes[
+                operandHomeOffset] != bodyId
+            || Host.StandaloneNormalizedHomes[
+                operandHomeOffset + 3] != typeId)
+        {
+            return 3;
+        }
+
+        int32 typeCode
+            = Host.StandaloneTypeFacts[typeId * 3 + 1];
+        mut int32 oneLow = 1;
+        mut int32 oneHigh = 0;
+        if (typeCode == 0x14)
+        {
+            oneLow = 0x3F800000;
+        }
+        else if (typeCode == 0x15)
+        {
+            oneLow = 0;
+            oneHigh = 0x3FF00000;
+        }
+        int32 constantFirst
+            = Host.StandaloneNormalizedBodies[bodyId * 12 + 3];
+        init int32 oneConstantId;
+        int32 constantStatus
+            = AppendStandaloneNormalizedConstant(
+                bodyId, constantFirst, typeId, oneLow, oneHigh,
+                ref init oneConstantId);
+        if (constantStatus != 0)
+        {
+            return constantStatus;
+        }
+        init int32 oneHomeId;
+        int32 oneHomeStatus = AppendStandaloneNormalizedHome(
+            bodyId, homeFirst, 3, typeId, 0,
+            ref init oneHomeId);
+        if (oneHomeStatus != 0)
+        {
+            return oneHomeStatus;
+        }
+        int32 operationStatus
+            = AppendStandaloneNormalizedOperation(
+                bodyId, 1, oneConstantId, 0, 0);
+        if (operationStatus != 0)
+        {
+            return operationStatus;
+        }
+        operationStatus = AppendStandaloneNormalizedOperation(
+            bodyId, 2, oneHomeId, 0, 0);
+        if (operationStatus != 0)
+        {
+            return operationStatus;
+        }
+
+        init int32 resultHomeId;
+        int32 resultHomeStatus = AppendStandaloneNormalizedHome(
+            bodyId, homeFirst, 3, typeId, 0,
+            ref init resultHomeId);
+        if (resultHomeStatus != 0)
+        {
+            return resultHomeStatus;
+        }
+        bool increment
+            = expressionKind == 27 || expressionKind == 29;
+        int32 operationKind;
+        if (typeCode == 0x14 || typeCode == 0x15)
+        {
+            operationKind = increment ? 25 : 26;
+        }
+        else if (Host.StandaloneSourceArithmeticProfile[0] == 0)
+        {
+            operationKind = increment ? 17 : 18;
+        }
+        else
+        {
+            operationKind = increment ? 20 : 21;
+        }
+        operationStatus = AppendStandaloneNormalizedOperation(
+            bodyId, operationKind, operandSelectorIndex,
+            oneHomeId, resultHomeId);
+        if (operationStatus != 0)
+        {
+            return operationStatus;
+        }
+        operationStatus = AppendStandaloneNormalizedOperation(
+            bodyId, 30, resultHomeId, localHomeId, localId);
+        if (operationStatus != 0)
+        {
+            return operationStatus;
+        }
+        *selectorKindResult = 2;
+        *sourceUseResult = 1;
+        *selectorIndexResult
+            = expressionKind == 27 || expressionKind == 28
+                ? resultHomeId : operandSelectorIndex;
         *terminatedResult = false;
         return 0;
     }

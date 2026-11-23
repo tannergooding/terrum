@@ -1410,6 +1410,70 @@ int32 VerifyStandaloneRewrittenSourceArenas()
                 return 3;
             }
         }
+        else if (expressionKind >= 27 && expressionKind <= 30)
+        {
+            int32 childExpressionId
+                = Host.StandaloneSourceExpressions[oldOffset + 2];
+            int32 writePlaceId
+                = Host.StandaloneSourceExpressions[oldOffset + 3];
+            int32 oldExpressionFirst
+                = Host.StandaloneSourceBodies[oldBodyId * 12 + 3];
+            int32 bodyExpressionCount
+                = Host.StandaloneSourceBodies[oldBodyId * 12 + 4];
+            int32 oldExpressionLocalId
+                = oldExpressionId - oldExpressionFirst;
+            int32 typeId
+                = Host.StandaloneSourceExpressions[oldOffset + 1];
+            int32 bodyPlaceFirst
+                = Host.StandaloneSourceBodyPlaceRanges[
+                    oldBodyId * 2];
+            int32 bodyPlaceCount
+                = Host.StandaloneSourceBodyPlaceRanges[
+                    oldBodyId * 2 + 1];
+            if (oldExpressionLocalId < 0
+                || oldExpressionLocalId >= bodyExpressionCount
+                || childExpressionId < 0
+                || childExpressionId >= oldExpressionLocalId
+                || writePlaceId < bodyPlaceFirst
+                || writePlaceId >= bodyPlaceFirst + bodyPlaceCount
+                || writePlaceId >= placeCount
+                || !IsStandaloneArithmeticType(typeId)
+                || Host.StandaloneSourceExpressions[
+                    oldOffset + 4] != 0
+                || Host.StandaloneSourceExpressions[
+                    oldOffset + 5] != 0
+                || Host.StandaloneSourceExpressions[
+                    oldOffset + 6] != -1
+                || Host.StandaloneSourceExpressions[
+                    (oldExpressionFirst + childExpressionId) * 8]
+                    != 5
+                || Host.StandaloneSourceExpressions[
+                    (oldExpressionFirst + childExpressionId) * 8 + 1]
+                    != typeId
+                || Host.StandaloneSourcePlaces[writePlaceId * 5]
+                    != oldBodyId
+                || Host.StandaloneSourcePlaces[
+                    writePlaceId * 5 + 1] != typeId
+                || Host.StandaloneSourcePlaces[
+                    writePlaceId * 5 + 2] != 2
+                || Host.StandaloneSourceExpressionUseCounts[
+                    oldExpressionFirst + childExpressionId] != 1)
+            {
+                return 3;
+            }
+            int32 newChildGlobalId
+                = Host.StandaloneRewriteExpressionIds[
+                    oldExpressionFirst + childExpressionId];
+            int32 newExpressionFirst
+                = Host.StandaloneRewrittenSourceBodies[
+                    Host.StandaloneRewriteBodyIds[oldBodyId] * 12 + 3];
+            Host.StandaloneRewrittenSourceExpressions[
+                newOffset + 2]
+                = newChildGlobalId - newExpressionFirst;
+            Host.StandaloneRewrittenSourceExpressions[
+                newOffset + 3]
+                = Host.StandaloneRewritePlaceIds[writePlaceId];
+        }
         else if (expressionKind == 6 || expressionKind == 8
             || expressionKind == 9 || expressionKind == 10
             || expressionKind == 11)

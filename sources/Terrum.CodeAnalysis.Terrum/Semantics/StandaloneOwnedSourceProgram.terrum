@@ -1711,7 +1711,8 @@ int32 TryGetStandaloneSourceExpressionDoesNotReturn(int32 bodyId,
     }
     if (expressionKind == 6 || expressionKind == 8
         || expressionKind == 9 || expressionKind == 10
-        || expressionKind == 11)
+        || expressionKind == 11
+        || (expressionKind >= 27 && expressionKind <= 30))
     {
         int32 childExpressionId
             = Host.StandaloneSourceExpressions[
@@ -3592,7 +3593,7 @@ bool IsStandaloneComparisonEqualityType(int32 typeId)
 bool IsStandaloneSourceOperandEndKind(int32 kind)
 {
     return kind == 2 || kind == 3 || kind == 20
-        || kind == 21 || kind == 47;
+        || kind == 21 || kind == 47 || kind == 86 || kind == 87;
 }
 
 int32 FindStandaloneBinaryOperator(int32 tokenStart,
@@ -3646,6 +3647,53 @@ int32 FindStandaloneBinaryOperator(int32 tokenStart,
     }
 
     return parenthesisDepth == 0 ? selectedIndex : -1;
+}
+
+bool IsStandaloneWritableUpdatePlace(int32 localCallableId,
+    int32 tokenStart, int32 tokenEnd, int32 expectedTypeId)
+{
+    if (tokenStart < 0 || tokenStart >= tokenEnd
+        || tokenEnd > Host.Tokens.Length / 3)
+    {
+        return false;
+    }
+    mut int32 placeStart = tokenStart;
+    mut int32 placeEnd = tokenEnd;
+    while (placeStart < placeEnd
+        && Host.Tokens[placeStart * 3] == 46)
+    {
+        init int32 closingToken;
+        if (!FindStandaloneMatchingClose(
+                placeStart, placeEnd, 46, 47,
+                ref init closingToken)
+            || closingToken + 1 != placeEnd)
+        {
+            return false;
+        }
+        placeStart = placeStart + 1;
+        placeEnd = closingToken;
+    }
+    if (placeEnd != placeStart + 1
+        || Host.Tokens[placeStart * 3] != 2)
+    {
+        return false;
+    }
+    int32 localId
+        = FindStandaloneSourceLocal(localCallableId, placeStart);
+    if (localId < 0)
+    {
+        return false;
+    }
+    int32 localOffset = localId * 10;
+    int32 bindingKind
+        = Host.StandaloneSourceLocals[localOffset + 3];
+    return Host.StandaloneSourceLocals[localOffset]
+            == localCallableId
+        && Host.StandaloneSourceLocals[localOffset + 2]
+            == expectedTypeId
+        && Host.StandaloneSourceLocalStates[localId] == 1
+        && (bindingKind == 1 || bindingKind == 3)
+        && GetStandaloneSourceUse(expectedTypeId) != 5;
 }
 
 bool IsStandaloneBinaryOperatorSeparated(int32 tokenIndex)
@@ -3963,6 +4011,40 @@ bool CanBindStandaloneSourceArgument(int32 localCallableId,
     if (initTestStatus != 1)
     {
         return false;
+    }
+
+    int32 prefixUpdateKind = Host.Tokens[tokenStart * 3];
+    int32 postfixTokenIndex = tokenEnd - 1;
+    int32 postfixUpdateKind
+        = Host.Tokens[postfixTokenIndex * 3];
+    bool prefixUpdate
+        = prefixUpdateKind == 86 || prefixUpdateKind == 87;
+    bool postfixUpdate
+        = postfixUpdateKind == 86 || postfixUpdateKind == 87;
+    if (prefixUpdate || postfixUpdate)
+    {
+        if ((prefixUpdate && postfixUpdate)
+            || !IsStandaloneArithmeticType(expectedTypeId))
+        {
+            return false;
+        }
+        int32 operandStart = prefixUpdate
+            ? tokenStart + 1 : tokenStart;
+        int32 operandEnd = prefixUpdate
+            ? tokenEnd : postfixTokenIndex;
+        if (operandStart >= operandEnd
+            || (prefixUpdate
+                ? !AreStandaloneSourceTokensAdjacent(
+                    tokenStart, operandStart)
+                : !AreStandaloneSourceTokensAdjacent(
+                    postfixTokenIndex - 1, postfixTokenIndex)))
+        {
+            return false;
+        }
+        return IsStandaloneWritableUpdatePlace(localCallableId,
+                operandStart, operandEnd, expectedTypeId)
+            && CanBindStandaloneSourceArgument(localCallableId,
+                operandStart, operandEnd, expectedTypeId, depth + 1);
     }
 
     int32 kind = Host.Tokens[tokenStart * 3];
@@ -5163,6 +5245,121 @@ int32 ParseStandaloneSourceExpression(int32 localCallableId,
         }
         Host.StandaloneSourceExpressionUseCounts[leftGlobalId] = 1;
         Host.StandaloneSourceExpressionUseCounts[rightGlobalId] = 1;
+        *expressionIdResult = expressionId;
+        *nextTokenResult = tokenEnd;
+        return 0;
+    }
+
+    int32 prefixUpdateKind = Host.Tokens[tokenIndex * 3];
+    int32 postfixTokenIndex = tokenEnd - 1;
+    int32 postfixUpdateKind
+        = postfixTokenIndex >= tokenIndex
+            ? Host.Tokens[postfixTokenIndex * 3] : 0;
+    bool prefixUpdate
+        = prefixUpdateKind == 86 || prefixUpdateKind == 87;
+    bool postfixUpdate
+        = postfixUpdateKind == 86 || postfixUpdateKind == 87;
+    if (prefixUpdate || postfixUpdate)
+    {
+        if (prefixUpdate && postfixUpdate)
+        {
+            return 1;
+        }
+        int32 operandStart = prefixUpdate
+            ? tokenIndex + 1 : tokenIndex;
+        int32 operandEnd = prefixUpdate
+            ? tokenEnd : postfixTokenIndex;
+        if (operandStart >= operandEnd
+            || (prefixUpdate
+                ? !AreStandaloneSourceTokensAdjacent(
+                    tokenIndex, operandStart)
+                : !AreStandaloneSourceTokensAdjacent(
+                    postfixTokenIndex - 1, postfixTokenIndex)))
+        {
+            return 2;
+        }
+
+        init int32 operandExpressionId;
+        init int32 nextOperandToken;
+        int32 operandStatus = ParseStandaloneSourceExpression(
+            localCallableId, bodyId, expressionFirst,
+            expectedTypeId, operandStart, operandEnd, depth + 1,
+            ref init operandExpressionId,
+            ref init nextOperandToken);
+        if (operandStatus != 0)
+        {
+            return operandStatus;
+        }
+        int32 operandGlobalId
+            = expressionFirst + operandExpressionId;
+        if (nextOperandToken != operandEnd
+            || operandGlobalId < expressionFirst
+            || operandGlobalId
+                >= Host.StandaloneSourceExpressionCount[0]
+            || Host.StandaloneSourceExpressions[
+                operandGlobalId * 8] != 5
+            || Host.StandaloneSourceExpressionUseCounts[
+                operandGlobalId] != 0)
+        {
+            return 2;
+        }
+        int32 typeId
+            = Host.StandaloneSourceExpressions[
+                operandGlobalId * 8 + 1];
+        int32 readPlaceId
+            = Host.StandaloneSourceExpressions[
+                operandGlobalId * 8 + 2];
+        if (!IsStandaloneArithmeticType(typeId)
+            || (expectedTypeId >= 0
+                && typeId != expectedTypeId)
+            || readPlaceId < 0
+            || readPlaceId
+                >= Host.StandaloneSourcePlaceCount[0]
+            || Host.StandaloneSourcePlaces[
+                readPlaceId * 5 + 2] != 1)
+        {
+            return 2;
+        }
+        int32 localId
+            = Host.StandaloneSourcePlaces[readPlaceId * 5 + 3];
+        if (localId < 0
+            || localId >= Host.StandaloneSourceLocalCount[0])
+        {
+            return 2;
+        }
+        int32 localOffset = localId * 10;
+        int32 bindingKind
+            = Host.StandaloneSourceLocals[localOffset + 3];
+        if (Host.StandaloneSourceLocals[localOffset] != localCallableId
+            || Host.StandaloneSourceLocals[
+                localOffset + 2] != typeId
+            || Host.StandaloneSourceLocalStates[localId] != 1
+            || (bindingKind != 1 && bindingKind != 3))
+        {
+            return 2;
+        }
+        init int32 writePlaceId;
+        int32 placeStatus = AppendStandaloneSourcePlace(
+            localCallableId, typeId, 2, localId, -1,
+            ref init writePlaceId);
+        if (placeStatus != 0)
+        {
+            return placeStatus;
+        }
+        int32 expressionKind = prefixUpdate
+            ? prefixUpdateKind == 86 ? 27 : 28
+            : postfixUpdateKind == 86 ? 29 : 30;
+        init int32 expressionId;
+        int32 appendStatus = AppendStandaloneSourceExpression(
+            bodyId, expressionKind, typeId, operandExpressionId,
+            writePlaceId, 0, 0, -1, expressionFirst,
+            ref init expressionId);
+        if (appendStatus != 0)
+        {
+            return appendStatus;
+        }
+        Host.StandaloneSourceExpressionUseCounts[
+            operandGlobalId] = 1;
         *expressionIdResult = expressionId;
         *nextTokenResult = tokenEnd;
         return 0;
@@ -6755,6 +6952,83 @@ int32 VerifyStandaloneDirectCalls()
                     }
                 }
                 Host.StandaloneSourcePlaceUseCounts[operand0] = 1;
+            }
+            else if (expressionKind >= 27 && expressionKind <= 30)
+            {
+                int32 operandExpressionId = operand0;
+                int32 writePlaceId
+                    = Host.StandaloneSourceExpressions[
+                        expressionOffset + 3];
+                int32 childGlobalId
+                    = bodyExpressionFirst + operandExpressionId;
+                if (operandExpressionId < 0
+                    || operandExpressionId >= expressionLocal
+                    || writePlaceId < bodyPlaceFirst
+                    || writePlaceId >= bodyPlaceFirst + bodyPlaceCount
+                    || Host.StandaloneSourcePlaceUseCounts[
+                        writePlaceId] != 0
+                    || !IsStandaloneArithmeticType(expressionTypeId)
+                    || Host.StandaloneSourceExpressions[
+                        expressionOffset + 4] != 0
+                    || Host.StandaloneSourceExpressions[
+                        expressionOffset + 5] != 0
+                    || Host.StandaloneSourceExpressions[
+                        expressionOffset + 6] != -1
+                    || Host.StandaloneSourceExpressions[
+                        childGlobalId * 8] != 5
+                    || Host.StandaloneSourceExpressions[
+                        childGlobalId * 8 + 1] != expressionTypeId
+                    || Host.StandaloneSourceExpressions[
+                        childGlobalId * 8 + 7] != bodyId
+                    || Host.StandaloneSourceExpressionUseCounts[
+                        childGlobalId] != 1)
+                {
+                    return 3;
+                }
+                int32 readPlaceId
+                    = Host.StandaloneSourceExpressions[
+                        childGlobalId * 8 + 2];
+                int32 writePlaceOffset = writePlaceId * 5;
+                int32 readPlaceOffset = readPlaceId * 5;
+                int32 localId
+                    = Host.StandaloneSourcePlaces[
+                        writePlaceOffset + 3];
+                int32 localOffset = localId * 10;
+                int32 bindingKind
+                    = localId >= bodyLocalFirst
+                        && localId < bodyLocalFirst + bodyLocalCount
+                        ? Host.StandaloneSourceLocals[
+                            localOffset + 3] : 0;
+                if (readPlaceId < bodyPlaceFirst
+                    || readPlaceId >= bodyPlaceFirst + bodyPlaceCount
+                    || Host.StandaloneSourcePlaceUseCounts[
+                        readPlaceId] != 1
+                    || Host.StandaloneSourcePlaces[
+                        readPlaceOffset] != bodyId
+                    || Host.StandaloneSourcePlaces[
+                        readPlaceOffset + 1] != expressionTypeId
+                    || Host.StandaloneSourcePlaces[
+                        readPlaceOffset + 2] != 1
+                    || Host.StandaloneSourcePlaces[
+                        writePlaceOffset] != bodyId
+                    || Host.StandaloneSourcePlaces[
+                        writePlaceOffset + 1] != expressionTypeId
+                    || Host.StandaloneSourcePlaces[
+                        writePlaceOffset + 2] != 2
+                    || localId < bodyLocalFirst
+                    || localId >= bodyLocalFirst + bodyLocalCount
+                    || Host.StandaloneSourceLocals[
+                        localOffset] != bodyId
+                    || Host.StandaloneSourceLocals[
+                        localOffset + 2] != expressionTypeId
+                    || (bindingKind != 1 && bindingKind != 3)
+                    || Host.StandaloneSourceLocalStates[localId] != 1
+                    || Host.StandaloneSourcePlaces[
+                        readPlaceOffset + 3] != localId)
+                {
+                    return 3;
+                }
+                Host.StandaloneSourcePlaceUseCounts[writePlaceId] = 1;
             }
             else if (expressionKind == 6)
             {
