@@ -1522,6 +1522,371 @@ int32 NormalizeStandaloneSourceStatement(int32 bodyId,
     return 3;
 }
 
+int32 CountStandaloneSourceConditionalTree(int32 bodyId,
+    int32 expressionId, int32 resultTypeId, int32 depth,
+    ref<init int32> blockCountResult,
+    ref<init int32> edgeCountResult,
+    ref<init bool> hasNormalResult)
+    ensure return == 0 ? (*blockCountResult is init
+        && *edgeCountResult is init
+        && *hasNormalResult is init) : true
+{
+    if (depth > 64 || bodyId < 0
+        || bodyId >= Host.StandaloneSourceBodyCount[0]
+        || expressionId < 0
+        || expressionId
+            >= Host.StandaloneSourceBodies[bodyId * 12 + 4])
+    {
+        return 3;
+    }
+
+    int32 expressionOffset
+        = (Host.StandaloneSourceBodies[bodyId * 12 + 3]
+            + expressionId) * 8;
+    int32 expressionKind
+        = Host.StandaloneSourceExpressions[expressionOffset];
+    int32 expressionTypeId
+        = Host.StandaloneSourceExpressions[expressionOffset + 1];
+    if (expressionTypeId != resultTypeId)
+    {
+        return 3;
+    }
+    if (expressionKind != 34)
+    {
+        if (expressionKind == 35 || expressionKind == 36
+            || GetStandaloneSourceUse(expressionTypeId) != 1)
+        {
+            return 2;
+        }
+        init bool expressionDoesNotReturn;
+        int32 doesNotReturnStatus
+            = TryGetStandaloneSourceExpressionDoesNotReturn(
+                bodyId, expressionId,
+                ref init expressionDoesNotReturn);
+        if (doesNotReturnStatus != 0)
+        {
+            return doesNotReturnStatus;
+        }
+        *blockCountResult = 1;
+        *edgeCountResult = 0;
+        *hasNormalResult = !expressionDoesNotReturn;
+        return 0;
+    }
+
+    int32 conditionExpressionId
+        = Host.StandaloneSourceExpressions[expressionOffset + 2];
+    int32 trueExpressionId
+        = Host.StandaloneSourceExpressions[expressionOffset + 3];
+    int32 falseExpressionId
+        = Host.StandaloneSourceExpressions[expressionOffset + 4];
+    if (conditionExpressionId < 0
+        || conditionExpressionId >= expressionId
+        || trueExpressionId < 0 || trueExpressionId >= expressionId
+        || falseExpressionId < 0 || falseExpressionId >= expressionId)
+    {
+        return 3;
+    }
+
+    int32 bodyExpressionFirst
+        = Host.StandaloneSourceBodies[bodyId * 12 + 3];
+    int32 conditionOffset
+        = (bodyExpressionFirst + conditionExpressionId) * 8;
+    int32 conditionKind
+        = Host.StandaloneSourceExpressions[conditionOffset];
+    int32 conditionTypeId
+        = Host.StandaloneSourceExpressions[conditionOffset + 1];
+    if (!IsStandaloneLogicalNotType(conditionTypeId)
+        || conditionKind == 34 || conditionKind == 35
+        || conditionKind == 36)
+    {
+        return 2;
+    }
+    init bool conditionDoesNotReturn;
+    int32 conditionDoesNotReturnStatus
+        = TryGetStandaloneSourceExpressionDoesNotReturn(
+            bodyId, conditionExpressionId,
+            ref init conditionDoesNotReturn);
+    if (conditionDoesNotReturnStatus != 0
+        || conditionDoesNotReturn)
+    {
+        return conditionDoesNotReturnStatus != 0
+            ? conditionDoesNotReturnStatus : 2;
+    }
+
+    init int32 trueBlockCount;
+    init int32 trueEdgeCount;
+    init bool trueHasNormal;
+    int32 trueStatus = CountStandaloneSourceConditionalTree(
+        bodyId, trueExpressionId, resultTypeId, depth + 1,
+        ref init trueBlockCount, ref init trueEdgeCount,
+        ref init trueHasNormal);
+    if (trueStatus != 0)
+    {
+        return trueStatus;
+    }
+    init int32 falseBlockCount;
+    init int32 falseEdgeCount;
+    init bool falseHasNormal;
+    int32 falseStatus = CountStandaloneSourceConditionalTree(
+        bodyId, falseExpressionId, resultTypeId, depth + 1,
+        ref init falseBlockCount, ref init falseEdgeCount,
+        ref init falseHasNormal);
+    if (falseStatus != 0)
+    {
+        return falseStatus;
+    }
+    if (trueBlockCount > int32.MaxValue - falseBlockCount - 1
+        || trueEdgeCount > int32.MaxValue - falseEdgeCount - 1)
+    {
+        return 3;
+    }
+
+    *blockCountResult = 1 + trueBlockCount + falseBlockCount;
+    *edgeCountResult = 1 + trueEdgeCount + falseEdgeCount;
+    *hasNormalResult = trueHasNormal || falseHasNormal;
+    return 0;
+}
+
+int32 SetStandaloneNormalizedConditionalTargets(int32 bodyId,
+    int32 blockIndex, int32 trueTarget, int32 falseTarget)
+{
+    if (blockIndex < 0
+        || blockIndex >= Host.StandaloneNormalizedBlockCount[0]
+        || trueTarget < 0 || trueTarget > 0xFFFF
+        || falseTarget < 0 || falseTarget > 0xFFFF)
+    {
+        return 3;
+    }
+
+    int32 offset = blockIndex * 16;
+    if (Host.StandaloneNormalizedBlocks[offset] != bodyId
+        || Host.StandaloneNormalizedBlocks[offset + 4] != 4
+        || Host.StandaloneNormalizedBlocks[offset + 8] != -1
+        || Host.StandaloneNormalizedBlocks[offset + 9] != -1)
+    {
+        return 3;
+    }
+    Host.StandaloneNormalizedBlocks[offset + 8] = trueTarget;
+    Host.StandaloneNormalizedBlocks[offset + 9] = falseTarget;
+    return 0;
+}
+
+int32 NormalizeStandaloneSourceConditionalTree(int32 bodyId,
+    int32 expressionId, int32 resultTypeId, int32 resultHomeId,
+    int32 finalBodyBlockCount, int32 returnBlockId, int32 depth,
+    int32 blockOrdinal, int32 edgeOrdinal,
+    ref<init int32> entryBlockIdResult,
+    ref<init int32> nextBlockOrdinalResult,
+    ref<init int32> nextEdgeOrdinalResult,
+    ref<init bool> hasNormalResult)
+    ensure return == 0 ? (*entryBlockIdResult is init
+        && *nextBlockOrdinalResult is init
+        && *nextEdgeOrdinalResult is init
+        && *hasNormalResult is init) : true
+{
+    if (depth > 64 || bodyId < 0
+        || bodyId >= Host.StandaloneSourceBodyCount[0]
+        || expressionId < 0
+        || expressionId
+            >= Host.StandaloneSourceBodies[bodyId * 12 + 4]
+        || blockOrdinal < 0 || blockOrdinal > 0xFFFF)
+    {
+        return 3;
+    }
+
+    int32 expressionOffset
+        = (Host.StandaloneSourceBodies[bodyId * 12 + 3]
+            + expressionId) * 8;
+    int32 expressionKind
+        = Host.StandaloneSourceExpressions[expressionOffset];
+    int32 expressionTypeId
+        = Host.StandaloneSourceExpressions[expressionOffset + 1];
+    if (expressionTypeId != resultTypeId)
+    {
+        return 3;
+    }
+
+    if (expressionKind == 34)
+    {
+        int32 conditionExpressionId
+            = Host.StandaloneSourceExpressions[expressionOffset + 2];
+        int32 trueExpressionId
+            = Host.StandaloneSourceExpressions[expressionOffset + 3];
+        int32 falseExpressionId
+            = Host.StandaloneSourceExpressions[expressionOffset + 4];
+        if (conditionExpressionId < 0
+            || conditionExpressionId >= expressionId
+            || trueExpressionId < 0 || trueExpressionId >= expressionId
+            || falseExpressionId < 0 || falseExpressionId >= expressionId)
+        {
+            return 3;
+        }
+
+        int32 bodyExpressionFirst
+            = Host.StandaloneSourceBodies[bodyId * 12 + 3];
+        int32 conditionOffset
+            = (bodyExpressionFirst + conditionExpressionId) * 8;
+        int32 conditionKind
+            = Host.StandaloneSourceExpressions[conditionOffset];
+        int32 conditionTypeId
+            = Host.StandaloneSourceExpressions[conditionOffset + 1];
+        if (!IsStandaloneLogicalNotType(conditionTypeId)
+            || conditionKind == 34 || conditionKind == 35
+            || conditionKind == 36)
+        {
+            return 2;
+        }
+
+        int32 operationFirst
+            = Host.StandaloneNormalizedOperationCount[0];
+        init int32 conditionSelectorKind;
+        init int32 conditionSourceUse;
+        init int32 conditionSelectorIndex;
+        init bool conditionTerminated;
+        int32 conditionStatus = NormalizeStandaloneSourceExpression(
+            bodyId, conditionExpressionId, depth + 1,
+            ref init conditionSelectorKind,
+            ref init conditionSourceUse,
+            ref init conditionSelectorIndex,
+            ref init conditionTerminated);
+        if (conditionStatus != 0)
+        {
+            return conditionStatus;
+        }
+        if (conditionTerminated || conditionSelectorKind != 2
+            || conditionSourceUse != 1
+            || conditionSelectorIndex < 0)
+        {
+            return 2;
+        }
+
+        int32 operationCount
+            = Host.StandaloneNormalizedOperationCount[0]
+                - operationFirst;
+        if (edgeOrdinal > 0xFFFF - finalBodyBlockCount)
+        {
+            return 3;
+        }
+        init int32 branchBlockIndex;
+        int32 branchStatus = AppendStandaloneNormalizedBlock(
+            bodyId, blockOrdinal, operationFirst, operationCount,
+            4, 0, 0, 0, -1, -1, 2, conditionSelectorIndex,
+            conditionTypeId, finalBodyBlockCount + edgeOrdinal,
+            -1, 0, ref init branchBlockIndex);
+        if (branchStatus != 0)
+        {
+            return branchStatus;
+        }
+
+        init int32 trueEntryBlock;
+        init int32 afterTrueBlock;
+        init int32 afterTrueEdge;
+        init bool trueHasNormal;
+        int32 trueStatus = NormalizeStandaloneSourceConditionalTree(
+            bodyId, trueExpressionId, resultTypeId, resultHomeId,
+            finalBodyBlockCount, returnBlockId, depth + 1,
+            blockOrdinal + 1, edgeOrdinal + 1,
+            ref init trueEntryBlock, ref init afterTrueBlock,
+            ref init afterTrueEdge, ref init trueHasNormal);
+        if (trueStatus != 0)
+        {
+            return trueStatus;
+        }
+        init int32 falseEntryBlock;
+        init int32 afterFalseBlock;
+        init int32 afterFalseEdge;
+        init bool falseHasNormal;
+        int32 falseStatus = NormalizeStandaloneSourceConditionalTree(
+            bodyId, falseExpressionId, resultTypeId, resultHomeId,
+            finalBodyBlockCount, returnBlockId, depth + 1,
+            afterTrueBlock, afterTrueEdge,
+            ref init falseEntryBlock, ref init afterFalseBlock,
+            ref init afterFalseEdge, ref init falseHasNormal);
+        if (falseStatus != 0)
+        {
+            return falseStatus;
+        }
+        int32 patchStatus = SetStandaloneNormalizedConditionalTargets(
+            bodyId, branchBlockIndex, trueEntryBlock, falseEntryBlock);
+        if (patchStatus != 0)
+        {
+            return patchStatus;
+        }
+
+        *entryBlockIdResult = blockOrdinal;
+        *nextBlockOrdinalResult = afterFalseBlock;
+        *nextEdgeOrdinalResult = afterFalseEdge;
+        *hasNormalResult = trueHasNormal || falseHasNormal;
+        return 0;
+    }
+
+    if (expressionKind == 35 || expressionKind == 36
+        || GetStandaloneSourceUse(expressionTypeId) != 1)
+    {
+        return 2;
+    }
+    int32 operationFirst
+        = Host.StandaloneNormalizedOperationCount[0];
+    init int32 selectorKind;
+    init int32 sourceUse;
+    init int32 selectorIndex;
+    init bool terminated;
+    int32 expressionStatus = NormalizeStandaloneSourceExpression(
+        bodyId, expressionId, depth + 1,
+        ref init selectorKind, ref init sourceUse,
+        ref init selectorIndex, ref init terminated);
+    if (expressionStatus != 0)
+    {
+        return expressionStatus;
+    }
+    int32 operationCount
+        = Host.StandaloneNormalizedOperationCount[0] - operationFirst;
+    if (terminated)
+    {
+        init int32 noReturnBlockIndex;
+        int32 noReturnStatus = AppendStandaloneNormalizedReturnBlock(
+            bodyId, blockOrdinal, operationFirst,
+            operationCount, 1, ref init noReturnBlockIndex);
+        if (noReturnStatus != 0)
+        {
+            return noReturnStatus;
+        }
+        *entryBlockIdResult = blockOrdinal;
+        *nextBlockOrdinalResult = blockOrdinal + 1;
+        *nextEdgeOrdinalResult = edgeOrdinal;
+        *hasNormalResult = false;
+        return 0;
+    }
+    if (selectorKind != 2 || sourceUse != 1
+        || selectorIndex < 0 || returnBlockId < 0)
+    {
+        return 2;
+    }
+
+    int32 copyStatus = AppendStandaloneNormalizedOperation(
+        bodyId, 38, selectorIndex, resultHomeId, 0);
+    if (copyStatus != 0)
+    {
+        return copyStatus;
+    }
+    operationCount
+        = Host.StandaloneNormalizedOperationCount[0] - operationFirst;
+    init int32 valueBlockIndex;
+    int32 valueBlockStatus = AppendStandaloneNormalizedBlock(
+        bodyId, blockOrdinal, operationFirst, operationCount,
+        3, 0, 0, 0, returnBlockId, -1, 0, 0, 0, -1, -1, 0,
+        ref init valueBlockIndex);
+    if (valueBlockStatus != 0)
+    {
+        return valueBlockStatus;
+    }
+    *entryBlockIdResult = blockOrdinal;
+    *nextBlockOrdinalResult = blockOrdinal + 1;
+    *nextEdgeOrdinalResult = edgeOrdinal;
+    *hasNormalResult = true;
+    return 0;
+}
+
 int32 NormalizeStandaloneSourceConditionalValue(int32 bodyId,
     int32 expressionId, int32 depth,
     ref<init int32> selectorKindResult,
@@ -1577,6 +1942,92 @@ int32 NormalizeStandaloneSourceConditionalValue(int32 bodyId,
     {
         return 3;
     }
+    int32 trueExpressionKind
+        = Host.StandaloneSourceExpressions[
+            (conditionFirst + trueExpressionId) * 8];
+    int32 falseExpressionKind
+        = Host.StandaloneSourceExpressions[
+            (conditionFirst + falseExpressionId) * 8];
+    if (trueExpressionKind == 34 || falseExpressionKind == 34)
+    {
+        init int32 expressionBlockCount;
+        init int32 conditionalEdgeCount;
+        init bool hasNormalArm;
+        int32 treeStatus = CountStandaloneSourceConditionalTree(
+            bodyId, expressionId, resultTypeId, 0,
+            ref init expressionBlockCount,
+            ref init conditionalEdgeCount,
+            ref init hasNormalArm);
+        if (treeStatus != 0)
+        {
+            return treeStatus;
+        }
+        int32 finalBodyBlockCount
+            = expressionBlockCount + (hasNormalArm ? 1 : 0);
+        if (expressionBlockCount <= 0
+            || finalBodyBlockCount > 0x1_0000
+            || conditionalEdgeCount < 1
+            || conditionalEdgeCount
+                > 0x1_0000 - finalBodyBlockCount)
+        {
+            return 3;
+        }
+
+        int32 homeFirst
+            = Host.StandaloneNormalizedBodies[bodyId * 12 + 1];
+        init int32 resultHomeId;
+        int32 resultHomeStatus = AppendStandaloneNormalizedHome(
+            bodyId, homeFirst, 3, resultTypeId, 0,
+            ref init resultHomeId);
+        if (resultHomeStatus != 0)
+        {
+            return resultHomeStatus;
+        }
+        int32 returnBlockId
+            = hasNormalArm ? expressionBlockCount : -1;
+        init int32 entryBlockId;
+        init int32 nextBlockOrdinal;
+        init int32 nextEdgeOrdinal;
+        init bool actualHasNormalArm;
+        int32 normalizeTreeStatus
+            = NormalizeStandaloneSourceConditionalTree(
+                bodyId, expressionId, resultTypeId, resultHomeId,
+                finalBodyBlockCount, returnBlockId, 0, 0, 0,
+                ref init entryBlockId,
+                ref init nextBlockOrdinal,
+                ref init nextEdgeOrdinal,
+                ref init actualHasNormalArm);
+        if (normalizeTreeStatus != 0)
+        {
+            return normalizeTreeStatus;
+        }
+        if (entryBlockId != 0
+            || nextBlockOrdinal != expressionBlockCount
+            || nextEdgeOrdinal != conditionalEdgeCount
+            || actualHasNormalArm != hasNormalArm
+            || Host.StandaloneNormalizedBlockCount[0]
+                - bodyBlockFirst != expressionBlockCount)
+        {
+            return 3;
+        }
+
+        if (hasNormalArm)
+        {
+            *selectorKindResult = 2;
+            *sourceUseResult = 1;
+            *selectorIndexResult = resultHomeId;
+            *terminatedResult = false;
+        }
+        else
+        {
+            *selectorKindResult = 0;
+            *sourceUseResult = 0;
+            *selectorIndexResult = 0;
+            *terminatedResult = true;
+        }
+        return 0;
+    }
+
     init int32 conditionSelectorKind;
     init int32 conditionSourceUse;
     init int32 conditionSelectorIndex;
