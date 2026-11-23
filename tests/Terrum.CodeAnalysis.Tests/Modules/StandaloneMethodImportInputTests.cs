@@ -1923,6 +1923,17 @@ internal sealed class StandaloneMethodImportInputTests
         "namespace client { int32 Main(int32 limit) { "
             + "mut int32 counter = 0; "
             + "while (counter < limit) { "
+            + "while (counter < limit) { "
+            + "counter = counter + 1; break; } "
+            + "counter = counter + 1; "
+            + "while (counter < limit) { "
+            + "counter = counter + 1; continue; } "
+            + "counter = counter + 1; } return counter; } }",
+        0, 243, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { int32 Main(int32 limit) { "
+            + "mut int32 counter = 0; "
+            + "while (counter < limit) { "
             + "counter = counter + 1; "
             + "if (counter == 2) break; } "
             + "return counter; } }", 0, 221, false)]
@@ -8200,7 +8211,7 @@ internal sealed class StandaloneMethodImportInputTests
                 return 0;
             }
             """;
-        const string multipleNestedBranchVerificationSource = """
+        var multipleNestedBranchVerificationSource = $$"""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
                 if (Scan() < 1) { return 87; }
@@ -8217,7 +8228,8 @@ internal sealed class StandaloneMethodImportInputTests
                     || Host.StandaloneSourceStatements[15] != 5
                     || Host.StandaloneSourceStatements[18] != 7
                     || Host.StandaloneSourceStatements[21] != 5
-                    || Host.StandaloneSourceStatements[24] != 8
+                    || Host.StandaloneSourceStatements[24]
+                        != {{verificationMode == 243 ? 9 : 8}}
                     || Host.StandaloneSourceStatements[27] != 5
                     || Host.StandaloneSourceStatementParentIds[2] != 1
                     || Host.StandaloneSourceStatementParentIds[3] != 2
@@ -8438,7 +8450,7 @@ internal sealed class StandaloneMethodImportInputTests
                 """
             : verificationMode == 236
                 ? nestedSequentialWhileVerificationSource
-            : verificationMode == 241
+            : verificationMode is 241 or 243
                 ? multipleNestedBranchVerificationSource
             : verificationMode == 239
                 ? nestedWhileWithPrefixNoSuffixVerificationSource
@@ -8984,7 +8996,7 @@ internal sealed class StandaloneMethodImportInputTests
                     or 216 or 217 or 218 or 219 or 220 or 221
                     or 222 or 223 or 224 or 225 or 226 or 227
                     or 230 or 231 or 232 or 233 or 234 or 235 or 236
-                    or 237 or 238 or 239 or 240 or 241 or 242)
+                    or 237 or 238 or 239 or 240 or 241 or 242 or 243)
             {
                 var expectedBlockCount
                     = verificationMode is 159 or 160 or 165 or 166
@@ -9032,6 +9044,7 @@ internal sealed class StandaloneMethodImportInputTests
                         : verificationMode == 240 ? 5
                         : verificationMode == 242 ? 6
                         : verificationMode == 241 ? 9
+                        : verificationMode == 243 ? 9
                         : verificationMode == 228 ? 3
                         : verificationMode == 229 ? 3
                         : verificationMode == 211 ? 1
@@ -9089,6 +9102,7 @@ internal sealed class StandaloneMethodImportInputTests
                             : verificationMode == 240 ? 2
                             : verificationMode == 242 ? 2
                             : verificationMode == 241 ? 3
+                            : verificationMode == 243 ? 3
                             : verificationMode == 228 ? 0
                             : verificationMode == 229 ? 0
                             : verificationMode == 189 ? 1
@@ -9132,7 +9146,7 @@ internal sealed class StandaloneMethodImportInputTests
                     and not 224 and not 225 and not 226 and not 227
                     and not 230 and not 231 and not 232 and not 233
                     and not 234 and not 235 and not 236 and not 237
-                    and not 238 and not 239 and not 240 and not 241
+                    and not 238 and not 239 and not 240 and not 241 and not 243
                     and not 242
                     and not 228 and not 229)
                 {
@@ -9739,6 +9753,7 @@ internal sealed class StandaloneMethodImportInputTests
                         and not 230 and not 231 and not 232 and not 233
                         and not 234 and not 235 and not 236 and not 237
                         and not 238 and not 239 and not 240 and not 241
+                        and not 243
                         and not 242
                         and not 228 and not 229
                         and not 170 and not 171)
@@ -9941,7 +9956,7 @@ internal sealed class StandaloneMethodImportInputTests
             {
                 expectedDecoderConstantMapCount = 2;
             }
-            if (verificationMode == 241)
+            if (verificationMode is 241 or 243)
             {
                 expectedDecoderConstantMapCount = 2;
             }
@@ -10260,6 +10275,7 @@ internal sealed class StandaloneMethodImportInputTests
                     or 240
                     or 241
                     or 242
+                    or 243
                     or 228 or 229)
             {
                 var artifactIndex = new TrRmArtifactIndex(artifact);
@@ -10440,6 +10456,7 @@ internal sealed class StandaloneMethodImportInputTests
                     or 240
                     or 241
                     or 242
+                    or 243
                     or 228 or 229 => 1,
                     161 => 2,
                     162 => 3,
@@ -11136,6 +11153,11 @@ internal sealed class StandaloneMethodImportInputTests
                     case 241:
                         Assert.That(Execute(0), Is.EqualTo(0));
                         Assert.That(Execute(1), Is.EqualTo(2));
+                        Assert.That(Execute(3), Is.EqualTo(4));
+                        break;
+                    case 243:
+                        Assert.That(Execute(0), Is.EqualTo(0));
+                        Assert.That(Execute(1), Is.EqualTo(3));
                         Assert.That(Execute(3), Is.EqualTo(4));
                         break;
                     case 242:
