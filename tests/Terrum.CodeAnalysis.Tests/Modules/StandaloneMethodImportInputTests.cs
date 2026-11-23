@@ -2099,7 +2099,7 @@ internal sealed class StandaloneMethodImportInputTests
             + "mut int32 counter = 0; "
             + "while (counter < 1) { "
             + "do { if (Imported(limit)) break; break; } "
-            + "while (counter < limit); "
+            + "while (counter < 0); "
             + "counter = counter + 1; } return counter; } }",
         0, 262, false)]
     [TestCase(BoundRuntimePolicy.FailFast,
