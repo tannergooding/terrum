@@ -66,6 +66,13 @@ internal sealed class NativeCoreRegistrationTests
         IntPtr source, int tag, IntPtr fallback);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int NativeFniReadPairCallback(IntPtr receiver,
+        int first, int second);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int NativeFniUpdateFunction(IntPtr receiver, int value);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int NativeFunctionPointerTarget(int value);
 
     [StructLayout(LayoutKind.Sequential)]
@@ -1789,6 +1796,426 @@ internal sealed class NativeCoreRegistrationTests
                     }
                 });
             Assert.That(nestedCallFound, Is.True);
+        }
+    }
+
+    [TestCase(SourceArithmeticProfile.Development)]
+    [TestCase(SourceArithmeticProfile.Release)]
+    public void StandardForeignNativeInterfaceMutableUpdatesRoundTripArgumentOrder(
+        SourceArithmeticProfile arithmeticProfile)
+    {
+        var (program, artifact, reemittedArtifact)
+            = CreateMutableUpdateConsumerProgram(arithmeticProfile);
+        var isChecked = arithmeticProfile
+            == SourceArithmeticProfile.Development;
+        var cases = new[] {
+            (Name: "PrefixIncrementThenRead", UpdateArgument: 0,
+                IsPrefix: true, Operator: TokenKind.PlusPlus,
+                UpdateFirst: true, FirstFormal: 0, SecondFormal: 1),
+            (Name: "ReadThenPrefixIncrement", UpdateArgument: 1,
+                IsPrefix: true, Operator: TokenKind.PlusPlus,
+                UpdateFirst: false, FirstFormal: 0, SecondFormal: 1),
+            (Name: "PostfixIncrementThenRead", UpdateArgument: 0,
+                IsPrefix: false, Operator: TokenKind.PlusPlus,
+                UpdateFirst: true, FirstFormal: 0, SecondFormal: 1),
+            (Name: "ReadThenPostfixIncrement", UpdateArgument: 1,
+                IsPrefix: false, Operator: TokenKind.PlusPlus,
+                UpdateFirst: false, FirstFormal: 0, SecondFormal: 1),
+            (Name: "ReversedFormalPrefixIncrementThenRead",
+                UpdateArgument: 0, IsPrefix: true,
+                Operator: TokenKind.PlusPlus, UpdateFirst: true,
+                FirstFormal: 1, SecondFormal: 0),
+            (Name: "ReversedFormalReadThenPostfixIncrement",
+                UpdateArgument: 1, IsPrefix: false,
+                Operator: TokenKind.PlusPlus, UpdateFirst: false,
+                FirstFormal: 1, SecondFormal: 0),
+            (Name: "PrefixDecrementThenRead", UpdateArgument: 0,
+                IsPrefix: true, Operator: TokenKind.MinusMinus,
+                UpdateFirst: true, FirstFormal: 0, SecondFormal: 1),
+            (Name: "PostfixDecrementThenRead", UpdateArgument: 0,
+                IsPrefix: false, Operator: TokenKind.MinusMinus,
+                UpdateFirst: true, FirstFormal: 0, SecondFormal: 1),
+        };
+
+        foreach (var testCase in cases)
+        {
+            AssertUpdateCall(program, testCase, isChecked);
+            AssertUpdateInstructionOrder(artifact, testCase, isChecked);
+            AssertUpdateInstructionOrder(reemittedArtifact, testCase,
+                isChecked);
+        }
+
+        var image = NativeEmitter.EmitLibrary(program,
+            [.. cases.Select(static testCase => testCase.Name)],
+            NativeRuntimePolicy.FailFast);
+        Assert.That(image[..2], Is.EqualTo(new byte[] {
+            (byte)'M', (byte)'Z',
+        }));
+
+        static void AssertUpdateCall(BoundProgram program,
+            (string Name, int UpdateArgument, bool IsPrefix,
+                TokenKind Operator, bool UpdateFirst, int FirstFormal,
+                int SecondFormal) testCase, bool checkedArithmetic)
+        {
+            var function = program.Functions.Single(
+                candidate => candidate.Name == testCase.Name);
+            BoundCall? outerCall = null;
+            _ = BoundTreeTraversal.VisitExpressions(function.Body,
+                expression =>
+                {
+                    if (expression is BoundCall call
+                        && call.ForeignInterfaceCall?.Member.Name == "Read")
+                    {
+                        outerCall = call;
+                    }
+                });
+            var selectedCall = outerCall
+                ?? throw new AssertionException(
+                    "Expected the FNI Read call.");
+            Assert.That(selectedCall.Arguments.Length, Is.EqualTo(2));
+            Assert.That(selectedCall.ParameterIndex(0),
+                Is.EqualTo(testCase.FirstFormal));
+            Assert.That(selectedCall.ParameterIndex(1),
+                Is.EqualTo(testCase.SecondFormal));
+
+            var update = selectedCall.Arguments[testCase.UpdateArgument];
+            Assert.That(update, Is.TypeOf<BoundUpdate>());
+            var selectedUpdate = (BoundUpdate)update;
+            Assert.That(selectedUpdate.Operator,
+                Is.EqualTo(testCase.Operator));
+            Assert.That(selectedUpdate.IsPrefix,
+                Is.EqualTo(testCase.IsPrefix));
+            Assert.That(selectedUpdate.OverflowBehavior,
+                Is.EqualTo(checkedArithmetic
+                    ? BoundIntegerOverflowBehavior.Checked
+                    : BoundIntegerOverflowBehavior.Wrapping));
+            Assert.That(selectedUpdate.Place, Is.TypeOf<BoundRead>());
+            var variable = ((BoundRead)selectedUpdate.Place).Variable;
+            var otherArgument
+                = selectedCall.Arguments[1 - testCase.UpdateArgument];
+            Assert.That(otherArgument, Is.TypeOf<BoundRead>());
+            Assert.That(((BoundRead)otherArgument).Variable,
+                Is.EqualTo(variable));
+            Assert.That(function.Variables[variable].IsMutable, Is.True);
+            Assert.That(function.Variables[variable].Type,
+                Is.EqualTo(PrimitiveType.Int32));
+        }
+
+        static void AssertUpdateInstructionOrder(byte[] artifact,
+            (string Name, int UpdateArgument, bool IsPrefix,
+                TokenKind Operator, bool UpdateFirst, int FirstFormal,
+                int SecondFormal) testCase, bool checkedArithmetic)
+        {
+            var tables = TrRmStructuralMetadataValidator
+                .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
+                    artifact, TrRmArtifactSchema
+                        .ForeignNativeInterfaceParameterSurfaceDraft));
+            var row = Enumerable.Range(1, tables.Methods.Count)
+                .Single(candidate => tables.Methods.GetName(candidate)
+                    == testCase.Name);
+            var body = tables.Bodies.GetRegisterBody(
+                tables.Methods.GetBodyRow(row), tables.Contracts.Count);
+            var code = body.GetBlockCode(0).ToArray();
+            var homeLoads = new List<int>();
+            var homeStores = new List<int>();
+            var updateMoves = new List<int>();
+            var arithmetic = new List<int>();
+            var callSites = new List<int>();
+            for (var index = 0; index < code.Length;)
+            {
+                var opcode = code[index];
+                if (opcode == 0xD5)
+                {
+                    homeLoads.Add(index);
+                }
+                else if (opcode == 0xD6)
+                {
+                    homeStores.Add(index);
+                }
+                else if (opcode == 0x10)
+                {
+                    updateMoves.Add(index);
+                }
+                else if (opcode is 0xC0 or 0x21 or 0x22)
+                {
+                    arithmetic.Add(index);
+                }
+                else if (opcode == 0x90)
+                {
+                    callSites.Add(index);
+                }
+
+                index += opcode is 0xC0 or 0xD5 or 0xD6 ? 4 : 2;
+            }
+
+            Assert.That(homeLoads, Has.Count.EqualTo(2), testCase.Name);
+            Assert.That(homeStores, Has.Count.EqualTo(2), testCase.Name);
+            Assert.That(arithmetic, Has.Count.EqualTo(1), testCase.Name);
+            Assert.That(updateMoves,
+                Has.Count.EqualTo(testCase.IsPrefix ? 0 : 1),
+                testCase.Name);
+            Assert.That(callSites, Has.Count.EqualTo(1), testCase.Name);
+            var expectedOpcode = checkedArithmetic
+                ? (byte)0xC0
+                : testCase.Operator == TokenKind.PlusPlus
+                    ? (byte)0x21 : (byte)0x22;
+            Assert.That(code[arithmetic[0]], Is.EqualTo(expectedOpcode),
+                testCase.Name);
+            if (checkedArithmetic)
+            {
+                Assert.That(code[arithmetic[0] + 1],
+                    Is.EqualTo(testCase.Operator == TokenKind.PlusPlus
+                        ? (byte)0x01 : (byte)0x02), testCase.Name);
+            }
+
+            Assert.That(homeStores[0], Is.LessThan(homeLoads[0]),
+                testCase.Name);
+            var updateLoad = homeLoads[testCase.UpdateFirst ? 0 : 1];
+            Assert.That(updateLoad, Is.LessThan(arithmetic[0]),
+                testCase.Name);
+            if (updateMoves.Count != 0)
+            {
+                Assert.That(updateLoad, Is.LessThan(updateMoves[0]),
+                    testCase.Name);
+                Assert.That(updateMoves[0],
+                    Is.LessThan(arithmetic[0]), testCase.Name);
+            }
+
+            Assert.That(arithmetic[0], Is.LessThan(homeStores[1]),
+                testCase.Name);
+            if (testCase.UpdateFirst)
+            {
+                Assert.That(homeStores[1], Is.LessThan(homeLoads[1]),
+                    testCase.Name);
+                Assert.That(homeLoads[1], Is.LessThan(callSites[0]),
+                    testCase.Name);
+            }
+            else
+            {
+                Assert.That(homeLoads[0], Is.LessThan(homeLoads[1]),
+                    testCase.Name);
+                Assert.That(homeLoads[1], Is.LessThan(arithmetic[0]),
+                    testCase.Name);
+                Assert.That(homeStores[1], Is.LessThan(callSites[0]),
+                    testCase.Name);
+            }
+        }
+    }
+
+    [Test]
+    public async Task StandardForeignNativeInterfaceMutableUpdatesExecuteOnWindowsX64()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+
+        var (program, _, _) = CreateMutableUpdateConsumerProgram(
+            SourceArithmeticProfile.Development);
+        var functionNames = new[] {
+            "PrefixIncrementThenRead",
+            "ReadThenPrefixIncrement",
+            "PostfixIncrementThenRead",
+            "ReadThenPostfixIncrement",
+            "ReversedFormalPrefixIncrementThenRead",
+            "ReversedFormalReadThenPostfixIncrement",
+            "PrefixDecrementThenRead",
+            "PostfixDecrementThenRead",
+        };
+        var image = NativeEmitter.EmitLibrary(program, functionNames,
+            NativeRuntimePolicy.FailFast);
+        Assert.That(image[..2], Is.EqualTo(new byte[] {
+            (byte)'M', (byte)'Z',
+        }));
+        await AssertMutableUpdateCallsAsync(image).ConfigureAwait(true);
+    }
+
+    private static (
+        BoundProgram Program, byte[] Artifact, byte[] ReemittedArtifact)
+        CreateMutableUpdateConsumerProgram(
+            SourceArithmeticProfile arithmeticProfile)
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-native-interface-parameter-surface-1";
+        var registration = CreateRegistration(
+            includeForeignNativeInterface: true);
+        var options = new CompilationOptions {
+            NativeCoreRegistration = registration,
+            LayoutCoreRegistration = CreateLayoutRegistration(registration),
+            SourceArithmeticProfile = arithmeticProfile,
+        };
+        var providerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Terrum.Interop;
+                [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+                [ForeignNativeInterface(VTableByteOffset: uint32(0))]
+                public interface IUpdateProbe {
+                    public unsafe int32 Read(int32 first, int32 second);
+                }
+                """), options);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+        var providerProgram = providerCompilation.Program
+            ?? throw new AssertionException("Expected an FNI provider.");
+        var providerInterface = providerProgram.Interfaces.Single();
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerProgram, "update-provider.module", schemaIdentity, 1, [
+                new TrRmSourceTypeExport("", "IUpdateProbe",
+                    "update-provider/IUpdateProbe") {
+                    GenericArity = 0,
+                    InterfaceMethodExports = [.. providerInterface.Members
+                        .Select(member =>
+                            new TrRmSourceInterfaceMethodExport(
+                                member.SourceInputOrdinal,
+                                member.SourceDeclarationSpan,
+                                $"update-provider/IUpdateProbe.{member.Name}"))],
+                },
+            ]);
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            providerArtifact);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            providerInput, "update-provider.module", []);
+        var consumerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                int32 PrefixIncrementThenRead(ptr<void> receiver,
+                    int32 value) {
+                    mut int32 current = value;
+                    unsafe {
+                        return IUpdateProbe.Read(receiver, ++current,
+                            current);
+                    }
+                }
+                int32 ReadThenPrefixIncrement(ptr<void> receiver,
+                    int32 value) {
+                    mut int32 current = value;
+                    unsafe {
+                        return IUpdateProbe.Read(receiver, current,
+                            ++current);
+                    }
+                }
+                int32 PostfixIncrementThenRead(ptr<void> receiver,
+                    int32 value) {
+                    mut int32 current = value;
+                    unsafe {
+                        return IUpdateProbe.Read(receiver, current++,
+                            current);
+                    }
+                }
+                int32 ReadThenPostfixIncrement(ptr<void> receiver,
+                    int32 value) {
+                    mut int32 current = value;
+                    unsafe {
+                        return IUpdateProbe.Read(receiver, current,
+                            current++);
+                    }
+                }
+                int32 ReversedFormalPrefixIncrementThenRead(
+                    ptr<void> receiver, int32 value) {
+                    mut int32 current = value;
+                    unsafe {
+                        return IUpdateProbe.Read(receiver,
+                            second: ++current, first: current);
+                    }
+                }
+                int32 ReversedFormalReadThenPostfixIncrement(
+                    ptr<void> receiver, int32 value) {
+                    mut int32 current = value;
+                    unsafe {
+                        return IUpdateProbe.Read(receiver,
+                            second: current, first: current++);
+                    }
+                }
+                int32 PrefixDecrementThenRead(ptr<void> receiver,
+                    int32 value) {
+                    mut int32 current = value;
+                    unsafe {
+                        return IUpdateProbe.Read(receiver, --current,
+                            current);
+                    }
+                }
+                int32 PostfixDecrementThenRead(ptr<void> receiver,
+                    int32 value) {
+                    mut int32 current = value;
+                    unsafe {
+                        return IUpdateProbe.Read(receiver, current--,
+                            current);
+                    }
+                }
+                """), reference, options);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumerProgram = consumerCompilation.Program
+            ?? throw new AssertionException("Expected an FNI consumer.");
+        var artifact = TrRmExecutableCompiler.EmitStandard(consumerProgram,
+            "update-consumer.module", schemaIdentity, 1, []);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            "update-consumer.module", [providerInput]);
+        var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(loaded,
+            "update-consumer.module", schemaIdentity, 1, []);
+        var reloaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, reemittedArtifact),
+            "update-consumer.module", [providerInput]);
+        return (reloaded, artifact, reemittedArtifact);
+    }
+
+    private static async Task AssertMutableUpdateCallsAsync(byte[] image)
+    {
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"native-fni-mutable-update-{Guid.NewGuid():N}.dll");
+        var module = IntPtr.Zero;
+        var receiver = IntPtr.Zero;
+        var vtable = IntPtr.Zero;
+        NativeFniReadPairCallback? callback = null;
+        try
+        {
+            await File.WriteAllBytesAsync(path, image).ConfigureAwait(true);
+            module = NativeLibrary.Load(path);
+            receiver = Marshal.AllocHGlobal(IntPtr.Size);
+            vtable = Marshal.AllocHGlobal(IntPtr.Size);
+            callback = (actualReceiver, first, second) =>
+                actualReceiver == receiver ? first * 100 + second : -1;
+            Marshal.WriteIntPtr(vtable,
+                Marshal.GetFunctionPointerForDelegate(callback));
+            Marshal.WriteIntPtr(receiver, vtable);
+
+            var expectedResults = new[] {
+                (Name: "PrefixIncrementThenRead", Value: 1111),
+                (Name: "ReadThenPrefixIncrement", Value: 1011),
+                (Name: "PostfixIncrementThenRead", Value: 1011),
+                (Name: "ReadThenPostfixIncrement", Value: 1010),
+                (Name: "ReversedFormalPrefixIncrementThenRead",
+                    Value: 1111),
+                (Name: "ReversedFormalReadThenPostfixIncrement",
+                    Value: 1010),
+                (Name: "PrefixDecrementThenRead", Value: 909),
+                (Name: "PostfixDecrementThenRead", Value: 1009),
+            };
+            foreach (var (name, value) in expectedResults)
+            {
+                var function = Marshal.GetDelegateForFunctionPointer<
+                    NativeFniUpdateFunction>(
+                    NativeLibrary.GetExport(module, name));
+                Assert.That(function(receiver, 10), Is.EqualTo(value), name);
+            }
+        }
+        finally
+        {
+            if (module != IntPtr.Zero)
+            {
+                NativeLibrary.Free(module);
+            }
+            if (vtable != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(vtable);
+            }
+            if (receiver != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(receiver);
+            }
+            GC.KeepAlive(callback);
+            await TestFileCleanup.DeleteWithRetryAsync(path)
+                .ConfigureAwait(true);
         }
     }
 

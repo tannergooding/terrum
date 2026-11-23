@@ -2484,6 +2484,56 @@ public static partial class TrRmExecutableCompiler
         return false;
     }
 
+    private static bool TryGetForeignInterfaceScalarUpdateEncoding(
+        BoundUpdate update, out byte opcode, out byte control)
+    {
+        opcode = 0;
+        control = 0;
+        if (update.Place is not BoundRead place
+            || place.Type != update.Type
+            || !PrimitiveTypeFacts.IsIntegerOrWide(update.Type)
+            || !DirectNativeImportContract.IsScalar(update.Type)
+            || update.Operator is not (TokenKind.PlusPlus
+                or TokenKind.MinusMinus))
+        {
+            return false;
+        }
+
+        var binary = new BoundBinary(
+            update.Operator == TokenKind.PlusPlus
+                ? TokenKind.Plus : TokenKind.Minus,
+            place, new BoundConstant(1, update.Type, update.Span),
+            update.Type, update.Span) {
+            OverflowBehavior = update.OverflowBehavior,
+        };
+        return TryGetForeignInterfaceScalarBinaryEncoding(binary,
+            out opcode, out control);
+    }
+
+    private static bool TryGetForeignInterfaceScalarUpdateFromBinary(
+        BoundBinary binary, out BoundUpdate update)
+    {
+        update = null!;
+        if (binary.Left is not BoundRead place
+            || binary.Right is not BoundConstant constant
+            || binary.Operator is not (TokenKind.Plus or TokenKind.Minus)
+            || constant.Type != binary.Type
+            || constant.RepresentationType != constant.Type
+            || constant.Bits.Low != 1 || constant.Bits.High != 0)
+        {
+            return false;
+        }
+
+        update = new BoundUpdate(
+            binary.Operator == TokenKind.Plus
+                ? TokenKind.PlusPlus : TokenKind.MinusMinus,
+            place, true, binary.Type, binary.Span) {
+            OverflowBehavior = binary.OverflowBehavior,
+        };
+        return TryGetForeignInterfaceScalarUpdateEncoding(update,
+            out _, out _);
+    }
+
     private static bool TryGetForeignInterfaceScalarComparisonPredicateMask(
         PrimitiveType operandType, TokenKind operation, out byte predicateMask)
     {
@@ -2524,7 +2574,8 @@ public static partial class TrRmExecutableCompiler
         BoundExpression expression, PrimitiveType expectedType,
         BoundFunction function, int parameterLimit,
         HashSet<(PrimitiveType Type, ScalarBits Bits)> expressionConstantInputs,
-        out int temporaryRegisterCount)
+        out int temporaryRegisterCount,
+        HashSet<int>? stagedLocalVariables = null)
     {
         temporaryRegisterCount = 0;
         if ((uint)parameterLimit > (uint)function.ParameterCount)
@@ -2537,7 +2588,8 @@ public static partial class TrRmExecutableCompiler
             expression = unsafeExpression.Expression;
         }
 
-        if (expression is not (BoundUnary or BoundBinary or BoundCast)
+        if (expression is not (BoundRead or BoundUnary or BoundBinary
+                or BoundCast or BoundUpdate)
             || !DirectNativeImportContract.IsScalar(expectedType))
         {
             return false;
@@ -2564,8 +2616,7 @@ public static partial class TrRmExecutableCompiler
             {
                 if (read.Type != type
                     || (uint)read.Variable
-                        >= (uint)parameterLimit
-                    || read.Variable >= 16
+                        >= (uint)function.Variables.Length
                     || function.Variables[read.Variable].Type != type
                     || function.Variables[read.Variable].IsOut
                     || function.Variables[read.Variable].IsInit)
@@ -2573,7 +2624,21 @@ public static partial class TrRmExecutableCompiler
                     return (false, 0, false);
                 }
 
-                return (true, 1, true);
+                if (read.Variable < parameterLimit
+                    && read.Variable < 16)
+                {
+                    return (true, 1, true);
+                }
+
+                if (read.Variable >= function.ParameterCount
+                    && stagedLocalVariables?.Contains(read.Variable) == true
+                    && !function.Variables[read.Variable]
+                        .IsInitializationLocal)
+                {
+                    return (true, 1, true);
+                }
+
+                return (false, 0, false);
             }
 
             if (candidate is BoundConstant constant)
@@ -2589,6 +2654,32 @@ public static partial class TrRmExecutableCompiler
                 _ = expressionConstantInputs.Add((constant.Type,
                     constant.Bits));
                 return (true, 0, false);
+            }
+
+            if (candidate is BoundUpdate update)
+            {
+                if (update.Type != type
+                    || update.Place is not BoundRead place
+                    || place.Type != update.Type
+                    || (uint)place.Variable
+                        >= (uint)function.Variables.Length
+                    || stagedLocalVariables is null
+                    || !stagedLocalVariables.Contains(place.Variable)
+                    || !function.Variables[place.Variable].IsMutable
+                    || function.Variables[place.Variable].IsOut
+                    || function.Variables[place.Variable].IsInit
+                    || function.Variables[place.Variable]
+                        .IsInitializationLocal
+                    || function.Variables[place.Variable].Type != update.Type
+                    || !TryGetForeignInterfaceScalarUpdateEncoding(update,
+                        out _, out _))
+                {
+                    return (false, 0, false);
+                }
+
+                var one = new BoundConstant(1, update.Type, update.Span);
+                _ = expressionConstantInputs.Add((one.Type, one.Bits));
+                return (true, update.IsPrefix ? 1 : 2, true);
             }
 
             if (candidate is BoundCast cast)
@@ -2682,6 +2773,10 @@ public static partial class TrRmExecutableCompiler
             CollectForeignInterfaceScalarInputConstants(cast.Operand,
                 addConstant);
         }
+        else if (expression is BoundUpdate update)
+        {
+            addConstant(new BoundConstant(1, update.Type, update.Span));
+        }
         else if (expression is BoundBinary binary)
         {
             CollectForeignInterfaceScalarInputConstants(binary.Left,
@@ -2712,6 +2807,10 @@ public static partial class TrRmExecutableCompiler
         {
             CollectForeignInterfaceScalarInputHomeVariables(cast.Operand,
                 homeVariables);
+        }
+        else if (expression is BoundUpdate { Place: BoundRead read })
+        {
+            _ = homeVariables.Add(read.Variable);
         }
         else if (expression is BoundBinary binary)
         {
@@ -2781,6 +2880,10 @@ public static partial class TrRmExecutableCompiler
                     cast.Type)
                 || ForeignInterfaceScalarInputExpressionMayThrow(
                     cast.Operand),
+            BoundUpdate update =>
+                update.OverflowBehavior
+                    == BoundIntegerOverflowBehavior.Checked
+                && PrimitiveTypeFacts.IsIntegerOrWide(update.Type),
             BoundUnary unary =>
                 (unary.Operator == TokenKind.Minus
                     && PrimitiveTypeFacts.IsIntegerOrWide(unary.Type)
@@ -2846,10 +2949,12 @@ public static partial class TrRmExecutableCompiler
     }
 
     private static int EmitForeignInterfaceScalarInputExpression(
-        BoundExpression expression, PrimitiveType expectedType,
+        BoundFunction function, BoundExpression expression,
+        PrimitiveType expectedType,
         Func<int> allocateRegister,
         Func<BoundConstant, byte> getConstantRegister,
-        Func<PrimitiveType, int> getTypeMapIndex, List<byte> code)
+        Func<PrimitiveType, int> getTypeMapIndex, List<byte> code,
+        HashSet<int>? stagedLocalVariables = null)
     {
         var result = Emit(expression, expectedType);
         if (!result.OwnsRegister)
@@ -2870,15 +2975,47 @@ public static partial class TrRmExecutableCompiler
 
             if (candidate is BoundRead read)
             {
-                if (read.Type != type || read.Variable is < 0 or >= 16)
+                if (read.Type != type
+                    || (uint)read.Variable
+                        >= (uint)function.Variables.Length
+                    || function.Variables[read.Variable].Type != type
+                    || function.Variables[read.Variable].IsOut
+                    || function.Variables[read.Variable].IsInit)
                 {
                     throw Unsupported(
                         "A Standard F+I scalar expression reads an unsupported Home.");
                 }
 
                 var register = allocateRegister();
-                code.Add(0x11);
-                code.Add(checked((byte)((read.Variable << 4) | register)));
+                if (read.Variable < function.ParameterCount)
+                {
+                    if (read.Variable >= 16)
+                    {
+                        throw Unsupported(
+                            "A Standard F+I scalar expression reads a parameter outside the formal-load range.");
+                    }
+
+                    code.Add(0x11);
+                    code.Add(checked((byte)((read.Variable << 4)
+                        | register)));
+                }
+                else if (stagedLocalVariables?.Contains(read.Variable)
+                    == true
+                    && !function.Variables[read.Variable]
+                        .IsInitializationLocal
+                    && (uint)read.Variable <= ushort.MaxValue)
+                {
+                    code.Add(0xD5);
+                    code.Add(checked((byte)register));
+                    code.Add(checked((byte)read.Variable));
+                    code.Add(checked((byte)(read.Variable >> 8)));
+                }
+                else
+                {
+                    throw Unsupported(
+                        "A Standard F+I scalar expression reads an unstaged local Home.");
+                }
+
                 return (register, true);
             }
 
@@ -2894,6 +3031,76 @@ public static partial class TrRmExecutableCompiler
                 }
 
                 return (getConstantRegister(constant), false);
+            }
+
+            if (candidate is BoundUpdate update
+                && update.Type == type
+                && update.Place is BoundRead place
+                && (uint)place.Variable
+                    < (uint)function.Variables.Length
+                && stagedLocalVariables?.Contains(place.Variable) == true
+                && function.Variables[place.Variable].IsMutable
+                && !function.Variables[place.Variable].IsOut
+                && !function.Variables[place.Variable].IsInit
+                && !function.Variables[place.Variable]
+                    .IsInitializationLocal
+                && function.Variables[place.Variable].Type == update.Type
+                && DirectNativeImportContract.IsScalar(update.Type)
+                && TryGetForeignInterfaceScalarUpdateEncoding(update,
+                    out var updateOpcode, out var updateControl))
+            {
+                if ((uint)place.Variable > ushort.MaxValue)
+                {
+                    throw Unsupported(
+                        "A Standard F+I scalar update exceeds the Home index range.");
+                }
+
+                var previousRegister = allocateRegister();
+                code.Add(0xD5);
+                code.Add(checked((byte)previousRegister));
+                code.Add(checked((byte)place.Variable));
+                code.Add(checked((byte)(place.Variable >> 8)));
+                var resultRegister = previousRegister;
+                if (!update.IsPrefix)
+                {
+                    resultRegister = allocateRegister();
+                    code.Add(0x10);
+                    code.Add(checked((byte)((previousRegister << 4)
+                        | resultRegister)));
+                }
+
+                var oneRegister = getConstantRegister(
+                    new BoundConstant(1, update.Type, update.Span));
+                if (updateOpcode == 0xC0)
+                {
+                    var payload = checked((ushort)(
+                        resultRegister | (0x0F << 4)
+                        | (resultRegister << 8)
+                        | (oneRegister << 12)));
+                    code.Add(updateOpcode);
+                    code.Add(updateControl);
+                    code.Add((byte)payload);
+                    code.Add((byte)(payload >> 8));
+                }
+                else if (updateControl == 0
+                    && updateOpcode is 0x21 or 0x22)
+                {
+                    code.Add(updateOpcode);
+                    code.Add(checked((byte)((oneRegister << 4)
+                        | resultRegister)));
+                }
+                else
+                {
+                    throw Invalid(
+                        "A Standard F+I scalar update has no selected Body operation.");
+                }
+
+                code.Add(0xD6);
+                code.Add(checked((byte)(0x10 | resultRegister)));
+                code.Add(checked((byte)place.Variable));
+                code.Add(checked((byte)(place.Variable >> 8)));
+                return (update.IsPrefix ? resultRegister
+                    : previousRegister, true);
             }
 
             if (candidate is BoundCast cast
@@ -3290,6 +3497,33 @@ public static partial class TrRmExecutableCompiler
                 {
                     return false;
                 }
+
+                if (stagedLocalVariables.Contains(read.Variable)
+                    && DirectNativeImportContract.IsScalar(read.Type))
+                {
+                    var expressionConstants
+                        = new HashSet<(PrimitiveType Type, ScalarBits Bits)>();
+                    if (!TryAnalyzeForeignInterfaceScalarInputExpression(
+                            read, target.Variables[formal].Type, function,
+                            function.ParameterCount, expressionConstants,
+                            out var expressionRegisterCount,
+                            stagedLocalVariables))
+                    {
+                        return false;
+                    }
+
+                    scalarExpressionRegisterCount = checked(
+                        scalarExpressionRegisterCount
+                        + expressionRegisterCount);
+                    constantInputs.UnionWith(expressionConstants);
+                    if (constantInputs.Count
+                            + nestedForeignInterfaceCalls.Count
+                            + scalarExpressionRegisterCount
+                        > availableInputRegisters)
+                    {
+                        return false;
+                    }
+                }
             }
             else if (argument is BoundConstant constant
                 && DirectNativeImportContract.IsScalar(constant.Type)
@@ -3307,14 +3541,15 @@ public static partial class TrRmExecutableCompiler
                 }
             }
             else if (argument is BoundUnary or BoundBinary or BoundCast
-                or BoundUnsafeExpression)
+                or BoundUpdate or BoundUnsafeExpression)
             {
                 var expressionConstants
                     = new HashSet<(PrimitiveType Type, ScalarBits Bits)>();
                 if (!TryAnalyzeForeignInterfaceScalarInputExpression(
                         argument, target.Variables[formal].Type, function,
                         function.ParameterCount, expressionConstants,
-                        out var expressionRegisterCount))
+                        out var expressionRegisterCount,
+                        stagedLocalVariables))
                 {
                     return false;
                 }
@@ -4475,7 +4710,7 @@ public static partial class TrRmExecutableCompiler
                 var expressionCode = new List<byte>();
                 var resultRegister
                     = EmitForeignInterfaceScalarInputExpression(
-                        expression, expectedType,
+                        function, expression, expectedType,
                         AllocateExpressionRegister, GetConstantRegister,
                         type => maps.GetTypeMapIndex(
                             GetStandardBodyTypeMapToken(type,
@@ -5080,17 +5315,36 @@ public static partial class TrRmExecutableCompiler
                 argumentPreparationCode.Add(0);
                 nestedRecordPatches.Add((operandOffset, nestedInputCall));
             }
-            else if (argument is BoundUnary or BoundBinary or BoundCast
-                or BoundUnsafeExpression)
+            else if (argument is BoundRead read
+                && stagedLocalVariables.Contains(read.Variable)
+                && DirectNativeImportContract.IsScalar(read.Type))
             {
                 var resultRegister
                     = EmitForeignInterfaceScalarInputExpression(
-                        argument, target.Variables[formal].Type,
+                        function, argument, target.Variables[formal].Type,
                         AllocateExpressionRegister, GetConstantRegister,
                         type => maps.GetTypeMapIndex(
                             GetStandardBodyTypeMapToken(type,
                                 typeSpecRowFor)),
-                        argumentPreparationCode);
+                        argumentPreparationCode, stagedLocalVariables);
+                if (!expressionRegisterByFormal.TryAdd(formal,
+                        checked((byte)resultRegister)))
+                {
+                    throw Invalid(
+                        "A Standard F+I scalar expression maps one formal more than once.");
+                }
+            }
+            else if (argument is BoundUnary or BoundBinary or BoundCast
+                or BoundUpdate or BoundUnsafeExpression)
+            {
+                var resultRegister
+                    = EmitForeignInterfaceScalarInputExpression(
+                        function, argument, target.Variables[formal].Type,
+                        AllocateExpressionRegister, GetConstantRegister,
+                        type => maps.GetTypeMapIndex(
+                            GetStandardBodyTypeMapToken(type,
+                                typeSpecRowFor)),
+                        argumentPreparationCode, stagedLocalVariables);
                 if (!expressionRegisterByFormal.TryAdd(formal,
                         checked((byte)resultRegister)))
                 {
@@ -5424,8 +5678,9 @@ public static partial class TrRmExecutableCompiler
             if (allowScalarExpression)
             {
                 var resultRegister
-                    = EmitForeignInterfaceScalarInputExpression(expression,
-                        expectedType, AllocateExpressionRegister,
+                    = EmitForeignInterfaceScalarInputExpression(function,
+                        expression, expectedType,
+                        AllocateExpressionRegister,
                         GetConstantRegister,
                         type => maps.GetTypeMapIndex(
                             GetStandardBodyTypeMapToken(type,
@@ -5801,6 +6056,7 @@ public static partial class TrRmExecutableCompiler
             {
                 var resultRegister
                     = EmitForeignInterfaceScalarInputExpression(
+                        function,
                         call.Arguments[sourceArgument],
                         target.Variables[formal].Type,
                         () => nextExpressionRegister++,
@@ -8528,6 +8784,11 @@ public static partial class TrRmExecutableCompiler
         var outputPlaceByRegister = new Dictionary<int, BoundExpression>();
         var valueByRegister = new Dictionary<int, BoundExpression>();
         var valueRegisterWriteOrder = new Dictionary<int, int>();
+        var pendingUpdatesByStoreRegister = new Dictionary<int,
+            (int Variable, int ResultRegister, TokenKind Operator,
+             PrimitiveType Type, BoundIntegerOverflowBehavior OverflowBehavior,
+             bool IsPrefix)>();
+        (int Destination, int Source)? pendingUpdateMove = null;
         var initializedLocals = new HashSet<int>();
         var initializedValueLocals = new HashSet<int>();
         var stores = 0;
@@ -8578,6 +8839,75 @@ public static partial class TrRmExecutableCompiler
         var activeNativeOutputReservations = new HashSet<int>();
         var code = body.GetBlockCode(0);
 
+        void TrackForeignInterfaceUpdate(BoundBinary binary,
+            int destinationRegister, bool followedByHomeStore)
+        {
+            if (!TryGetForeignInterfaceScalarUpdateFromBinary(binary,
+                    out var update))
+            {
+                if (pendingUpdateMove is not null)
+                {
+                    throw Invalid(
+                        "A Standard F+I postfix update move is not followed by its arithmetic operation.");
+                }
+
+                return;
+            }
+
+            if (!followedByHomeStore)
+            {
+                if (pendingUpdateMove is not null)
+                {
+                    throw Invalid(
+                        "A Standard F+I postfix update arithmetic result is not stored to its mutable Home.");
+                }
+
+                return;
+            }
+
+            var place = (BoundRead)update.Place;
+            if ((uint)place.Variable >= (uint)variables.Count
+                || !initializedValueLocals.Contains(place.Variable)
+                || !variables[place.Variable].IsMutable)
+            {
+                if (pendingUpdateMove is not null)
+                {
+                    throw Invalid(
+                        "A Standard F+I postfix update does not target an initialized mutable local.");
+                }
+
+                return;
+            }
+
+            var resultRegister = destinationRegister;
+            var isPrefix = true;
+            if (pendingUpdateMove is { } move)
+            {
+                if (move.Destination != destinationRegister
+                    || !valueByRegister.TryGetValue(move.Source,
+                        out var previousValue)
+                    || previousValue is not BoundRead previousRead
+                    || previousRead.Variable != place.Variable)
+                {
+                    throw Invalid(
+                        "A Standard F+I postfix update does not preserve its old value.");
+                }
+
+                resultRegister = move.Source;
+                isPrefix = false;
+                pendingUpdateMove = null;
+            }
+
+            if (!pendingUpdatesByStoreRegister.TryAdd(
+                    destinationRegister,
+                    (place.Variable, resultRegister, update.Operator,
+                        update.Type, update.OverflowBehavior, isPrefix)))
+            {
+                throw Invalid(
+                    "A Standard F+I update result is stored more than once.");
+            }
+        }
+
         for (var position = 0; position < code.Length;)
         {
             var opcode = code[position];
@@ -8590,9 +8920,49 @@ public static partial class TrRmExecutableCompiler
                 throw Invalid(
                     "A Standard F+I relation comparison is not immediately followed by SetCondition.");
             }
+            if (pendingUpdateMove is not null
+                && opcode is not (0x21 or 0x22 or 0xC0))
+            {
+                throw Invalid(
+                    "A Standard F+I postfix update copy is not followed by arithmetic.");
+            }
+            if (pendingUpdatesByStoreRegister.Count != 0
+                && opcode != 0xD6)
+            {
+                throw Invalid(
+                    "A Standard F+I update is not immediately stored to its mutable Home.");
+            }
 
             switch (opcode)
             {
+                case 0x10:
+                {
+                    if (!foreignInterfaceDirectCallBody)
+                    {
+                        throw Unsupported(
+                            "A Standard initialization-reference Body does not use direct register moves.");
+                    }
+
+                    var destinationRegister = instruction[1] & 0x0F;
+                    var sourceRegister = instruction[1] >> 4;
+                    if (pendingUpdateMove is not null
+                        || destinationRegister is 0 or >= 14
+                        || sourceRegister is 0 or >= 14
+                        || valueByRegister.ContainsKey(
+                            destinationRegister)
+                        || !valueByRegister.TryGetValue(sourceRegister,
+                            out var value))
+                    {
+                        throw Invalid(
+                            "A Standard F+I register move has an invalid source or destination.");
+                    }
+
+                    valueByRegister[destinationRegister] = value;
+                    valueRegisterWriteOrder[destinationRegister] = position;
+                    pendingUpdateMove
+                        = (destinationRegister, sourceRegister);
+                    break;
+                }
                 case 0x11:
                 {
                     var destinationRegister = instruction[1] & 0x0F;
@@ -8740,6 +9110,10 @@ public static partial class TrRmExecutableCompiler
 
                     valueByRegister[destinationRegister] = binary;
                     valueRegisterWriteOrder[destinationRegister] = position;
+                    TrackForeignInterfaceUpdate(binary,
+                        destinationRegister,
+                        position + instructionLength < code.Length
+                            && code[position + instructionLength] == 0xD6);
                     break;
                 }
                 case 0xC0:
@@ -8834,6 +9208,10 @@ public static partial class TrRmExecutableCompiler
 
                     valueByRegister[destinationRegister] = binary;
                     valueRegisterWriteOrder[destinationRegister] = position;
+                    TrackForeignInterfaceUpdate(binary,
+                        destinationRegister,
+                        position + instructionLength < code.Length
+                            && code[position + instructionLength] == 0xD6);
                     break;
                 }
                 case 0xC2:
@@ -9008,6 +9386,55 @@ public static partial class TrRmExecutableCompiler
                         }
 
                         var variable = homeVariables[homeIndex];
+                        if (pendingUpdatesByStoreRegister.TryGetValue(
+                                sourceRegister, out var pendingUpdate))
+                        {
+                            if (variable < function.ParameterCount
+                                || variable >= variables.Count
+                                || variables[variable].IsOut
+                                || variables[variable].IsInit
+                                || variables[variable]
+                                    .IsInitializationLocal
+                                || !initializedValueLocals.Contains(variable)
+                                || !variables[variable].IsMutable
+                                || variable != pendingUpdate.Variable
+                                || homeTypes[homeIndex]
+                                    != pendingUpdate.Type
+                                || variables[variable].Type
+                                    != pendingUpdate.Type
+                                || !valueByRegister.TryGetValue(
+                                    sourceRegister, out var updateValue)
+                                || updateValue is not BoundBinary)
+                            {
+                                throw Invalid(
+                                    "A Standard F+I update store does not match its mutable local and arithmetic result.");
+                            }
+
+                            var updateExpression = new BoundUpdate(
+                                pendingUpdate.Operator,
+                                new BoundRead(variable,
+                                    pendingUpdate.Type, default),
+                                pendingUpdate.IsPrefix,
+                                pendingUpdate.Type, default) {
+                                OverflowBehavior
+                                    = pendingUpdate.OverflowBehavior,
+                            };
+                            valueByRegister[pendingUpdate.ResultRegister]
+                                = updateExpression;
+                            valueRegisterWriteOrder[
+                                pendingUpdate.ResultRegister] = position;
+                            _ = pendingUpdatesByStoreRegister.Remove(
+                                sourceRegister);
+                            if (pendingUpdate.ResultRegister
+                                != sourceRegister)
+                            {
+                                _ = valueByRegister.Remove(sourceRegister);
+                                _ = valueRegisterWriteOrder.Remove(
+                                    sourceRegister);
+                            }
+                            break;
+                        }
+
                         if (variable < function.ParameterCount
                             || variable >= variables.Count
                             || variables[variable].IsOut
@@ -9566,8 +9993,9 @@ public static partial class TrRmExecutableCompiler
                                                 "A ForeignNativeInterface CallSite reuses or misclassifies a nested result register.");
                                         }
                                     }
-                                    else if (registerArgument is BoundUnary or
-                                        BoundBinary or BoundCast)
+                                    else if (registerArgument is BoundRead or
+                                        BoundUnary or BoundBinary or BoundCast
+                                        or BoundUpdate)
                                     {
                                         var expressionConstants
                                             = new HashSet<(PrimitiveType Type,
@@ -9576,7 +10004,8 @@ public static partial class TrRmExecutableCompiler
                                                 registerArgument, formalType,
                                                 function,
                                                 function.ParameterCount,
-                                                expressionConstants, out _))
+                                                expressionConstants, out _,
+                                                initializedValueLocals))
                                         {
                                             throw Invalid(
                                                 "A ForeignNativeInterface CallSite contains an unsupported scalar expression input.");
@@ -10597,21 +11026,30 @@ public static partial class TrRmExecutableCompiler
                         valueByRegister[register] = new BoundRead(
                             pointerLoadHomeVariable,
                             homeTypes[homeIndex], default);
+                        valueRegisterWriteOrder[register] = position;
                         break;
                     }
 
                     if ((instruction[1] & 0xF0) != 0
-                        || homeIndex >= homeVariables.Length
-                        || !initializedLocals.Contains(
-                            homeVariables[(int)homeIndex]))
+                        || homeIndex >= homeVariables.Length)
                     {
                         throw Invalid(
                             "A Standard init Body loads a Home before its output call.");
                     }
 
                     var variable = homeVariables[(int)homeIndex];
+                    if (!initializedLocals.Contains(variable)
+                        && !(body.Schema.UsesForeignNativeInterface()
+                            && homeRoles[homeIndex] == 3
+                            && initializedValueLocals.Contains(variable)))
+                    {
+                        throw Invalid(
+                            "A Standard init Body loads a Home before it is initialized.");
+                    }
+
                     valueByRegister[register] = new BoundRead(variable,
                         variables[variable].Type, default);
+                    valueRegisterWriteOrder[register] = position;
                     break;
                 }
                 case 0x17:
@@ -10653,6 +11091,13 @@ public static partial class TrRmExecutableCompiler
         {
             throw Invalid(
                 "A Standard F+I relation comparison has no SetCondition.");
+        }
+
+        if (pendingUpdateMove is not null
+            || pendingUpdatesByStoreRegister.Count != 0)
+        {
+            throw Invalid(
+                "A Standard F+I update is missing its arithmetic or Home store.");
         }
 
         if (activeNativeOutputReservations.Count != 0)
