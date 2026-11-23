@@ -255,6 +255,9 @@ public static partial class SemanticVerifier
         bool verifyPureEvaluationForms = true,
         bool pureEvaluationFailureProof = false)
     {
+        duplicateNameViewIndexes
+            = IncludeStandardFunctionPointerClosureNameViews(program,
+                duplicateNameViewIndexes);
         VerificationSummaries? summaries = null;
         System.Runtime.ExceptionServices.ExceptionDispatchInfo? failure = null;
         var worker = new System.Threading.Thread(() =>
@@ -279,6 +282,56 @@ public static partial class SemanticVerifier
         failure?.Throw();
         return summaries ?? throw new InvalidOperationException(
             "The semantic verifier completed without a result.");
+    }
+
+    private static IReadOnlySet<int>?
+        IncludeStandardFunctionPointerClosureNameViews(
+        BoundProgram program, IReadOnlySet<int>? existingIndexes)
+    {
+        var typeDefRows = program.StandardFunctionPointerTypeDefClosureRows;
+        if (typeDefRows.IsDefaultOrEmpty)
+        {
+            return existingIndexes;
+        }
+
+        var firstAdditionalStructure
+            = program.Structures.Length - typeDefRows.Length;
+        if (firstAdditionalStructure < 0)
+        {
+            throw Invalid();
+        }
+
+        var additionalNames = new HashSet<string>(StringComparer.Ordinal);
+        for (var index = firstAdditionalStructure;
+            index < program.Structures.Length; index++)
+        {
+            var structure = program.Structures[index];
+            if (structure is null || string.IsNullOrWhiteSpace(
+                    structure.Name))
+            {
+                throw Invalid();
+            }
+
+            additionalNames.Add(structure.Name);
+        }
+
+        var indexes = existingIndexes is null
+            ? new HashSet<int>() : new HashSet<int>(existingIndexes);
+        for (var index = 0; index < program.Structures.Length; index++)
+        {
+            var structure = program.Structures[index];
+            if (structure is null)
+            {
+                throw Invalid();
+            }
+
+            if (additionalNames.Contains(structure.Name))
+            {
+                _ = indexes.Add(index);
+            }
+        }
+
+        return indexes;
     }
 
     private static VerificationSummaries VerifyCoreOnVerifierStack(
@@ -764,8 +817,9 @@ public static partial class SemanticVerifier
                 program.CheckedReferenceTypes,
                 program.EnumDefinitions);
         }
-        var structNames = new Dictionary<string, bool>(program.Structures.Length,
-            StringComparer.Ordinal);
+        var structNames = new Dictionary<string,
+            (bool Hidden, BoundStandardTypeOrigin? Origin)>(
+                program.Structures.Length, StringComparer.Ordinal);
         var layoutStates = new byte[program.Structures.Length];
         var alignments = new int[program.Structures.Length];
         var requiredAlignments = new int[program.Structures.Length];
@@ -783,7 +837,9 @@ public static partial class SemanticVerifier
             if (@class is null || string.IsNullOrWhiteSpace(@class.Name)
                 || @class.Name is NativeManagedNodeIntrinsics.TypeName or NativeManagedNodeIntrinsics.HeapName
                 || !classNames.Add(@class.Name)
-                || structNames.ContainsKey(@class.Name)
+                || (structNames.TryGetValue(@class.Name,
+                        out var classNameType)
+                    && !classNameType.Hidden)
                 || @class.Fields.IsDefaultOrEmpty
                 || @class.Fields.Length > ManagedClassTypes.MaximumFields
                 || @class.Size is < 8 or > ManagedClassTypes.MaximumPayload
@@ -961,14 +1017,21 @@ public static partial class SemanticVerifier
             if (structNames.TryGetValue(structure.Name,
                     out var existingDuplicateNameView))
             {
-                if (!existingDuplicateNameView || !isDuplicateNameView)
+                if ((!existingDuplicateNameView.Hidden
+                        && !isDuplicateNameView)
+                    || ((!existingDuplicateNameView.Hidden
+                            || !isDuplicateNameView)
+                        && !BoundStandardTypeOriginIdentity.AreDistinct(
+                            existingDuplicateNameView.Origin,
+                            structure.StandardTypeOrigin)))
                 {
                     throw Invalid();
                 }
             }
             else
             {
-                structNames.Add(structure.Name, isDuplicateNameView);
+                structNames.Add(structure.Name, (isDuplicateNameView,
+                    structure.StandardTypeOrigin));
             }
             ulong offset = 0;
             var alignment = structure.IsTransparent ? 0 : 1;

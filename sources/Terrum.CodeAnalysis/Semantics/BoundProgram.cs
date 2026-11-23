@@ -718,6 +718,9 @@ public sealed record BoundProgram(ImmutableArray<BoundFunction> Functions, int E
     internal BoundStandardFieldProviderClosure?
         StandardFieldProviderClosure { get; init; }
 
+    internal ImmutableArray<int>
+        StandardFunctionPointerTypeDefClosureRows { get; init; } = [];
+
     internal BoundStandardQuerySourceAssociation?
         StandardQuerySourceAssociation { get; init; }
 
@@ -1428,6 +1431,63 @@ internal sealed record BoundStandardTypeOrigin(
     }
 
     internal ImmutableArray<int> ContextualViewIndexes { get; init; }
+}
+
+internal static class BoundStandardTypeOriginIdentity
+{
+    internal static bool AreDistinct(
+        BoundStandardTypeOrigin? left, BoundStandardTypeOrigin? right)
+    {
+        if (left is null)
+        {
+            return right is not null
+                && right.ReferenceRoot is BoundSourceTypeProviderSnapshot root
+                && (!StringComparer.Ordinal.Equals(
+                        right.Provider.SchemaIdentity,
+                        root.SchemaIdentity)
+                    || !StringComparer.Ordinal.Equals(
+                        right.Provider.ModuleIdentity,
+                        root.ModuleIdentity));
+        }
+
+        if (right is null)
+        {
+            return left.ReferenceRoot is BoundSourceTypeProviderSnapshot root
+                && (!StringComparer.Ordinal.Equals(
+                        left.Provider.SchemaIdentity, root.SchemaIdentity)
+                    || !StringComparer.Ordinal.Equals(
+                        left.Provider.ModuleIdentity,
+                        root.ModuleIdentity));
+        }
+
+        var leftProvider = left.Provider;
+        var rightProvider = right.Provider;
+        if (!StringComparer.Ordinal.Equals(leftProvider.SchemaIdentity,
+                rightProvider.SchemaIdentity)
+            || !StringComparer.Ordinal.Equals(leftProvider.ModuleIdentity,
+                rightProvider.ModuleIdentity)
+            || leftProvider.GoverningRuleEdition
+                != rightProvider.GoverningRuleEdition
+            || leftProvider.TargetRequirement
+                != rightProvider.TargetRequirement
+            || leftProvider.RuntimePolicy != rightProvider.RuntimePolicy)
+        {
+            return true;
+        }
+
+        if (!left.ExportKeys.IsDefaultOrEmpty
+            && !right.ExportKeys.IsDefaultOrEmpty
+            && left.ExportKeys.Any(leftKey =>
+                right.ExportKeys.Contains(leftKey, StringComparer.Ordinal)))
+        {
+            return false;
+        }
+
+        return left.DefinitionId != right.DefinitionId
+            || leftProvider.ModuleRow != rightProvider.ModuleRow
+            || !leftProvider.ArtifactSnapshot.AsSpan().SequenceEqual(
+                rightProvider.ArtifactSnapshot.AsSpan());
+    }
 }
 
 internal sealed record BoundStandardFieldOrigin(

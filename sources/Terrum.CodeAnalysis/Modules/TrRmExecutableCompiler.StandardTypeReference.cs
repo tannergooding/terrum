@@ -8296,8 +8296,55 @@ public static partial class TrRmExecutableCompiler
 
         var (typeDefStart, typeDefEnd)
             = tables.Modules.GetTypeDefRange(moduleRow);
+        var optionalStructureCount = 0;
+        if (program.Structures.Length
+            >= TrRmOptionalScalar.Structures.Length)
+        {
+            var matchesOptionalScalarPrefix = true;
+            for (var index = 0;
+                index < TrRmOptionalScalar.Structures.Length; index++)
+            {
+                if (!StringComparer.Ordinal.Equals(
+                        program.Structures[index].Name,
+                        TrRmOptionalScalar.Structures[index].Name))
+                {
+                    matchesOptionalScalarPrefix = false;
+                    break;
+                }
+            }
+
+            if (matchesOptionalScalarPrefix)
+            {
+                optionalStructureCount
+                    = TrRmOptionalScalar.Structures.Length;
+            }
+        }
+        var rootStructureCount = typeDefEnd - typeDefStart;
+        var rootStructureIndexByTypeDef = new int[tables.TypeDefs.Count + 1];
+        Array.Fill(rootStructureIndexByTypeDef, -1);
+        var nextRootStructureIndex = optionalStructureCount;
+        for (var typeDefRow = typeDefStart;
+            typeDefRow < typeDefEnd; typeDefRow++)
+        {
+            if (tables.Layouts.HasBlittableLayout(typeDefRow, 1, 1))
+            {
+                rootStructureIndexByTypeDef[typeDefRow]
+                    = nextRootStructureIndex++;
+            }
+        }
+
+        rootStructureCount = nextRootStructureIndex
+            - optionalStructureCount;
+        var additionalStructureCount = program.Structures.Length
+            - nextRootStructureIndex;
+        var additionalTypeDefRows
+            = program.StandardFunctionPointerTypeDefClosureRows;
         if (typeDefStart <= 0
-            || typeDefEnd - typeDefStart != program.Structures.Length)
+            || program.Structures.Length < nextRootStructureIndex
+            || additionalStructureCount < 0
+            || (!additionalTypeDefRows.IsDefaultOrEmpty
+                && additionalTypeDefRows.Length
+                    != additionalStructureCount))
         {
             throw Invalid(
                 "The loaded A2 type declarations do not match their Module row range.");
@@ -8351,22 +8398,23 @@ public static partial class TrRmExecutableCompiler
             return snapshot;
         }
 
-        var bindingsByExpectedTypeDef = new Dictionary<int,
+        var bindingsByExpectedTypeDef = new Dictionary<
+            (int ModuleRow, int TypeDefRow),
             List<TrRmStandardTypeProviderBinding>>();
         foreach (var binding in typeProviderBindings)
         {
-            if (binding.ConsumerArtifactIndex != consumerArtifactIndex
-                || binding.ConsumerModuleRow != moduleRow)
+            if (binding.ConsumerArtifactIndex != consumerArtifactIndex)
             {
                 continue;
             }
 
+            var key = (binding.ConsumerModuleRow,
+                binding.ExpectedTypeDefRow);
             if (!bindingsByExpectedTypeDef.TryGetValue(
-                    binding.ExpectedTypeDefRow, out var bindings))
+                    key, out var bindings))
             {
                 bindings = [];
-                bindingsByExpectedTypeDef.Add(
-                    binding.ExpectedTypeDefRow, bindings);
+                bindingsByExpectedTypeDef.Add(key, bindings);
             }
 
             bindings.Add(binding);
@@ -8402,13 +8450,20 @@ public static partial class TrRmExecutableCompiler
 
         var structures = ImmutableArray.CreateBuilder<BoundStruct>(
             program.Structures.Length);
-        for (var structureIndex = 0;
-            structureIndex < program.Structures.Length; structureIndex++)
+        structures.AddRange(program.Structures.Take(optionalStructureCount));
+        for (var typeDefRow = typeDefStart;
+            typeDefRow < typeDefEnd; typeDefRow++)
         {
-            var structure = program.Structures[structureIndex];
-            var typeDefRow = typeDefStart + structureIndex;
-            if (!bindingsByExpectedTypeDef.TryGetValue(typeDefRow,
-                    out var bindings))
+            var programStructureIndex
+                = rootStructureIndexByTypeDef[typeDefRow];
+            if (programStructureIndex < 0)
+            {
+                continue;
+            }
+
+            var structure = program.Structures[programStructureIndex];
+            if (!bindingsByExpectedTypeDef.TryGetValue((moduleRow,
+                    typeDefRow), out var bindings))
             {
                 if (!retainTypeOriginsWithoutPublications)
                 {
@@ -8539,10 +8594,198 @@ public static partial class TrRmExecutableCompiler
             });
         }
 
+        var localTypeExportKeysByTypeDef
+            = new Dictionary<int, List<string>>();
+        if (!additionalTypeDefRows.IsDefaultOrEmpty)
+        {
+            var additionalOwnerModuleRows = new HashSet<int>();
+            foreach (var typeDefRow in additionalTypeDefRows)
+            {
+                _ = additionalOwnerModuleRows.Add(
+                    tables.TypeDefs.GetOwnerModule(typeDefRow));
+            }
+
+            foreach (var ownerModuleRow in additionalOwnerModuleRows)
+            {
+                foreach (var (definition, exportKey) in
+                    tables.Exports.GetExportsForModule(ownerModuleRow))
+                {
+                    if ((definition >> 24) != 0x13)
+                    {
+                        continue;
+                    }
+
+                    var typeDefRow = checked((int)(definition
+                        & 0x00FF_FFFF));
+                    if (!localTypeExportKeysByTypeDef.TryGetValue(
+                            typeDefRow, out var keys))
+                    {
+                        keys = [];
+                        localTypeExportKeysByTypeDef.Add(typeDefRow,
+                            keys);
+                    }
+
+                    keys.Add(exportKey);
+                }
+            }
+        }
+
+        for (var additionalIndex = 0;
+            additionalIndex < additionalStructureCount;
+            additionalIndex++)
+        {
+            var programStructureIndex = optionalStructureCount
+                + rootStructureCount + additionalIndex;
+            var structure = program.Structures[programStructureIndex];
+            if (additionalTypeDefRows.IsDefaultOrEmpty)
+            {
+                if (structure.StandardTypeOrigin is not
+                        BoundStandardTypeOrigin {
+                            IsLookupRoot: false,
+                        })
+                {
+                    throw Invalid(
+                        "A retained defining-Module TypeDef has no hidden provider origin.");
+                }
+
+                structures.Add(structure);
+                continue;
+            }
+
+            var typeDefRow = additionalTypeDefRows[additionalIndex];
+            var ownerModuleRow
+                = tables.TypeDefs.GetOwnerModule(typeDefRow);
+            if (ownerModuleRow == moduleRow
+                || (typeDefRow >= typeDefStart
+                    && typeDefRow < typeDefEnd))
+            {
+                throw Invalid(
+                    "A defining-Module TypeDef closure contains a root TypeDef.");
+            }
+
+            var expectedDeclaration = structure with {
+                StandardTypeOrigin = null,
+                StandardLayoutOnly = false,
+                DeclaredCopyEvidence
+                    = tables.TypeDefs.HasDeclaredCopy(typeDefRow),
+                Fields = [.. structure.Fields.Select(static field => field with {
+                    StandardFieldOrigin = null,
+                })],
+            };
+            if (!bindingsByExpectedTypeDef.TryGetValue((ownerModuleRow,
+                    typeDefRow), out var bindings))
+            {
+                var providerSnapshot
+                    = GetSnapshot(consumerArtifactIndex, ownerModuleRow);
+                var exportKeys = localTypeExportKeysByTypeDef.TryGetValue(
+                        typeDefRow, out var keys)
+                    ? keys.ToImmutableArray()
+                    : ImmutableArray<string>.Empty;
+                structures.Add(structure with {
+                    StandardTypeOrigin = new BoundStandardTypeOrigin(
+                        providerSnapshot,
+                        0x1300_0000u | checked((uint)typeDefRow),
+                        exportKeys, false, ReferenceRoot: rootSnapshot,
+                        ExpectedDeclaration: expectedDeclaration,
+                        ExpectedFixedArrayTypes:
+                            program.NativeFixedArrayTypes,
+                        ExpectedNativePointerTypes:
+                            program.NativePointerTypes) {
+                        SelectedExportKeys = [],
+                    },
+                    StandardLayoutOnly = true,
+                    DeclaredCopyEvidence
+                        = tables.TypeDefs.HasDeclaredCopy(typeDefRow),
+                });
+                continue;
+            }
+
+            var firstBinding = bindings[0];
+            if (bindings.Any(binding =>
+                    binding.ProviderArtifactIndex
+                        != firstBinding.ProviderArtifactIndex
+                    || binding.ProviderModuleRow
+                        != firstBinding.ProviderModuleRow
+                    || binding.ProviderTypeDefRow
+                        != firstBinding.ProviderTypeDefRow
+                    || !StringComparer.Ordinal.Equals(
+                        binding.ProducerIdentity,
+                        firstBinding.ProducerIdentity)
+                    || binding.TargetRequirement
+                        != firstBinding.TargetRequirement
+                    || binding.RuntimePolicy != firstBinding.RuntimePolicy))
+            {
+                throw Invalid(
+                    "One defining-Module TypeDef has conflicting provider origins.");
+            }
+
+            var providerSnapshot = GetSnapshot(
+                firstBinding.ProviderArtifactIndex,
+                firstBinding.ProviderModuleRow);
+            var usingModuleSnapshot = GetSnapshot(
+                consumerArtifactIndex, ownerModuleRow);
+            var expectations = ImmutableArray.CreateBuilder<
+                BoundSourceTypeExpectation>(
+                bindings.Count + typeProviderBindings.Length);
+            foreach (var binding in bindings)
+            {
+                expectations.Add(new BoundSourceTypeExpectation(
+                    usingModuleSnapshot, binding.ImportRow,
+                    0x1300_0000u | checked((uint)typeDefRow),
+                    binding.ProducerIdentity, binding.ExportKey,
+                    binding.TargetRequirement, binding.RuntimePolicy,
+                    providerSnapshot,
+                    0x1300_0000u
+                        | checked((uint)binding.ProviderTypeDefRow)));
+            }
+
+            foreach (var binding in typeProviderBindings)
+            {
+                if (binding.ConsumerArtifactIndex
+                        != firstBinding.ProviderArtifactIndex
+                    || binding.ConsumerModuleRow
+                        != firstBinding.ProviderModuleRow)
+                {
+                    continue;
+                }
+
+                expectations.Add(new BoundSourceTypeExpectation(
+                    GetSnapshot(binding.ConsumerArtifactIndex,
+                        binding.ConsumerModuleRow),
+                    binding.ImportRow,
+                    0x1300_0000u
+                        | checked((uint)binding.ExpectedTypeDefRow),
+                    binding.ProducerIdentity, binding.ExportKey,
+                    binding.TargetRequirement, binding.RuntimePolicy,
+                    GetSnapshot(binding.ProviderArtifactIndex,
+                        binding.ProviderModuleRow),
+                    0x1300_0000u
+                        | checked((uint)binding.ProviderTypeDefRow)));
+            }
+
+            var exportKeys = bindings.Select(
+                    static binding => binding.ExportKey)
+                .Distinct(StringComparer.Ordinal).ToImmutableArray();
+            structures.Add(structure with {
+                StandardTypeOrigin = new BoundStandardTypeOrigin(
+                    providerSnapshot,
+                    0x1300_0000u
+                        | checked((uint)firstBinding.ProviderTypeDefRow),
+                    exportKeys, false, expectations.ToImmutable(),
+                    rootSnapshot, expectedDeclaration,
+                    program.NativeFixedArrayTypes,
+                    program.NativePointerTypes),
+                StandardLayoutOnly = true,
+                DeclaredCopyEvidence
+                    = tables.TypeDefs.HasDeclaredCopy(typeDefRow),
+            });
+        }
+
         if (retainTypeOriginsWithoutPublications)
         {
             return program with {
                 Structures = structures.MoveToImmutable(),
+                StandardFunctionPointerTypeDefClosureRows = [],
             };
         }
 
@@ -8566,7 +8809,14 @@ public static partial class TrRmExecutableCompiler
                     "A loaded A2 TypeDef publication does not identify a local declaration.");
             }
 
-            var structureIndex = typeDefRow - typeDefStart;
+            var structureIndex
+                = rootStructureIndexByTypeDef[typeDefRow];
+            if (structureIndex < 0)
+            {
+                throw Invalid(
+                    "A loaded A2 TypeDef publication has no Blittable structure view.");
+            }
+
             var keys = exportsByStructure[structureIndex] ??= [];
             keys.Add(exportKey);
         }
@@ -8599,6 +8849,7 @@ public static partial class TrRmExecutableCompiler
         return program with {
             Structures = structures.MoveToImmutable(),
             SourceTypePublications = publications.ToImmutable(),
+            StandardFunctionPointerTypeDefClosureRows = [],
         };
     }
 }

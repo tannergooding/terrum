@@ -2947,7 +2947,7 @@ public static partial class TrRmExecutableCompiler
         }
         var structureTypeDefRows = new Dictionary<int, int>(
             typeDefStructureIndexes.Length);
-        var structureIndexByName = new Dictionary<string, int>(
+        var structureIndexesByName = new Dictionary<string, List<int>>(
             typeDefStructureIndexes.Length, StringComparer.Ordinal);
         var structureNamespaceRows = new int[typeDefStructureIndexes.Length];
         var structureNameRows = new int[typeDefStructureIndexes.Length];
@@ -3000,13 +3000,26 @@ public static partial class TrRmExecutableCompiler
             if (typeName.Length == 0
                 || !structureTypeDefRows.ContainsKey(structureIndex)
                     && !structureTypeDefRows.TryAdd(structureIndex,
-                        index + 1)
-                || structureIndexByName.TryGetValue(structure.Name,
-                    out var existingStructureIndex)
-                    && existingStructureIndex != structureIndex)
+                        index + 1))
             {
                 throw Unsupported($"Native Blittable structure identity '{structure.Name}' cannot be represented in TRRM.");
             }
+            if (!structureIndexesByName.TryGetValue(structure.Name,
+                    out var structureIndexes))
+            {
+                structureIndexes = [];
+                structureIndexesByName.Add(structure.Name,
+                    structureIndexes);
+            }
+            else if (structureIndexes.Any(existingStructureIndex =>
+                    program.Structures[existingStructureIndex]
+                        .StandardTypeOrigin is null
+                    && structure.StandardTypeOrigin is null))
+            {
+                throw Unsupported(
+                    $"Private Blittable structure identity '{structure.Name}' is selected more than once.");
+            }
+
             if (typeDefStructureViewIndexes[index] >= 0
                 && !typeDefRowByContextualView.TryAdd(
                     typeDefStructureViewIndexes[index], index + 1))
@@ -3014,8 +3027,7 @@ public static partial class TrRmExecutableCompiler
                 throw Invalid(
                     "A contextual TypeDef view has multiple destination rows.");
             }
-            _ = structureIndexByName.TryAdd(structure.Name,
-                structureIndex);
+            structureIndexes.Add(structureIndex);
             structureNamespaceRows[index] = names.Count + 1;
             names.Add((typeNamespace, 1));
             structureNameRows[index] = names.Count + 1;
@@ -6540,9 +6552,33 @@ public static partial class TrRmExecutableCompiler
             var ownerTypeDefRow = 0;
             if (function.DeclaringStruct is string declaringStruct)
             {
-                if (!structureIndexByName.TryGetValue(declaringStruct,
-                        out var structureIndex)
-                    || !structureTypeDefRows.TryGetValue(structureIndex,
+                if (!structureIndexesByName.TryGetValue(declaringStruct,
+                        out var structureIndexes)
+                    || structureIndexes.Count == 0)
+                {
+                    throw Unsupported(
+                        $"Function '{function.Name}' has no selected Standard TypeDef owner.");
+                }
+
+                var ownerIdentity = function.ModuleImport?.ProducerIdentity
+                    ?? moduleIdentity;
+                var ownerStructureIndexes = structureIndexes.Where(index =>
+                        program.Structures[index].StandardTypeOrigin is
+                            BoundStandardTypeOrigin origin
+                            ? StringComparer.Ordinal.Equals(
+                                origin.Provider.ModuleIdentity,
+                                ownerIdentity)
+                            : StringComparer.Ordinal.Equals(ownerIdentity,
+                                moduleIdentity))
+                    .ToArray();
+                if (ownerStructureIndexes.Length == 0
+                    && structureIndexes.Count == 1)
+                {
+                    ownerStructureIndexes = [structureIndexes[0]];
+                }
+                if (ownerStructureIndexes.Length != 1
+                    || !structureTypeDefRows.TryGetValue(
+                        ownerStructureIndexes[0],
                         out ownerTypeDefRow))
                 {
                     throw Unsupported(
@@ -8173,6 +8209,8 @@ public static partial class TrRmExecutableCompiler
         Array.Fill(functionPointerSignatureIndexByTypeSpecRow, -1);
         var standardFunctionPointerSignatures
             = ImmutableArray<NativeFunctionPointerSignatureDefinition>.Empty;
+        var standardFunctionPointerTypeDefClosureRows
+            = ImmutableArray<int>.Empty;
         int[]? standardFunctionPointerStructureTypeByTypeDef = null;
         var standardFunctionPointerAnchorProfile
             = schema == TrRmArtifactSchema.Standard;
@@ -8194,15 +8232,56 @@ public static partial class TrRmExecutableCompiler
                             typeDefRow] = nextStructureIndex++;
                     }
                 }
-            }
 
-            standardFunctionPointerSignatures
-                = LoadStandardFunctionPointerSignatures(validatedTables,
-                    selectedModuleRow,
-                    standardFunctionPointerStructureTypeByTypeDef,
-                    nativePointerTypeDefinitions,
-                    functionPointerSignatureIndexByTypeSpecRow);
+                var anchorClosure
+                    = CollectStandardFunctionPointerAnchorClosure(
+                        validatedTables, selectedModuleRow,
+                        standardFunctionPointerStructureTypeByTypeDef,
+                        standardSchemaIdentity is { } selectedIdentity
+                            && TrRmArtifactSchemaFacts
+                                .IsSelectedTerrumFunctionPointerSchemaIdentity(
+                                    selectedIdentity));
+                standardFunctionPointerTypeDefClosureRows
+                    = anchorClosure.AdditionalTypeDefRows;
+                foreach (var typeDefRow
+                    in standardFunctionPointerTypeDefClosureRows)
+                {
+                    if (standardFunctionPointerStructureTypeByTypeDef[
+                            typeDefRow] >= 0)
+                    {
+                        throw Invalid(
+                            "A defining-Module TypeDef is already represented by the selected structure map.");
+                    }
+
+                    standardFunctionPointerStructureTypeByTypeDef[
+                        typeDefRow] = nextStructureIndex++;
+                }
+
+                standardFunctionPointerSignatures
+                    = LoadStandardFunctionPointerSignatures(validatedTables,
+                        selectedModuleRow,
+                        standardFunctionPointerStructureTypeByTypeDef,
+                        nativePointerTypeDefinitions,
+                        functionPointerSignatureIndexByTypeSpecRow,
+                        anchorClosure.AnchorTypeSpecRows);
+            }
         }
+
+        Action<int[]>? mapFunctionPointerTypeDefClosure = null;
+        if (!standardFunctionPointerTypeDefClosureRows.IsEmpty)
+        {
+            mapFunctionPointerTypeDefClosure = structureTypeByTypeDef =>
+            {
+                foreach (var typeDefRow
+                    in standardFunctionPointerTypeDefClosureRows)
+                {
+                    structureTypeByTypeDef[typeDefRow]
+                        = standardFunctionPointerStructureTypeByTypeDef![
+                            typeDefRow];
+                }
+            };
+        }
+
         var structures = LoadBlittableStructures(typeDefs, fields, layouts, layoutFields,
             targetProfiles, types, optionalStructures, nativePointerTypeDefinitions,
             out var structureTypeByTypeDef, imports: imports,
@@ -8215,13 +8294,63 @@ public static partial class TrRmExecutableCompiler
                 nominalClassTypesByTypeSpecReference,
             functionPointerSignatureIndexByTypeSpecRow:
                 standardFunctionPointerAnchorProfile
-                    ? functionPointerSignatureIndexByTypeSpecRow : null);
+                    ? functionPointerSignatureIndexByTypeSpecRow : null,
+            beforeFieldLoad: mapFunctionPointerTypeDefClosure,
+            deferLayoutValidation:
+                !standardFunctionPointerTypeDefClosureRows.IsEmpty);
         if (standardFunctionPointerStructureTypeByTypeDef is not null
-            && !structureTypeByTypeDef.AsSpan().SequenceEqual(
-                standardFunctionPointerStructureTypeByTypeDef))
+            && Enumerable.Range(0, typeDefEnd - typeDefStart)
+                .Any(offset => structureTypeByTypeDef[
+                    typeDefStart + offset] !=
+                    standardFunctionPointerStructureTypeByTypeDef[
+                        typeDefStart + offset]))
         {
             throw Invalid(
                 "The Standard function-pointer signature TypeDef map changed while loading layouts.");
+        }
+        if (!standardFunctionPointerTypeDefClosureRows.IsEmpty)
+        {
+            var combinedTypeDefRows = new HashSet<int>(selectedTypeDefRows);
+            var existingStructureIndexesByTypeDef
+                = new Dictionary<int, int>(selectedTypeDefRows.Count);
+            for (var typeDefRow = typeDefStart;
+                typeDefRow < typeDefEnd; typeDefRow++)
+            {
+                if (structureTypeByTypeDef[typeDefRow] >= 0)
+                {
+                    existingStructureIndexesByTypeDef.Add(typeDefRow,
+                        structureTypeByTypeDef[typeDefRow]);
+                }
+            }
+
+            foreach (var typeDefRow
+                in standardFunctionPointerTypeDefClosureRows)
+            {
+                _ = combinedTypeDefRows.Add(typeDefRow);
+            }
+
+            structures = LoadBlittableStructures(typeDefs, fields, layouts,
+                layoutFields, targetProfiles, types, structures,
+                nativePointerTypeDefinitions,
+                out var combinedStructureTypeByTypeDef, imports: imports,
+                selectedTypeDefRows: combinedTypeDefRows,
+                includedTypeDefRows: combinedTypeDefRows,
+                allowDuplicateImportedViews: true,
+                nominalClassTypesByTypeSpecReference:
+                    nominalClassTypesByTypeSpecReference,
+                existingStructureTypeIndexesByTypeDef:
+                    existingStructureIndexesByTypeDef,
+                functionPointerSignatureIndexByTypeSpecRow:
+                    functionPointerSignatureIndexByTypeSpecRow,
+                hiddenTypeDefRows: standardFunctionPointerTypeDefClosureRows
+                    .ToHashSet());
+            if (!combinedStructureTypeByTypeDef.AsSpan().SequenceEqual(
+                    standardFunctionPointerStructureTypeByTypeDef))
+            {
+                throw Invalid(
+                    "The defining-Module function-pointer TypeDef closure changed while loading layouts.");
+            }
+            structureTypeByTypeDef = combinedStructureTypeByTypeDef;
         }
 
         var declaredExports = new HashSet<int>(exportCount);
@@ -9180,6 +9309,9 @@ public static partial class TrRmExecutableCompiler
             NativePointerTypes = standardClassQueryProgram is null
                 ? [.. nativePointerTypeDefinitions]
                 : standardClassQueryProgram.NativePointerTypes,
+            StandardFunctionPointerTypeDefClosureRows =
+                standardClassQueryProgram is null
+                    ? standardFunctionPointerTypeDefClosureRows : [],
             CheckedReferenceTypes = standardClassQueryProgram is null
                 ? checkedReferenceTypes
                 : standardClassQueryProgram.CheckedReferenceTypes,
@@ -11943,24 +12075,38 @@ public static partial class TrRmExecutableCompiler
         return payload;
     }
 
-    private static ImmutableArray<NativeFunctionPointerSignatureDefinition>
-        LoadStandardFunctionPointerSignatures(
+    private readonly record struct StandardFunctionPointerAnchorClosure(
+        ImmutableArray<int> AnchorTypeSpecRows,
+        ImmutableArray<int> AdditionalTypeDefRows);
+
+    private static StandardFunctionPointerAnchorClosure
+        CollectStandardFunctionPointerAnchorClosure(
         TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
         int selectedModuleRow, int[] structureTypeByTypeDef,
-        List<NativePointerTypeDefinition> nativePointerTypeDefinitions,
-        int[] signatureIndexByTypeSpecRow)
+        bool allowCrossModuleAnchors)
     {
         var anchors = tables.NativeFunctionPointerAnchors;
-        var indexByAnchor = new Dictionary<(byte Convention,
-            int MethodDefRow), int>();
-        var anchorsToDecode = new List<(byte Convention,
-            int MethodDefRow)>();
         var reachableAnchorTypeSpecRows = new HashSet<int>();
-        var visitedTypeSpecReferences = new HashSet<uint>();
-        var pendingTypeSpecReferences = new Stack<uint>();
+        var additionalTypeDefRows = new HashSet<int>();
+        var visitedTypeSpecContexts
+            = new HashSet<(uint TypeSpecReference, int ModuleRow,
+                bool AnchorContext)>();
+        var pendingTypeSpecReferences
+            = new Stack<(uint TypeSpecReference, int ModuleRow,
+                bool AnchorContext)>();
+        var pendingAdditionalTypeDefs = new Queue<int>();
+        var visitedAdditionalTypeDefs = new HashSet<int>();
         var remainingReachabilityWork
             = SemanticVerifier.MaximumAnalysisVisits;
-        void EnqueueTypeSpecReference(uint typeSpecReference)
+        if (!tables.TargetProfiles.TryGetProfile(1, 1,
+                out var windowsX64ProfileRow))
+        {
+            throw Invalid(
+                "The defining-Module TypeDef closure has no Windows x64 TargetProfile.");
+        }
+
+        void EnqueueTypeSpecReference(uint typeSpecReference,
+            int moduleRow, bool anchorContext)
         {
             if (typeSpecReference == 0)
             {
@@ -11973,7 +12119,8 @@ public static partial class TrRmExecutableCompiler
                     "The Standard function-pointer anchor reachability exceeds the analysis limit.");
             }
 
-            pendingTypeSpecReferences.Push(typeSpecReference);
+            pendingTypeSpecReferences.Push((typeSpecReference, moduleRow,
+                anchorContext));
         }
 
         var (selectedMethodStart, selectedMethodEnd)
@@ -11983,13 +12130,15 @@ public static partial class TrRmExecutableCompiler
         {
             var signatureRow = tables.Methods.GetSignature(methodRow);
             EnqueueTypeSpecReference(
-                tables.Signatures.GetResultTypeSpec(signatureRow));
+                tables.Signatures.GetResultTypeSpec(signatureRow),
+                selectedModuleRow, anchorContext: false);
             var (firstParameter, parameterCount)
                 = tables.Signatures.GetParamRange(signatureRow);
             for (var ordinal = 0; ordinal < parameterCount; ordinal++)
             {
                 EnqueueTypeSpecReference(
-                    tables.Parameters.GetTypeSpec(firstParameter + ordinal));
+                    tables.Parameters.GetTypeSpec(firstParameter + ordinal),
+                    selectedModuleRow, anchorContext: false);
             }
 
             var bodyRow = tables.Methods.GetBodyRow(methodRow);
@@ -12009,7 +12158,8 @@ public static partial class TrRmExecutableCompiler
                 if (token >> 24 == 0x11)
                 {
                     EnqueueTypeSpecReference(
-                        token & 0x00FF_FFFFu);
+                        token & 0x00FF_FFFFu, selectedModuleRow,
+                        anchorContext: false);
                 }
             }
         }
@@ -12019,97 +12169,258 @@ public static partial class TrRmExecutableCompiler
         for (var typeDefRow = selectedTypeDefStart;
             typeDefRow < selectedTypeDefEnd; typeDefRow++)
         {
+            if (!tables.Layouts.HasBlittableLayout(typeDefRow, 1, 1))
+            {
+                continue;
+            }
+
+            var layoutRow = tables.Layouts.GetLayoutForProfile(typeDefRow,
+                checked((uint)windowsX64ProfileRow));
             var (firstField, fieldCount)
-                = tables.TypeDefs.GetFieldRange(typeDefRow);
+                = tables.Layouts.GetLayoutFieldRange(layoutRow);
             for (var ordinal = 0; ordinal < fieldCount; ordinal++)
             {
+                var fieldRow = tables.LayoutFields.GetFieldDef(
+                    firstField + ordinal);
                 EnqueueTypeSpecReference(
-                    tables.Fields.GetTypeSpecRef(firstField + ordinal));
-            }
-        }
-
-        while (pendingTypeSpecReferences.TryPop(
-            out var typeSpecReference))
-        {
-            if (--remainingReachabilityWork < 0)
-            {
-                throw new NotSupportedException(
-                    "The Standard function-pointer anchor reachability exceeds the analysis limit.");
-            }
-            if (typeSpecReference == 0)
-            {
-                continue;
-            }
-            if (!visitedTypeSpecReferences.Add(typeSpecReference))
-            {
-                continue;
-            }
-
-            var typeSpec = tables.TypeSpecs.GetTypeSpecRef(
-                typeSpecReference);
-            if (!typeSpec.IsRow)
-            {
-                continue;
-            }
-
-            if (anchors.HasAnchorForTypeSpec(typeSpec.Row))
-            {
-                if (reachableAnchorTypeSpecRows.Add(typeSpec.Row))
-                {
-                    var methodDefRow
-                        = anchors.GetAnchorMethodDefRow(typeSpec.Row);
-                    var signatureRow
-                        = tables.Methods.GetSignature(methodDefRow);
-                    EnqueueTypeSpecReference(
-                        tables.Signatures.GetResultTypeSpec(signatureRow));
-                    var (firstParameter, parameterCount)
-                        = tables.Signatures.GetParamRange(signatureRow);
-                    for (var ordinal = 0; ordinal < parameterCount;
-                        ordinal++)
-                    {
-                        EnqueueTypeSpecReference(
-                            tables.Parameters.GetTypeSpec(
-                                firstParameter + ordinal));
-                    }
-                }
-
-                continue;
-            }
-
-            var typeSpecBytes = tables.TypeSpecs.GetTypeSpecBytes(
-                typeSpecReference);
-            if (typeSpecBytes.Length == 6
-                && (typeSpecBytes[0] is >= 0x06 and <= 0x0B or 0x0E))
-            {
-                EnqueueTypeSpecReference(
-                    BinaryPrimitives.ReadUInt32LittleEndian(
-                        typeSpecBytes[2..]));
-            }
-            else if (typeSpecBytes.Length == 7
-                && typeSpecBytes[0] == 0x0C)
-            {
-                EnqueueTypeSpecReference(
-                    BinaryPrimitives.ReadUInt32LittleEndian(
-                        typeSpecBytes[3..]));
+                    tables.Fields.GetTypeSpecRef(fieldRow),
+                    selectedModuleRow, anchorContext: false);
             }
         }
 
         for (var typeSpecRow = 1;
             typeSpecRow <= tables.TypeSpecs.Count; typeSpecRow++)
         {
-            if (!anchors.HasAnchorForTypeSpec(typeSpecRow))
+            if (anchors.HasAnchorForTypeSpec(typeSpecRow)
+                && tables.Methods.GetOwnerModule(
+                    anchors.GetAnchorMethodDefRow(typeSpecRow))
+                    == selectedModuleRow
+                && reachableAnchorTypeSpecRows.Add(typeSpecRow))
+            {
+                var methodDefRow
+                    = anchors.GetAnchorMethodDefRow(typeSpecRow);
+                var signatureRow
+                    = tables.Methods.GetSignature(methodDefRow);
+                var ownerModuleRow
+                    = tables.Methods.GetOwnerModule(methodDefRow);
+                EnqueueTypeSpecReference(
+                    tables.Signatures.GetResultTypeSpec(signatureRow),
+                    ownerModuleRow, anchorContext: true);
+                var (firstParameter, parameterCount)
+                    = tables.Signatures.GetParamRange(signatureRow);
+                for (var ordinal = 0; ordinal < parameterCount; ordinal++)
+                {
+                    EnqueueTypeSpecReference(
+                        tables.Parameters.GetTypeSpec(
+                            firstParameter + ordinal),
+                        ownerModuleRow, anchorContext: true);
+                }
+            }
+        }
+
+        while (pendingTypeSpecReferences.Count != 0
+            || pendingAdditionalTypeDefs.Count != 0)
+        {
+            if (pendingTypeSpecReferences.TryPop(
+                out var pendingTypeSpec))
+            {
+                var (typeSpecReference, contextModuleRow, anchorContext)
+                    = pendingTypeSpec;
+                if (!visitedTypeSpecContexts.Add((typeSpecReference,
+                        contextModuleRow, anchorContext)))
+                {
+                    continue;
+                }
+
+                if (--remainingReachabilityWork < 0)
+                {
+                    throw new NotSupportedException(
+                        "The Standard function-pointer anchor reachability exceeds the analysis limit.");
+                }
+
+                var typeSpec = tables.TypeSpecs.GetTypeSpecRef(
+                    typeSpecReference);
+                if (!typeSpec.IsRow)
+                {
+                    continue;
+                }
+
+                if (anchors.HasAnchorForTypeSpec(typeSpec.Row))
+                {
+                    var methodDefRow
+                        = anchors.GetAnchorMethodDefRow(typeSpec.Row);
+                    var ownerModuleRow
+                        = tables.Methods.GetOwnerModule(methodDefRow);
+                    if (ownerModuleRow != selectedModuleRow
+                        && !allowCrossModuleAnchors)
+                    {
+                        continue;
+                    }
+
+                    if (reachableAnchorTypeSpecRows.Add(typeSpec.Row))
+                    {
+                        var signatureRow
+                            = tables.Methods.GetSignature(methodDefRow);
+                        EnqueueTypeSpecReference(
+                            tables.Signatures.GetResultTypeSpec(signatureRow),
+                            ownerModuleRow, anchorContext: true);
+                        var (firstParameter, parameterCount)
+                            = tables.Signatures.GetParamRange(signatureRow);
+                        for (var ordinal = 0; ordinal < parameterCount;
+                            ordinal++)
+                        {
+                            EnqueueTypeSpecReference(
+                                tables.Parameters.GetTypeSpec(
+                                    firstParameter + ordinal),
+                                ownerModuleRow, anchorContext: true);
+                        }
+                    }
+
+                    continue;
+                }
+
+                var typeSpecBytes = tables.TypeSpecs.GetTypeSpecBytes(
+                    typeSpecReference);
+                if (anchorContext && typeSpecBytes.Length == 6
+                    && (typeSpecBytes[0] is 0x02 or 0x03))
+                {
+                    var typeDefRow = typeSpecBytes[0] == 0x02
+                        ? checked((int)BinaryPrimitives
+                            .ReadUInt32LittleEndian(typeSpecBytes[2..]))
+                        : 0;
+                    if (typeSpecBytes[0] == 0x03)
+                    {
+                        var importRow = checked((int)BinaryPrimitives
+                            .ReadUInt32LittleEndian(typeSpecBytes[2..]));
+                        var moduleRefRow
+                            = tables.Imports.GetModuleRefForImportRow(
+                                importRow);
+                        if (tables.ModuleRefs.GetOwnerModule(moduleRefRow)
+                                != contextModuleRow)
+                        {
+                            throw Invalid(
+                                "A function-pointer anchor Import is not owned by its defining Module.");
+                        }
+
+                        var expectedDefinition = tables.Imports
+                            .GetExpectedDefinitionForImportRow(importRow);
+                        if ((expectedDefinition >> 24) != 0x13)
+                        {
+                            throw Invalid(
+                                "A function-pointer anchor Import is not a TypeDef.");
+                        }
+
+                        typeDefRow = checked((int)(expectedDefinition
+                            & 0x00FF_FFFF));
+                    }
+
+                    if ((uint)typeDefRow == 0
+                        || (uint)typeDefRow > (uint)tables.TypeDefs.Count)
+                    {
+                        throw Invalid(
+                            "A function-pointer anchor TypeDef is out of range.");
+                    }
+
+                    if (structureTypeByTypeDef[typeDefRow] < 0)
+                    {
+                        if (tables.TypeDefs.GetOwnerModule(typeDefRow)
+                            == selectedModuleRow)
+                        {
+                            throw Unsupported(
+                                "A function-pointer anchor references an unrepresented selected-Module TypeDef.");
+                        }
+                        if (!allowCrossModuleAnchors)
+                        {
+                            throw Unsupported(
+                                "The selected Standard profile does not admit a cross-Module function-pointer TypeDef closure.");
+                        }
+
+                        if (!tables.Layouts.HasBlittableLayout(typeDefRow,
+                                1, 1))
+                        {
+                            throw Unsupported(
+                                "A function-pointer anchor references a TypeDef without a supported Blittable layout.");
+                        }
+
+                        if (additionalTypeDefRows.Add(typeDefRow))
+                        {
+                            pendingAdditionalTypeDefs.Enqueue(typeDefRow);
+                        }
+                    }
+                }
+
+                if (typeSpecBytes.Length == 6
+                    && (typeSpecBytes[0] is >= 0x06 and <= 0x0B or 0x0E))
+                {
+                    EnqueueTypeSpecReference(
+                        BinaryPrimitives.ReadUInt32LittleEndian(
+                            typeSpecBytes[2..]),
+                        contextModuleRow, anchorContext);
+                }
+                else if (typeSpecBytes.Length == 7
+                    && typeSpecBytes[0] == 0x0C)
+                {
+                    EnqueueTypeSpecReference(
+                        BinaryPrimitives.ReadUInt32LittleEndian(
+                            typeSpecBytes[3..]),
+                        contextModuleRow, anchorContext);
+                }
+
+                continue;
+            }
+
+            var additionalTypeDefRow
+                = pendingAdditionalTypeDefs.Dequeue();
+            if (!visitedAdditionalTypeDefs.Add(additionalTypeDefRow))
             {
                 continue;
+            }
+
+            var ownerModuleRow
+                = tables.TypeDefs.GetOwnerModule(additionalTypeDefRow);
+            var layoutRow = tables.Layouts.GetLayoutForProfile(
+                additionalTypeDefRow,
+                checked((uint)windowsX64ProfileRow));
+            var (firstField, fieldCount)
+                = tables.Layouts.GetLayoutFieldRange(layoutRow);
+            for (var ordinal = 0; ordinal < fieldCount; ordinal++)
+            {
+                var fieldRow = tables.LayoutFields.GetFieldDef(
+                    firstField + ordinal);
+                EnqueueTypeSpecReference(
+                    tables.Fields.GetTypeSpecRef(fieldRow),
+                    ownerModuleRow, anchorContext: true);
+            }
+        }
+
+        return new StandardFunctionPointerAnchorClosure(
+            [.. reachableAnchorTypeSpecRows.OrderBy(
+                static row => row)],
+            [.. additionalTypeDefRows.OrderBy(static row => row)]);
+    }
+
+    private static ImmutableArray<NativeFunctionPointerSignatureDefinition>
+        LoadStandardFunctionPointerSignatures(
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+        int selectedModuleRow, int[] structureTypeByTypeDef,
+        List<NativePointerTypeDefinition> nativePointerTypeDefinitions,
+        int[] signatureIndexByTypeSpecRow,
+        ImmutableArray<int> anchorTypeSpecRows)
+    {
+        var anchors = tables.NativeFunctionPointerAnchors;
+        var indexByAnchor = new Dictionary<(byte Convention,
+            int MethodDefRow), int>();
+        var anchorsToDecode = new List<(byte Convention,
+            int MethodDefRow)>();
+        foreach (var typeSpecRow in anchorTypeSpecRows)
+        {
+            if (!anchors.HasAnchorForTypeSpec(typeSpecRow))
+            {
+                throw Invalid(
+                    "The selected function-pointer anchor closure contains a non-anchor TypeSpec.");
             }
 
             var methodDefRow = anchors.GetAnchorMethodDefRow(typeSpecRow);
-            if (tables.Methods.GetOwnerModule(methodDefRow)
-                    != selectedModuleRow
-                && !reachableAnchorTypeSpecRows.Contains(typeSpecRow))
-            {
-                continue;
-            }
-
             var convention = anchors.GetCallingConvention(typeSpecRow);
             var key = (convention, methodDefRow);
             if (!indexByAnchor.TryGetValue(key, out var signatureIndex))
@@ -12516,7 +12827,9 @@ public static partial class TrRmExecutableCompiler
         IReadOnlyDictionary<int, int>?
             existingStructureTypeIndexesByTypeDef = null,
         int[]? functionPointerSignatureIndexByTypeSpecRow = null,
-        Action<int[]>? beforeFieldLoad = null)
+        Action<int[]>? beforeFieldLoad = null,
+        bool deferLayoutValidation = false,
+        IReadOnlySet<int>? hiddenTypeDefRows = null)
     {
         fixedArrayTypes ??= ImmutableArray<BoundNativeFixedArrayType>.Empty;
         if (!targetProfiles.TryGetProfile(1, 1, out var windowsX64ProfileRow))
@@ -12684,15 +12997,44 @@ public static partial class TrRmExecutableCompiler
         if (allowDuplicateImportedViews)
         {
             duplicateNameViewIndexes = [];
-            foreach (var row in structureRows)
+            var duplicateNames = new HashSet<string>(
+                StringComparer.Ordinal);
+            for (var row = 1; row <= typeDefs.Count; row++)
             {
-                if (imports.IsExpectedDefinition(
-                        0x1300_0000u | checked((uint)row)))
+                if ((includedTypeDefRows is null
+                        || includedTypeDefRows.Contains(row))
+                    && structureTypeByTypeDef[row] >= 0
+                    && (imports.IsExpectedDefinition(
+                            0x1300_0000u | checked((uint)row))
+                        || hiddenTypeDefRows?.Contains(row) == true))
                 {
-                    _ = duplicateNameViewIndexes.Add(
-                        structureTypeByTypeDef[row]);
+                    var structureIndex = structureTypeByTypeDef[row];
+                    _ = duplicateNames.Add(structures[structureIndex].Name);
                 }
             }
+
+            if (duplicateNames.Count != 0)
+            {
+                for (var typeDefRow = 1;
+                    typeDefRow <= typeDefs.Count; typeDefRow++)
+                {
+                    if ((includedTypeDefRows is null
+                            || includedTypeDefRows.Contains(typeDefRow))
+                        && structureTypeByTypeDef[typeDefRow] >= 0
+                        && duplicateNames.Contains(
+                            structures[structureTypeByTypeDef[
+                                typeDefRow]].Name))
+                    {
+                        _ = duplicateNameViewIndexes.Add(
+                            structureTypeByTypeDef[typeDefRow]);
+                    }
+                }
+            }
+        }
+
+        if (deferLayoutValidation)
+        {
+            return [.. structures];
         }
 
         try

@@ -383,8 +383,14 @@ internal sealed class TrRmExecutableCompilerTests
                         public int32 Value;
                     }
 
+                    [Blittable]
+                    [Layout(LayoutKind.Sequential, Packing: 1)]
+                    public struct OwnerPayload {
+                        public int32 Value;
+                    }
+
                     public int32 Accept(
-                        fnptr<ptr<Payload>, int32> callback) {
+                        fnptr<ptr<OwnerPayload>, int32> callback) {
                         return 0;
                     }
                 }
@@ -422,7 +428,7 @@ internal sealed class TrRmExecutableCompilerTests
     }
 
     [Test]
-    public void StandardTerrumFunctionPointerLoadsAnchorFromAnotherModule()
+    public void StandardTerrumFunctionPointerLoadsCrossModuleAnchorTypeClosure()
     {
         var schemaIdentity = TrRmArtifactSchemaFacts
             .StandardTerrumFunctionPointerSchemaIdentity;
@@ -453,6 +459,8 @@ internal sealed class TrRmExecutableCompilerTests
             compilation.Program!, "cross-module-consumer", schemaIdentity,
             targetRequirement, [
                 new TrRmSourceTypeExport("Example", "Payload", "payload"),
+                new TrRmSourceTypeExport("Example", "OwnerPayload",
+                    "owner-payload"),
             ]);
         var artifactIndex = TrRmExecutableCompiler.CreateForeignInvocationIndex(
             artifact, schemaIdentity);
@@ -468,6 +476,15 @@ internal sealed class TrRmExecutableCompilerTests
             .ToArray();
         Assert.That(anchorMethodRows, Has.Length.EqualTo(1));
         var anchorMethodRow = anchorMethodRows[0];
+        var consumerTypeDefRow = Enumerable.Range(1,
+                sourceTables.TypeDefs.Count)
+            .Single(row => sourceTables.TypeDefs.GetName(row) == "Payload");
+        var ownerTypeDefRow = Enumerable.Range(1,
+                sourceTables.TypeDefs.Count)
+            .Single(row => sourceTables.TypeDefs.GetName(row)
+                == "OwnerPayload");
+        Assert.That(consumerTypeDefRow, Is.EqualTo(1));
+        Assert.That(ownerTypeDefRow, Is.EqualTo(2));
         var rootIdentityRow = Enumerable.Range(1,
                 sourceTables.Strings.Count)
             .Single(row => sourceTables.Strings.DecodeNamespace(row)
@@ -485,22 +502,54 @@ internal sealed class TrRmExecutableCompilerTests
             TrRmFeatureRow.NativeBoundaryContracts,
             TrRmFeatureRow.RootlessNativeValues,
         ], TrRmArtifactSchema.Standard);
-        var (typeDefStart, _) = sourceTables.Modules
-            .GetTypeDefRange(1);
         var (moduleRefStart, _) = sourceTables.Modules
             .GetModuleRefRange(1);
         var (sourceFileStart, _) = sourceTables.Modules
             .GetSourceFileRange(1);
         var moduleBytes = TrRmModuleTableWriter.Encode([
             new TrRmModuleRow(rootIdentityRow, targetRequirement, 0, 0,
-                moduleRefStart, typeDefStart, 1, sourceFileStart, 1, 2),
+                moduleRefStart, consumerTypeDefRow, 1, sourceFileStart, 1, 2),
             new TrRmModuleRow(strings.Count, targetRequirement, 0, 0,
                 sourceTables.ModuleRefs.Count + 1,
-                sourceTables.TypeDefs.Count + 1, anchorMethodRow,
+                ownerTypeDefRow, anchorMethodRow,
                 sourceFileCount + 1, 3, 2),
         ], strings, sourceTables.ModuleRefs.Count,
             sourceTables.TypeDefs.Count, sourceTables.Methods.Count,
             sourceFileCount, featureCount: 4);
+        var moduleTable = new TrRmModuleTableReader(moduleBytes, 2,
+            strings, sourceTables.ModuleRefs.Count,
+            sourceTables.TypeDefs.Count, sourceTables.Methods.Count,
+            sourceFileCount, featureCount: 4);
+        var stringRowByText = new Dictionary<string, int>(
+            StringComparer.Ordinal);
+        for (var row = 1; row <= strings.Count; row++)
+        {
+            _ = stringRowByText.TryAdd(strings.DecodeNamespace(row), row);
+        }
+        var payloadNameStringRow = stringRowByText["Payload"];
+        var typeDefRows = new TrRmTypeDefRow[sourceTables.TypeDefs.Count];
+        for (var row = 1; row <= sourceTables.TypeDefs.Count; row++)
+        {
+            var (fieldStart, fieldEnd)
+                = sourceTables.TypeDefs.GetFieldRange(row);
+            var (genericFirst, genericCount)
+                = sourceTables.TypeDefs.GetGenericRange(row);
+            var (layoutFirst, layoutCount)
+                = sourceTables.TypeDefs.GetLayoutRange(row);
+            var (contractFirst, contractCount)
+                = sourceTables.TypeDefs.GetContractRange(row);
+            typeDefRows[row - 1] = new TrRmTypeDefRow(
+                stringRowByText[sourceTables.TypeDefs.GetNamespace(row)],
+                row == ownerTypeDefRow ? payloadNameStringRow
+                    : stringRowByText[sourceTables.TypeDefs.GetName(row)],
+                sourceTables.TypeDefs.GetFlags(row), fieldStart,
+                fieldEnd - fieldStart, genericFirst, genericCount,
+                layoutFirst, layoutCount, contractFirst, contractCount);
+        }
+        var typeDefBytes = TrRmTypeDefTableWriter.Encode(typeDefRows,
+            strings, moduleTable, sourceTables.Fields.Count,
+            sourceTables.GenericParams.Count, sourceTables.Layouts.Count,
+            sourceTables.Contracts.Count);
 
         var rewrittenSections = new List<TrRmSection>(
             artifactIndex.SectionCount);
@@ -522,6 +571,10 @@ internal sealed class TrRmExecutableCompilerTests
                     rewrittenSections.Add(new TrRmSection(kind, flags, 4,
                         featureBytes));
                     break;
+                case 0x0013:
+                    rewrittenSections.Add(new TrRmSection(kind, flags,
+                        checked((uint)typeDefRows.Length), typeDefBytes));
+                    break;
                 default:
                     rewrittenSections.Add(new TrRmSection(kind, flags,
                         checked((uint)recordCount), bytes.ToArray()));
@@ -538,6 +591,10 @@ internal sealed class TrRmExecutableCompilerTests
                     splitArtifact, schemaIdentity));
         Assert.That(splitTables.Methods.GetOwnerModule(anchorMethodRow),
             Is.EqualTo(2));
+        Assert.That(splitTables.TypeDefs.GetOwnerModule(ownerTypeDefRow),
+            Is.EqualTo(2));
+        Assert.That(splitTables.TypeDefs.GetName(ownerTypeDefRow),
+            Is.EqualTo(splitTables.TypeDefs.GetName(consumerTypeDefRow)));
         var reference = TrRmExecutableCompiler.CreateStandardReference(
             new TrRmStandardArtifactInput(schemaIdentity, splitArtifact),
             "cross-module-consumer",
@@ -547,18 +604,60 @@ internal sealed class TrRmExecutableCompilerTests
             Is.EqualTo(NativeCallingConvention.Native));
         var pointerType = signature.ParameterTypes.Single();
         Assert.That(NativePointerTypes.IsType(pointerType), Is.True);
+        var sameNamedPayloads = reference.Structures.Where(
+            static structure => structure.Name == "Example.Payload")
+            .ToArray();
+        Assert.That(sameNamedPayloads, Has.Length.EqualTo(2));
+        var payloadStructure = reference.Structures.Single(
+            static structure => structure.StandardTypeOrigin?.Provider
+                .ModuleIdentity == "cross-module-anchor-owner");
+        var rootPayloadStructure = reference.Structures.Single(
+            static structure => structure.StandardTypeOrigin?.Provider
+                .ModuleIdentity == "cross-module-consumer");
+        Assert.That(reference.Structures.IndexOf(payloadStructure),
+            Is.Not.EqualTo(reference.Structures.IndexOf(
+                rootPayloadStructure)));
+        Assert.That(payloadStructure.StandardTypeOrigin?.IsLookupRoot,
+            Is.False);
         var pointeeType = reference.NativePointerTypes[
             NativePointerTypes.Index(pointerType)].PointeeType;
-        var payloadStructureIndex = Enumerable.Range(0,
-                reference.Structures.Length)
-            .Single(index => reference.Structures[index].Name
-                == "Example.Payload");
+        var payloadStructureIndex = reference.Structures.IndexOf(
+            payloadStructure);
         Assert.That((int)pointeeType,
             Is.EqualTo(100 + payloadStructureIndex));
         var consumer = Compilation.CreateLibrary(SyntaxTree.Parse(
             "int32 Main() { return 0; }"), reference);
         Assert.That(consumer.HasErrors, Is.False,
             string.Join(Environment.NewLine, consumer.Diagnostics));
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, splitArtifact),
+            "cross-module-consumer",
+            Array.Empty<TrRmStandardArtifactInput>());
+        var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(loaded,
+            "cross-module-reemitted", schemaIdentity, targetRequirement);
+        var reemittedReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    reemittedArtifact),
+                "cross-module-reemitted", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        splitArtifact),
+                ]);
+        var reemittedSignature
+            = reemittedReference.NativeFunctionPointerSignatures.Single();
+        var reemittedPointerType
+            = reemittedSignature.ParameterTypes.Single();
+        var reemittedPointeeType = reemittedReference.NativePointerTypes[
+            NativePointerTypes.Index(reemittedPointerType)].PointeeType;
+        var reemittedOwnerStructureIndex = Enumerable.Range(0,
+                reemittedReference.Structures.Length)
+            .Single(index =>
+                reemittedReference.Structures[index].StandardTypeOrigin
+                    ?.Provider.ModuleIdentity
+                    == "cross-module-anchor-owner");
+        Assert.That((int)reemittedPointeeType,
+            Is.EqualTo(100 + reemittedOwnerStructureIndex));
     }
 
     [Test]

@@ -65,7 +65,9 @@ public static class FixedLayoutStorage
         var alignments = new int[structures.Length];
         var heights = new int[structures.Length];
         var computedStructures = new BoundStruct[structures.Length];
-        var names = new Dictionary<string, bool>(StringComparer.Ordinal);
+        var names = new Dictionary<string,
+            (bool Hidden, BoundStandardTypeOrigin? Origin)>(
+                StringComparer.Ordinal);
         var remaining = SemanticVerifier.MaximumAnalysisVisits;
         for (var index = 0; index < structures.Length; index++)
         {
@@ -160,20 +162,24 @@ public static class FixedLayoutStorage
                 throw Invalid();
             }
 
+            var origin = structure.StandardTypeOrigin;
             var isHiddenImportedView
                 = (duplicateNameViewIndexes?.Contains(index) ?? false)
-                    || structure.StandardTypeOrigin?.IsLookupRoot == false
+                    || origin?.IsLookupRoot == false
                     || structure.StandardLayoutOnly;
-            if (names.TryGetValue(structure.Name, out var existingHiddenView))
+            if (names.TryGetValue(structure.Name, out var existingView))
             {
-                if (!existingHiddenView || !isHiddenImportedView)
+                if ((!existingView.Hidden && !isHiddenImportedView)
+                    || ((!existingView.Hidden || !isHiddenImportedView)
+                        && !BoundStandardTypeOriginIdentity.AreDistinct(
+                            existingView.Origin, origin)))
                 {
                     throw Invalid();
                 }
             }
             else
             {
-                names.Add(structure.Name, isHiddenImportedView);
+                names.Add(structure.Name, (isHiddenImportedView, origin));
             }
 
             if (structure.BlittableTargetRequirement != WindowsX64TargetRequirement
