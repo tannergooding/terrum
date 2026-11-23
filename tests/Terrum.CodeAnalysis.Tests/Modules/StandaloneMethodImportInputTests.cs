@@ -1719,6 +1719,10 @@ internal sealed class StandaloneMethodImportInputTests
             + "return Imported(value) + Imported(value); } }",
         0, 211, false)]
     [TestCase(BoundRuntimePolicy.FailFast,
+        "using api; namespace client { int32 Main(int32 value) { "
+            + "return Imported(value) + value; } }",
+        0, 212, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
         "namespace client { int32 Main(int32 limit) { "
             + "for (mut int32 index = 0; index < limit; "
             + "index = index + 1) { } return index; } }",
@@ -1795,7 +1799,8 @@ internal sealed class StandaloneMethodImportInputTests
             new(SchemaIdentity,
                 CreateMethodProviderArtifact("provider/leaf",
                     "api.Imported",
-                    effectsMask: verificationMode == 198 ? 2u : 0u,
+                    effectsMask: verificationMode is 198 or 212
+                        ? 2u : 0u,
                     scalarParameter: true,
                     executableBody: verificationMode is 161 or 211)),
         };
@@ -7375,6 +7380,39 @@ internal sealed class StandaloneMethodImportInputTests
                 return 0;
             }
             """;
+        const string noReturnCallOperandVerificationSource = """
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                if (Scan() < 1) { return 87; }
+                int32 status = BindStandaloneOwnedSourceProgram();
+                if (status != 0
+                    || Host.StandaloneSourceBodyCount[0] != 1
+                    || Host.StandaloneSourceDirectCallCount[0] != 1
+                    || Host.StandaloneSourceCallArgumentCount[0] != 1) {
+                    return 88;
+                }
+                status = NormalizeStandaloneOwnedSourceProgram();
+                if (status != 0
+                    || Host.StandaloneNormalizedBlockCount[0] != 1
+                    || Host.StandaloneNormalizedBodyBlockRanges[0] != 0
+                    || Host.StandaloneNormalizedBodyBlockRanges[1] != 1
+                    || Host.StandaloneNormalizedBlocks[4] != 2
+                    || Host.StandaloneNormalizedBlocks[14] != 0
+                    || Host.StandaloneInvokeCount[0] != 1
+                    || Host.StandaloneInvokeInputCount[0] != 1) {
+                    return 89;
+                }
+                status = RewriteStandaloneOwnedCallNodes();
+                if (status != 0) { return status; }
+                status = WriteStandaloneScalarModule();
+                if (status != 0
+                    || Host.StandaloneWriterStatus[0] != 0
+                    || Host.StandaloneWriterBodyPlanCount[0] != 1) {
+                    return 90;
+                }
+                return 0;
+            }
+            """;
         var verificationSource = expectedSourceStatus != 0
             ? $$"""
                 namespace Terrum.CodeAnalysis;
@@ -7427,6 +7465,8 @@ internal sealed class StandaloneMethodImportInputTests
                 ? nestedCallArithmeticVerificationSource
             : verificationMode == 211
                 ? nestedImportedCallArithmeticVerificationSource
+            : verificationMode == 212
+                ? noReturnCallOperandVerificationSource
             : verificationMode == 161
                 ? importedCallInConditionalReturnVerificationSource
             : verificationMode is 162 or 163 or 164
@@ -7903,6 +7943,7 @@ internal sealed class StandaloneMethodImportInputTests
                     or 148 or 149 or 150 or 151 or 152 or 153
                     or 154 or 155 or 156 or 158 or 159 or 160
                     or 161 or 162 or 163 or 164 or 165 or 166 or 211
+                    or 212
                     or 167 or 168 or 169 or 170 or 171
                     or 172 or 173 or 174 or 175 or 176 or 177
                     or 178 or 179 or 180 or 181
@@ -7934,6 +7975,7 @@ internal sealed class StandaloneMethodImportInputTests
                         : verificationMode == 208 ? 7
                         : verificationMode == 209 ? 8
                         : verificationMode == 211 ? 1
+                        : verificationMode == 212 ? 1
                         : verificationMode == 199 ? 3
                         : verificationMode == 189 ? 5
                         : verificationMode == 190 ? 4
@@ -7967,6 +8009,7 @@ internal sealed class StandaloneMethodImportInputTests
                             : verificationMode is 206 or 207 ? 2
                             : verificationMode is 208 or 209 ? 2
                             : verificationMode == 211 ? 2
+                            : verificationMode == 212 ? 1
                             : verificationMode == 189 ? 1
                             : verificationMode == 190 ? 1
                             : verificationMode == 191 ? 1
@@ -8651,7 +8694,7 @@ internal sealed class StandaloneMethodImportInputTests
             var expectedDecoderBodyCount
                 = verificationMode is 58 or 210 ? 2 : 1;
             var expectedDecoderCallCount = verificationMode is 4 or 158
-                    or 161 or 198 or 199 ? 1
+                    or 161 or 198 or 199 or 212 ? 1
                 : verificationMode is 58 or 210 or 211 ? 2 : 0;
             var expectedDecoderConstantMapCount
                 = verificationMode is 4 or 23 or 25 or 26
@@ -8787,6 +8830,8 @@ internal sealed class StandaloneMethodImportInputTests
                     + "Host.StandaloneDecoderBodies[21] != 5",
                 211 => "Host.StandaloneDecoderBodies[19] != 1 || "
                     + "Host.StandaloneDecoderBodies[21] != 3",
+                212 => "Host.StandaloneDecoderBodies[19] != 1 || "
+                    + "Host.StandaloneDecoderBodies[21] != 2",
                 159 or 160 => "Host.StandaloneDecoderBodies[19] != 5 || "
                     + "Host.StandaloneDecoderBodies[21] != 7",
                 162 or 163 or 164
@@ -9086,7 +9131,7 @@ internal sealed class StandaloneMethodImportInputTests
                     new TrRmStandardArtifactInput(SchemaIdentity,
                         reemitted), input.UsingModuleIdentity,
                     input.Artifacts);
-                if (verificationMode is 161 or 211)
+                if (verificationMode is 161 or 211 or 212)
                 {
                     var importedTarget = loaded.Functions.Single(
                         static function => function.ModuleImport is not null);
@@ -9132,6 +9177,7 @@ internal sealed class StandaloneMethodImportInputTests
                     156 => 5,
                     158 => 2,
                     210 => 2,
+                    212 => 1,
                     161 => 2,
                     162 => 3,
                     149 => 3,
@@ -9695,6 +9741,8 @@ internal sealed class StandaloneMethodImportInputTests
                     case 211:
                         Assert.That(Execute(4), Is.EqualTo(8));
                         Assert.That(Execute(-3), Is.EqualTo(-6));
+                        break;
+                    case 212:
                         break;
                 }
             }
