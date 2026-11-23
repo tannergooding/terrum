@@ -925,7 +925,7 @@ int32 NormalizeStandaloneSourceIfReturns(int32 bodyId,
         = Host.StandaloneSourceIfNodes[ifNodeOffset + 3];
     int32 falseCount
         = Host.StandaloneSourceIfNodes[ifNodeOffset + 4];
-    if (trueCount <= 0 || falseCount <= 0
+    if (trueCount <= 0 || falseCount < 0
         || trueFirst < 0 || falseFirst < 0
         || trueFirst + trueCount
             > Host.StandaloneSourceIfChildCount[0]
@@ -937,21 +937,23 @@ int32 NormalizeStandaloneSourceIfReturns(int32 bodyId,
     }
     int32 trueStatementId
         = Host.StandaloneSourceIfChildren[trueFirst];
-    int32 falseStatementId
-        = Host.StandaloneSourceIfChildren[falseFirst];
+    int32 falseStatementId = falseCount == 0
+        ? -1 : Host.StandaloneSourceIfChildren[falseFirst];
     if (trueStatementId < 0
         || trueStatementId
             >= Host.StandaloneSourceStatementCount[0]
-        || falseStatementId < 0
-        || falseStatementId
-            >= Host.StandaloneSourceStatementCount[0])
+        || (falseCount != 0
+            && (falseStatementId < 0
+                || falseStatementId
+                    >= Host.StandaloneSourceStatementCount[0])))
     {
         return 3;
     }
     int32 trueStatementKind
         = Host.StandaloneSourceStatements[trueStatementId * 3];
-    int32 falseStatementKind
-        = Host.StandaloneSourceStatements[falseStatementId * 3];
+    int32 falseStatementKind = falseCount == 0
+        ? -1
+        : Host.StandaloneSourceStatements[falseStatementId * 3];
     bool bothReturns
         = trueCount == 1 && falseCount == 1
             && trueStatementKind == 1 && falseStatementKind == 1;

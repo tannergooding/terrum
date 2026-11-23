@@ -2579,27 +2579,34 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
             {
                 return trueStatus;
             }
-            if (afterTrueToken >= bodyTokenEnd
-                || !IsStandaloneSourceElseKeyword(afterTrueToken))
-            {
-                return 2;
-            }
             init int32 falseStatementFirst;
             init int32 falseStatementCount;
             init int32 afterFalseToken;
-            int32 falseStatus = ParseStandaloneSourceIfBranch(
-                localCallableId, localCallableId, expressionFirst,
-                resultTypeId, ifNodeId, ifStatementId, false,
-                afterTrueToken + 1, bodyTokenEnd,
-                ref init falseStatementFirst,
-                ref init falseStatementCount,
-                ref init afterFalseToken);
-            if (falseStatus != 0)
+            if (afterTrueToken < bodyTokenEnd
+                && IsStandaloneSourceElseKeyword(afterTrueToken))
             {
-                return falseStatus;
+                int32 falseStatus = ParseStandaloneSourceIfBranch(
+                    localCallableId, localCallableId, expressionFirst,
+                    resultTypeId, ifNodeId, ifStatementId, false,
+                    afterTrueToken + 1, bodyTokenEnd,
+                    ref init falseStatementFirst,
+                    ref init falseStatementCount,
+                    ref init afterFalseToken);
+                if (falseStatus != 0)
+                {
+                    return falseStatus;
+                }
+            }
+            else
+            {
+                falseStatementFirst = -1;
+                falseStatementCount = 0;
+                afterFalseToken = afterTrueToken;
+                Host.StandaloneSourceIfNodes[ifNodeId * 5 + 3]
+                    = Host.StandaloneSourceIfChildCount[0];
             }
             if (trueStatementCount <= 0
-                || falseStatementCount <= 0)
+                || falseStatementCount < 0)
             {
                 return 2;
             }
@@ -2609,10 +2616,14 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
                 = Host.StandaloneSourceIfNodes[ifNodeId * 5 + 3];
             int32 trueStatementId
                 = Host.StandaloneSourceIfChildren[trueChildFirst];
-            int32 falseStatementId
-                = Host.StandaloneSourceIfChildren[falseChildFirst];
+            int32 falseStatementId = falseStatementCount == 0
+                ? -1
+                : Host.StandaloneSourceIfChildren[falseChildFirst];
             if (trueStatementId != trueStatementFirst
-                || falseStatementId != falseStatementFirst
+                || (falseStatementCount != 0
+                    && falseStatementId != falseStatementFirst)
+                || (falseStatementCount == 0
+                    && falseStatementFirst != -1)
                 || Host.StandaloneSourceIfNodes[ifNodeId * 5 + 2]
                     != trueStatementCount
                 || Host.StandaloneSourceIfNodes[ifNodeId * 5 + 4]
@@ -2623,13 +2634,16 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
             int32 trueStatementKind
                 = Host.StandaloneSourceStatements[
                     trueStatementId * 3];
-            int32 falseStatementKind
-                = Host.StandaloneSourceStatements[
+            int32 falseStatementKind = falseStatementCount == 0
+                ? -1
+                : Host.StandaloneSourceStatements[
                     falseStatementId * 3];
             bool bothReturns
                 = trueStatementKind == 1 && falseStatementKind == 1;
             bool bothAssignments
-                = trueStatementKind == 5 && falseStatementKind == 5;
+                = trueStatementKind == 5
+                    && (falseStatementCount == 0
+                        || falseStatementKind == 5);
             if (!bothReturns && !bothAssignments)
             {
                 return 2;
@@ -8848,7 +8862,7 @@ int32 VerifyStandaloneDirectCalls()
                 int32 falseCount
                     = Host.StandaloneSourceIfNodes[
                         ifNodeOffset + 4];
-                if (trueCount <= 0 || falseCount <= 0
+                if (trueCount <= 0 || falseCount < 0
                     || trueFirst < 0 || falseFirst < 0
                     || trueFirst + trueCount
                         > Host.StandaloneSourceIfChildCount[0]
@@ -8860,29 +8874,36 @@ int32 VerifyStandaloneDirectCalls()
                 }
                 int32 trueStatementId
                     = Host.StandaloneSourceIfChildren[trueFirst];
-                int32 falseStatementId
-                    = Host.StandaloneSourceIfChildren[falseFirst];
+                int32 falseStatementId = falseCount == 0
+                    ? -1
+                    : Host.StandaloneSourceIfChildren[falseFirst];
                 if (trueStatementId < bodyStatementFirst
                     || trueStatementId
                         >= bodyStatementFirst + bodyStatementCount
-                    || falseStatementId < bodyStatementFirst
-                    || falseStatementId
-                        >= bodyStatementFirst + bodyStatementCount
+                    || (falseCount != 0
+                        && (falseStatementId < bodyStatementFirst
+                            || falseStatementId
+                                >= bodyStatementFirst
+                                    + bodyStatementCount))
                     || trueStatementId != statementId + 1
-                    || falseStatementId
-                        != trueStatementId + trueCount
+                    || falseFirst != trueFirst + trueCount
+                    || (falseCount != 0
+                        && falseStatementId
+                            != trueStatementId + trueCount)
                     || Host.StandaloneSourceStatementParentIds[
                         trueStatementId] != statementId
-                    || Host.StandaloneSourceStatementParentIds[
-                        falseStatementId] != statementId)
+                    || (falseCount != 0
+                        && Host.StandaloneSourceStatementParentIds[
+                            falseStatementId] != statementId))
                 {
                     return 3;
                 }
                 int32 trueStatementKind
                     = Host.StandaloneSourceStatements[
                         trueStatementId * 3];
-                int32 falseStatementKind
-                    = Host.StandaloneSourceStatements[
+                int32 falseStatementKind = falseCount == 0
+                    ? -1
+                    : Host.StandaloneSourceStatements[
                         falseStatementId * 3];
                 bool bothReturns
                     = trueCount == 1 && falseCount == 1
