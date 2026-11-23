@@ -3438,6 +3438,42 @@ int32 SetStandaloneDecoderRegisterType(int32 bodyId,
     return 0;
 }
 
+int32 ValidateStandaloneDecoderHomeStore(int32 bodyId,
+    int32 bodyOffset, int32 homeIndex, int32 sourceRegister)
+{
+    int32 homeCount
+        = Host.StandaloneDecoderBodies[bodyOffset + 8];
+    if (homeIndex < 0 || homeIndex >= homeCount
+        || sourceRegister < 0 || sourceRegister > 13)
+    {
+        return 3;
+    }
+
+    int32 homeFirst
+        = Host.StandaloneDecoderBodies[bodyOffset + 28];
+    int32 homeOffset = (homeFirst + homeIndex) * 3;
+    int32 homeFlagsAndRole
+        = Host.StandaloneDecoderHomes[homeOffset];
+    int32 homeRole = homeFlagsAndRole & 0xFF;
+    int32 homeFlags = homeFlagsAndRole >>> 8;
+    int32 homeTypeId
+        = Host.StandaloneDecoderHomes[homeOffset + 1];
+    if (homeRole != 3 || (homeFlags & ~1) != 0)
+    {
+        return 3;
+    }
+    if (homeTypeId <= 0
+        || homeTypeId > Host.StandaloneTypeFactCount[0]
+        || Host.StandaloneTypeFacts[homeTypeId * 3] != 0
+        || !IsStandaloneDecoderRegisterValueType(homeTypeId))
+    {
+        return 2;
+    }
+    return Host.StandaloneDecoderRegisterTypeIds[
+            bodyId * 14 + sourceRegister] == homeTypeId
+        ? 0 : 3;
+}
+
 int32 ValidateStandaloneDecoderCallInstruction(int32 bodyId,
     int32 bodyOffset, int32 recordIndex,
     ref<init bool> doesNotReturnResult)
@@ -3684,6 +3720,18 @@ int32 ValidateStandaloneBodyCode(int32 bodyId, int32 bodyOffset,
             }
             codeOffset = codeOffset + 1;
         }
+        else if (opcode == 0x07 || opcode == 0x08)
+        {
+            int32 homeIndex = opcode == 0x07 ? 0 : 1;
+            int32 sourceRegister = opcode == 0x07 ? 0 : 1;
+            int32 storeStatus = ValidateStandaloneDecoderHomeStore(
+                bodyId, bodyOffset, homeIndex, sourceRegister);
+            if (storeStatus != 0)
+            {
+                return storeStatus;
+            }
+            codeOffset = codeOffset + 1;
+        }
         else if (opcode == 0x09)
         {
             if (constantMapCount <= 0)
@@ -3751,6 +3799,29 @@ int32 ValidateStandaloneBodyCode(int32 bodyId, int32 bodyOffset,
             }
             codeOffset = codeOffset + 2;
         }
+        else if (opcode == 0x14)
+        {
+            if (codeOffset > codeLength - 2)
+            {
+                return 3;
+            }
+            init int32 control;
+            if (!TryReadStandaloneArtifactAbsoluteByte(artifactStart,
+                    artifactLength, codeStart + codeOffset + 1,
+                    ref init control))
+            {
+                return 3;
+            }
+            int32 homeIndex = control & 0x0F;
+            int32 sourceRegister = control >>> 4;
+            int32 storeStatus = ValidateStandaloneDecoderHomeStore(
+                bodyId, bodyOffset, homeIndex, sourceRegister);
+            if (storeStatus != 0)
+            {
+                return storeStatus;
+            }
+            codeOffset = codeOffset + 2;
+        }
         else if (opcode == 0xD4 || opcode == 0xD5)
         {
             if (codeOffset > codeLength - 4)
@@ -3799,6 +3870,32 @@ int32 ValidateStandaloneBodyCode(int32 bodyId, int32 bodyOffset,
             if (setStatus != 0)
             {
                 return setStatus;
+            }
+            codeOffset = codeOffset + 4;
+        }
+        else if (opcode == 0xD6)
+        {
+            if (codeOffset > codeLength - 4)
+            {
+                return 3;
+            }
+            init int32 control;
+            init uint32 homeIndex;
+            if (!TryReadStandaloneArtifactAbsoluteByte(artifactStart,
+                    artifactLength, codeStart + codeOffset + 1,
+                    ref init control)
+                || !TryReadStandaloneArtifactAbsoluteHalfWord(
+                    artifactStart, artifactLength,
+                    codeStart + codeOffset + 2, ref init homeIndex)
+                || (control >>> 4) != 1)
+            {
+                return 3;
+            }
+            int32 storeStatus = ValidateStandaloneDecoderHomeStore(
+                bodyId, bodyOffset, int32(homeIndex), control & 0x0F);
+            if (storeStatus != 0)
+            {
+                return storeStatus;
             }
             codeOffset = codeOffset + 4;
         }

@@ -3532,21 +3532,21 @@ int32 WriteStandaloneWriterBodyCode(int32 bodyId,
             }
             if (operand0 == 0)
             {
-                status = AppendStandaloneWriterByte(0x05);
+                status = AppendStandaloneWriterByte(0x07);
                 if (status != 0) { return status; }
             }
             else if (operand0 <= 15)
             {
-                status = AppendStandaloneWriterByte(0x13);
+                status = AppendStandaloneWriterByte(0x14);
                 if (status != 0) { return status; }
-                status = AppendStandaloneWriterByte(operand0 << 4);
+                status = AppendStandaloneWriterByte(operand0);
                 if (status != 0) { return status; }
             }
             else if (operand0 <= 0xFFFF)
             {
-                status = AppendStandaloneWriterByte(0xD5);
+                status = AppendStandaloneWriterByte(0xD6);
                 if (status != 0) { return status; }
-                status = AppendStandaloneWriterByte(0);
+                status = AppendStandaloneWriterByte(0x10);
                 if (status != 0) { return status; }
                 status = AppendStandaloneWriterHalfWord(
                     uint32(operand0));

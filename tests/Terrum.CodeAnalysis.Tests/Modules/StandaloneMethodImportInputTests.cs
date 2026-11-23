@@ -462,7 +462,7 @@ internal sealed class StandaloneMethodImportInputTests
             + "return Helper(value); } } }", 0, 1, false)]
     [TestCase(BoundRuntimePolicy.FailFast,
         "using api; namespace client { int32 Main(int32 value) { "
-            + "return Imported(value); } }", 0, 0, false)]
+            + "return Imported(7); } }", 0, 4, false)]
     [TestCase(BoundRuntimePolicy.FailFast,
         "namespace client { using api; } namespace client.inner { "
             + "int32 Main(int32 value) { return Imported(value); } }",
@@ -825,6 +825,13 @@ internal sealed class StandaloneMethodImportInputTests
                     || Host.StandaloneInvokeCount[0] != 1) {
                     return 62;
                 }
+                status = RewriteStandaloneOwnedCallNodes();
+                if (status != 0) { return status; }
+                status = WriteStandaloneScalarModule();
+                if (status != 0
+                    || Host.StandaloneWriterStatus[0] != 0) {
+                    return 63;
+                }
                 return 0;
             }
             """;
@@ -852,6 +859,32 @@ internal sealed class StandaloneMethodImportInputTests
                     || Host.StandaloneInvokeCount[0] != 2) {
                     return 72;
                 }
+                status = RewriteStandaloneOwnedCallNodes();
+                if (status != 0) { return status; }
+                status = WriteStandaloneScalarModule();
+                if (status != 0
+                    || Host.StandaloneWriterStatus[0] != 0) {
+                    return 73;
+                }
+                return 0;
+            }
+            """;
+        const string genericSourceCallVerificationSource = """
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                if (Scan() < 1) { return 90; }
+                int32 status = BindStandaloneOwnedSourceProgram();
+                if (status != 0) { return status; }
+                status = NormalizeStandaloneOwnedSourceProgram();
+                if (status != 0) { return status; }
+                status = RewriteStandaloneOwnedCallNodes();
+                if (status != 0) { return status; }
+                status = WriteStandaloneScalarModule();
+                if (status != 0
+                    || Host.StandaloneWriterStatus[0] != 0
+                    || Host.StandaloneWriterBodyPlanCount[0] <= 0) {
+                    return 91;
+                }
                 return 0;
             }
             """;
@@ -877,9 +910,11 @@ internal sealed class StandaloneMethodImportInputTests
                 ? localOverloadCallVerificationSource
                 : verificationMode == 3
                     ? nestedLocalOverloadCallVerificationSource
-                    : verificationMode == 1
-                        ? localNamespaceCallVerificationSource
-                        : successfulVerificationSource;
+                    : verificationMode == 4
+                        ? genericSourceCallVerificationSource
+                        : verificationMode == 1
+                            ? localNamespaceCallVerificationSource
+                            : successfulVerificationSource;
 
         var root = RepositoryRoot();
         var components = new List<SyntaxTree>(sourcePaths.Length + 1);
@@ -912,7 +947,102 @@ internal sealed class StandaloneMethodImportInputTests
         }
         var artifact = StandaloneMethodImportOutputFramer.Frame(
             execution, buffers);
-        AssertStandaloneWrittenArtifact(artifact);
+        if (verificationMode == 0)
+        {
+            AssertStandaloneWrittenArtifact(artifact);
+        }
+        else
+        {
+            var artifactIndex = new TrRmArtifactIndex(artifact);
+            Assert.That(artifactIndex.TryGetSection(0x0020,
+                    out var bodySection, out var bodyCount),
+                Is.True);
+            Assert.That(bodyCount, Is.GreaterThan(0));
+            var bodyTable = new TrRmBodyTableReader(bodySection, bodyCount);
+            for (var bodyId = 1; bodyId <= bodyCount; bodyId++)
+            {
+                _ = new TrRmRegisterBodyReader(bodyTable.GetRow(bodyId));
+            }
+        }
+
+        if (verificationMode == 4)
+        {
+            var artifactIndex = new TrRmArtifactIndex(artifact);
+            Assert.That(artifactIndex.TryGetSection(0x0020,
+                    out var bodySection, out var bodyCount),
+                Is.True);
+            var bodyTable = new TrRmBodyTableReader(bodySection, bodyCount);
+            var bodyReader
+                = new TrRmRegisterBodyReader(bodyTable.GetRow(1));
+            Assert.That(bodyReader.Code.IndexOf((byte)0x14),
+                Is.GreaterThanOrEqualTo(0));
+
+            var decoderInput = new StandaloneMethodImportArtifactInput(
+                Agreement, "consumer/module",
+                new TrRmStandardArtifactInput(SchemaIdentity, artifact),
+                input.Artifacts);
+            var decoderBuffers = decoderInput.Capture()
+                .CreateSourceFreeReaderHostBuffers();
+            Assert.That(decoderBuffers.Any(buffer => buffer.Name == "Source"
+                    || buffer.Name == "Tokens"),
+                Is.False);
+            var decoderSourcePaths = new[] {
+                "sources/Terrum.CodeAnalysis.Terrum/Text/Utf16CodeUnits.terrum",
+                "sources/Terrum.CodeAnalysis.Terrum/Text/Utf16Scalar.terrum",
+                "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodImportInput.terrum",
+                "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneArtifactDirectory.terrum",
+                "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneStringTable.terrum",
+                "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneModuleDirectory.terrum",
+                "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneCallableTypes.terrum",
+                "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneTypeSpecValidation.terrum",
+                "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodEffects.terrum",
+                "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodOutputStates.terrum",
+                "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodRoots.terrum",
+                "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodImports.terrum",
+                "sources/Terrum.CodeAnalysis.Terrum/Modules/StandaloneMethodImportBindings.terrum",
+                "sources/Terrum.CodeAnalysis.Terrum/Semantics/StandaloneOwnedSourceDecoder.terrum",
+            };
+            const string decoderVerificationSource = """
+                namespace Terrum.CodeAnalysis;
+                int32 Main() {
+                    int32 status = DecodeStandaloneModuleMetadata();
+                    if (status != 0
+                        || Host.StandaloneDecoderStatus[0] != 0
+                        || Host.StandaloneDecoderBodyCount[0] != 1
+                        || Host.StandaloneDecoderCallCount[0] != 1
+                        || Host.StandaloneDecoderConstantMapCount[0] != 1) {
+                        return 80;
+                    }
+                    return 0;
+                }
+                """;
+            var decoderComponents
+                = new List<SyntaxTree>(decoderSourcePaths.Length + 1);
+            foreach (var sourcePath in decoderSourcePaths)
+            {
+                var path = TerrumProjectPaths.RepositoryFile(root,
+                    sourcePath);
+                var tree = SyntaxTree.Parse(await File.ReadAllTextAsync(path)
+                    .ConfigureAwait(true), path);
+                Assert.That(tree.HasErrors, Is.False,
+                    string.Join(Environment.NewLine, tree.Diagnostics));
+                decoderComponents.Add(tree);
+            }
+            decoderComponents.Add(SyntaxTree.Parse(
+                decoderVerificationSource,
+                "standalone-source-call-decoder-tests.terrum"));
+            var decoderCompilation = Compilation.Create(decoderComponents,
+                decoderBuffers, policy);
+            Assert.That(decoderCompilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine,
+                    decoderCompilation.Diagnostics));
+            var decoderProgram = decoderCompilation.Program
+                ?? throw new AssertionException(
+                    "Expected the source-free Body decoder validator.");
+            var decoderExecution = NativeJit.ExecuteWithData(
+                decoderProgram, (NativeRuntimePolicy)policy);
+            Assert.That(decoderExecution.ExitCode, Is.EqualTo(0));
+        }
 
         var contractSource = SourceText.From(
             "using api; bool Main(ref<init int32> output, "
@@ -2931,6 +3061,8 @@ internal sealed class StandaloneMethodImportInputTests
         var bodies = new TrRmBodyTableReader(bodySection, bodyCount);
         var bodyReader = new TrRmRegisterBodyReader(bodies.GetRow(1));
         Assert.That(bodyReader.Code[0], Is.EqualTo(0x05));
+        Assert.That(bodyReader.Code.IndexOf((byte)0x14),
+            Is.GreaterThanOrEqualTo(0));
         Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
                 bodyReader.MethodMap), Is.EqualTo(0x1C00_0001));
         Assert.That(bodyReader.RecordCount, Is.EqualTo(4));
