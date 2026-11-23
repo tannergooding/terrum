@@ -540,8 +540,11 @@ internal sealed class StandaloneMethodImportInputTests
         0, 15, false)]
     [TestCase(BoundRuntimePolicy.FailFast,
         "using api; int32 Main(int32 value) { "
-            + "int32 copy = value; return Imported(copy); }",
+            + "int32 copy = value; return +Imported(copy); }",
         0, 16, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { bool Main(bool value) { return +value; } }",
+        2, 0, false)]
     [TestCase(BoundRuntimePolicy.FailFast,
         "namespace client { "
             + "int32 First(int32 value) { "
@@ -841,6 +844,10 @@ internal sealed class StandaloneMethodImportInputTests
                 if (status != 0
                     || Host.StandaloneNormalizedProgramStatus[0] != 0
                     || Host.StandaloneNormalizedBodyCount[0] != 1
+                    || Host.StandaloneSourceExpressionCount[0] != 4
+                    || Host.StandaloneSourceExpressions[16] != 3
+                    || Host.StandaloneSourceExpressions[24] != 6
+                    || Host.StandaloneSourceStatements[4] != 3
                     || Host.StandaloneNormalizedHomeCount[0] != 2
                     || Host.StandaloneNormalizedSourceLocalHomeIds[0]
                         != 0
@@ -905,6 +912,8 @@ internal sealed class StandaloneMethodImportInputTests
                     || Host.StandaloneRewrittenSourceStatements[2] != 0
                     || Host.StandaloneRewrittenSourceExpressions[10]
                         != 0
+                    || Host.StandaloneRewrittenSourceExpressions[26]
+                        != 2
                     || Host.StandaloneRewrittenNormalizedSourceLocalHomeIds[
                         0] != 0) {
                     return 72;

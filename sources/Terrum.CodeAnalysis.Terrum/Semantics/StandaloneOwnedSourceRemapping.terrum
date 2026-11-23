@@ -356,6 +356,29 @@ public static int32 RewriteStandaloneOwnedCallNodes()
                     targetOffset + 2]
                     = Host.StandaloneRewritePlaceIds[placeId];
             }
+            else if (Host.StandaloneSourceExpressions[
+                    sourceOffset] == 6)
+            {
+                int32 childExpressionId
+                    = Host.StandaloneSourceExpressions[
+                        sourceOffset + 2];
+                if (childExpressionId < 0
+                    || childExpressionId >= expressionLocal)
+                {
+                    return FailStandaloneRewrite(3);
+                }
+                int32 childGlobalId
+                    = expressionFirst + childExpressionId;
+                int32 newChildGlobalId
+                    = Host.StandaloneRewriteExpressionIds[
+                        childGlobalId];
+                int32 newExpressionFirst
+                    = Host.StandaloneRewrittenSourceBodies[
+                        newBodyId * 12 + 3];
+                Host.StandaloneRewrittenSourceExpressions[
+                    targetOffset + 2]
+                    = newChildGlobalId - newExpressionFirst;
+            }
         }
     }
 
@@ -1138,6 +1161,44 @@ int32 VerifyStandaloneRewrittenSourceArenas()
                 || Host.StandaloneRewrittenSourceExpressions[
                     newOffset + 2]
                     != Host.StandaloneRewritePlaceIds[oldPlaceId])
+            {
+                return 3;
+            }
+        }
+        else if (expressionKind == 6)
+        {
+            int32 childExpressionId
+                = Host.StandaloneSourceExpressions[oldOffset + 2];
+            int32 oldExpressionFirst
+                = Host.StandaloneSourceBodies[oldBodyId * 12 + 3];
+            int32 bodyExpressionCount
+                = Host.StandaloneSourceBodies[oldBodyId * 12 + 4];
+            int32 oldExpressionLocalId
+                = oldExpressionId - oldExpressionFirst;
+            if (childExpressionId < 0
+                || childExpressionId >= oldExpressionLocalId
+                || oldExpressionLocalId < 0
+                || oldExpressionLocalId >= bodyExpressionCount)
+            {
+                return 3;
+            }
+            int32 childGlobalId
+                = oldExpressionFirst + childExpressionId;
+            int32 newChildGlobalId
+                = Host.StandaloneRewriteExpressionIds[childGlobalId];
+            int32 newExpressionFirst
+                = Host.StandaloneRewrittenSourceBodies[
+                    Host.StandaloneRewriteBodyIds[oldBodyId] * 12 + 3];
+            if (!IsStandaloneUnaryPlusType(
+                    Host.StandaloneSourceExpressions[
+                        oldOffset + 1])
+                || Host.StandaloneSourceExpressions[
+                    childGlobalId * 8 + 1]
+                    != Host.StandaloneSourceExpressions[
+                        oldOffset + 1]
+                || Host.StandaloneRewrittenSourceExpressions[
+                    newOffset + 2]
+                    != newChildGlobalId - newExpressionFirst)
             {
                 return 3;
             }

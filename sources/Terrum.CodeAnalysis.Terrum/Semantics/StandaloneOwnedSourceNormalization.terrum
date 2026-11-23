@@ -468,6 +468,19 @@ int32 VisitStandaloneSourceExpression(int32 bodyId,
             }
         }
     }
+    else if (expressionKind == 6)
+    {
+        int32 childExpressionId
+            = Host.StandaloneSourceExpressions[
+                expressionOffset + 2];
+        int32 visitStatus = VisitStandaloneSourceExpression(
+            bodyId, expressionFirst, expressionCount,
+            childExpressionId, depth + 1);
+        if (visitStatus != 0)
+        {
+            return visitStatus;
+        }
+    }
     Host.StandaloneDirectCallTraversalExpressionStates[
         expressionIndex] = 2;
     return 0;
@@ -886,6 +899,45 @@ int32 NormalizeStandaloneSourceExpression(int32 bodyId,
             *sourceUseResult = sourceUse;
             *selectorIndexResult = homeId;
         }
+        *terminatedResult = false;
+        return 0;
+    }
+    if (expressionKind == 6)
+    {
+        int32 operandExpressionId
+            = Host.StandaloneSourceExpressions[
+                expressionOffset + 2];
+        if (!IsStandaloneUnaryPlusType(typeId)
+            || operandExpressionId < 0
+            || operandExpressionId >= expressionId)
+        {
+            return 3;
+        }
+        init int32 operandSelectorKind;
+        init int32 operandSourceUse;
+        init int32 operandSelectorIndex;
+        init bool operandTerminated;
+        int32 operandStatus = NormalizeStandaloneSourceExpression(
+            bodyId, operandExpressionId, depth + 1,
+            ref init operandSelectorKind,
+            ref init operandSourceUse,
+            ref init operandSelectorIndex,
+            ref init operandTerminated);
+        if (operandStatus != 0)
+        {
+            return operandStatus;
+        }
+        if (operandTerminated)
+        {
+            *selectorKindResult = 0;
+            *sourceUseResult = 0;
+            *selectorIndexResult = 0;
+            *terminatedResult = true;
+            return 0;
+        }
+        *selectorKindResult = operandSelectorKind;
+        *sourceUseResult = operandSourceUse;
+        *selectorIndexResult = operandSelectorIndex;
         *terminatedResult = false;
         return 0;
     }
