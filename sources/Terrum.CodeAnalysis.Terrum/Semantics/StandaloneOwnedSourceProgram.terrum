@@ -2430,6 +2430,77 @@ bool IsStandaloneUnitType(int32 typeId)
         && Host.StandaloneTypeFacts[typeId * 3 + 2] == 0;
 }
 
+bool AreStandaloneSourceTokensAdjacent(int32 firstToken,
+    int32 secondToken)
+{
+    int32 tokenCount = Host.Tokens.Length / 3;
+    if (firstToken < 0 || firstToken >= tokenCount
+        || secondToken < 0 || secondToken >= tokenCount)
+    {
+        return false;
+    }
+    int32 firstStart
+        = Host.Tokens[firstToken * 3 + 1];
+    int32 firstLength
+        = Host.Tokens[firstToken * 3 + 2];
+    int32 secondStart
+        = Host.Tokens[secondToken * 3 + 1];
+    return firstStart >= 0 && firstLength > 0
+        && firstStart <= Host.Source.Length - firstLength
+        && secondStart == firstStart + firstLength;
+}
+
+bool TryParseStandaloneIntegerToken(int32 tokenIndex,
+    ref<init int32> radixResult,
+    ref<init uint64> magnitudeResult)
+    ensure return ? (*radixResult is init
+        && *magnitudeResult is init) : true
+{
+    if (tokenIndex < 0
+        || tokenIndex >= Host.Tokens.Length / 3
+        || Host.Tokens[tokenIndex * 3] != 3)
+    {
+        return false;
+    }
+    int32 tokenStart
+        = Host.Tokens[tokenIndex * 3 + 1];
+    int32 tokenLength
+        = Host.Tokens[tokenIndex * 3 + 2];
+    if (tokenStart < 0 || tokenLength <= 0
+        || tokenStart > Host.Source.Length - tokenLength)
+    {
+        return false;
+    }
+    int32 radix = 10;
+    int32 digitsStart = tokenStart;
+    int32 digitsLength = tokenLength;
+    if (tokenLength >= 2 && Host.Source[tokenStart] == 48)
+    {
+        int32 prefix = Host.Source[tokenStart + 1];
+        if (prefix == 120 || prefix == 88)
+        {
+            radix = 16;
+        }
+        else if (prefix == 98 || prefix == 66)
+        {
+            radix = 2;
+        }
+        if (radix != 10)
+        {
+            digitsStart = tokenStart + 2;
+            digitsLength = tokenLength - 2;
+        }
+    }
+    if (digitsLength <= 0
+        || !TryParseUInt64Base(digitsStart, digitsLength, radix,
+            ref init *magnitudeResult))
+    {
+        return false;
+    }
+    *radixResult = radix;
+    return true;
+}
+
 int32 GetStandaloneSourceUse(int32 typeId)
 {
     if (typeId <= 0 || typeId > Host.StandaloneTypeFactCount[0])
@@ -3001,6 +3072,23 @@ bool CanBindStandaloneSourceArgument(int32 localCallableId,
     }
     if (kind == 57)
     {
+        int32 operandToken = tokenStart + 1;
+        if (operandToken < tokenEnd
+            && Host.Tokens[operandToken * 3] == 3)
+        {
+            if (operandToken + 1 != tokenEnd
+                || !AreStandaloneSourceTokensAdjacent(
+                    tokenStart, operandToken))
+            {
+                return false;
+            }
+            int32 typeCode
+                = Host.StandaloneTypeFacts[
+                    expectedTypeId * 3 + 1];
+            return Host.StandaloneTypeFacts[
+                    expectedTypeId * 3] == 0
+                && IsStandaloneIntegerSourceType(typeCode);
+        }
         return tokenStart + 1 < tokenEnd
             && IsStandaloneUnaryPlusType(expectedTypeId)
             && CanBindStandaloneSourceArgument(localCallableId,
@@ -3008,6 +3096,23 @@ bool CanBindStandaloneSourceArgument(int32 localCallableId,
     }
     if (kind == 58)
     {
+        int32 operandToken = tokenStart + 1;
+        if (operandToken < tokenEnd
+            && Host.Tokens[operandToken * 3] == 3)
+        {
+            if (operandToken + 1 != tokenEnd
+                || !AreStandaloneSourceTokensAdjacent(
+                    tokenStart, operandToken))
+            {
+                return false;
+            }
+            int32 typeCode
+                = Host.StandaloneTypeFacts[
+                    expectedTypeId * 3 + 1];
+            return Host.StandaloneTypeFacts[
+                    expectedTypeId * 3] == 0
+                && IsStandaloneIntegerSourceType(typeCode);
+        }
         return tokenStart + 1 < tokenEnd
             && IsStandaloneUnaryMinusType(expectedTypeId)
             && CanBindStandaloneSourceArgument(localCallableId,
@@ -3920,8 +4025,6 @@ int32 ParseStandaloneSourceExpression(int32 localCallableId,
     }
 
     int32 kind = Host.Tokens[tokenIndex * 3];
-    int32 tokenStart = Host.Tokens[tokenIndex * 3 + 1];
-    int32 tokenLength = Host.Tokens[tokenIndex * 3 + 2];
     if (kind == 46)
     {
         init int32 closingToken;
@@ -3985,6 +4088,52 @@ int32 ParseStandaloneSourceExpression(int32 localCallableId,
         {
             return 1;
         }
+        int32 operandToken = tokenIndex + 1;
+        if (Host.Tokens[operandToken * 3] == 3)
+        {
+            if (operandToken + 1 != tokenEnd
+                || !AreStandaloneSourceTokensAdjacent(
+                    tokenIndex, operandToken))
+            {
+                return 2;
+            }
+            if (expectedTypeId <= 0
+                || expectedTypeId
+                    > Host.StandaloneTypeFactCount[0])
+            {
+                return 2;
+            }
+            int32 typeCode
+                = Host.StandaloneTypeFacts[
+                    expectedTypeId * 3 + 1];
+            init int32 literalRadix;
+            init uint64 magnitude;
+            if (!TryParseStandaloneIntegerToken(operandToken,
+                    ref init literalRadix, ref init magnitude)
+                || (literalRadix != 2 && literalRadix != 10
+                    && literalRadix != 16)
+                || !IsStandaloneIntegerLiteralInRange(
+                    typeCode, magnitude))
+            {
+                return 2;
+            }
+            init int32 literalExpressionId;
+            int32 literalAppendStatus
+                = AppendStandaloneSourceExpression(
+                    bodyId, 2, expectedTypeId, 0, 0,
+                    EncodeWord(uint32(magnitude
+                        & uint64(uint32.MaxValue))),
+                    EncodeWord(uint32(magnitude >> 32)),
+                    -1, expressionFirst,
+                    ref init literalExpressionId);
+            if (literalAppendStatus != 0)
+            {
+                return literalAppendStatus;
+            }
+            *expressionIdResult = literalExpressionId;
+            *nextTokenResult = tokenIndex + 2;
+            return 0;
+        }
         init int32 operandExpressionId;
         init int32 nextOperandToken;
         int32 operandStatus = ParseStandaloneSourceExpression(
@@ -4041,6 +4190,12 @@ int32 ParseStandaloneSourceExpression(int32 localCallableId,
         int32 operandToken = tokenIndex + 1;
         if (Host.Tokens[operandToken * 3] == 3)
         {
+            if (operandToken + 1 != tokenEnd
+                || !AreStandaloneSourceTokensAdjacent(
+                    tokenIndex, operandToken))
+            {
+                return 2;
+            }
             if (expectedTypeId <= 0
                 || expectedTypeId
                     > Host.StandaloneTypeFactCount[0])
@@ -4050,13 +4205,12 @@ int32 ParseStandaloneSourceExpression(int32 localCallableId,
             int32 typeCode
                 = Host.StandaloneTypeFacts[
                     expectedTypeId * 3 + 1];
-            int32 literalStart
-                = Host.Tokens[operandToken * 3 + 1];
-            int32 literalLength
-                = Host.Tokens[operandToken * 3 + 2];
+            init int32 literalRadix;
             init uint64 magnitude;
-            if (!TryParseUInt64Base(literalStart,
-                    literalLength, 10, ref init magnitude)
+            if (!TryParseStandaloneIntegerToken(operandToken,
+                    ref init literalRadix, ref init magnitude)
+                || (literalRadix != 2 && literalRadix != 10
+                    && literalRadix != 16)
                 || !IsStandaloneNegativeIntegerLiteralInRange(
                     typeCode, magnitude))
             {
@@ -4157,11 +4311,16 @@ int32 ParseStandaloneSourceExpression(int32 localCallableId,
         }
         int32 metadataTypeCode
             = Host.StandaloneTypeFacts[expectedTypeId * 3 + 1];
+        init int32 radix;
         init uint64 magnitude;
-        if (!TryParseUInt64Base(tokenStart, tokenLength, 10,
-                ref init magnitude)
-            || !IsStandaloneIntegerLiteralInRange(
-                metadataTypeCode, magnitude))
+        if (!TryParseStandaloneIntegerToken(tokenIndex,
+                ref init radix, ref init magnitude)
+            || (radix == 10
+                && !IsStandaloneIntegerLiteralInRange(
+                    metadataTypeCode, magnitude))
+            || (radix != 10
+                && !IsStandaloneBasedIntegerLiteralInRange(
+                    metadataTypeCode, magnitude)))
         {
             return 2;
         }
@@ -4638,6 +4797,26 @@ bool IsStandaloneIntegerLiteralInRange(int32 typeCode,
         return magnitude <= uint64(0xFFFF);
     }
     return false;
+}
+
+bool IsStandaloneBasedIntegerLiteralInRange(int32 typeCode,
+    uint64 bitPattern)
+{
+    if (typeCode == 0x06 || typeCode == 0x0B)
+    {
+        return bitPattern <= uint64(0xFF);
+    }
+    if (typeCode == 0x03 || typeCode == 0x07
+        || typeCode == 0x0C)
+    {
+        return bitPattern <= uint64(0xFFFF);
+    }
+    if (typeCode == 0x08 || typeCode == 0x0D)
+    {
+        return bitPattern <= uint64(0xFFFF_FFFF);
+    }
+    return typeCode == 0x09 || typeCode == 0x0E
+        || typeCode == 0x10 || typeCode == 0x11;
 }
 
 bool IsStandaloneNegativeIntegerLiteralInRange(int32 typeCode,
