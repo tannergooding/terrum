@@ -1056,7 +1056,8 @@ internal sealed class TrRmExecutableCompilerTests
             = TrRmExecutableCompiler.CreateStandardReference(
                 new TrRmStandardArtifactInput(schemaIdentity,
                     shiftedAnchorReemission),
-                "cross-module-reemitted-shifted", [ownerProviderInput]);
+                "cross-module-reemitted-shifted",
+                [shiftedOwnerProviderInput]);
         Assert.That(shiftedAnchorReference.NativeFunctionPointerSignatures,
             Has.Length.EqualTo(1));
         var shiftedAnchorOwnerOrigins = shiftedAnchorReference.Structures
@@ -1066,7 +1067,7 @@ internal sealed class TrRmExecutableCompilerTests
             .ToArray();
         Assert.That(shiftedAnchorOwnerOrigins, Has.Length.EqualTo(2));
         Assert.That(shiftedAnchorOwnerOrigins.All(static origin =>
-            (origin.DefinitionId & 0x00FF_FFFFu) == 1u), Is.True);
+            (origin.DefinitionId & 0x00FF_FFFFu) == 2u), Is.True);
     }
 
     [Test]
