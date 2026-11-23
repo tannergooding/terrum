@@ -1353,8 +1353,12 @@ int32 NormalizeStandaloneSourceStatement(int32 bodyId,
         init int32 sourceUse;
         init int32 selectorIndex;
         init bool terminated;
+        int32 expressionDepth
+            = Host.StandaloneSourceStatementParentIds[
+                statementOffset / 3] < 0 ? 0 : 1;
         int32 expressionStatus = NormalizeStandaloneSourceExpression(
-            bodyId, expressionId, 1, ref init selectorKind,
+            bodyId, expressionId, expressionDepth,
+            ref init selectorKind,
             ref init sourceUse, ref init selectorIndex,
             ref init terminated);
         if (expressionStatus != 0)
@@ -1750,8 +1754,9 @@ int32 NormalizeStandaloneSourceConditionalTree(int32 bodyId,
             return 2;
         }
 
-        int32 operationFirst
-            = Host.StandaloneNormalizedOperationCount[0];
+        int32 operationFirst = blockOrdinal == 0
+            ? Host.StandaloneNormalizedBodies[bodyId * 12 + 9]
+            : Host.StandaloneNormalizedOperationCount[0];
         init int32 conditionSelectorKind;
         init int32 conditionSourceUse;
         init int32 conditionSelectorIndex;
@@ -2401,8 +2406,9 @@ int32 NormalizeStandaloneSourceLazyBooleanConditions(int32 bodyId,
         return 3;
     }
 
-    int32 operationFirst
-        = Host.StandaloneNormalizedOperationCount[0];
+    int32 operationFirst = operandOrdinal == 0
+        ? Host.StandaloneNormalizedBodies[bodyId * 12 + 9]
+        : Host.StandaloneNormalizedOperationCount[0];
     if (Host.StandaloneSourceExpressions[expressionOffset + 1]
         != boolTypeId)
     {
@@ -2591,8 +2597,9 @@ int32 NormalizeStandaloneSourceLazyBooleanDecision(int32 bodyId,
     {
         return 3;
     }
-    int32 operationFirst
-        = Host.StandaloneNormalizedOperationCount[0];
+    int32 operationFirst = blockOrdinal == 0
+        ? Host.StandaloneNormalizedBodies[bodyId * 12 + 9]
+        : Host.StandaloneNormalizedOperationCount[0];
     init int32 selectorKind;
     init int32 sourceUse;
     init int32 selectorIndex;
