@@ -11751,9 +11751,7 @@ int32 VerifyStandaloneDirectCalls()
                                     childStatementOffset + 2],
                                 ref init nestedDoBlockCount);
                         if (nestedDoStatus != 0
-                            || (nestedDoBlockCount != 1
-                                && nestedDoBlockCount != 2
-                                && nestedDoBlockCount != 3))
+                            || nestedDoBlockCount < 1)
                         {
                             return nestedDoStatus != 0
                                 ? nestedDoStatus : 3;
