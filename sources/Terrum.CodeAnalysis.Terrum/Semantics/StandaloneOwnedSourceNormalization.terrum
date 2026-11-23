@@ -199,6 +199,43 @@ public static int32 NormalizeStandaloneOwnedSourceProgram()
             }
             blockCount = 1;
         }
+        else
+        {
+            int32 lastBlockOffset
+                = (blockFirst + blockCount - 1) * 16;
+            int32 lastOperationFirst
+                = Host.StandaloneNormalizedBlocks[
+                    lastBlockOffset + 2];
+            int32 lastOperationCount
+                = Host.StandaloneNormalizedBlocks[
+                    lastBlockOffset + 3];
+            int32 trailingOperationFirst
+                = lastOperationFirst + lastOperationCount;
+            int32 operationEnd = operationFirst + operationCount;
+            if (trailingOperationFirst < operationFirst
+                || trailingOperationFirst > operationEnd)
+            {
+                return FailStandaloneNormalization(3);
+            }
+            if (trailingOperationFirst < operationEnd)
+            {
+                int32 trailingOperationCount
+                    = operationEnd - trailingOperationFirst;
+                init int32 blockIndex;
+                int32 blockStatus
+                    = AppendStandaloneNormalizedReturnBlock(
+                        bodyId, blockCount, trailingOperationFirst,
+                        trailingOperationCount, terminalKind,
+                        ref init blockIndex);
+                if (blockStatus != 0)
+                {
+                    return FailStandaloneNormalization(blockStatus);
+                }
+                blockCount
+                    = Host.StandaloneNormalizedBlockCount[0]
+                        - blockFirst;
+            }
+        }
         if (blockCount <= 0
             || bodyId * 2 + 1
                 >= Host.StandaloneNormalizedBodyBlockRanges.Length)
@@ -860,6 +897,13 @@ int32 AppendStandaloneNormalizedReturnBlock(int32 bodyId,
 int32 NormalizeStandaloneSourceIfReturns(int32 bodyId,
     int32 ifStatementId)
 {
+    int32 bodyBlockFirst
+        = Host.StandaloneNormalizedBodyBlockRanges[bodyId * 2];
+    if (bodyBlockFirst < 0
+        || Host.StandaloneNormalizedBlockCount[0] != bodyBlockFirst)
+    {
+        return 2;
+    }
     int32 statementOffset = ifStatementId * 3;
     int32 conditionExpressionId
         = Host.StandaloneSourceStatements[statementOffset + 1];
@@ -887,6 +931,85 @@ int32 NormalizeStandaloneSourceIfReturns(int32 bodyId,
         || falseFirst >= Host.StandaloneSourceIfChildCount[0])
     {
         return 3;
+    }
+    int32 trueStatementId
+        = Host.StandaloneSourceIfChildren[trueFirst];
+    int32 falseStatementId
+        = Host.StandaloneSourceIfChildren[falseFirst];
+    if (trueStatementId < 0
+        || trueStatementId
+            >= Host.StandaloneSourceStatementCount[0]
+        || falseStatementId < 0
+        || falseStatementId
+            >= Host.StandaloneSourceStatementCount[0])
+    {
+        return 3;
+    }
+    int32 trueStatementKind
+        = Host.StandaloneSourceStatements[trueStatementId * 3];
+    int32 falseStatementKind
+        = Host.StandaloneSourceStatements[falseStatementId * 3];
+    bool bothReturns
+        = trueStatementKind == 1 && falseStatementKind == 1;
+    bool bothAssignments
+        = trueStatementKind == 5 && falseStatementKind == 5;
+    if (!bothReturns && !bothAssignments)
+    {
+        return 3;
+    }
+    if (bothAssignments)
+    {
+        int32 truePlaceId
+            = Host.StandaloneSourceStatements[
+                trueStatementId * 3 + 2];
+        int32 falsePlaceId
+            = Host.StandaloneSourceStatements[
+                falseStatementId * 3 + 2];
+        if (truePlaceId < 0
+            || truePlaceId >= Host.StandaloneSourcePlaceCount[0]
+            || falsePlaceId < 0
+            || falsePlaceId >= Host.StandaloneSourcePlaceCount[0])
+        {
+            return 3;
+        }
+        int32 truePlaceOffset = truePlaceId * 5;
+        int32 falsePlaceOffset = falsePlaceId * 5;
+        int32 localId
+            = Host.StandaloneSourcePlaces[truePlaceOffset + 3];
+        int32 localRangeOffset = bodyId * 2;
+        int32 localFirst
+            = Host.StandaloneSourceBodyLocalRanges[
+                localRangeOffset];
+        int32 localCount
+            = Host.StandaloneSourceBodyLocalRanges[
+                localRangeOffset + 1];
+        if (Host.StandaloneSourcePlaces[truePlaceOffset] != bodyId
+            || Host.StandaloneSourcePlaces[falsePlaceOffset] != bodyId
+            || Host.StandaloneSourcePlaces[truePlaceOffset + 2] != 2
+            || Host.StandaloneSourcePlaces[falsePlaceOffset + 2] != 2
+            || localId < localFirst
+            || localId >= localFirst + localCount
+            || Host.StandaloneSourcePlaces[
+                falsePlaceOffset + 3] != localId
+            || Host.StandaloneSourcePlaces[
+                truePlaceOffset + 1]
+                != Host.StandaloneSourcePlaces[
+                    falsePlaceOffset + 1])
+        {
+            return 3;
+        }
+        int32 localOffset = localId * 10;
+        int32 bindingKind
+            = Host.StandaloneSourceLocals[localOffset + 3];
+        if (Host.StandaloneSourceLocals[localOffset] != bodyId
+            || (bindingKind != 1 && bindingKind != 3)
+            || Host.StandaloneSourceLocalStates[localId] != 1
+            || Host.StandaloneSourceLocals[localOffset + 2]
+                != Host.StandaloneSourcePlaces[
+                    truePlaceOffset + 1])
+        {
+            return 3;
+        }
     }
 
     int32 conditionExpressionOffset
@@ -932,7 +1055,8 @@ int32 NormalizeStandaloneSourceIfReturns(int32 bodyId,
         = AppendStandaloneNormalizedBlock(
             bodyId, 0, conditionOperationFirst,
             conditionOperationCount, 4, 0, 0, 0, 1, 2,
-            2, conditionSelectorIndex, conditionTypeId, 3, -1, 0,
+            2, conditionSelectorIndex, conditionTypeId,
+            bothAssignments ? 4 : 3, -1, 0,
             ref init conditionBlockIndex);
     if (conditionBlockStatus != 0)
     {
@@ -944,9 +1068,8 @@ int32 NormalizeStandaloneSourceIfReturns(int32 bodyId,
         branchIndex < 2;
         branchIndex = branchIndex + 1)
     {
-        int32 childFirst = branchIndex == 0 ? trueFirst : falseFirst;
         int32 childStatementId
-            = Host.StandaloneSourceIfChildren[childFirst];
+            = branchIndex == 0 ? trueStatementId : falseStatementId;
         int32 childStatementOffset = childStatementId * 3;
         if (childStatementId < 0
             || childStatementId
@@ -954,7 +1077,8 @@ int32 NormalizeStandaloneSourceIfReturns(int32 bodyId,
             || Host.StandaloneSourceStatementParentIds[
                 childStatementId] != ifStatementId
             || Host.StandaloneSourceStatements[
-                childStatementOffset] != 1)
+                childStatementOffset]
+                != (bothAssignments ? 5 : 1))
         {
             return 3;
         }
@@ -972,11 +1096,28 @@ int32 NormalizeStandaloneSourceIfReturns(int32 bodyId,
             = Host.StandaloneNormalizedOperationCount[0]
                 - branchOperationFirst;
         init int32 branchBlockIndex;
-        int32 branchBlockStatus
-            = AppendStandaloneNormalizedReturnBlock(
-                bodyId, branchIndex + 1, branchOperationFirst,
-                branchOperationCount, branchTerminalKind,
-                ref init branchBlockIndex);
+        int32 branchBlockStatus;
+        if (bothAssignments)
+        {
+            if (branchTerminalKind != 0)
+            {
+                return 3;
+            }
+            branchBlockStatus
+                = AppendStandaloneNormalizedBlock(
+                    bodyId, branchIndex + 1, branchOperationFirst,
+                    branchOperationCount, 3, 0, 0, 0, 3, -1,
+                    0, 0, 0, -1, -1, 0,
+                    ref init branchBlockIndex);
+        }
+        else
+        {
+            branchBlockStatus
+                = AppendStandaloneNormalizedReturnBlock(
+                    bodyId, branchIndex + 1, branchOperationFirst,
+                    branchOperationCount, branchTerminalKind,
+                    ref init branchBlockIndex);
+        }
         if (branchBlockStatus != 0)
         {
             return branchBlockStatus;
@@ -989,6 +1130,7 @@ int32 NormalizeStandaloneSourceStatement(int32 bodyId,
     int32 statementOffset, ref<init int32> terminalKind)
     ensure return == 0 ? *terminalKind is init : true
 {
+    *terminalKind = 0;
     int32 statementKind
         = Host.StandaloneSourceStatements[statementOffset];
     int32 expressionId

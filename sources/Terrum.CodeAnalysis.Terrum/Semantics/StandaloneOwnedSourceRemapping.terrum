@@ -1417,6 +1417,9 @@ int32 VerifyStandaloneRewrittenSourceArenas()
             = Host.StandaloneSourceBodies[bodyId * 12 + 9];
         int32 bodyStatementCount
             = Host.StandaloneSourceBodies[bodyId * 12 + 10];
+        mut int32 childStatementKind = -1;
+        mut int32 assignedLocalId = -1;
+        mut int32 assignedTypeId = -1;
         for (mut int32 childOrdinal = 0;
             childOrdinal < trueCount + falseCount;
             childOrdinal = childOrdinal + 1)
@@ -1452,10 +1455,66 @@ int32 VerifyStandaloneRewrittenSourceArenas()
                 return 3;
             }
             int32 childStatementOffset = childStatementId * 3;
-            if (Host.StandaloneSourceStatements[
-                    childStatementOffset] != 1)
+            int32 currentChildKind
+                = Host.StandaloneSourceStatements[
+                    childStatementOffset];
+            if ((currentChildKind != 1 && currentChildKind != 5)
+                || (childStatementKind >= 0
+                    && currentChildKind != childStatementKind))
             {
                 return 3;
+            }
+            childStatementKind = currentChildKind;
+            if (currentChildKind == 5)
+            {
+                int32 placeId
+                    = Host.StandaloneSourceStatements[
+                        childStatementOffset + 2];
+                if (placeId < 0
+                    || placeId
+                        >= Host.StandaloneSourcePlaceCount[0])
+                {
+                    return 3;
+                }
+                int32 placeOffset = placeId * 5;
+                int32 localId
+                    = Host.StandaloneSourcePlaces[
+                        placeOffset + 3];
+                int32 typeId
+                    = Host.StandaloneSourcePlaces[
+                        placeOffset + 1];
+                int32 localRangeOffset = bodyId * 2;
+                int32 localFirst
+                    = Host.StandaloneSourceBodyLocalRanges[
+                        localRangeOffset];
+                int32 localCount
+                    = Host.StandaloneSourceBodyLocalRanges[
+                        localRangeOffset + 1];
+                if (Host.StandaloneSourcePlaces[placeOffset] != bodyId
+                    || Host.StandaloneSourcePlaces[
+                        placeOffset + 2] != 2
+                    || localId < localFirst
+                    || localId >= localFirst + localCount
+                    || typeId <= 0
+                    || typeId
+                        > Host.StandaloneTypeFactCount[0]
+                    || Host.StandaloneSourceLocals[localId * 10]
+                        != bodyId
+                    || Host.StandaloneSourceLocals[
+                        localId * 10 + 2] != typeId
+                    || (Host.StandaloneSourceLocals[
+                            localId * 10 + 3] != 1
+                        && Host.StandaloneSourceLocals[
+                            localId * 10 + 3] != 3)
+                    || Host.StandaloneSourceLocalStates[localId] != 1
+                    || (assignedLocalId >= 0
+                        && (assignedLocalId != localId
+                            || assignedTypeId != typeId)))
+                {
+                    return 3;
+                }
+                assignedLocalId = localId;
+                assignedTypeId = typeId;
             }
         }
     }

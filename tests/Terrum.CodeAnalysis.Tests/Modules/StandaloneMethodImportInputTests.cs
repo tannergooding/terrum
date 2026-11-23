@@ -1295,6 +1295,20 @@ internal sealed class StandaloneMethodImportInputTests
         "namespace client { bool Main(bool left, bool right) { "
             + "return left || right; } }", 0, 133, false)]
     [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { int32 Main(bool condition, int32 initial, "
+            + "int32 whenTrue, int32 whenFalse) { "
+            + "mut int32 value = initial; "
+            + "if (condition) { value = whenTrue; } "
+            + "else { value = whenFalse; } "
+            + "return value; } }", 0, 134, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { int32 Main(bool condition, int32 initial, "
+            + "int32 whenTrue, int32 whenFalse) { "
+            + "mut int32 first = initial; mut int32 second = initial; "
+            + "if (condition) { first = whenTrue; } "
+            + "else { second = whenFalse; } "
+            + "return first; } }", 3, 0, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
         "namespace client { int32 Main(int32 left, int32 right) { "
             + "return left && right; } }", 2, 0, false)]
     public async Task TerrumOwnedSourceBinderValidatesOrderedCallUsesAsync(
@@ -4903,6 +4917,54 @@ internal sealed class StandaloneMethodImportInputTests
                 return 0;
             }
             """;
+        const string mutableIfJoinVerificationSource = """
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                if (Scan() < 1) { return 92; }
+                int32 status = BindStandaloneOwnedSourceProgram();
+                if (status != 0
+                    || Host.StandaloneSourceStatementCount[0] != 5
+                    || Host.StandaloneSourceLocalCount[0] != 1
+                    || Host.StandaloneSourcePlaceCount[0] != 3
+                    || Host.StandaloneSourceStatements[3] != 6
+                    || Host.StandaloneSourceStatements[2 * 3] != 5
+                    || Host.StandaloneSourceStatements[3 * 3] != 5) {
+                    return 93;
+                }
+                status = NormalizeStandaloneOwnedSourceProgram();
+                if (status != 0
+                    || Host.StandaloneNormalizedBlockCount[0] != 4
+                    || Host.StandaloneNormalizedBodyBlockRanges[0] != 0
+                    || Host.StandaloneNormalizedBodyBlockRanges[1] != 4
+                    || Host.StandaloneNormalizedOperationCount[0] != 5
+                    || Host.StandaloneNormalizedBlocks[4] != 4
+                    || Host.StandaloneNormalizedBlocks[8] != 1
+                    || Host.StandaloneNormalizedBlocks[9] != 2
+                    || Host.StandaloneNormalizedBlocks[13] != 4
+                    || Host.StandaloneNormalizedBlocks[20] != 3
+                    || Host.StandaloneNormalizedBlocks[24] != 3
+                    || Host.StandaloneNormalizedBlocks[36] != 3
+                    || Host.StandaloneNormalizedBlocks[40] != 3
+                    || Host.StandaloneNormalizedBlocks[52] != 1
+                    || Host.StandaloneNormalizedBlocks[54] != 5
+                    || Host.StandaloneNormalizedOperations[0] != 30
+                    || Host.StandaloneNormalizedOperations[5] != 30
+                    || Host.StandaloneNormalizedOperations[10] != 30
+                    || Host.StandaloneNormalizedOperations[15] != 31
+                    || Host.StandaloneNormalizedOperations[20] != 4) {
+                    return 94;
+                }
+                status = RewriteStandaloneOwnedCallNodes();
+                if (status != 0) { return status; }
+                status = WriteStandaloneScalarModule();
+                if (status != 0
+                    || Host.StandaloneWriterStatus[0] != 0
+                    || Host.StandaloneWriterBodyPlanCount[0] != 1) {
+                    return 95;
+                }
+                return 0;
+            }
+            """;
         var verificationSource = expectedSourceStatus != 0
             ? $$"""
                 namespace Terrum.CodeAnalysis;
@@ -4927,6 +4989,8 @@ internal sealed class StandaloneMethodImportInputTests
                 ? conditionalValueJoinVerificationSource
             : verificationMode is 132 or 133
                 ? lazyBooleanVerificationSource
+            : verificationMode == 134
+                ? mutableIfJoinVerificationSource
             : verificationMode == 2
                 ? localOverloadCallVerificationSource
                 : verificationMode == 3
@@ -5350,7 +5414,7 @@ internal sealed class StandaloneMethodImportInputTests
                 Assert.That(code.IndexOf((byte)0xD6),
                     Is.GreaterThanOrEqualTo(0));
             }
-            else if (verificationMode is >= 130 and <= 133)
+            else if (verificationMode is >= 130 and <= 134)
             {
                 var expectedBlockCount
                     = verificationMode == 130 ? 3 : 4;
@@ -5360,7 +5424,7 @@ internal sealed class StandaloneMethodImportInputTests
                     Is.EqualTo(expectedBlockCount + 1));
                 Assert.That(bodyReader.GetBlockCode(0)
                     .IndexOf((byte)0xB1), Is.GreaterThanOrEqualTo(0));
-                if (verificationMode is >= 131 and <= 133)
+                if (verificationMode is >= 131 and <= 134)
                 {
                     Assert.That(bodyReader.GetBlockCode(1)
                         .IndexOf((byte)0xB0),
@@ -5442,6 +5506,8 @@ internal sealed class StandaloneMethodImportInputTests
                     + "Host.StandaloneDecoderBodies[21] != 5",
                 132 or 133 => "Host.StandaloneDecoderBodies[19] != 4 || "
                     + "Host.StandaloneDecoderBodies[21] != 5",
+                134 => "Host.StandaloneDecoderBodies[19] != 4 || "
+                    + "Host.StandaloneDecoderBodies[21] != 5",
                 _ => "false",
             };
             var decoderVerificationSource = $$"""
@@ -5488,7 +5554,7 @@ internal sealed class StandaloneMethodImportInputTests
             var decoderExecution = NativeJit.ExecuteWithData(
                 decoderProgram, (NativeRuntimePolicy)policy);
             Assert.That(decoderExecution.ExitCode, Is.EqualTo(0));
-            if (verificationMode is >= 130 and <= 133)
+            if (verificationMode is >= 130 and <= 134)
             {
                 var artifactIndex = new TrRmArtifactIndex(artifact);
                 Assert.That(artifactIndex.TryGetSection(0x0020,
