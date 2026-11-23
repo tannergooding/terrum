@@ -11048,6 +11048,99 @@ internal sealed class NativeCoreRegistrationTests
         AssertReadSurface(reloadedProgram, "data", 2);
         AssertReadCallDefault(reloadedProgram, 1);
 
+        var sourceFreeProgram = sourceFreeCompilation.Program
+            ?? throw new AssertionException(
+                "Expected a source-free FNI consumer for multiple views.");
+        var providerViewIndex = Enumerable.Range(0,
+                sourceFreeProgram.Interfaces.Length)
+            .Single(index => sourceFreeProgram.Interfaces[index]
+                .QualifiedName == "IProbe");
+        var providerView = sourceFreeProgram.Interfaces[providerViewIndex];
+        var expectedView
+            = providerView.ForeignNativeInterfaceExpectedViews.Single();
+        var expectedRead = expectedView.Definition.Members.Single(
+            static member => member.Name == "Read");
+        var alternateExpectedRead = expectedRead with {
+            Parameters = expectedRead.Parameters.SetItem(0,
+                expectedRead.Parameters[0] with { Name = "input" }),
+        };
+        var alternateExpectedDefinition = expectedView.Definition with {
+            Members = expectedView.Definition.Members.SetItem(
+                expectedRead.Ordinal, alternateExpectedRead),
+        };
+        var alternateExpectedView = expectedView with {
+            SourceTypeDefRow = checked(expectedView.SourceTypeDefRow + 1),
+            Definition = alternateExpectedDefinition,
+        };
+        var multipleViewProgram = sourceFreeProgram with {
+            Interfaces = sourceFreeProgram.Interfaces.SetItem(
+                providerViewIndex, providerView with {
+                    ForeignNativeInterfaceExpectedViews = [
+                        .. providerView.ForeignNativeInterfaceExpectedViews,
+                        alternateExpectedView,
+                    ],
+                }),
+        };
+        var multipleViewArtifact = TrRmExecutableCompiler.EmitStandard(
+            multipleViewProgram, "multiple-view.module", schemaIdentity, 1,
+            []);
+        AssertReadSurfaceRows(multipleViewArtifact, schema, "source",
+            "input");
+        var multipleViewReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    multipleViewArtifact), "multiple-view.module",
+                [shiftedProviderInput]);
+        var retainedViews = multipleViewReference.Interfaces.Single(
+                static definition =>
+                    definition.QualifiedName == "IProbe")
+            .ForeignNativeInterfaceExpectedViews;
+        Assert.That(retainedViews.Length, Is.EqualTo(2));
+        Assert.That(retainedViews.Select(static view =>
+                view.Definition.Members.Single(
+                    static member => member.Name == "Read")
+                    .Parameters[0].Name),
+            Is.EqualTo(new[] { "source", "input" }));
+
+        var multipleViewCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(""), multipleViewReference, options);
+        Assert.That(multipleViewCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                multipleViewCompilation.Diagnostics));
+        var multipleViewProgramForEmission
+            = multipleViewCompilation.Program
+                ?? throw new AssertionException(
+                    "Expected the source-free multiple-view FNI consumer.");
+        AssertReadSurface(multipleViewProgramForEmission, "data", 2);
+        AssertReadCallDefault(multipleViewProgramForEmission, 1);
+        var multipleViewReemittedArtifact
+            = TrRmExecutableCompiler.EmitStandard(
+                multipleViewProgramForEmission, "multiple-view-forwarder.module",
+                schemaIdentity, 1, []);
+        AssertReadSurfaceRows(multipleViewReemittedArtifact, schema, "source",
+            "input");
+        var multipleViewReloadedReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    multipleViewReemittedArtifact),
+                "multiple-view-forwarder.module", [shiftedProviderInput]);
+        var multipleViewReloadedCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(""), multipleViewReloadedReference, options);
+        Assert.That(multipleViewReloadedCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                multipleViewReloadedCompilation.Diagnostics));
+        var multipleViewReloadedProgram
+            = multipleViewReloadedCompilation.Program
+                ?? throw new AssertionException(
+                    "Expected the reloaded multiple-view FNI consumer.");
+        AssertReadSurface(multipleViewReloadedProgram, "data", 2);
+        AssertReadCallDefault(multipleViewReloadedProgram, 1);
+        Assert.That(multipleViewReloadedReference.Interfaces.Single(
+                static definition =>
+                    definition.QualifiedName == "IProbe")
+            .ForeignNativeInterfaceExpectedViews.Length,
+            Is.EqualTo(2));
+
         static void AssertReadSurface(BoundProgram program,
             string expectedLabel, long expectedDefault)
         {
@@ -11070,6 +11163,38 @@ internal sealed class NativeCoreRegistrationTests
             Assert.That(tables.FrozenValueNodes.GetScalarPayload(
                     frozenValueNode, tables.Blobs).ToArray(),
                 Is.EqualTo(new byte[] { expectedValue, 0, 0, 0 }));
+        }
+
+        static void AssertReadSurfaceRows(byte[] artifact,
+            TrRmArtifactSchema schema, params string[] expectedLabels)
+        {
+            var tables = TrRmStructuralMetadataValidator
+                .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
+                    artifact, schema));
+            var readRows = Enumerable.Range(1, tables.Methods.Count)
+                .Where(row => tables.Methods.GetName(row) == "Read")
+                .ToArray();
+            Assert.That(readRows, Has.Length.EqualTo(
+                expectedLabels.Length));
+            for (var index = 0; index < readRows.Length; index++)
+            {
+                var methodRow = readRows[index];
+                Assert.That(tables.MethodParameterLabels
+                    .TryGetNameStringRow(methodRow, 0,
+                        out var nameStringRow), Is.True);
+                Assert.That(tables.Strings.DecodeName(nameStringRow),
+                    Is.EqualTo(expectedLabels[index]));
+                Assert.That(tables.MethodParameterLabels
+                    .TryGetNameStringRow(methodRow, 1,
+                        out var defaultParameterNameRow), Is.True);
+                Assert.That(tables.Strings.DecodeName(
+                        defaultParameterNameRow),
+                    Is.EqualTo("extra"));
+                Assert.That(tables.MethodParameterLabels
+                    .TryGetDefaultConstantSourceRow(methodRow, 1,
+                        out var defaultConstantSourceRow), Is.True);
+                AssertDefaultPayload(tables, defaultConstantSourceRow, 1);
+            }
         }
 
         static void AssertReadCallDefault(BoundProgram program,
