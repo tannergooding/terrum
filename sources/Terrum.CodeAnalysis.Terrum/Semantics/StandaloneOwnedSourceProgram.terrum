@@ -9366,9 +9366,7 @@ int32 VerifyStandaloneDirectCalls()
                 int32 loopConditionKind
                     = Host.StandaloneSourceExpressions[
                         (bodyExpressionFirst + expressionId) * 8];
-                if (loopConditionKind == 34
-                    || loopConditionKind == 35
-                    || loopConditionKind == 36)
+                if (loopConditionKind == 34)
                 {
                     return 2;
                 }

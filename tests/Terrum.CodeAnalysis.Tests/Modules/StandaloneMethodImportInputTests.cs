@@ -1482,6 +1482,25 @@ internal sealed class StandaloneMethodImportInputTests
             + "counter = counter + 1; break; } "
             + "return counter; } }", 0, 174, false)]
     [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { int32 Main(bool enabled, int32 initial, "
+            + "int32 limit) { mut int32 counter = initial; "
+            + "while (enabled && counter < limit) { "
+            + "counter = counter + 1; } return counter; } }",
+        0, 175, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { int32 Main(bool enabled, int32 initial, "
+            + "int32 limit) { mut int32 counter = initial; "
+            + "while (counter < limit || enabled) { "
+            + "counter = counter + 1; } return counter; } }",
+        0, 176, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { int32 Main(bool enabled, bool keepGoing, "
+            + "int32 initial, int32 limit) { "
+            + "mut int32 counter = initial; "
+            + "while (enabled && counter < limit || keepGoing) { "
+            + "counter = counter + 1; } return counter; } }",
+        0, 177, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
         "namespace client { int32 Main() { break; return 0; } }",
         2, 0, false)]
     [TestCase(BoundRuntimePolicy.FailFast,
@@ -6097,12 +6116,56 @@ internal sealed class StandaloneMethodImportInputTests
             int32 Main() {
                 if (Scan() < 1) { return 87; }
                 int32 status = BindStandaloneOwnedSourceProgram();
+                if (status != 0) { return 88; }
                 int32 sourceStatementCount
                     = Host.StandaloneSourceStatementCount[0];
-                if (status != 0
-                    || (sourceStatementCount != 4
+                if ((sourceStatementCount != 4
                         && sourceStatementCount != 5)
-                    || Host.StandaloneSourceStatements[3] != 7
+                    || Host.StandaloneSourceBodyCount[0] < 1) {
+                    return 88;
+                }
+                int32 loopConditionExpressionId
+                    = Host.StandaloneSourceStatements[4];
+                int32 loopConditionGlobalExpressionId
+                    = Host.StandaloneSourceBodies[3]
+                        + loopConditionExpressionId;
+                if (loopConditionExpressionId < 0
+                    || loopConditionExpressionId
+                        >= Host.StandaloneSourceBodies[4]
+                    || loopConditionGlobalExpressionId < 0
+                    || loopConditionGlobalExpressionId
+                        >= Host.StandaloneSourceExpressionCount[0]) {
+                    return 88;
+                }
+                int32 loopConditionKind
+                    = Host.StandaloneSourceExpressions[
+                        loopConditionGlobalExpressionId * 8];
+                bool lazyCondition
+                    = loopConditionKind == 35
+                        || loopConditionKind == 36;
+                int32 conditionLeafCount = 1;
+                if (lazyCondition) {
+                    init int32 countedConditionLeafCount;
+                    init bool conditionIsHomogeneous;
+                    int32 countStatus
+                        = CountStandaloneSourceLazyBooleanTree(
+                            0, loopConditionExpressionId,
+                            loopConditionKind, 0,
+                            ref init countedConditionLeafCount,
+                            ref init conditionIsHomogeneous);
+                    if (countStatus != 0
+                        || countedConditionLeafCount < 1) {
+                        return 88;
+                    }
+                    conditionLeafCount = countedConditionLeafCount;
+                }
+                int32 expectedBlockCount
+                    = lazyCondition ? conditionLeafCount + 3 : 4;
+                int32 bodyBlockId
+                    = lazyCondition ? conditionLeafCount + 1 : 2;
+                int32 exitBlockId
+                    = lazyCondition ? conditionLeafCount + 2 : 3;
+                if (Host.StandaloneSourceStatements[3] != 7
                     || Host.StandaloneSourceLocalCount[0] != 1
                     || Host.StandaloneSourceLocalStates[0] != 1
                     || Host.StandaloneSourceIfNodeCount[0] != 1
@@ -6120,19 +6183,61 @@ internal sealed class StandaloneMethodImportInputTests
                 int32 expectedBodyTarget
                     = sourceStatementCount == 5
                         && Host.StandaloneSourceStatements[9] == 8
-                        ? 3 : 1;
+                        ? exitBlockId : 1;
                 status = NormalizeStandaloneOwnedSourceProgram();
                 if (status != 0
-                    || Host.StandaloneNormalizedBlockCount[0] != 4
+                    || Host.StandaloneNormalizedBlockCount[0]
+                        != expectedBlockCount
                     || Host.StandaloneNormalizedBodyBlockRanges[0] != 0
-                    || Host.StandaloneNormalizedBodyBlockRanges[1] != 4
+                    || Host.StandaloneNormalizedBodyBlockRanges[1]
+                        != expectedBlockCount
                     || Host.StandaloneNormalizedBlocks[8] != 1
-                    || Host.StandaloneNormalizedBlocks[24] != 2
-                    || Host.StandaloneNormalizedBlocks[25] != 3
-                    || Host.StandaloneNormalizedBlocks[29] != 4
-                    || Host.StandaloneNormalizedBlocks[40]
+                    || Host.StandaloneNormalizedBlocks[
+                        bodyBlockId * 16 + 8]
                         != expectedBodyTarget) {
                     return 89;
+                }
+                if (!lazyCondition
+                    && (Host.StandaloneNormalizedBlocks[24] != 2
+                        || Host.StandaloneNormalizedBlocks[25] != 3
+                        || Host.StandaloneNormalizedBlocks[29] != 4)) {
+                    return 89;
+                }
+                if (lazyCondition) {
+                    for (mut int32 ordinal = 0;
+                        ordinal < conditionLeafCount;
+                        ordinal = ordinal + 1) {
+                        int32 decisionBlockOffset
+                            = (ordinal + 1) * 16;
+                        if (Host.StandaloneNormalizedBlocks[
+                                decisionBlockOffset + 4] != 4
+                            || Host.StandaloneNormalizedBlocks[
+                                decisionBlockOffset + 8] < 0
+                            || Host.StandaloneNormalizedBlocks[
+                                decisionBlockOffset + 8]
+                                >= expectedBlockCount
+                            || Host.StandaloneNormalizedBlocks[
+                                decisionBlockOffset + 9] < 0
+                            || Host.StandaloneNormalizedBlocks[
+                                decisionBlockOffset + 9]
+                                >= expectedBlockCount
+                            || Host.StandaloneNormalizedBlocks[
+                                decisionBlockOffset + 13]
+                                != expectedBlockCount + ordinal) {
+                            return 89;
+                        }
+                    }
+                    if (conditionLeafCount == 2
+                        && (Host.StandaloneNormalizedBlocks[24]
+                                != (loopConditionKind == 35 ? 2 : 3)
+                            || Host.StandaloneNormalizedBlocks[25]
+                                != (loopConditionKind == 35 ? 4 : 2)
+                            || Host.StandaloneNormalizedBlocks[40]
+                                != bodyBlockId
+                            || Host.StandaloneNormalizedBlocks[41]
+                                != exitBlockId)) {
+                        return 89;
+                    }
                 }
                 status = RewriteStandaloneOwnedCallNodes();
                 if (status != 0) { return status; }
@@ -6388,7 +6493,7 @@ internal sealed class StandaloneMethodImportInputTests
                 ? terminalIfNoElseReturnVerificationSource
             : verificationMode is 169 or 170 or 171
                 ? differentPlacesIfJoinVerificationSource
-            : verificationMode is >= 172 and <= 174
+            : verificationMode is >= 172 and <= 177
                 ? whileLoopVerificationSource
             : verificationMode == 154
                 ? lazyBooleanIfMutableJoinVerificationSource
@@ -6837,11 +6942,12 @@ internal sealed class StandaloneMethodImportInputTests
                     or 154 or 155 or 156 or 158 or 159 or 160
                     or 161 or 162 or 163 or 164 or 165 or 166
                     or 167 or 168 or 169 or 170 or 171
-                    or 172 or 173 or 174)
+                    or 172 or 173 or 174 or 175 or 176 or 177)
             {
                 var expectedBlockCount
                     = verificationMode is 159 or 160 or 165 or 166
-                        or 168 or 170 or 171 ? 5
+                        or 168 or 170 or 171 or 175 or 176 ? 5
+                        : verificationMode == 177 ? 6
                         : verificationMode == 169 ? 4
                         : verificationMode is 172 or 173 or 174 ? 4
                         : verificationMode is 130 or 158 or 161 ? 3
@@ -6851,7 +6957,9 @@ internal sealed class StandaloneMethodImportInputTests
                                 or 150 or 152 or 154 or 155 or 156 ? 6 : 4;
                 var expectedRecordCount
                     = expectedBlockCount
-                        + (verificationMode is 136 or 137 or 138 ? 2
+                        + (verificationMode is 175 or 176 ? 2
+                            : verificationMode == 177 ? 3
+                            : verificationMode is 136 or 137 or 138 ? 2
                             : verificationMode is 144 or 145 or 146
                                 or 148 or 149 or 152 or 153
                                 or 154 or 155 or 156 ? 3
@@ -6863,7 +6971,8 @@ internal sealed class StandaloneMethodImportInputTests
                     Is.EqualTo(expectedBlockCount));
                 Assert.That(bodyReader.RecordCount,
                     Is.EqualTo(expectedRecordCount));
-                if (verificationMode is not 172 and not 173 and not 174)
+                if (verificationMode is not 172 and not 173 and not 174
+                    and not 175 and not 176 and not 177)
                 {
                     Assert.That(bodyReader.GetBlockCode(0)
                         .IndexOf((byte)0xB1),
@@ -7043,6 +7152,79 @@ internal sealed class StandaloneMethodImportInputTests
                         .ReadUInt16LittleEndian(loopEdge[6..]),
                         Is.EqualTo((ushort)3));
                 }
+                if (verificationMode is 175 or 176 or 177)
+                {
+                    Assert.That(bodyReader.GetBlockCode(0)
+                        .IndexOf((byte)0xB0),
+                        Is.GreaterThanOrEqualTo(0));
+                    var conditionLeafCount
+                        = verificationMode == 177 ? 3 : 2;
+                    var bodyBlockIndex = conditionLeafCount + 1;
+                    for (var blockIndex = 1;
+                        blockIndex <= conditionLeafCount; blockIndex++)
+                    {
+                        Assert.That(bodyReader.GetBlockCode(blockIndex)
+                            .IndexOf((byte)0xB1),
+                            Is.GreaterThanOrEqualTo(0));
+                    }
+                    Assert.That(bodyReader.GetBlockCode(bodyBlockIndex)
+                        .IndexOf((byte)0xB0),
+                        Is.GreaterThanOrEqualTo(0));
+                    for (var edgeOrdinal = 0;
+                        edgeOrdinal < conditionLeafCount; edgeOrdinal++)
+                    {
+                        Assert.That(bodyReader.GetRecord(
+                            expectedBlockCount + edgeOrdinal)[0],
+                            Is.EqualTo((byte)6));
+                    }
+                    if (verificationMode is 175 or 176)
+                    {
+                        var firstEdge = bodyReader.GetRecord(
+                            expectedBlockCount);
+                        var secondEdge = bodyReader.GetRecord(
+                            expectedBlockCount + 1);
+                        var isAnd = verificationMode == 175;
+                        Assert.That(BinaryPrimitives
+                            .ReadUInt16LittleEndian(firstEdge[4..]),
+                            Is.EqualTo((ushort)(isAnd ? 2 : 3)));
+                        Assert.That(BinaryPrimitives
+                            .ReadUInt16LittleEndian(firstEdge[6..]),
+                            Is.EqualTo((ushort)(isAnd ? 4 : 2)));
+                        Assert.That(BinaryPrimitives
+                            .ReadUInt16LittleEndian(secondEdge[4..]),
+                            Is.EqualTo((ushort)3));
+                        Assert.That(BinaryPrimitives
+                            .ReadUInt16LittleEndian(secondEdge[6..]),
+                            Is.EqualTo((ushort)4));
+                    }
+                    else
+                    {
+                        var firstEdge = bodyReader.GetRecord(
+                            expectedBlockCount);
+                        var secondEdge = bodyReader.GetRecord(
+                            expectedBlockCount + 1);
+                        var thirdEdge = bodyReader.GetRecord(
+                            expectedBlockCount + 2);
+                        Assert.That(BinaryPrimitives
+                            .ReadUInt16LittleEndian(firstEdge[4..]),
+                            Is.EqualTo((ushort)2));
+                        Assert.That(BinaryPrimitives
+                            .ReadUInt16LittleEndian(firstEdge[6..]),
+                            Is.EqualTo((ushort)3));
+                        Assert.That(BinaryPrimitives
+                            .ReadUInt16LittleEndian(secondEdge[4..]),
+                            Is.EqualTo((ushort)4));
+                        Assert.That(BinaryPrimitives
+                            .ReadUInt16LittleEndian(secondEdge[6..]),
+                            Is.EqualTo((ushort)3));
+                        Assert.That(BinaryPrimitives
+                            .ReadUInt16LittleEndian(thirdEdge[4..]),
+                            Is.EqualTo((ushort)4));
+                        Assert.That(BinaryPrimitives
+                            .ReadUInt16LittleEndian(thirdEdge[6..]),
+                            Is.EqualTo((ushort)5));
+                    }
+                }
                 if (verificationMode is 136 or 137)
                 {
                     Assert.That(bodyReader.GetBlockCode(1)
@@ -7193,6 +7375,7 @@ internal sealed class StandaloneMethodImportInputTests
                         and not 159 and not 160 and not 161
                         and not 165 and not 166 and not 168
                         and not 172 and not 173 and not 174
+                        and not 175 and not 176 and not 177
                         and not 170 and not 171)
                 {
                     var edgeRecord
@@ -7257,7 +7440,7 @@ internal sealed class StandaloneMethodImportInputTests
                     or >= 96 and <= 103
                     or >= 104 and <= 109
                     or 115 or 132 or 133 or 136 or 137 or 158
-                    or 172 or 173 or 174
+                    or 172 or 173 or 174 or 175 or 176 or 177
                     ? 1 : 0;
             if (verificationMode is 71 or 130 or 144 or 145 or 146
                 or 148 or 149 or 152 or 153)
@@ -7333,6 +7516,11 @@ internal sealed class StandaloneMethodImportInputTests
                 173 or 174
                     => "Host.StandaloneDecoderBodies[19] != 4 || "
                         + "Host.StandaloneDecoderBodies[21] != 5",
+                175 or 176
+                    => "Host.StandaloneDecoderBodies[19] != 5 || "
+                        + "Host.StandaloneDecoderBodies[21] != 7",
+                177 => "Host.StandaloneDecoderBodies[19] != 6 || "
+                    + "Host.StandaloneDecoderBodies[21] != 9",
                 149 => "Host.StandaloneDecoderBodies[19] != 6 || "
                     + "Host.StandaloneDecoderBodies[21] != 9",
                 _ => "false",
@@ -7423,7 +7611,7 @@ internal sealed class StandaloneMethodImportInputTests
                     or 154 or 155 or 156 or 158 or 159 or 160
                     or 161 or 162 or 163 or 164 or 165 or 166
                     or 167 or 168 or 169 or 170 or 171
-                    or 172 or 173 or 174)
+                    or 172 or 173 or 174 or 175 or 176 or 177)
             {
                 var artifactIndex = new TrRmArtifactIndex(artifact);
                 Assert.That(artifactIndex.TryGetSection(0x0020,
@@ -7597,6 +7785,8 @@ internal sealed class StandaloneMethodImportInputTests
                     169 => 5,
                     170 or 171 => 6,
                     172 or 173 or 174 => 2,
+                    175 or 176 => 3,
+                    177 => 4,
                     _ => 4,
                 };
                 var mainIndex = -1;
@@ -7960,6 +8150,24 @@ internal sealed class StandaloneMethodImportInputTests
                         Assert.That(Execute(0, 3), Is.EqualTo(1));
                         Assert.That(Execute(3, 5), Is.EqualTo(4));
                         Assert.That(Execute(5, 2), Is.EqualTo(5));
+                        break;
+                    case 175:
+                        Assert.That(Execute(0, 0, 3), Is.EqualTo(0));
+                        Assert.That(Execute(1, 0, 3), Is.EqualTo(3));
+                        Assert.That(Execute(1, 3, 5), Is.EqualTo(5));
+                        break;
+                    case 176:
+                        Assert.That(Execute(0, 0, 3), Is.EqualTo(3));
+                        Assert.That(Execute(0, 3, 5), Is.EqualTo(5));
+                        Assert.That(Execute(0, 5, 2), Is.EqualTo(5));
+                        break;
+                    case 177:
+                        Assert.That(Execute(0, 0, 0, 3),
+                            Is.EqualTo(0));
+                        Assert.That(Execute(1, 0, 0, 3),
+                            Is.EqualTo(3));
+                        Assert.That(Execute(1, 0, 3, 5),
+                            Is.EqualTo(5));
                         break;
                 }
             }
