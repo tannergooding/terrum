@@ -1392,6 +1392,10 @@ internal sealed class StandaloneMethodImportInputTests
             + "return (first || second) ? whenTrue : whenFalse; } }",
         0, 160, false)]
     [TestCase(BoundRuntimePolicy.FailFast,
+        "using api; namespace client { int32 Main(bool condition, "
+            + "int32 value) { if (condition) { return Imported(value); } "
+            + "else { return value; } } }", 0, 161, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
         "namespace client { int32 Main(bool condition, int32 initial, "
             + "int32 whenTrue, int32 whenFalse) { "
             + "mut int32 value = initial; "
@@ -1450,7 +1454,8 @@ internal sealed class StandaloneMethodImportInputTests
         var artifacts = new List<TrRmStandardArtifactInput> {
             new(SchemaIdentity,
                 CreateMethodProviderArtifact("provider/leaf",
-                    "api.Imported", scalarParameter: true)),
+                    "api.Imported", scalarParameter: true,
+                    executableBody: verificationMode == 161)),
         };
         var methodRoots = new List<StandaloneMethodRoot> {
             new(0, "provider/leaf",
@@ -5766,6 +5771,45 @@ internal sealed class StandaloneMethodImportInputTests
                 return 0;
             }
             """;
+        const string importedCallInConditionalReturnVerificationSource = """
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                if (Scan() < 1) { return 87; }
+                int32 status = BindStandaloneOwnedSourceProgram();
+                if (status != 0
+                    || Host.StandaloneSourceImportedCallableCount[0] != 1
+                    || Host.StandaloneSourceDirectCallCount[0] != 1
+                    || Host.StandaloneSourceCallArgumentCount[0] != 1
+                    || Host.StandaloneSourceIfNodeCount[0] != 1) {
+                    return 88;
+                }
+                status = NormalizeStandaloneOwnedSourceProgram();
+                if (status != 0
+                    || Host.StandaloneNormalizedBlockCount[0] != 3
+                    || Host.StandaloneNormalizedBodyBlockRanges[0] != 0
+                    || Host.StandaloneNormalizedBodyBlockRanges[1] != 3
+                    || Host.StandaloneInvokeCount[0] != 1
+                    || Host.StandaloneInvokeInputCount[0] != 1
+                    || Host.StandaloneInvokes[0] != 2
+                    || Host.StandaloneInvokes[1] != 0
+                    || Host.StandaloneNormalizedBlocks[8] != 1
+                    || Host.StandaloneNormalizedBlocks[9] != 2
+                    || Host.StandaloneNormalizedBlocks[13] != 3) {
+                    return 89;
+                }
+                status = RewriteStandaloneOwnedCallNodes();
+                if (status != 0) { return status; }
+                status = WriteStandaloneScalarModule();
+                if (status != 0
+                    || Host.StandaloneWriterStatus[0] != 0
+                    || Host.StandaloneWriterBodyPlanCount[0] != 1
+                    || Host.StandaloneWriterMethodMapCount[0] != 1
+                    || Host.StandaloneWriterCallSiteRecordIndices[0] != 4) {
+                    return 90;
+                }
+                return 0;
+            }
+            """;
         const string nestedConditionalValueVerificationSource = """
             namespace Terrum.CodeAnalysis;
             int32 Main() {
@@ -5999,6 +6043,8 @@ internal sealed class StandaloneMethodImportInputTests
                 ? lazyBooleanIfReturnVerificationSource
             : verificationMode == 158
                 ? localCallInLazyIfReturnVerificationSource
+            : verificationMode == 161
+                ? importedCallInConditionalReturnVerificationSource
             : verificationMode == 154
                 ? lazyBooleanIfMutableJoinVerificationSource
             : verificationMode == 155
@@ -6443,11 +6489,11 @@ internal sealed class StandaloneMethodImportInputTests
             else if ((verificationMode is >= 130 and <= 140)
                 || verificationMode is 144 or 145 or 146 or 147
                     or 148 or 149 or 150 or 151 or 152 or 153
-                    or 154 or 155 or 156 or 158 or 159 or 160)
+                    or 154 or 155 or 156 or 158 or 159 or 160 or 161)
             {
                 var expectedBlockCount
                     = verificationMode is 159 or 160 ? 5
-                        : verificationMode is 130 or 158 ? 3
+                        : verificationMode is 130 or 158 or 161 ? 3
                         : verificationMode is 136 or 137 or 153 ? 5
                             : verificationMode is 138 or 144 or 145
                                 or 146 or 147 or 148 or 149
@@ -6458,7 +6504,8 @@ internal sealed class StandaloneMethodImportInputTests
                             : verificationMode is 144 or 145 or 146
                                 or 148 or 149 or 152 or 153
                                 or 154 or 155 or 156 ? 3
-                                : verificationMode is 158 or 159 or 160 ? 2
+                                : verificationMode is 158 or 159 or 160
+                                    or 161 ? 2
                                 : verificationMode is 147 or 150 ? 2 : 1);
                 Assert.That(bodyReader.BlockCount,
                     Is.EqualTo(expectedBlockCount));
@@ -6505,6 +6552,22 @@ internal sealed class StandaloneMethodImportInputTests
                     Assert.That(BinaryPrimitives
                         .ReadUInt16LittleEndian(secondEdge[6..]),
                         Is.EqualTo((ushort)3));
+                }
+                if (verificationMode == 161)
+                {
+                    var trueBlockCode = bodyReader.GetBlockCode(1);
+                    Assert.That(trueBlockCode.IndexOf((byte)0x90),
+                        Is.GreaterThanOrEqualTo(0));
+                    var methodToken
+                        = BinaryPrimitives.ReadUInt32LittleEndian(
+                            bodyReader.MethodMap);
+                    Assert.That(methodToken,
+                        Is.EqualTo(0x1C00_0001u));
+                    var callSite = bodyReader.GetRecord(
+                        bodyReader.RecordCount - 1);
+                    Assert.That(callSite[0], Is.EqualTo((byte)0x02));
+                    Assert.That(callSite[4], Is.EqualTo((byte)1));
+                    Assert.That(callSite[5], Is.EqualTo((byte)2));
                 }
                 if (verificationMode is 136 or 137)
                 {
@@ -6653,7 +6716,7 @@ internal sealed class StandaloneMethodImportInputTests
                 if ((verificationMode is < 136 or > 138)
                     && verificationMode is not 145
                         and not 147 and not 150
-                        and not 159 and not 160)
+                        and not 159 and not 160 and not 161)
                 {
                     var edgeRecord
                         = bodyReader.GetRecord(expectedBlockCount);
@@ -6706,7 +6769,8 @@ internal sealed class StandaloneMethodImportInputTests
             };
             var expectedDecoderBodyCount
                 = verificationMode == 58 ? 2 : 1;
-            var expectedDecoderCallCount = verificationMode is 4 or 158 ? 1
+            var expectedDecoderCallCount = verificationMode is 4 or 158
+                    or 161 ? 1
                 : verificationMode == 58 ? 2 : 0;
             var expectedDecoderConstantMapCount
                 = verificationMode is 4 or 23 or 25 or 26
@@ -6767,6 +6831,8 @@ internal sealed class StandaloneMethodImportInputTests
                     + "Host.StandaloneDecoderBodies[21] != 9",
                 158 => "Host.StandaloneDecoderBodies[19] != 3 || "
                     + "Host.StandaloneDecoderBodies[21] != 5",
+                161 => "Host.StandaloneDecoderBodies[19] != 3 || "
+                    + "Host.StandaloneDecoderBodies[21] != 5",
                 159 or 160 => "Host.StandaloneDecoderBodies[19] != 5 || "
                     + "Host.StandaloneDecoderBodies[21] != 7",
                 149 => "Host.StandaloneDecoderBodies[19] != 6 || "
@@ -6817,10 +6883,46 @@ internal sealed class StandaloneMethodImportInputTests
             var decoderExecution = NativeJit.ExecuteWithData(
                 decoderProgram, (NativeRuntimePolicy)policy);
             Assert.That(decoderExecution.ExitCode, Is.EqualTo(0));
+            if (verificationMode == 161)
+            {
+                decoderComponents[^1] = SyntaxTree.Parse("""
+                    namespace Terrum.CodeAnalysis;
+                    int32 Main() {
+                        int32 status = DecodeStandaloneModuleMetadata();
+                        if (status != 0) { return status; }
+                        status = BuildStandaloneImportedTargetPlan();
+                        if (status != 0) { return status; }
+                        status = ValidateStandaloneImportedTargetBodies();
+                        if (status != 0) { return status; }
+                        if (Host.StandaloneDecoderCallCount[0] != 1
+                            || Host.StandaloneDecoderCalls[3] != 2
+                            || Host.StandaloneDecoderCalls[14] != 1
+                            || Host.StandaloneDecoderCalls[20] <= 0
+                            || Host.StandaloneDecoderCalls[21] <= 0
+                            || Host.StandaloneDecoderTargetPlanBuilt[0] != 1
+                            || Host.StandaloneDecoderTargetBodiesValidated[0]
+                                != 1) {
+                            return 81;
+                        }
+                        return 0;
+                    }
+                    """, "standalone-imported-cfg-target-plan-tests.terrum");
+                var targetPlanCompilation = Compilation.Create(
+                    decoderComponents, decoderBuffers, policy);
+                Assert.That(targetPlanCompilation.HasErrors, Is.False,
+                    string.Join(Environment.NewLine,
+                        targetPlanCompilation.Diagnostics));
+                var targetPlanProgram = targetPlanCompilation.Program
+                    ?? throw new AssertionException(
+                        "Expected an imported CFG target-plan validator.");
+                var targetPlanExecution = NativeJit.ExecuteWithData(
+                    targetPlanProgram, (NativeRuntimePolicy)policy);
+                Assert.That(targetPlanExecution.ExitCode, Is.EqualTo(0));
+            }
             if ((verificationMode is >= 130 and <= 140)
                 || verificationMode is 144 or 145 or 146 or 147
                     or 148 or 149 or 150 or 151 or 152 or 153
-                    or 154 or 155 or 156 or 158 or 159 or 160)
+                    or 154 or 155 or 156 or 158 or 159 or 160 or 161)
             {
                 var artifactIndex = new TrRmArtifactIndex(artifact);
                 Assert.That(artifactIndex.TryGetSection(0x0020,
@@ -6938,6 +7040,30 @@ internal sealed class StandaloneMethodImportInputTests
                     new TrRmStandardArtifactInput(SchemaIdentity,
                         reemitted), input.UsingModuleIdentity,
                     input.Artifacts);
+                if (verificationMode == 161)
+                {
+                    var importedTarget = loaded.Functions.Single(
+                        static function => function.ModuleImport is not null);
+                    Assert.That(importedTarget.IsExternal, Is.True);
+                    Assert.That(importedTarget.IsModuleReference, Is.True);
+                    Assert.That(importedTarget.ModuleImport!.ProducerIdentity,
+                        Is.EqualTo("provider/leaf"));
+                    Assert.That(importedTarget.ModuleImport.ExportKey,
+                        Is.EqualTo("api.Imported"));
+                    var reemittedIndex = new TrRmArtifactIndex(reemitted);
+                    Assert.That(reemittedIndex.TryGetSection(0x0020,
+                            out var reemittedBodySection,
+                            out var reemittedBodyCount),
+                        Is.True);
+                    var reemittedBodies = new TrRmBodyTableReader(
+                        reemittedBodySection, reemittedBodyCount);
+                    var reemittedBody
+                        = new TrRmRegisterBodyReader(
+                            reemittedBodies.GetRow(1));
+                    Assert.That(BinaryPrimitives
+                        .ReadUInt32LittleEndian(reemittedBody.MethodMap),
+                        Is.EqualTo(0x1C00_0001u));
+                }
                 var parameterCount = verificationMode switch {
                     130 => 1,
                     131 => 3,
@@ -6959,6 +7085,7 @@ internal sealed class StandaloneMethodImportInputTests
                     155 => 5,
                     156 => 5,
                     158 => 2,
+                    161 => 2,
                     149 => 3,
                     _ => 4,
                 };

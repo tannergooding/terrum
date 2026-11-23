@@ -1198,18 +1198,25 @@ public static partial class TrRmExecutableCompiler
                                 body.MethodMap.Slice(
                                     methodMapIndex * sizeof(uint),
                                     sizeof(uint)));
-                        if ((methodToken >> 24) != 0x16)
+                        var methodTokenKind = methodToken >> 24;
+                        if (methodTokenKind != 0x16
+                            && methodTokenKind != 0x1C)
                         {
                             throw Unsupported(
-                                "The Standard scalar control-flow CallSite subset requires local MethodDef targets.");
+                                "The Standard scalar control-flow CallSite subset requires local MethodDef or exact MethodMap Import targets.");
                         }
                         var targetFunction
                             = ResolveStandardInitializationBodyMethodMapFunction(
                                 methodToken, imports,
                                 functionIndexByMethodRow, functions);
                         var target = functions[targetFunction];
-                        if (target.IsExternal
-                            || target.ModuleImport is not null
+                        var isImportedManagedTarget
+                            = methodTokenKind == 0x1C;
+                        if (target.IsExternal != isImportedManagedTarget
+                            || target.IsModuleReference
+                                != isImportedManagedTarget
+                            || (target.ModuleImport is not null)
+                                != isImportedManagedTarget
                             || target.DirectNativeImport is not null
                             || target.NativeVTableMethod is not null
                             || target.IsConstructor
