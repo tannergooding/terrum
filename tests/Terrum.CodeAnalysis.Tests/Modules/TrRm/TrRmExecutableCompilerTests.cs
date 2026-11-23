@@ -487,6 +487,10 @@ internal sealed class TrRmExecutableCompilerTests
                         public int32 Value;
                     }
 
+                    public int32 Precede() {
+                        return 1;
+                    }
+
                     public int32 Accept(
                         fnptr<ptr<OwnerPayload>, int32> callback) {
                         return 0;
