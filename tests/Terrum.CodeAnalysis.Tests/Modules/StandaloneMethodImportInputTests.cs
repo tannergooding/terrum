@@ -1337,6 +1337,11 @@ internal sealed class StandaloneMethodImportInputTests
             + "value = first ? (second ? whenBoth : whenFirst) "
             + ": whenNeither; return value; } }", 0, 150, false)]
     [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { int32 Main(bool condition, "
+            + "int32 whenTrue, int32 whenFalse, int32 offset) { "
+            + "return (condition ? whenTrue : whenFalse) + offset; } }",
+        0, 151, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
         "namespace client { int32 Main(bool condition, int32 initial, "
             + "int32 whenTrue, int32 whenFalse) { "
             + "mut int32 value = initial; "
@@ -5314,6 +5319,43 @@ internal sealed class StandaloneMethodImportInputTests
                 return 0;
             }
             """;
+        const string conditionalInEagerExpressionVerificationSource = """
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                if (Scan() < 1) { return 87; }
+                int32 status = BindStandaloneOwnedSourceProgram();
+                if (status != 0
+                    || Host.StandaloneSourceStatementCount[0] != 1
+                    || Host.StandaloneSourceLocalCount[0] != 0
+                    || Host.StandaloneSourceExpressionCount[0] != 6
+                    || Host.StandaloneSourceExpressions[24] != 34) {
+                    return 88;
+                }
+                status = NormalizeStandaloneOwnedSourceProgram();
+                if (status != 0
+                    || Host.StandaloneNormalizedBlockCount[0] != 4
+                    || Host.StandaloneNormalizedBodyBlockRanges[0] != 0
+                    || Host.StandaloneNormalizedBodyBlockRanges[1] != 4
+                    || Host.StandaloneNormalizedHomeCount[0] != 6
+                    || Host.StandaloneNormalizedOperationCount[0] != 4
+                    || Host.StandaloneNormalizedBlocks[8] != 1
+                    || Host.StandaloneNormalizedBlocks[9] != 2
+                    || Host.StandaloneNormalizedBlocks[13] != 4
+                    || Host.StandaloneNormalizedBlocks[24] != 3
+                    || Host.StandaloneNormalizedBlocks[40] != 3) {
+                    return 89;
+                }
+                status = RewriteStandaloneOwnedCallNodes();
+                if (status != 0) { return status; }
+                status = WriteStandaloneScalarModule();
+                if (status != 0
+                    || Host.StandaloneWriterStatus[0] != 0
+                    || Host.StandaloneWriterBodyPlanCount[0] != 1) {
+                    return 90;
+                }
+                return 0;
+            }
+            """;
         const string nestedConditionalValueVerificationSource = """
             namespace Terrum.CodeAnalysis;
             int32 Main() {
@@ -5537,6 +5579,8 @@ internal sealed class StandaloneMethodImportInputTests
                 ? mixedLazyBooleanMutableAssignmentVerificationSource
             : verificationMode == 150
                 ? nestedConditionalAssignmentVerificationSource
+            : verificationMode == 151
+                ? conditionalInEagerExpressionVerificationSource
             : verificationMode == 134
                 ? mutableIfJoinVerificationSource
             : verificationMode == 135
@@ -5972,7 +6016,7 @@ internal sealed class StandaloneMethodImportInputTests
             }
             else if ((verificationMode is >= 130 and <= 140)
                 || verificationMode is 144 or 145 or 146 or 147
-                    or 148 or 149 or 150)
+                    or 148 or 149 or 150 or 151)
             {
                 var expectedBlockCount
                     = verificationMode == 130 ? 3
@@ -6099,7 +6143,7 @@ internal sealed class StandaloneMethodImportInputTests
                 }
                 else if ((verificationMode >= 131
                         && verificationMode <= 135)
-                    || verificationMode is 139 or 140)
+                    || verificationMode is 139 or 140 or 151)
                 {
                     Assert.That(bodyReader.GetBlockCode(1)
                         .IndexOf((byte)0xB0),
@@ -6211,6 +6255,8 @@ internal sealed class StandaloneMethodImportInputTests
                     + "Host.StandaloneDecoderBodies[21] != 9",
                 150 => "Host.StandaloneDecoderBodies[19] != 6 || "
                     + "Host.StandaloneDecoderBodies[21] != 8",
+                151 => "Host.StandaloneDecoderBodies[19] != 4 || "
+                    + "Host.StandaloneDecoderBodies[21] != 5",
                 149 => "Host.StandaloneDecoderBodies[19] != 6 || "
                     + "Host.StandaloneDecoderBodies[21] != 9",
                 _ => "false",
@@ -6261,7 +6307,7 @@ internal sealed class StandaloneMethodImportInputTests
             Assert.That(decoderExecution.ExitCode, Is.EqualTo(0));
             if ((verificationMode is >= 130 and <= 140)
                 || verificationMode is 144 or 145 or 146 or 147
-                    or 148 or 149 or 150)
+                    or 148 or 149 or 150 or 151)
             {
                 var artifactIndex = new TrRmArtifactIndex(artifact);
                 Assert.That(artifactIndex.TryGetSection(0x0020,
@@ -6393,6 +6439,7 @@ internal sealed class StandaloneMethodImportInputTests
                     147 => 5,
                     148 => 3,
                     150 => 6,
+                    151 => 4,
                     149 => 3,
                     _ => 4,
                 };
@@ -6593,6 +6640,12 @@ internal sealed class StandaloneMethodImportInputTests
                             Is.EqualTo(19));
                         Assert.That(Execute(0, 1, 17, 19, 23, 7),
                             Is.EqualTo(23));
+                        break;
+                    case 151:
+                        Assert.That(Execute(1, 17, 23, 3),
+                            Is.EqualTo(20));
+                        Assert.That(Execute(0, 17, 23, 3),
+                            Is.EqualTo(26));
                         break;
                 }
             }
