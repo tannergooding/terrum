@@ -165,7 +165,7 @@ bool ValidateStandaloneNormalizationBuffers()
 {
     if (Host.Source.Length < 0
         || Host.Source.Length > 16384
-        || Host.Source.Length > (int32.MaxValue / 12) - 1)
+        || Host.Source.Length > (int32.MaxValue / 15) - 1)
     {
         return false;
     }
@@ -198,7 +198,7 @@ bool ValidateStandaloneNormalizationBuffers()
             == tokenCapacity * 3
         && Host.StandaloneNormalizedOperationCount.Length == 1
         && Host.StandaloneNormalizedOperations.Length
-            == tokenCapacity * 12
+            == tokenCapacity * 15
         && Host.StandaloneDirectCallInvokeMap.Length
             == tokenCapacity
         && Host.StandaloneDirectCallTraversalCount.Length == 1
@@ -483,6 +483,30 @@ int32 VisitStandaloneSourceExpression(int32 bodyId,
             return visitStatus;
         }
     }
+    else if (expressionKind == 12 || expressionKind == 13
+        || expressionKind == 14)
+    {
+        int32 leftExpressionId
+            = Host.StandaloneSourceExpressions[
+                expressionOffset + 2];
+        int32 rightExpressionId
+            = Host.StandaloneSourceExpressions[
+                expressionOffset + 3];
+        int32 visitStatus = VisitStandaloneSourceExpression(
+            bodyId, expressionFirst, expressionCount,
+            leftExpressionId, depth + 1);
+        if (visitStatus != 0)
+        {
+            return visitStatus;
+        }
+        visitStatus = VisitStandaloneSourceExpression(
+            bodyId, expressionFirst, expressionCount,
+            rightExpressionId, depth + 1);
+        if (visitStatus != 0)
+        {
+            return visitStatus;
+        }
+    }
     Host.StandaloneDirectCallTraversalExpressionStates[
         expressionIndex] = 2;
     return 0;
@@ -546,21 +570,22 @@ int32 AppendStandaloneNormalizedConstant(int32 bodyId,
 }
 
 int32 AppendStandaloneNormalizedOperation(int32 bodyId,
-    int32 kind, int32 operand0, int32 operand1)
+    int32 kind, int32 operand0, int32 operand1, int32 operand2)
 {
     int32 count = Host.StandaloneNormalizedOperationCount[0];
     if (count < 0
-        || count >= Host.StandaloneNormalizedOperations.Length / 4
+        || count >= Host.StandaloneNormalizedOperations.Length / 5
         || bodyId < 0
         || bodyId >= Host.StandaloneSourceBodyCount[0])
     {
         return 3;
     }
-    int32 offset = count * 4;
+    int32 offset = count * 5;
     Host.StandaloneNormalizedOperations[offset] = kind;
     Host.StandaloneNormalizedOperations[offset + 1] = operand0;
     Host.StandaloneNormalizedOperations[offset + 2] = operand1;
-    Host.StandaloneNormalizedOperations[offset + 3] = bodyId;
+    Host.StandaloneNormalizedOperations[offset + 3] = operand2;
+    Host.StandaloneNormalizedOperations[offset + 4] = bodyId;
     Host.StandaloneNormalizedOperationCount[0] = count + 1;
     return 0;
 }
@@ -662,7 +687,7 @@ int32 NormalizeStandaloneSourceStatement(int32 bodyId,
             return 3;
         }
         return AppendStandaloneNormalizedOperation(
-            bodyId, 5, 0, 0);
+            bodyId, 5, 0, 0, 0);
     }
     if (expressionId < 0)
     {
@@ -699,14 +724,14 @@ int32 NormalizeStandaloneSourceStatement(int32 bodyId,
                 return 3;
             }
             return AppendStandaloneNormalizedOperation(
-                bodyId, 5, 0, 0);
+                bodyId, 5, 0, 0, 0);
         }
         if (selectorKind != 2 || sourceUse != 1)
         {
             return 3;
         }
         return AppendStandaloneNormalizedOperation(
-            bodyId, 4, selectorIndex, 0);
+            bodyId, 4, selectorIndex, 0, 0);
     }
     if (statementKind == 2)
     {
@@ -810,13 +835,13 @@ int32 NormalizeStandaloneSourceExpression(int32 bodyId,
             return homeStatus;
         }
         int32 loadStatus = AppendStandaloneNormalizedOperation(
-            bodyId, 1, constantId, 0);
+            bodyId, 1, constantId, 0, 0);
         if (loadStatus != 0)
         {
             return loadStatus;
         }
         int32 storeStatus = AppendStandaloneNormalizedOperation(
-            bodyId, 2, homeId, 0);
+            bodyId, 2, homeId, 0, 0);
         if (storeStatus != 0)
         {
             return storeStatus;
@@ -946,6 +971,127 @@ int32 NormalizeStandaloneSourceExpression(int32 bodyId,
         *terminatedResult = false;
         return 0;
     }
+    if (expressionKind == 12 || expressionKind == 13
+        || expressionKind == 14)
+    {
+        int32 leftExpressionId
+            = Host.StandaloneSourceExpressions[
+                expressionOffset + 2];
+        int32 rightExpressionId
+            = Host.StandaloneSourceExpressions[
+                expressionOffset + 3];
+        if (!IsStandaloneNotType(typeId)
+            || leftExpressionId < 0
+            || leftExpressionId >= expressionId
+            || rightExpressionId < 0
+            || rightExpressionId >= expressionId)
+        {
+            return 3;
+        }
+
+        init int32 leftSelectorKind;
+        init int32 leftSourceUse;
+        init int32 leftSelectorIndex;
+        init bool leftTerminated;
+        int32 leftStatus = NormalizeStandaloneSourceExpression(
+            bodyId, leftExpressionId, depth + 1,
+            ref init leftSelectorKind, ref init leftSourceUse,
+            ref init leftSelectorIndex, ref init leftTerminated);
+        if (leftStatus != 0)
+        {
+            return leftStatus;
+        }
+        if (leftTerminated)
+        {
+            *selectorKindResult = 0;
+            *sourceUseResult = 0;
+            *selectorIndexResult = 0;
+            *terminatedResult = true;
+            return 0;
+        }
+        if (leftSelectorKind != 2 || leftSourceUse != 1
+            || leftSelectorIndex < 0)
+        {
+            return 2;
+        }
+
+        init int32 rightSelectorKind;
+        init int32 rightSourceUse;
+        init int32 rightSelectorIndex;
+        init bool rightTerminated;
+        int32 rightStatus = NormalizeStandaloneSourceExpression(
+            bodyId, rightExpressionId, depth + 1,
+            ref init rightSelectorKind, ref init rightSourceUse,
+            ref init rightSelectorIndex, ref init rightTerminated);
+        if (rightStatus != 0)
+        {
+            return rightStatus;
+        }
+        if (rightTerminated)
+        {
+            *selectorKindResult = 0;
+            *sourceUseResult = 0;
+            *selectorIndexResult = 0;
+            *terminatedResult = true;
+            return 0;
+        }
+        if (rightSelectorKind != 2 || rightSourceUse != 1
+            || rightSelectorIndex < 0)
+        {
+            return 2;
+        }
+
+        int32 sourceUse = GetStandaloneSourceUse(typeId);
+        int32 homeFirst
+            = Host.StandaloneNormalizedBodies[
+                bodyId * 12 + 1];
+        int32 bodyHomeCount
+            = Host.StandaloneNormalizedHomeCount[0] - homeFirst;
+        if (sourceUse != 1
+            || leftSelectorIndex >= bodyHomeCount
+            || rightSelectorIndex >= bodyHomeCount)
+        {
+            return 3;
+        }
+        int32 leftHomeOffset
+            = (homeFirst + leftSelectorIndex) * 5;
+        int32 rightHomeOffset
+            = (homeFirst + rightSelectorIndex) * 5;
+        if (Host.StandaloneNormalizedHomes[
+                leftHomeOffset] != bodyId
+            || Host.StandaloneNormalizedHomes[
+                leftHomeOffset + 3] != typeId
+            || Host.StandaloneNormalizedHomes[
+                rightHomeOffset] != bodyId
+            || Host.StandaloneNormalizedHomes[
+                rightHomeOffset + 3] != typeId)
+        {
+            return 3;
+        }
+
+        init int32 resultHomeId;
+        int32 homeStatus = AppendStandaloneNormalizedHome(
+            bodyId, homeFirst, 3, typeId, 0,
+            ref init resultHomeId);
+        if (homeStatus != 0)
+        {
+            return homeStatus;
+        }
+        int32 operationKind = expressionKind == 12 ? 10
+            : expressionKind == 13 ? 11 : 12;
+        int32 operationStatus = AppendStandaloneNormalizedOperation(
+            bodyId, operationKind, leftSelectorIndex,
+            rightSelectorIndex, resultHomeId);
+        if (operationStatus != 0)
+        {
+            return operationStatus;
+        }
+        *selectorKindResult = 2;
+        *sourceUseResult = sourceUse;
+        *selectorIndexResult = resultHomeId;
+        *terminatedResult = false;
+        return 0;
+    }
     if (expressionKind == 9 || expressionKind == 10
         || expressionKind == 11)
     {
@@ -1039,7 +1185,7 @@ int32 NormalizeStandaloneSourceExpression(int32 bodyId,
         }
         int32 operationStatus = AppendStandaloneNormalizedOperation(
             bodyId, operationKind, operandSelectorIndex,
-            resultHomeId);
+            resultHomeId, 0);
         if (operationStatus != 0)
         {
             return operationStatus;
@@ -1365,7 +1511,7 @@ int32 NormalizeStandaloneCallExpression(int32 bodyId,
     Host.StandaloneDirectCallInvokeMap[callIndex] = invokeGlobal;
     Host.StandaloneInvokeUseCounts[invokeGlobal] = 1;
     int32 operationStatus = AppendStandaloneNormalizedOperation(
-        bodyId, 3, invokeLocal, 0);
+        bodyId, 3, invokeLocal, 0, 0);
     if (operationStatus != 0)
     {
         return operationStatus;
@@ -1418,7 +1564,7 @@ int32 VerifyStandaloneNormalizedProgram()
         || inputCount > Host.StandaloneInvokeInputs.Length / 3
         || operationCount < 0
         || operationCount
-            > Host.StandaloneNormalizedOperations.Length / 4)
+            > Host.StandaloneNormalizedOperations.Length / 5)
     {
         return 3;
     }
@@ -1837,7 +1983,7 @@ int32 VerifyStandaloneNormalizedProgram()
             localOperation = localOperation + 1)
         {
             int32 operationOffset
-                = (operationFirst + localOperation) * 4;
+                = (operationFirst + localOperation) * 5;
             int32 kind
                 = Host.StandaloneNormalizedOperations[
                     operationOffset];
@@ -1847,8 +1993,11 @@ int32 VerifyStandaloneNormalizedProgram()
             int32 operand1
                 = Host.StandaloneNormalizedOperations[
                     operationOffset + 2];
+            int32 operand2
+                = Host.StandaloneNormalizedOperations[
+                    operationOffset + 3];
             if (Host.StandaloneNormalizedOperations[
-                    operationOffset + 3] != bodyId)
+                    operationOffset + 4] != bodyId)
             {
                 return 3;
             }
@@ -1858,6 +2007,7 @@ int32 VerifyStandaloneNormalizedProgram()
                 if (operand0 < 0
                     || operand0 >= bodyConstantCount
                     || operand1 != 0
+                    || operand2 != 0
                     || Host.StandaloneNormalizedConstants[
                         (constantFirst + operand0) * 4] != bodyId)
                 {
@@ -1867,12 +2017,13 @@ int32 VerifyStandaloneNormalizedProgram()
             else if (kind == 2)
             {
                 if (operand0 < 0 || operand0 >= bodyHomeCount
-                    || operand1 != 0 || localOperation == 0)
+                    || operand1 != 0 || operand2 != 0
+                    || localOperation == 0)
                 {
                     return 3;
                 }
                 int32 previousOffset
-                    = (operationFirst + localOperation - 1) * 4;
+                    = (operationFirst + localOperation - 1) * 5;
                 if (Host.StandaloneNormalizedOperations[
                         previousOffset] != 1)
                 {
@@ -1900,7 +2051,7 @@ int32 VerifyStandaloneNormalizedProgram()
             else if (kind == 3)
             {
                 if (operand0 < 0 || operand0 >= bodyInvokeCount
-                    || operand1 != 0)
+                    || operand1 != 0 || operand2 != 0)
                 {
                     return 3;
                 }
@@ -1934,7 +2085,7 @@ int32 VerifyStandaloneNormalizedProgram()
             else if (kind == 4)
             {
                 if (operand0 < 0 || operand0 >= bodyHomeCount
-                    || operand1 != 0
+                    || operand1 != 0 || operand2 != 0
                     || localOperation != bodyOperationCount - 1
                     || terminalKind != 0
                     || Host.StandaloneNormalizedHomes[
@@ -1948,6 +2099,7 @@ int32 VerifyStandaloneNormalizedProgram()
             else if (kind == 5)
             {
                 if (operand0 != 0 || operand1 != 0
+                    || operand2 != 0
                     || localOperation != bodyOperationCount - 1
                     || terminalKind != 0
                     || !IsStandaloneUnitType(
@@ -1962,7 +2114,7 @@ int32 VerifyStandaloneNormalizedProgram()
             {
                 if (operand0 < 0 || operand0 >= bodyHomeCount
                     || operand1 < 0 || operand1 >= bodyHomeCount
-                    || operand0 == operand1)
+                    || operand0 == operand1 || operand2 != 0)
                 {
                     return 3;
                 }
@@ -2004,6 +2156,47 @@ int32 VerifyStandaloneNormalizedProgram()
                     return 3;
                 }
             }
+            else if (kind == 10 || kind == 11 || kind == 12)
+            {
+                if (operand0 < 0 || operand0 >= bodyHomeCount
+                    || operand1 < 0 || operand1 >= bodyHomeCount
+                    || operand2 < 0 || operand2 >= bodyHomeCount
+                    || operand2 == operand0 || operand2 == operand1)
+                {
+                    return 3;
+                }
+                int32 leftHomeOffset
+                    = (homeFirst + operand0) * 5;
+                int32 rightHomeOffset
+                    = (homeFirst + operand1) * 5;
+                int32 resultHomeOffset
+                    = (homeFirst + operand2) * 5;
+                int32 typeId
+                    = Host.StandaloneNormalizedHomes[
+                        leftHomeOffset + 3];
+                if (!IsStandaloneNotType(typeId)
+                    || Host.StandaloneNormalizedHomes[
+                        leftHomeOffset] != bodyId
+                    || Host.StandaloneNormalizedHomes[
+                        rightHomeOffset] != bodyId
+                    || Host.StandaloneNormalizedHomes[
+                        resultHomeOffset] != bodyId
+                    || Host.StandaloneNormalizedHomes[
+                        rightHomeOffset + 3] != typeId
+                    || Host.StandaloneNormalizedHomes[
+                        resultHomeOffset + 3] != typeId
+                    || Host.StandaloneNormalizedHomes[
+                        leftHomeOffset + 2] != 0
+                    || Host.StandaloneNormalizedHomes[
+                        rightHomeOffset + 2] != 0
+                    || Host.StandaloneNormalizedHomes[
+                        resultHomeOffset + 1] != 3
+                    || Host.StandaloneNormalizedHomes[
+                        resultHomeOffset + 2] != 0)
+                {
+                    return 3;
+                }
+            }
             else
             {
                 return 3;
@@ -2024,7 +2217,7 @@ int32 VerifyStandaloneNormalizedProgram()
         {
             int32 finalInvokeLocal
                 = Host.StandaloneNormalizedOperations[
-                    (operationFirst + bodyOperationCount - 1) * 4 + 1];
+                    (operationFirst + bodyOperationCount - 1) * 5 + 1];
             int32 finalExpectedId
                 = Host.StandaloneInvokes[
                     (invokeFirst + finalInvokeLocal) * 10 + 2];

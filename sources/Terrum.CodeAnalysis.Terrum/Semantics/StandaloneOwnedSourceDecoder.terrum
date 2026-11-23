@@ -4004,41 +4004,79 @@ int32 ValidateStandaloneBodyCode(int32 bodyId, int32 bodyOffset,
                 = int32(registerPayload & 0x0F);
             int32 unusedResult
                 = int32((registerPayload >> 4) & 0x0F);
-            int32 sourceRegister
+            int32 source0Register
                 = int32((registerPayload >> 8) & 0x0F);
-            int32 unusedSource
+            int32 source1Register
                 = int32((registerPayload >> 12) & 0x0F);
-            if (resultRegister > 13
-                || resultRegister != sourceRegister
-                || unusedResult != 15 || unusedSource != 15)
+            if (resultRegister > 13 || unusedResult != 15)
             {
                 return 3;
             }
-            int32 registerTypeId
-                = Host.StandaloneDecoderRegisterTypeIds[
-                    bodyId * 14 + sourceRegister];
-            if (registerTypeId <= 0
-                || registerTypeId
-                    > Host.StandaloneTypeFactCount[0]
-                || Host.StandaloneTypeFacts[
-                    registerTypeId * 3] != 0)
-            {
-                return 3;
-            }
-            int32 typeCode
-                = Host.StandaloneTypeFacts[
-                    registerTypeId * 3 + 1];
-            bool integerType
-                = (typeCode >= 0x06 && typeCode <= 0x0F)
-                    || typeCode == 0x10 || typeCode == 0x11;
+            int32 registerTypeId = -1;
             if (control == 0x04)
             {
+                if (resultRegister != source0Register
+                    || source1Register != 15
+                    || source0Register > 13)
+                {
+                    return 3;
+                }
+                registerTypeId
+                    = Host.StandaloneDecoderRegisterTypeIds[
+                        bodyId * 14 + source0Register];
+                if (registerTypeId <= 0
+                    || registerTypeId
+                        > Host.StandaloneTypeFactCount[0]
+                    || Host.StandaloneTypeFacts[
+                        registerTypeId * 3] != 0)
+                {
+                    return 3;
+                }
+                int32 typeCode
+                    = Host.StandaloneTypeFacts[
+                        registerTypeId * 3 + 1];
+                bool integerType
+                    = (typeCode >= 0x06 && typeCode <= 0x0F)
+                        || typeCode == 0x10 || typeCode == 0x11;
                 if (!integerType && typeCode != 1)
                 {
                     return 3;
                 }
             }
-            else if (control >= 1 && control <= 7)
+            else if (control >= 1 && control <= 3)
+            {
+                if (source0Register > 13 || source1Register > 13)
+                {
+                    return 3;
+                }
+                int32 leftTypeId
+                    = Host.StandaloneDecoderRegisterTypeIds[
+                        bodyId * 14 + source0Register];
+                int32 rightTypeId
+                    = Host.StandaloneDecoderRegisterTypeIds[
+                        bodyId * 14 + source1Register];
+                if (leftTypeId <= 0
+                    || leftTypeId
+                        > Host.StandaloneTypeFactCount[0]
+                    || rightTypeId != leftTypeId
+                    || Host.StandaloneTypeFacts[
+                        leftTypeId * 3] != 0)
+                {
+                    return 3;
+                }
+                int32 typeCode
+                    = Host.StandaloneTypeFacts[
+                        leftTypeId * 3 + 1];
+                bool integerType
+                    = (typeCode >= 0x06 && typeCode <= 0x0F)
+                        || typeCode == 0x10 || typeCode == 0x11;
+                if (!integerType && typeCode != 1)
+                {
+                    return 3;
+                }
+                registerTypeId = leftTypeId;
+            }
+            else if (control >= 5 && control <= 7)
             {
                 return 2;
             }
