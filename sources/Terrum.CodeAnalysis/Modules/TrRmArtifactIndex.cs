@@ -18,6 +18,7 @@ internal enum TrRmArtifactSchema
     ForeignInvocationDraft,
     ForeignNativeInterfaceDraft,
     ForeignNativeInterfaceParameterSurfaceDraft,
+    ForeignNativeInterfaceParameterSurfaceEnumClosureDraft,
     ForeignNativeInterfaceAggregateOutputConsumptionDraft,
     ForeignInvocationStorageAddressDraft,
     ForeignInvocationStorageFixedArrayCopyDraft,
@@ -101,7 +102,7 @@ internal static class TrRmArtifactSchemaFacts
         this TrRmArtifactSchema schema) =>
         schema.SupportsNominalEnums()
             || schema.UsesGenericConstantMethods()
-            || schema.UsesC1EnumClosure();
+            || schema.UsesEN1EnumClosure();
 
     internal static bool UsesGenericConstantMethods(
         this TrRmArtifactSchema schema) =>
@@ -119,10 +120,17 @@ internal static class TrRmArtifactSchemaFacts
             or TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureClassInstanceLayoutInitializerCopyEvidenceDraft
             or TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureClassInstanceLayoutInitializerCopyEvidenceDraft;
 
+    internal static bool UsesEN1EnumClosure(
+        this TrRmArtifactSchema schema)
+        => schema.UsesC1EnumClosure()
+            || schema
+                == TrRmArtifactSchema
+                    .ForeignNativeInterfaceParameterSurfaceEnumClosureDraft;
+
     internal static bool UsesTypedEnumMemberValues(
         this TrRmArtifactSchema schema)
         => schema.UsesGenericConstantMethods()
-            || schema.UsesC1EnumClosure();
+            || schema.UsesEN1EnumClosure();
 
     internal static bool SupportsEnumUnderlyingTypeCode(
         this TrRmArtifactSchema schema, byte typeCode)
@@ -130,7 +138,7 @@ internal static class TrRmArtifactSchemaFacts
             ? typeCode == 0x08
             : schema.UsesGenericConstantMethods()
                 ? typeCode is >= 0x06 and <= 0x0F
-                : schema.UsesC1EnumClosure()
+                : schema.UsesEN1EnumClosure()
                     && typeCode is >= 0x06 and <= 0x11;
 
     internal static bool SupportsDeclaredCopyEvidence(
@@ -192,6 +200,7 @@ internal static class TrRmArtifactSchemaFacts
     internal static bool UsesScalarFrozenValues(this TrRmArtifactSchema schema) =>
         schema is TrRmArtifactSchema.ScalarFrozenValuesDraft
             or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft
+            or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceEnumClosureDraft
             or TrRmArtifactSchema.ForeignNativeInterfaceAggregateOutputConsumptionDraft
             or TrRmArtifactSchema.NominalEnumsDraft
             or TrRmArtifactSchema.GeneralPredicateGraphsDraft
@@ -398,6 +407,7 @@ internal static class TrRmArtifactSchemaFacts
     internal static bool UsesMethodParameterLabels(
         this TrRmArtifactSchema schema) =>
         schema is TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft
+            or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceEnumClosureDraft
             or TrRmArtifactSchema.ForeignNativeInterfaceAggregateOutputConsumptionDraft
             or TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft
             or TrRmArtifactSchema.GenericMethodCallsParameterLabelsReceiverAccessDraft
@@ -466,6 +476,7 @@ internal static class TrRmArtifactSchemaFacts
         schema is TrRmArtifactSchema.ForeignInvocationDraft
             or TrRmArtifactSchema.ForeignNativeInterfaceDraft
             or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft
+            or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceEnumClosureDraft
             or TrRmArtifactSchema.ForeignNativeInterfaceAggregateOutputConsumptionDraft
             or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
@@ -481,17 +492,25 @@ internal static class TrRmArtifactSchemaFacts
         this TrRmArtifactSchema schema)
         => schema is TrRmArtifactSchema.ForeignNativeInterfaceDraft
             or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft
+            or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceEnumClosureDraft
             or TrRmArtifactSchema.ForeignNativeInterfaceAggregateOutputConsumptionDraft;
 
     internal static bool UsesForeignNativeInterfaceParameterSurface(
         this TrRmArtifactSchema schema)
         => schema is TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft
+            or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceEnumClosureDraft
             or TrRmArtifactSchema.ForeignNativeInterfaceAggregateOutputConsumptionDraft;
 
     internal static bool UsesForeignNativeInterfaceAggregateOutputConsumption(
         this TrRmArtifactSchema schema)
         => schema
             == TrRmArtifactSchema.ForeignNativeInterfaceAggregateOutputConsumptionDraft;
+
+    internal static bool AllowsEnumOnlyForeignNativeInterfaceProvider(
+        this TrRmArtifactSchema schema)
+        => schema
+            == TrRmArtifactSchema
+                .ForeignNativeInterfaceParameterSurfaceEnumClosureDraft;
 
     internal static bool UsesNativeParameterContracts(
         this TrRmArtifactSchema schema) =>
@@ -872,8 +891,18 @@ public readonly ref struct TrRmArtifactIndex
             throw InvalidArtifact();
         }
 
+        var hasForeignNativeInterfaceSection
+            = TryGetSection(0x004C, out _, out _);
         if (schema.UsesForeignNativeInterface()
-            && sectionCounts[0x004C] == 0)
+            && (sectionCounts[0x004C] == 0
+                && !schema.AllowsEnumOnlyForeignNativeInterfaceProvider()))
+        {
+            throw InvalidArtifact();
+        }
+
+        if (schema.AllowsEnumOnlyForeignNativeInterfaceProvider()
+            && hasForeignNativeInterfaceSection
+                != (sectionCounts[0x004C] != 0))
         {
             throw InvalidArtifact();
         }
@@ -1027,6 +1056,13 @@ public readonly ref struct TrRmArtifactIndex
         ReadOnlySpan<byte> artifact)
         => new(artifact,
             TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft);
+
+    internal static TrRmArtifactIndex
+        ForForeignNativeInterfaceParameterSurfaceEnumClosureDraft(
+        ReadOnlySpan<byte> artifact)
+        => new(artifact,
+            TrRmArtifactSchema
+                .ForeignNativeInterfaceParameterSurfaceEnumClosureDraft);
 
     internal static TrRmArtifactIndex
         ForForeignNativeInterfaceAggregateOutputConsumptionDraft(

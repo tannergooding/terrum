@@ -429,6 +429,7 @@ public static class TrRmStructuralMetadataValidator
                     or TrRmArtifactSchema.ForeignInvocationDraft
                     or TrRmArtifactSchema.ForeignNativeInterfaceDraft
                     or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft
+                    or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceEnumClosureDraft
                     or TrRmArtifactSchema.ForeignNativeInterfaceAggregateOutputConsumptionDraft
                     or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
                     or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
@@ -1136,6 +1137,9 @@ public static class TrRmStructuralMetadataValidator
         => ValidateCore(index, BodyInspection.None, developmentProfile: false,
             foreignInvocationDraft: true, foreignNativeInterfaceDraft: true,
         foreignNativeInterfaceParameterSurfaceDraft: true,
+        foreignNativeInterfaceParameterSurfaceEnumClosureDraft:
+            index.Schema == TrRmArtifactSchema
+                .ForeignNativeInterfaceParameterSurfaceEnumClosureDraft,
         foreignNativeInterfaceAggregateOutputConsumptionDraft:
             index.Schema == TrRmArtifactSchema
                 .ForeignNativeInterfaceAggregateOutputConsumptionDraft);
@@ -1538,6 +1542,7 @@ public static class TrRmStructuralMetadataValidator
         bool copyOriginDraft = false, bool foreignInvocationDraft = false,
         bool foreignNativeInterfaceDraft = false,
         bool foreignNativeInterfaceParameterSurfaceDraft = false,
+        bool foreignNativeInterfaceParameterSurfaceEnumClosureDraft = false,
         bool foreignNativeInterfaceAggregateOutputConsumptionDraft = false,
         bool developmentFunctionPointerEffectsDraft = false,
         bool developmentNativeConventionsDraft = false,
@@ -1612,6 +1617,9 @@ public static class TrRmStructuralMetadataValidator
                 : foreignNativeInterfaceAggregateOutputConsumptionDraft
                     ? TrRmArtifactSchema
                         .ForeignNativeInterfaceAggregateOutputConsumptionDraft
+                : foreignNativeInterfaceParameterSurfaceEnumClosureDraft
+                    ? TrRmArtifactSchema
+                        .ForeignNativeInterfaceParameterSurfaceEnumClosureDraft
                 : foreignNativeInterfaceParameterSurfaceDraft
                     ? TrRmArtifactSchema
                         .ForeignNativeInterfaceParameterSurfaceDraft
@@ -1658,6 +1666,7 @@ public static class TrRmStructuralMetadataValidator
             |= foreignInvocationStorageFixedArrayEmptyInitializationDraft;
         foreignInvocationDraft |= foreignNativeInterfaceDraft
             || foreignNativeInterfaceParameterSurfaceDraft
+            || foreignNativeInterfaceParameterSurfaceEnumClosureDraft
             || foreignNativeInterfaceAggregateOutputConsumptionDraft
             || foreignInvocationStorageAddressDraft
             || foreignInvocationStorageFixedArrayDraft
@@ -2273,9 +2282,9 @@ public static class TrRmStructuralMetadataValidator
                     frozenValueNodes, blobs, features, modules,
                     selectedA3LayoutResourceLedger);
             }
-            if (index.Schema.UsesC1EnumClosure())
+            if (index.Schema.UsesEN1EnumClosure())
             {
-                ValidateC1NativeEnumBindings(enumDefs, types, typeSpecs,
+                ValidateEN1NativeEnumBindings(enumDefs, types, typeSpecs,
                     layouts, targetProfiles, modules, imports,
                     selectedA3LayoutResourceLedger);
             }
@@ -2702,9 +2711,9 @@ public static class TrRmStructuralMetadataValidator
             interfaces, associatedTypeDefs, fields, features, modules,
             index.Schema, associatedConstDefs, staticFields, staticFieldContracts,
             intrinsicRegistrations, selectedA3LayoutResourceLedger);
-        if (index.Schema.UsesC1EnumClosure())
+        if (index.Schema.UsesEN1EnumClosure())
         {
-            ValidateC1EnumExportOwnership(exports, types, imports, modules,
+            ValidateEN1EnumExportOwnership(exports, types, imports, modules,
                 selectedA3LayoutResourceLedger);
         }
         var nativeImports = developmentProfile
@@ -3825,7 +3834,7 @@ public static class TrRmStructuralMetadataValidator
         }
     }
 
-    private static void ValidateC1NativeEnumBindings(
+    private static void ValidateEN1NativeEnumBindings(
         TrRmEnumDefTableReader enumDefs, TrRmTypeDefTableReader typeDefs,
         TrRmTypeSpecTableReader typeSpecs, TrRmLayoutTableReader layouts,
         TrRmTargetProfileTableReader targetProfiles,
@@ -3885,7 +3894,7 @@ public static class TrRmStructuralMetadataValidator
         }
     }
 
-    private static void ValidateC1EnumExportOwnership(
+    private static void ValidateEN1EnumExportOwnership(
         TrRmExportTableReader exports, TrRmTypeDefTableReader typeDefs,
         TrRmImportTableReader imports, TrRmModuleTableReader modules,
         TrRmA3LayoutResourceLedger? resourceLedger)
@@ -4044,7 +4053,9 @@ public static class TrRmStructuralMetadataValidator
         TrRmArtifactSchema schema)
     {
         if (schema.UsesForeignNativeInterface()
-            != (foreignNativeInterfaces.Count != 0))
+                ? foreignNativeInterfaces.Count == 0
+                    && !schema.AllowsEnumOnlyForeignNativeInterfaceProvider()
+                : foreignNativeInterfaces.Count != 0)
         {
             throw InvalidMetadata();
         }
@@ -4240,7 +4251,8 @@ public static class TrRmStructuralMetadataValidator
         TrRmArtifactSchema schema)
     {
         if (!schema.UsesForeignNativeInterfaceParameterSurface()
-            || foreignNativeInterfaces.Count == 0)
+            || (foreignNativeInterfaces.Count == 0
+                && !schema.AllowsEnumOnlyForeignNativeInterfaceProvider()))
         {
             throw InvalidMetadata();
         }

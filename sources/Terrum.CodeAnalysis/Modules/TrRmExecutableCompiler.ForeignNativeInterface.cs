@@ -13,11 +13,28 @@ public static partial class TrRmExecutableCompiler
     private static byte[] EmitForeignNativeInterfaceDeclarations(
         BoundProgram program, string moduleIdentity, string schemaIdentity,
         uint moduleTargetRequirement,
-        IReadOnlyList<TrRmSourceTypeExport>? sourceTypeExports)
+        IReadOnlyList<TrRmSourceTypeExport>? sourceTypeExports,
+        IReadOnlyList<TrRmSourceEnumDeclarationExport>?
+            sourceEnumDeclarationExports = null)
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentException.ThrowIfNullOrEmpty(moduleIdentity);
         var schema = GetForeignInvocationSchema(schemaIdentity);
+        if (program.Interfaces.IsEmpty)
+        {
+            return EmitForeignNativeInterfaceEnumOnlyDeclarations(program,
+                moduleIdentity, schemaIdentity, moduleTargetRequirement,
+                schema, sourceTypeExports, sourceEnumDeclarationExports);
+        }
+
+        if (sourceEnumDeclarationExports is { Count: > 0 }
+            && program.EnumDefinitions.IsEmpty)
+        {
+            throw new ArgumentException(
+                "Source enum mappings do not select an enum in this program.",
+                nameof(sourceEnumDeclarationExports));
+        }
+
         if (!schema.UsesForeignNativeInterface()
             || moduleTargetRequirement
                 != TrRmModuleTableReader.WindowsX64NativeTargetRequirement
@@ -250,6 +267,55 @@ public static partial class TrRmExecutableCompiler
         _ = TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
             new TrRmArtifactIndex(artifact, schema));
         return artifact;
+    }
+
+    private static byte[] EmitForeignNativeInterfaceEnumOnlyDeclarations(
+        BoundProgram program, string moduleIdentity, string schemaIdentity,
+        uint moduleTargetRequirement, TrRmArtifactSchema schema,
+        IReadOnlyList<TrRmSourceTypeExport>? sourceTypeExports,
+        IReadOnlyList<TrRmSourceEnumDeclarationExport>?
+            sourceEnumDeclarationExports)
+    {
+        if (!schema.AllowsEnumOnlyForeignNativeInterfaceProvider()
+            || program.EnumDefinitions.IsEmpty)
+        {
+            throw Unsupported(
+                "The selected FNI enum-closure schema requires foreign interfaces or a nonempty enum-only provider.");
+        }
+        if (sourceTypeExports is { Count: > 0 })
+        {
+            throw new ArgumentException(
+                "Enum-only FNI providers do not accept source TypeDef mappings.",
+                nameof(sourceTypeExports));
+        }
+
+        var sourceEnumCount = program.EnumDefinitions.Count(
+            static definition => definition.Identity
+                is BoundEnumDeclarationIdentity.Source);
+        C1EnumClosureSourceEnumExports? capturedSourceEnums = null;
+        if (sourceEnumCount != 0)
+        {
+            if (sourceEnumDeclarationExports is null)
+            {
+                throw new ArgumentException(
+                    "Every retained source enum requires an explicit source-anchored mapping.",
+                    nameof(sourceEnumDeclarationExports));
+            }
+
+            capturedSourceEnums
+                = C1EnumClosureSourceEnumExports.Capture(program,
+                    sourceEnumDeclarationExports);
+        }
+        else if (sourceEnumDeclarationExports is { Count: > 0 })
+        {
+            throw new ArgumentException(
+                "Source enum mappings do not select a source enum in this program.",
+                nameof(sourceEnumDeclarationExports));
+        }
+
+        return EmitC1EnumClosureDeclarationLibrary(program, moduleIdentity,
+            schemaIdentity, moduleTargetRequirement, schema, null, null, null,
+            capturedSourceEnums);
     }
 
     private static ImmutableArray<int>

@@ -720,7 +720,7 @@ public static partial class TrRmExecutableCompiler
             || !program.GenericMethodSignatures.IsEmpty
             || !program.GenericMethodOperatorProtocols.IsEmpty
             || !standardClassClosureIsValid
-            || !schema.UsesC1EnumClosure()
+            || !schema.UsesEN1EnumClosure()
             || !BoundEnumTypes.IsValidTable(program.EnumDefinitions)
             || program.EnumDefinitions.Any(static definition =>
                 definition.Identity is not
@@ -5143,7 +5143,7 @@ public static partial class TrRmExecutableCompiler
                 var constant = new BoundConstant(bits,
                     BoundEnumTypes.Type(enumIndex),
                     emittedEnum.UnderlyingType, default);
-                var frozenValue = valueBuilder.AddC1EnumClosureMember(
+                var frozenValue = valueBuilder.AddEN1EnumMember(
                     constant, typeSpecByEmissionEnumIndex[enumIndex],
                     emittedEnum.UnderlyingType, schema);
                 enumMemberRows.Add(new TrRmTypedEnumMemberDefRow(
@@ -6467,7 +6467,7 @@ public static partial class TrRmExecutableCompiler
                 = program.EnumDefinitions[enumIndex].UnderlyingType;
             var enumConstant = new BoundConstant(constant.Bits,
                 BoundEnumTypes.Type(enumIndex), underlyingType, default);
-            return valueBuilder.AddC1EnumClosureMember(enumConstant,
+            return valueBuilder.AddEN1EnumMember(enumConstant,
                 remappedTypeSpec, underlyingType, schema);
         }
 
@@ -7500,7 +7500,7 @@ public static partial class TrRmExecutableCompiler
         var enumDefs = new TrRmEnumDefTableReader(enumDefBytes,
             enumRows.Count, typeDefs, typeSpecs, layouts,
             targetProfiles, enumMembers);
-        var values = valueBuilder.EncodeC1EnumClosure(typeSpecs, typeDefs,
+        var values = valueBuilder.EncodeEN1EnumClosure(typeSpecs, typeDefs,
             enumDefs, imports);
         var exportBytes = exportRows.Count == 0 ? []
             : TrRmExportTableWriter.Encode(exportRows, strings, typeDefs,
@@ -7667,6 +7667,12 @@ public static partial class TrRmExecutableCompiler
                     new TrRmArtifactIndex(artifact, schema, null,
                         usesNativePointerLoads: false,
                         standardSchemaIdentity: schemaIdentity));
+        }
+        else if (schema.UsesForeignNativeInterfaceParameterSurface())
+        {
+            _ = TrRmStructuralMetadataValidator
+                .ValidateAndGetExecutionTables(
+                    new TrRmArtifactIndex(artifact, schema));
         }
         else
         {

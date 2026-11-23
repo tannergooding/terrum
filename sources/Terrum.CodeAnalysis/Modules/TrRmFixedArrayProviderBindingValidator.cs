@@ -2959,7 +2959,7 @@ internal static class TrRmFixedArrayProviderBindingValidator
                     throw InvalidBinding();
                 }
 
-                TrRmEnumProviderBindingValidator.ValidateC1EnumSnapshot(
+                TrRmEnumProviderBindingValidator.ValidateEN1EnumSnapshot(
                     expected, expectedType, actual, actualType);
                 return;
             }

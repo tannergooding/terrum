@@ -83,6 +83,8 @@ public static partial class TrRmExecutableCompiler
         = "trrm/1-draft-foreign-native-interface-contracts-1";
     private const string StandardForeignNativeInterfaceParameterSurfaceSchemaIdentity
         = "trrm/1-draft-foreign-native-interface-parameter-surface-1";
+    private const string StandardForeignNativeInterfaceParameterSurfaceEnumClosureSchemaIdentity
+        = "trrm/1-draft-foreign-native-interface-parameter-surface-1-enum-closure-1";
     private const string StandardForeignNativeInterfaceAggregateOutputConsumptionSchemaIdentity
         = "trrm/1-draft-foreign-native-interface-aggregate-output-consumption-1";
     private const string StandardForeignInvocationStorageAddressSchemaIdentity
@@ -386,6 +388,8 @@ public static partial class TrRmExecutableCompiler
                 StandardForeignNativeInterfaceSchemaIdentity)
             || StringComparer.Ordinal.Equals(schemaIdentity,
                 StandardForeignNativeInterfaceParameterSurfaceSchemaIdentity)
+            || IsSelectedForeignNativeInterfaceParameterSurfaceEnumClosureSchemaIdentity(
+                schemaIdentity)
             || StringComparer.Ordinal.Equals(schemaIdentity,
                 StandardForeignNativeInterfaceAggregateOutputConsumptionSchemaIdentity)
             || IsSelectedInitializationReferenceLocalFieldLayoutSchemaIdentity(
@@ -402,8 +406,16 @@ public static partial class TrRmExecutableCompiler
                 StandardForeignNativeInterfaceSchemaIdentity)
             || StringComparer.Ordinal.Equals(schemaIdentity,
                 StandardForeignNativeInterfaceParameterSurfaceSchemaIdentity)
+            || IsSelectedForeignNativeInterfaceParameterSurfaceEnumClosureSchemaIdentity(
+                schemaIdentity)
             || StringComparer.Ordinal.Equals(schemaIdentity,
                 StandardForeignNativeInterfaceAggregateOutputConsumptionSchemaIdentity);
+
+    internal static bool
+        IsSelectedForeignNativeInterfaceParameterSurfaceEnumClosureSchemaIdentity(
+            string? schemaIdentity)
+        => StringComparer.Ordinal.Equals(schemaIdentity,
+            StandardForeignNativeInterfaceParameterSurfaceEnumClosureSchemaIdentity);
 
     internal static bool IsSelectedFniAggregateProviderSchemaIdentity(
         string schemaIdentity)
@@ -441,6 +453,13 @@ public static partial class TrRmExecutableCompiler
             return originSchemaIdentity is
                 StandardForeignNativeInterfaceParameterSurfaceSchemaIdentity
                 or StandardForeignInvocationStorageFixedArraySchemaIdentity;
+        }
+
+        if (IsSelectedForeignNativeInterfaceParameterSurfaceEnumClosureSchemaIdentity(
+                outputSchemaIdentity))
+        {
+            return IsSelectedForeignNativeInterfaceParameterSurfaceEnumClosureSchemaIdentity(
+                originSchemaIdentity);
         }
 
         return StringComparer.Ordinal.Equals(outputSchemaIdentity,
@@ -635,6 +654,8 @@ public static partial class TrRmExecutableCompiler
                 StandardForeignNativeInterfaceSchemaIdentity)
             || StringComparer.Ordinal.Equals(schemaIdentity,
                 StandardForeignNativeInterfaceParameterSurfaceSchemaIdentity)
+            || IsSelectedForeignNativeInterfaceParameterSurfaceEnumClosureSchemaIdentity(
+                schemaIdentity)
             || StringComparer.Ordinal.Equals(schemaIdentity,
                 StandardForeignNativeInterfaceAggregateOutputConsumptionSchemaIdentity))
         {
@@ -750,6 +771,76 @@ public static partial class TrRmExecutableCompiler
             moduleTargetRequirement, typeExportSnapshot);
     }
 
+    /// <summary>Emits an FNI parameter-surface module with source-anchored enum mappings.</summary>
+    public static byte[] EmitStandard(BoundProgram program, string moduleIdentity,
+        string schemaIdentity, uint moduleTargetRequirement,
+        IReadOnlyList<TrRmSourceTypeExport> typeExports,
+        IReadOnlyList<TrRmSourceEnumDeclarationExport> enumExports)
+    {
+        ArgumentNullException.ThrowIfNull(program);
+        ArgumentNullException.ThrowIfNull(typeExports);
+        ArgumentNullException.ThrowIfNull(enumExports);
+        ArgumentException.ThrowIfNullOrEmpty(moduleIdentity);
+        ArgumentException.ThrowIfNullOrEmpty(schemaIdentity);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(
+            moduleTargetRequirement,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        if (!IsSelectedForeignNativeInterfaceParameterSurfaceEnumClosureSchemaIdentity(
+                schemaIdentity))
+        {
+            throw new ArgumentException(
+                "The source enum FNI route requires the exact PS1+EN1 schema identity.",
+                nameof(schemaIdentity));
+        }
+
+        var typeExportSnapshot = new TrRmSourceTypeExport[typeExports.Count];
+        for (var index = 0; index < typeExportSnapshot.Length; index++)
+        {
+            var export = typeExports[index]
+                ?? throw new ArgumentException(
+                    "Source TypeDef mappings cannot contain null entries.",
+                    nameof(typeExports));
+            if (!export.EnumMemberDeclarationKeys.IsDefault)
+            {
+                throw new ArgumentException(
+                    "FNI enum members require source-anchored enum mappings.",
+                    nameof(typeExports));
+            }
+
+            typeExportSnapshot[index] = export with {
+                FieldExports = export.FieldExports.IsDefault
+                    ? default : [.. export.FieldExports],
+                InterfaceMethodExports =
+                    export.InterfaceMethodExports.IsDefault
+                        ? default : [.. export.InterfaceMethodExports],
+                InterfaceAssociatedTypeExports
+                    = export.InterfaceAssociatedTypeExports.IsDefault
+                        ? default : [.. export.InterfaceAssociatedTypeExports],
+            };
+        }
+
+        var enumExportSnapshot
+            = new TrRmSourceEnumDeclarationExport[enumExports.Count];
+        for (var index = 0; index < enumExportSnapshot.Length; index++)
+        {
+            var export = enumExports[index]
+                ?? throw new ArgumentException(
+                    "Source enum mappings cannot contain null entries.",
+                    nameof(enumExports));
+            enumExportSnapshot[index] = export with {
+                ExportKeys = export.ExportKeys.IsDefault
+                    ? default : [.. export.ExportKeys],
+                MemberDeclarationKeys =
+                    export.MemberDeclarationKeys.IsDefault
+                        ? default : [.. export.MemberDeclarationKeys],
+            };
+        }
+
+        return EmitStandardCore(program, moduleIdentity, schemaIdentity,
+            moduleTargetRequirement, typeExportSnapshot,
+            sourceEnumDeclarationExports: enumExportSnapshot);
+    }
+
     /// <summary>Emits an exact G1L1 or supported C1-family L1 schema with explicit source generic-method and interface exports.</summary>
     /// <param name="program">The checked source-bound program to serialize.</param>
     /// <param name="moduleIdentity">The output Module identity.</param>
@@ -774,10 +865,12 @@ public static partial class TrRmExecutableCompiler
         ArgumentException.ThrowIfNullOrEmpty(schemaIdentity);
         if (BoundEnumTypes.HasStandardDeclarations(
                 program.EnumDefinitions)
-            && !IsSelectedC1EnumClosureSchemaIdentity(schemaIdentity))
+            && !IsSelectedC1EnumClosureSchemaIdentity(schemaIdentity)
+            && !IsSelectedForeignNativeInterfaceParameterSurfaceEnumClosureSchemaIdentity(
+                schemaIdentity))
         {
             throw Unsupported(
-                "Standard enum origins require one of the exact EN1 schema identities.");
+                "Standard enum origins require an exact EN1 schema identity.");
         }
 
         ArgumentOutOfRangeException.ThrowIfGreaterThan(
@@ -1080,7 +1173,9 @@ public static partial class TrRmExecutableCompiler
         SourceGenericMethodExports? sourceGenericMethodExports = null,
         SourceClassExports? sourceClassExports = null,
         IReadOnlyList<BoundGenericMethodDefinition>?
-            retainedGenericMethodDefinitions = null)
+            retainedGenericMethodDefinitions = null,
+        IReadOnlyList<TrRmSourceEnumDeclarationExport>?
+            sourceEnumDeclarationExports = null)
     {
         ArgumentNullException.ThrowIfNull(program);
         if (retainedGenericMethodDefinitions is not null
@@ -1295,6 +1390,7 @@ public static partial class TrRmExecutableCompiler
         if ((schemaIdentity is StandardForeignInvocationSchemaIdentity
                 or StandardForeignNativeInterfaceSchemaIdentity
                 or StandardForeignNativeInterfaceParameterSurfaceSchemaIdentity
+                or StandardForeignNativeInterfaceParameterSurfaceEnumClosureSchemaIdentity
                 or StandardForeignNativeInterfaceAggregateOutputConsumptionSchemaIdentity
                 or StandardForeignInvocationStorageAddressSchemaIdentity
                 or StandardForeignInvocationStorageFixedArraySchemaIdentity
@@ -1589,10 +1685,11 @@ public static partial class TrRmExecutableCompiler
                     program, moduleIdentity),
             StandardForeignNativeInterfaceSchemaIdentity
                 or StandardForeignNativeInterfaceParameterSurfaceSchemaIdentity
+                or StandardForeignNativeInterfaceParameterSurfaceEnumClosureSchemaIdentity
                 or StandardForeignNativeInterfaceAggregateOutputConsumptionSchemaIdentity
                 => EmitForeignNativeInterfaceDeclarations(program,
                     moduleIdentity, schemaIdentity, moduleTargetRequirement,
-                    sourceTypeExports),
+                    sourceTypeExports, sourceEnumDeclarationExports),
             StandardForeignInvocationStorageAddressSchemaIdentity
                 => EmitForeignInvocationDraftNativeAddressLibrary(program,
                     moduleIdentity,
@@ -2133,7 +2230,7 @@ public static partial class TrRmExecutableCompiler
             = schema.UsesTerrumFunctionPointer(standardSchemaIdentity);
         if (BoundEnumTypes.HasStandardDeclarations(
                 program.EnumDefinitions)
-            && !schema.UsesC1EnumClosure())
+            && !schema.UsesEN1EnumClosure())
         {
             throw Unsupported(
                 "Standard enum origins cannot be emitted under Development or a parent Standard schema.");
@@ -2171,6 +2268,7 @@ public static partial class TrRmExecutableCompiler
                 or TrRmArtifactSchema.InitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft
                 or TrRmArtifactSchema.ForeignNativeInterfaceDraft
                 or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft
+                or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceEnumClosureDraft
                 or TrRmArtifactSchema.ForeignNativeInterfaceAggregateOutputConsumptionDraft))
         {
             throw new ArgumentException(
@@ -2240,6 +2338,7 @@ public static partial class TrRmExecutableCompiler
                 or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft
                 or TrRmArtifactSchema.ForeignNativeInterfaceDraft
                 or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft
+                or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceEnumClosureDraft
                 or TrRmArtifactSchema.ForeignNativeInterfaceAggregateOutputConsumptionDraft))
         {
             throw Unsupported(
@@ -2473,6 +2572,7 @@ public static partial class TrRmExecutableCompiler
                 or TrRmArtifactSchema.RegisterExceptionRegionsDraft
                 or TrRmArtifactSchema.ForeignNativeInterfaceDraft
                 or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft
+                or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceEnumClosureDraft
                 or TrRmArtifactSchema.ForeignNativeInterfaceAggregateOutputConsumptionDraft)
             && (hasRegisteredQueryOperations || hasSourceTypeExports
                 || (schema.UsesForeignNativeInterface()
@@ -6846,6 +6946,7 @@ public static partial class TrRmExecutableCompiler
                 or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft
                 or TrRmArtifactSchema.ForeignNativeInterfaceDraft
                 or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft
+                or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceEnumClosureDraft
                 or TrRmArtifactSchema.ForeignNativeInterfaceAggregateOutputConsumptionDraft)
             && (registeredQueryBodyCount != 0
                 || fieldPathRows.Count != 0
@@ -7007,6 +7108,7 @@ public static partial class TrRmExecutableCompiler
                     or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft
                     or TrRmArtifactSchema.ForeignNativeInterfaceDraft
                     or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft
+                    or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceEnumClosureDraft
                     or TrRmArtifactSchema.ForeignNativeInterfaceAggregateOutputConsumptionDraft)
                 || schema.UsesGeneralPredicateGraphs()
                 || standardNativeParameterProfile)
@@ -7957,6 +8059,7 @@ public static partial class TrRmExecutableCompiler
                     or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft
                     or TrRmArtifactSchema.ForeignNativeInterfaceDraft
                     or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft
+                    or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceEnumClosureDraft
                     or TrRmArtifactSchema.ForeignNativeInterfaceAggregateOutputConsumptionDraft
                     ? TrRmStructuralMetadataValidator
                         .ValidateAndGetExecutionTables(index)
@@ -8148,6 +8251,7 @@ public static partial class TrRmExecutableCompiler
                 or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft
                 or TrRmArtifactSchema.ForeignNativeInterfaceDraft
                 or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceDraft
+                or TrRmArtifactSchema.ForeignNativeInterfaceParameterSurfaceEnumClosureDraft
                 or TrRmArtifactSchema.ForeignNativeInterfaceAggregateOutputConsumptionDraft)
             || schema.UsesGeneralPredicateGraphs()
             || schema.UsesNativeParameterContracts())

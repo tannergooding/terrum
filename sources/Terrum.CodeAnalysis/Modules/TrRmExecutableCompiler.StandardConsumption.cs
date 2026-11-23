@@ -232,6 +232,8 @@ public static partial class TrRmExecutableCompiler
                 StandardForeignNativeInterfaceSchemaIdentity)
             || StringComparer.Ordinal.Equals(input.SchemaIdentity,
                 StandardForeignNativeInterfaceParameterSurfaceSchemaIdentity)
+            || IsSelectedForeignNativeInterfaceParameterSurfaceEnumClosureSchemaIdentity(
+                input.SchemaIdentity)
             || StringComparer.Ordinal.Equals(input.SchemaIdentity,
                 StandardForeignNativeInterfaceAggregateOutputConsumptionSchemaIdentity))
         {
@@ -4411,6 +4413,9 @@ public static partial class TrRmExecutableCompiler
             StandardForeignNativeInterfaceParameterSurfaceSchemaIdentity
                 => TrRmArtifactSchema
                     .ForeignNativeInterfaceParameterSurfaceDraft,
+            StandardForeignNativeInterfaceParameterSurfaceEnumClosureSchemaIdentity
+                => TrRmArtifactSchema
+                    .ForeignNativeInterfaceParameterSurfaceEnumClosureDraft,
             StandardForeignNativeInterfaceAggregateOutputConsumptionSchemaIdentity
                 => TrRmArtifactSchema
                     .ForeignNativeInterfaceAggregateOutputConsumptionDraft,
@@ -4972,6 +4977,8 @@ public static partial class TrRmExecutableCompiler
                 var supportsForeignNativeInterfaceParameterSurface
                     = StringComparer.Ordinal.Equals(schemaIdentities[index],
                         StandardForeignNativeInterfaceParameterSurfaceSchemaIdentity)
+                    || IsSelectedForeignNativeInterfaceParameterSurfaceEnumClosureSchemaIdentity(
+                        schemaIdentities[index])
                     || StringComparer.Ordinal.Equals(schemaIdentities[index],
                         StandardForeignNativeInterfaceAggregateOutputConsumptionSchemaIdentity);
                 var supportsNativeOutputCells

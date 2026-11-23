@@ -5369,7 +5369,7 @@ public static partial class TrRmExecutableCompiler
                 var enumDefinition = program.EnumDefinitions[
                     BoundEnumTypes.Index(constant.Type)];
                 frozenValue
-                    = frozenScalarValueBuilder.AddC1EnumClosureMember(
+                    = frozenScalarValueBuilder.AddEN1EnumMember(
                         constant, typeSpecReference,
                         enumDefinition.UnderlyingType, schema);
             }

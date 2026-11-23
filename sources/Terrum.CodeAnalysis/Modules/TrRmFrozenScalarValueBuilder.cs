@@ -112,11 +112,11 @@ internal sealed class TrRmFrozenScalarValueBuilder
         return Add(constant, typeSpecRef, underlyingType);
     }
 
-    internal TrRmFrozenScalarValueReference AddC1EnumClosureMember(
+    internal TrRmFrozenScalarValueReference AddEN1EnumMember(
         BoundConstant constant, uint typeSpecRef,
         PrimitiveType underlyingType, TrRmArtifactSchema schema)
     {
-        if (!schema.UsesC1EnumClosure()
+        if (!schema.UsesEN1EnumClosure()
             || !BoundEnumTypes.IsType(constant.Type)
             || typeSpecRef is 0 or > 0x00FF_FFFF
             || !TrRmConstantSourceValueValidator.TryGetIntegerTypeCode(
@@ -287,13 +287,13 @@ internal sealed class TrRmFrozenScalarValueBuilder
             _sources.Count);
     }
 
-    internal TrRmFrozenScalarValueTables EncodeC1EnumClosure(
+    internal TrRmFrozenScalarValueTables EncodeEN1EnumClosure(
         TrRmTypeSpecTableReader typeSpecs,
         TrRmTypeDefTableReader typeDefs,
         TrRmEnumDefTableReader enumDefs,
         TrRmImportTableReader imports)
     {
-        if (!typeSpecs.Schema.UsesC1EnumClosure())
+        if (!typeSpecs.Schema.UsesEN1EnumClosure())
         {
             throw new ArgumentOutOfRangeException(nameof(typeSpecs));
         }

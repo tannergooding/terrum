@@ -455,7 +455,7 @@ public static class TrRmFrozenValueNodeTableWriter
         TrRmTypeDefTableReader typeDefs, TrRmEnumDefTableReader enumDefs,
         TrRmImportTableReader imports)
     {
-        if (!typeSpecs.Schema.UsesC1EnumClosure())
+        if (!typeSpecs.Schema.UsesTypedEnumMemberValues())
         {
             throw new ArgumentOutOfRangeException(nameof(typeSpecs));
         }

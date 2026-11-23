@@ -8,14 +8,14 @@ namespace Terrum.CodeAnalysis.Modules;
 
 internal static class TrRmEnumProviderBindingValidator
 {
-    internal static void ValidateC1EnumSnapshot(
+    internal static void ValidateEN1EnumSnapshot(
         TrRmStructuralMetadataValidator.ValidatedExecutionTables expected,
         int expectedType,
         TrRmStructuralMetadataValidator.ValidatedExecutionTables actual,
         int actualType)
     {
-        if (!expected.Schema.UsesC1EnumClosure()
-            || !actual.Schema.UsesC1EnumClosure()
+        if (!expected.Schema.UsesEN1EnumClosure()
+            || !actual.Schema.UsesEN1EnumClosure()
             || expected.TypeDefs.GetKind(expectedType) != 4
             || actual.TypeDefs.GetKind(actualType) != 4
             || actual.Imports.IsExpectedDefinition(
