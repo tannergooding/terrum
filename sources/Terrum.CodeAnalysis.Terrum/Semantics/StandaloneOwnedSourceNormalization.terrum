@@ -1250,14 +1250,45 @@ int32 NormalizeStandaloneSourceLoopBody(int32 bodyId,
             }
             if (nestedChildCount == 1 && nestedTransferKind == 9)
             {
-                if (childIndex != 0
-                    || (childCount == 1 && bodyBlockCount != 1)
-                    || (childCount > 1 && bodyBlockCount != 2))
+                bool hasPrefix = childIndex > 0;
+                bool hasSuffix = childIndex < childCount - 1;
+                int32 nestedConditionBlockId
+                    = bodyBlockId + (hasPrefix ? 1 : 0);
+                int32 nestedContinuationBlockId
+                    = nestedConditionBlockId + 1;
+                int32 expectedNestedBodyBlockCount
+                    = (hasPrefix ? 1 : 0) + 1
+                        + (hasSuffix ? 1 : 0);
+                if (bodyBlockCount != expectedNestedBodyBlockCount)
                 {
                     return 3;
                 }
-                int32 nestedContinuationTarget = childCount == 1
-                    ? continueTarget : bodyBlockId + 1;
+                int32 nestedContinuationTarget = hasSuffix
+                    ? nestedContinuationBlockId : continueTarget;
+                if (hasPrefix)
+                {
+                    int32 prefixOperationCount
+                        = nestedConditionOperationFirst
+                            - bodyOperationFirst;
+                    init int32 prefixBlockIndex;
+                    int32 prefixBlockStatus
+                        = AppendStandaloneNormalizedBlock(
+                            bodyId, bodyBlockId, bodyOperationFirst,
+                            prefixOperationCount,
+                            3, 0, 0, 0,
+                            nestedConditionBlockId, -1,
+                            0, 0, 0, -1, -1, 0,
+                            ref init prefixBlockIndex);
+                    if (prefixBlockStatus != 0)
+                    {
+                        return prefixBlockStatus;
+                    }
+                    if (prefixBlockIndex
+                        != bodyBlockFirst + bodyBlockId)
+                    {
+                        return 3;
+                    }
+                }
                 int32 nestedConditionOperationCount
                     = Host.StandaloneNormalizedOperationCount[0]
                         - nestedConditionOperationFirst;
@@ -1271,10 +1302,10 @@ int32 NormalizeStandaloneSourceLoopBody(int32 bodyId,
                 init int32 nestedConditionBlockIndex;
                 int32 nestedConditionBlockStatus
                     = AppendStandaloneNormalizedBlock(
-                        bodyId, bodyBlockId,
+                        bodyId, nestedConditionBlockId,
                         nestedConditionOperationFirst,
                         nestedConditionOperationCount,
-                        4, 0, 0, 0, bodyBlockId,
+                        4, 0, 0, 0, nestedConditionBlockId,
                         nestedContinuationTarget, 2,
                         nestedConditionSelectorIndex,
                         nestedConditionTypeId,
@@ -1285,33 +1316,43 @@ int32 NormalizeStandaloneSourceLoopBody(int32 bodyId,
                     return nestedConditionBlockStatus;
                 }
                 if (nestedConditionBlockIndex
-                    != bodyBlockFirst + bodyBlockId)
+                    != bodyBlockFirst + nestedConditionBlockId)
                 {
                     return 3;
                 }
-                if (childCount == 1)
+                if (!hasSuffix)
                 {
                     return 0;
                 }
                 bodyOperationFirst
                     = Host.StandaloneNormalizedOperationCount[0];
-                finalBodyBlockId = bodyBlockId + 1;
+                finalBodyBlockId = nestedContinuationBlockId;
                 currentBlockCountBeforeBody
                     = Host.StandaloneNormalizedBlockCount[0];
                 continue;
             }
             if (nestedChildCount > 1)
             {
-                if (childIndex != 0
-                    || (childCount == 1 && bodyBlockCount != 2)
-                    || (childCount > 1 && bodyBlockCount != 3))
+                bool hasPrefix = childIndex > 0;
+                bool hasSuffix = childIndex < childCount - 1;
+                int32 nestedConditionBlockId
+                    = bodyBlockId + (hasPrefix ? 1 : 0);
+                int32 nestedAssignmentBlockId
+                    = nestedConditionBlockId + 1;
+                int32 nestedContinuationBlockId
+                    = nestedAssignmentBlockId + 1;
+                int32 expectedNestedBodyBlockCount
+                    = (hasPrefix ? 1 : 0) + 2
+                        + (hasSuffix ? 1 : 0);
+                if (bodyBlockCount != expectedNestedBodyBlockCount)
                 {
                     return 3;
                 }
-                int32 nestedContinuationTarget = childCount == 1
-                    ? continueTarget : bodyBlockId + 2;
+                int32 nestedContinuationTarget = hasSuffix
+                    ? nestedContinuationBlockId : continueTarget;
                 int32 nestedAssignmentTarget = nestedTransferKind == 9
-                    ? bodyBlockId : nestedContinuationTarget;
+                    ? nestedConditionBlockId
+                    : nestedContinuationTarget;
                 int32 nestedConditionOperationCount
                     = Host.StandaloneNormalizedOperationCount[0]
                         - nestedConditionOperationFirst;
@@ -1322,13 +1363,37 @@ int32 NormalizeStandaloneSourceLoopBody(int32 bodyId,
                 {
                     return 3;
                 }
+                if (hasPrefix)
+                {
+                    int32 prefixOperationCount
+                        = nestedConditionOperationFirst
+                            - bodyOperationFirst;
+                    init int32 prefixBlockIndex;
+                    int32 prefixBlockStatus
+                        = AppendStandaloneNormalizedBlock(
+                            bodyId, bodyBlockId, bodyOperationFirst,
+                            prefixOperationCount,
+                            3, 0, 0, 0,
+                            nestedConditionBlockId, -1,
+                            0, 0, 0, -1, -1, 0,
+                            ref init prefixBlockIndex);
+                    if (prefixBlockStatus != 0)
+                    {
+                        return prefixBlockStatus;
+                    }
+                    if (prefixBlockIndex
+                        != bodyBlockFirst + bodyBlockId)
+                    {
+                        return 3;
+                    }
+                }
                 init int32 nestedConditionBlockIndex;
                 int32 nestedConditionBlockStatus
                     = AppendStandaloneNormalizedBlock(
-                        bodyId, bodyBlockId,
+                        bodyId, nestedConditionBlockId,
                         nestedConditionOperationFirst,
                         nestedConditionOperationCount,
-                        4, 0, 0, 0, bodyBlockId + 1,
+                        4, 0, 0, 0, nestedAssignmentBlockId,
                         nestedContinuationTarget, 2,
                         nestedConditionSelectorIndex,
                         nestedConditionTypeId,
@@ -1339,7 +1404,7 @@ int32 NormalizeStandaloneSourceLoopBody(int32 bodyId,
                     return nestedConditionBlockStatus;
                 }
                 if (nestedConditionBlockIndex
-                    != bodyBlockFirst + bodyBlockId)
+                    != bodyBlockFirst + nestedConditionBlockId)
                 {
                     return 3;
                 }
@@ -1371,7 +1436,7 @@ int32 NormalizeStandaloneSourceLoopBody(int32 bodyId,
                 init int32 nestedAssignmentBlockIndex;
                 int32 nestedAssignmentBlockStatus
                     = AppendStandaloneNormalizedBlock(
-                        bodyId, bodyBlockId + 1,
+                        bodyId, nestedAssignmentBlockId,
                         nestedAssignmentOperationFirst,
                         nestedAssignmentOperationCount,
                         3, 0, 0, 0, nestedAssignmentTarget, -1,
@@ -1382,17 +1447,17 @@ int32 NormalizeStandaloneSourceLoopBody(int32 bodyId,
                     return nestedAssignmentBlockStatus;
                 }
                 if (nestedAssignmentBlockIndex
-                    != bodyBlockFirst + bodyBlockId + 1)
+                    != bodyBlockFirst + nestedAssignmentBlockId)
                 {
                     return 3;
                 }
-                if (childCount == 1)
+                if (!hasSuffix)
                 {
                     return 0;
                 }
                 bodyOperationFirst
                     = Host.StandaloneNormalizedOperationCount[0];
-                finalBodyBlockId = bodyBlockId + 2;
+                finalBodyBlockId = nestedContinuationBlockId;
                 currentBlockCountBeforeBody
                     = Host.StandaloneNormalizedBlockCount[0];
                 continue;
@@ -1826,74 +1891,93 @@ int32 GetStandaloneSourceLoopBodyBlockCount(int32 statementId,
         }
         int32 lastChildKind
             = Host.StandaloneSourceStatements[lastChildId * 3];
-        if (firstChildKind == 7)
+        mut bool sawNestedLoop = false;
+        mut bool sawOtherControlChild = false;
+        mut int32 nestedBranchCount = 0;
+        mut int32 nestedBodyBlockCount = 1;
+        for (mut int32 childOrdinal = 0;
+            childOrdinal < childCount;
+            childOrdinal = childOrdinal + 1)
         {
-            int32 nestedLoopNodeId
-                = Host.StandaloneSourceStatements[
-                    firstChildId * 3 + 2];
-            init int32 nestedBlockCount;
-            int32 nestedBlockCountStatus
-                = GetStandaloneSourceNestedWhileBodyBlockCount(
-                    Host.StandaloneSourceIfNodes[loopNodeOffset],
-                    firstChildId, nestedLoopNodeId, true,
-                    ref init nestedBlockCount);
-            if (nestedBlockCountStatus != 0)
-            {
-                return nestedBlockCountStatus;
-            }
-            for (mut int32 childOrdinal = 1;
-                childOrdinal < childCount;
-                childOrdinal = childOrdinal + 1)
-            {
-                int32 childId
-                    = Host.StandaloneSourceIfChildren[
-                        childFirst + childOrdinal];
-                if (childId < 0
-                    || childId
-                        >= Host.StandaloneSourceStatementCount[0])
-                {
-                    return 3;
-                }
-                int32 childOffset = childId * 3;
-                int32 childKind
-                    = Host.StandaloneSourceStatements[childOffset];
-                if (Host.StandaloneSourceStatementParentIds[
+            int32 childId
+                = Host.StandaloneSourceIfChildren[
+                    childFirst + childOrdinal];
+            if (childId < 0
+                || childId
+                    >= Host.StandaloneSourceStatementCount[0]
+                || Host.StandaloneSourceStatementParentIds[
                     childId] != statementId)
+            {
+                return 3;
+            }
+            int32 childOffset = childId * 3;
+            int32 childKind
+                = Host.StandaloneSourceStatements[childOffset];
+            if (childKind == 7)
+            {
+                int32 nestedLoopNodeId
+                    = Host.StandaloneSourceStatements[
+                        childOffset + 2];
+                init int32 candidateBlockCount;
+                int32 candidateStatus
+                    = GetStandaloneSourceNestedWhileBodyBlockCount(
+                        Host.StandaloneSourceIfNodes[loopNodeOffset],
+                        childId, nestedLoopNodeId,
+                        childOrdinal < childCount - 1,
+                        ref init candidateBlockCount);
+                if (candidateStatus != 0)
                 {
-                    return 3;
+                    return candidateStatus;
                 }
-                if (childKind == 7)
+                int32 nestedNodeOffset = nestedLoopNodeId * 5;
+                int32 nestedChildFirst
+                    = Host.StandaloneSourceIfNodes[
+                        nestedNodeOffset + 1];
+                int32 nestedChildCount
+                    = Host.StandaloneSourceIfNodes[
+                        nestedNodeOffset + 2];
+                int32 nestedTransferStatementId
+                    = Host.StandaloneSourceIfChildren[
+                        nestedChildFirst + nestedChildCount - 1];
+                bool nestedNeedsBranch = nestedChildCount > 1
+                    || Host.StandaloneSourceStatements[
+                        nestedTransferStatementId * 3] == 9;
+                if (nestedNeedsBranch)
                 {
-                    init int32 followingNestedBlockCount;
-                    int32 followingNestedStatus
-                        = GetStandaloneSourceNestedWhileBodyBlockCount(
-                            Host.StandaloneSourceIfNodes[
-                                loopNodeOffset],
-                            childId,
-                            Host.StandaloneSourceStatements[
-                                childOffset + 2],
-                            true,
-                            ref init followingNestedBlockCount);
-                    if (followingNestedStatus != 0
-                        || followingNestedBlockCount != 1)
+                    nestedBranchCount = nestedBranchCount + 1;
+                    if (nestedBranchCount > 1)
                     {
-                        return followingNestedStatus != 0
-                            ? followingNestedStatus : 3;
+                        return 3;
                     }
-                    continue;
+                    nestedBodyBlockCount
+                        = candidateBlockCount
+                            + (childOrdinal > 0 ? 1 : 0);
                 }
-                if ((childKind != 5
-                        && childKind != 8 && childKind != 9)
-                    || (childKind != 5
-                        && (Host.StandaloneSourceStatements[
-                                childOffset + 1] != -1
-                            || Host.StandaloneSourceStatements[
-                                childOffset + 2] != loopNodeId)))
+                sawNestedLoop = true;
+            }
+            else if (childKind == 8 || childKind == 9)
+            {
+                if (childOrdinal != childCount - 1
+                    || Host.StandaloneSourceStatements[
+                        childOffset + 1] != -1
+                    || Host.StandaloneSourceStatements[
+                        childOffset + 2] != loopNodeId)
                 {
                     return 3;
                 }
             }
-            *blockCountResult = nestedBlockCount;
+            else if (childKind != 5)
+            {
+                sawOtherControlChild = true;
+            }
+        }
+        if (sawNestedLoop)
+        {
+            if (sawOtherControlChild)
+            {
+                return 3;
+            }
+            *blockCountResult = nestedBodyBlockCount;
             return 0;
         }
         if (firstChildKind == 12 || firstChildKind == 13)
