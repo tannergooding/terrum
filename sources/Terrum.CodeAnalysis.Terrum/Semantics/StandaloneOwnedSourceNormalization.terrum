@@ -1917,9 +1917,62 @@ int32 CountStandaloneSourceConditionalTree(int32 bodyId,
         = Host.StandaloneSourceExpressions[conditionOffset];
     int32 conditionTypeId
         = Host.StandaloneSourceExpressions[conditionOffset + 1];
-    if (!IsStandaloneLogicalNotType(conditionTypeId)
-        || conditionKind == 34 || conditionKind == 35
-        || conditionKind == 36)
+    if (!IsStandaloneLogicalNotType(conditionTypeId))
+    {
+        return 2;
+    }
+    if (conditionKind == 35 || conditionKind == 36)
+    {
+        init int32 conditionLeafCount;
+        init bool homogeneous;
+        int32 conditionStatus = CountStandaloneSourceLazyBooleanTree(
+            bodyId, conditionExpressionId, conditionKind, depth + 1,
+            ref init conditionLeafCount, ref init homogeneous);
+        if (conditionStatus != 0)
+        {
+            return conditionStatus;
+        }
+
+        init int32 trueBlockCount;
+        init int32 trueEdgeCount;
+        init bool trueHasNormal;
+        int32 trueStatus = CountStandaloneSourceConditionalTree(
+            bodyId, trueExpressionId, resultTypeId, depth + 1,
+            ref init trueBlockCount, ref init trueEdgeCount,
+            ref init trueHasNormal);
+        if (trueStatus != 0)
+        {
+            return trueStatus;
+        }
+        init int32 falseBlockCount;
+        init int32 falseEdgeCount;
+        init bool falseHasNormal;
+        int32 falseStatus = CountStandaloneSourceConditionalTree(
+            bodyId, falseExpressionId, resultTypeId, depth + 1,
+            ref init falseBlockCount, ref init falseEdgeCount,
+            ref init falseHasNormal);
+        if (falseStatus != 0)
+        {
+            return falseStatus;
+        }
+        if (trueBlockCount > int32.MaxValue - falseBlockCount
+            || trueBlockCount + falseBlockCount
+                > int32.MaxValue - conditionLeafCount
+            || trueEdgeCount > int32.MaxValue - falseEdgeCount
+            || trueEdgeCount + falseEdgeCount
+                > int32.MaxValue - conditionLeafCount)
+        {
+            return 3;
+        }
+
+        *blockCountResult
+            = conditionLeafCount + trueBlockCount + falseBlockCount;
+        *edgeCountResult
+            = conditionLeafCount + trueEdgeCount + falseEdgeCount;
+        *hasNormalResult = trueHasNormal || falseHasNormal;
+        return 0;
+    }
+    if (conditionKind == 34)
     {
         return 2;
     }
@@ -2011,7 +2064,13 @@ int32 NormalizeStandaloneSourceConditionalTree(int32 bodyId,
         || expressionId < 0
         || expressionId
             >= Host.StandaloneSourceBodies[bodyId * 12 + 4]
-        || blockOrdinal < 0 || blockOrdinal > 0xFFFF)
+        || finalBodyBlockCount <= 0
+        || finalBodyBlockCount > 0x1_0000
+        || blockOrdinal < 0
+        || blockOrdinal >= finalBodyBlockCount
+        || edgeOrdinal < 0
+        || edgeOrdinal
+            > 0x1_0000 - finalBodyBlockCount)
     {
         return 3;
     }
@@ -2053,10 +2112,158 @@ int32 NormalizeStandaloneSourceConditionalTree(int32 bodyId,
         int32 conditionTypeId
             = Host.StandaloneSourceExpressions[conditionOffset + 1];
         if (!IsStandaloneLogicalNotType(conditionTypeId)
-            || conditionKind == 34 || conditionKind == 35
-            || conditionKind == 36)
+            || conditionKind == 34)
         {
             return 2;
+        }
+
+        if (conditionKind == 35 || conditionKind == 36)
+        {
+            init int32 conditionLeafCount;
+            init bool homogeneous;
+            int32 conditionStatus
+                = CountStandaloneSourceLazyBooleanTree(
+                    bodyId, conditionExpressionId, conditionKind,
+                    depth + 1,
+                    ref init conditionLeafCount,
+                    ref init homogeneous);
+            if (conditionStatus != 0)
+            {
+                return conditionStatus;
+            }
+            init int32 trueBlockCount;
+            init int32 trueEdgeCount;
+            init bool trueHasNormal;
+            int32 trueCountStatus
+                = CountStandaloneSourceConditionalTree(
+                    bodyId, trueExpressionId, resultTypeId,
+                    depth + 1, ref init trueBlockCount,
+                    ref init trueEdgeCount,
+                    ref init trueHasNormal);
+            if (trueCountStatus != 0)
+            {
+                return trueCountStatus;
+            }
+            init int32 falseBlockCount;
+            init int32 falseEdgeCount;
+            init bool falseHasNormal;
+            int32 falseCountStatus
+                = CountStandaloneSourceConditionalTree(
+                    bodyId, falseExpressionId, resultTypeId,
+                    depth + 1, ref init falseBlockCount,
+                    ref init falseEdgeCount,
+                    ref init falseHasNormal);
+            if (falseCountStatus != 0)
+            {
+                return falseCountStatus;
+            }
+            if (conditionLeafCount < 2
+                || trueBlockCount <= 0 || falseBlockCount <= 0
+                || trueBlockCount
+                    > int32.MaxValue - falseBlockCount
+                || trueBlockCount + falseBlockCount
+                    > int32.MaxValue - conditionLeafCount
+                || trueEdgeCount
+                    > int32.MaxValue - falseEdgeCount
+                || trueEdgeCount + falseEdgeCount
+                    > int32.MaxValue - conditionLeafCount)
+            {
+                return 3;
+            }
+
+            int32 subtreeBlockCount = conditionLeafCount
+                + trueBlockCount + falseBlockCount;
+            int32 subtreeEdgeCount = conditionLeafCount
+                + trueEdgeCount + falseEdgeCount;
+            int32 availableEdgeCount
+                = 0x1_0000 - finalBodyBlockCount;
+            if (subtreeBlockCount > finalBodyBlockCount
+                || blockOrdinal
+                    > finalBodyBlockCount - subtreeBlockCount
+                || subtreeEdgeCount > availableEdgeCount
+                || edgeOrdinal
+                    > availableEdgeCount - subtreeEdgeCount)
+            {
+                return 3;
+            }
+
+            int32 trueTarget = blockOrdinal + conditionLeafCount;
+            int32 falseTarget = trueTarget + trueBlockCount;
+            if (trueTarget > 0xFFFF || falseTarget > 0xFFFF)
+            {
+                return 3;
+            }
+            init int32 afterDecisionBlock;
+            init int32 afterDecisionEdge;
+            int32 decisionStatus
+                = NormalizeStandaloneSourceLazyBooleanDecision(
+                    bodyId, conditionExpressionId, conditionTypeId,
+                    trueTarget, falseTarget, conditionLeafCount,
+                    finalBodyBlockCount, depth + 1,
+                    blockOrdinal, edgeOrdinal,
+                    ref init afterDecisionBlock,
+                    ref init afterDecisionEdge);
+            if (decisionStatus != 0)
+            {
+                return decisionStatus;
+            }
+            if (afterDecisionBlock
+                    != blockOrdinal + conditionLeafCount
+                || afterDecisionEdge
+                    != edgeOrdinal + conditionLeafCount)
+            {
+                return 3;
+            }
+
+            init int32 trueEntryBlock;
+            init int32 afterTrueBlock;
+            init int32 afterTrueEdge;
+            init bool actualTrueHasNormal;
+            int32 trueStatus = NormalizeStandaloneSourceConditionalTree(
+                bodyId, trueExpressionId, resultTypeId, resultHomeId,
+                finalBodyBlockCount, returnBlockId, depth + 1,
+                afterDecisionBlock, afterDecisionEdge,
+                ref init trueEntryBlock, ref init afterTrueBlock,
+                ref init afterTrueEdge,
+                ref init actualTrueHasNormal);
+            if (trueStatus != 0)
+            {
+                return trueStatus;
+            }
+            init int32 falseEntryBlock;
+            init int32 afterFalseBlock;
+            init int32 afterFalseEdge;
+            init bool actualFalseHasNormal;
+            int32 falseStatus = NormalizeStandaloneSourceConditionalTree(
+                bodyId, falseExpressionId, resultTypeId, resultHomeId,
+                finalBodyBlockCount, returnBlockId, depth + 1,
+                afterTrueBlock, afterTrueEdge,
+                ref init falseEntryBlock, ref init afterFalseBlock,
+                ref init afterFalseEdge,
+                ref init actualFalseHasNormal);
+            if (falseStatus != 0)
+            {
+                return falseStatus;
+            }
+            if (trueEntryBlock != trueTarget
+                || falseEntryBlock != falseTarget
+                || afterFalseBlock
+                    != blockOrdinal + subtreeBlockCount
+                || afterFalseEdge
+                    != edgeOrdinal + subtreeEdgeCount
+                || actualTrueHasNormal != trueHasNormal
+                || actualFalseHasNormal != falseHasNormal
+                || (actualTrueHasNormal || actualFalseHasNormal)
+                    != (trueHasNormal || falseHasNormal))
+            {
+                return 3;
+            }
+
+            *entryBlockIdResult = blockOrdinal;
+            *nextBlockOrdinalResult = afterFalseBlock;
+            *nextEdgeOrdinalResult = afterFalseEdge;
+            *hasNormalResult = trueHasNormal || falseHasNormal;
+            return 0;
         }
 
         int32 operationFirst = blockOrdinal == 0
@@ -2265,13 +2472,18 @@ int32 NormalizeStandaloneSourceConditionalValue(int32 bodyId,
     {
         return 3;
     }
+    int32 conditionExpressionKind
+        = Host.StandaloneSourceExpressions[
+            (conditionFirst + conditionExpressionId) * 8];
     int32 trueExpressionKind
         = Host.StandaloneSourceExpressions[
             (conditionFirst + trueExpressionId) * 8];
     int32 falseExpressionKind
         = Host.StandaloneSourceExpressions[
             (conditionFirst + falseExpressionId) * 8];
-    if (trueExpressionKind == 34 || falseExpressionKind == 34)
+    if (conditionExpressionKind == 35
+        || conditionExpressionKind == 36
+        || trueExpressionKind == 34 || falseExpressionKind == 34)
     {
         init int32 expressionBlockCount;
         init int32 conditionalEdgeCount;
@@ -2285,10 +2497,15 @@ int32 NormalizeStandaloneSourceConditionalValue(int32 bodyId,
         {
             return treeStatus;
         }
+        if (expressionBlockCount <= 0
+            || expressionBlockCount
+                > 0x1_0000 - (hasNormalArm ? 1 : 0))
+        {
+            return 3;
+        }
         int32 finalBodyBlockCount
             = expressionBlockCount + (hasNormalArm ? 1 : 0);
-        if (expressionBlockCount <= 0
-            || finalBodyBlockCount > 0x1_0000
+        if (finalBodyBlockCount > 0x1_0000
             || conditionalEdgeCount < 1
             || conditionalEdgeCount
                 > 0x1_0000 - finalBodyBlockCount)
@@ -2816,9 +3033,15 @@ int32 NormalizeStandaloneSourceLazyBooleanDecision(int32 bodyId,
         || finalBodyBlockCount <= 0
         || finalBodyBlockCount > 0x1_0000
         || blockOrdinal < 0
-        || blockOrdinal >= leafCount
+        || blockOrdinal >= finalBodyBlockCount
+        || leafCount > finalBodyBlockCount - blockOrdinal
         || edgeOrdinal < 0
-        || edgeOrdinal >= leafCount)
+        || edgeOrdinal
+            > 0x1_0000 - finalBodyBlockCount
+        || leafCount
+            > 0x1_0000 - finalBodyBlockCount - edgeOrdinal
+        || trueTarget >= finalBodyBlockCount
+        || falseTarget >= finalBodyBlockCount)
     {
         return 3;
     }
@@ -2857,10 +3080,11 @@ int32 NormalizeStandaloneSourceLazyBooleanDecision(int32 bodyId,
         int32 leftLeafCount
             = Host.StandaloneLazyBooleanLeafCounts[
                 leftGlobalExpressionId];
+        int32 rightLeafCount = leafCount - leftLeafCount;
         int32 rightEntry = blockOrdinal + leftLeafCount;
-        if (leftLeafCount <= 0
+        if (leftLeafCount <= 0 || rightLeafCount <= 0
             || rightEntry <= blockOrdinal
-            || rightEntry >= leafCount)
+            || rightEntry >= blockOrdinal + leafCount)
         {
             return 3;
         }
@@ -2873,7 +3097,7 @@ int32 NormalizeStandaloneSourceLazyBooleanDecision(int32 bodyId,
         init int32 afterLeftEdge;
         int32 leftStatus = NormalizeStandaloneSourceLazyBooleanDecision(
             bodyId, leftExpressionId, boolTypeId,
-            leftTrueTarget, leftFalseTarget, leafCount,
+            leftTrueTarget, leftFalseTarget, leftLeafCount,
             finalBodyBlockCount,
             depth + 1, blockOrdinal, edgeOrdinal,
             ref init afterLeftBlock, ref init afterLeftEdge);
@@ -2881,13 +3105,14 @@ int32 NormalizeStandaloneSourceLazyBooleanDecision(int32 bodyId,
         {
             return leftStatus;
         }
-        if (afterLeftBlock != rightEntry)
+        if (afterLeftBlock != rightEntry
+            || afterLeftEdge != edgeOrdinal + leftLeafCount)
         {
             return 3;
         }
         return NormalizeStandaloneSourceLazyBooleanDecision(
             bodyId, rightExpressionId, boolTypeId,
-            trueTarget, falseTarget, leafCount,
+            trueTarget, falseTarget, rightLeafCount,
             finalBodyBlockCount,
             depth + 1, rightEntry, afterLeftEdge,
             ref init *nextBlockOrdinalResult,
