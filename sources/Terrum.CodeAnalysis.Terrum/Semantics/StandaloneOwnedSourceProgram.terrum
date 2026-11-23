@@ -2922,8 +2922,9 @@ bool IsStandaloneUnaryPlusType(int32 typeId)
         return false;
     }
     int32 typeCode = Host.StandaloneTypeFacts[typeId * 3 + 1];
-    return typeCode != 0x03
-        && IsStandaloneIntegerSourceType(typeCode);
+    return (typeCode != 0x03
+            && IsStandaloneIntegerSourceType(typeCode))
+        || typeCode == 0x14 || typeCode == 0x15;
 }
 
 bool CanBindStandaloneSourceArgument(int32 localCallableId,
