@@ -1128,6 +1128,26 @@ internal sealed class StandaloneMethodImportInputTests
             + "return value << count; } }", 2, 0, false)]
     [TestCase(BoundRuntimePolicy.FailFast,
         "namespace client { "
+            + "int32 Main(int32 initial, int32 count) { "
+            + "mut int32 value = initial; value <<= count; "
+            + "return value; } }", 0, 118, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "int32 Main(int32 initial, int32 count) { "
+            + "mut int32 value = initial; value >>= count; "
+            + "return value; } }", 0, 119, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "int32 Main(int32 initial, uint32 count) { "
+            + "mut int32 value = initial; value >>>= count; "
+            + "return value; } }", 0, 120, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "uint32 Main(uint32 initial, uint32 count) { "
+            + "mut uint32 value = initial; value >>= count; "
+            + "return value; } }", 0, 121, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
             + "int32 Main(int32 initial) { "
             + "int32 value = initial; value += 1; "
             + "return value; } }", 2, 0, false)]
@@ -4107,6 +4127,157 @@ internal sealed class StandaloneMethodImportInputTests
                 return 0;
             }
             """;
+        var shiftCompoundExpressionKind = verificationMode switch
+        {
+            118 => 31,
+            119 or 121 => 32,
+            _ => 33,
+        };
+        var shiftCompoundOperationKind = verificationMode switch
+        {
+            118 => 35,
+            119 or 121 => 36,
+            _ => 37,
+        };
+        var shiftCompoundControl = verificationMode switch
+        {
+            118 => 0x05,
+            119 => 0x06,
+            _ => 0x07,
+        };
+        var shiftCompoundDataTypeCode = verificationMode == 121
+            ? 0x0D : 0x08;
+        var shiftCompoundCountTypeCode = verificationMode is 120 or 121
+            ? 0x0D : 0x08;
+        var shiftCompoundNeedsReinterpret
+            = verificationMode is 118 or 119;
+        var shiftCompoundVerificationSource = $$"""
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                if (Scan() < 1) { return 309; }
+                int32 status = BindStandaloneOwnedSourceProgram();
+                int32 expressionOffset = 24;
+                int32 dataTypeId
+                    = Host.StandaloneSourceExpressions[
+                        expressionOffset + 1];
+                int32 leftExpressionId
+                    = Host.StandaloneSourceExpressions[
+                        expressionOffset + 2];
+                int32 rightExpressionId
+                    = Host.StandaloneSourceExpressions[
+                        expressionOffset + 3];
+                if (status != 0
+                    || Host.StandaloneSourceBodyCount[0] != 1
+                    || Host.StandaloneSourceLocalCount[0] != 1
+                    || Host.StandaloneSourcePlaceCount[0] != 3
+                    || Host.StandaloneSourceExpressionCount[0] != 5
+                    || Host.StandaloneSourceStatementCount[0] != 3
+                    || Host.StandaloneSourceExpressions[
+                        expressionOffset] != {{shiftCompoundExpressionKind}}
+                    || leftExpressionId != 1
+                    || rightExpressionId != 2
+                    || Host.StandaloneSourceExpressions[8] != 5
+                    || Host.StandaloneSourceExpressions[10] != 1
+                    || Host.StandaloneSourceExpressions[16] != 1
+                    || dataTypeId <= 0
+                    || dataTypeId > Host.StandaloneTypeFactCount[0]
+                    || Host.StandaloneTypeFacts[
+                        dataTypeId * 3 + 1]
+                        != {{shiftCompoundDataTypeCode}}
+                    || Host.StandaloneTypeFacts[
+                        Host.StandaloneSourceExpressions[17] * 3 + 1]
+                        != {{shiftCompoundCountTypeCode}}) {
+                    return 310;
+                }
+                status = NormalizeStandaloneOwnedSourceProgram();
+                if (status != 0
+                    || Host.StandaloneNormalizedHomeCount[0] != 6
+                    || Host.StandaloneNormalizedOperationCount[0] != 6
+                    || Host.StandaloneNormalizedConstantCount[0] != 0
+                    || Host.StandaloneNormalizedSourceLocalHomeIds[0] != 2
+                    || Host.StandaloneNormalizedOperations[10]
+                        != {{shiftCompoundOperationKind}}
+                    || Host.StandaloneNormalizedOperations[11] != 3
+                    || Host.StandaloneNormalizedOperations[12] != 1
+                    || Host.StandaloneNormalizedOperations[13] != 4
+                    || Host.StandaloneNormalizedOperations[15] != 30
+                    || Host.StandaloneNormalizedOperations[16] != 4
+                    || Host.StandaloneNormalizedOperations[17] != 2
+                    || Host.StandaloneNormalizedOperations[25] != 4
+                    || Host.StandaloneNormalizedOperations[26] != 5) {
+                    return 311;
+                }
+                int32 callableBase
+                    = Host.StandaloneResolvedRootCount[0]
+                        + Host.StandaloneResolvedImports.Length / 32
+                        + Host.StandaloneResolvedProviderGroupCount[0];
+                int32 callableCount
+                    = callableBase + Host.StandaloneLocalCallableCount[0];
+                Host.StandaloneRewriteCallableCount[0] = callableCount;
+                for (mut int32 id = 0;
+                    id < Host.StandaloneModuleCount[0];
+                    id = id + 1) {
+                    Host.StandaloneRewriteModuleIds[id] = id;
+                }
+                for (mut int32 id = 0;
+                    id < Host.StandaloneLocalCallableCount[0];
+                    id = id + 1) {
+                    Host.StandaloneRewriteLocalCallableIds[id] = id;
+                }
+                for (mut int32 id = 0;
+                    id < Host.StandaloneSourceImportedCallableCount[0];
+                    id = id + 1) {
+                    Host.StandaloneRewriteImportedCallableIds[id] = id;
+                }
+                for (mut int32 id = 0;
+                    id < callableCount;
+                    id = id + 1) {
+                    Host.StandaloneRewriteCallableIds[id] = id;
+                }
+                Host.StandaloneRewriteTypeIds[0] = 0;
+                for (mut int32 id = 1;
+                    id <= Host.StandaloneTypeFactCount[0];
+                    id = id + 1) {
+                    Host.StandaloneRewriteTypeIds[id] = id;
+                }
+                Host.StandaloneRewriteBodyIds[0] = 0;
+                for (mut int32 id = 0;
+                    id < Host.StandaloneSourceExpressionCount[0];
+                    id = id + 1) {
+                    Host.StandaloneRewriteExpressionIds[id] = id;
+                }
+                for (mut int32 id = 0;
+                    id < Host.StandaloneSourceLexicalScopeCount[0];
+                    id = id + 1) {
+                    Host.StandaloneRewriteScopeIds[id] = id;
+                }
+                for (mut int32 id = 0;
+                    id < Host.StandaloneSourceLocalCount[0];
+                    id = id + 1) {
+                    Host.StandaloneRewriteLocalIds[id] = id;
+                }
+                for (mut int32 id = 0;
+                    id < Host.StandaloneSourcePlaceCount[0];
+                    id = id + 1) {
+                    Host.StandaloneRewritePlaceIds[id]
+                        = (id + 1)
+                            % Host.StandaloneSourcePlaceCount[0];
+                }
+                status = RewriteStandaloneOwnedCallNodes();
+                if (status != 0
+                    || Host.StandaloneRewrittenSourceStatements[5] != 1
+                    || Host.StandaloneRewrittenSourceExpressions[10] != 2) {
+                    return 312;
+                }
+                status = WriteStandaloneScalarModule();
+                if (status != 0
+                    || Host.StandaloneWriterStatus[0] != 0
+                    || Host.StandaloneWriterBodyPlanCount[0] != 1) {
+                    return 313;
+                }
+                return 0;
+            }
+            """;
         var initializationLocalVerificationSource = $$"""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
@@ -4519,6 +4690,8 @@ internal sealed class StandaloneMethodImportInputTests
                                                         ? updateExpressionVerificationSource
                                                     : verificationMode is >= 111 and <= 117
                                                         ? shiftVerificationSource
+                                                    : verificationMode is >= 118 and <= 121
+                                                        ? shiftCompoundVerificationSource
                                                     : verificationMode is 81 or 82
                                                         ? initializationLocalVerificationSource
                                                     : verificationMode is 75 or 77
@@ -4629,7 +4802,8 @@ internal sealed class StandaloneMethodImportInputTests
             or 54 or 55 or 56 or 57 or 58 or 59
             or >= 60 and <= 74 or 75 or 77 or 81 or 82
             or >= 90 and <= 95 or >= 96 and <= 103
-            or >= 104 and <= 109 or >= 111 and <= 117)
+            or >= 104 and <= 109 or >= 111 and <= 117
+            or >= 118 and <= 121)
         {
             var artifactIndex = new TrRmArtifactIndex(artifact);
             Assert.That(artifactIndex.TryGetSection(0x0020,
@@ -4848,6 +5022,28 @@ internal sealed class StandaloneMethodImportInputTests
                     Is.EqualTo((byte)shiftControl));
                 var reinterpretOffset = code.IndexOf((byte)0xD3);
                 if (shiftNeedsReinterpret)
+                {
+                    Assert.That(reinterpretOffset,
+                        Is.GreaterThanOrEqualTo(0));
+                }
+                else
+                {
+                    Assert.That(reinterpretOffset, Is.EqualTo(-1));
+                }
+                Assert.That(code.IndexOf((byte)0xD5),
+                    Is.GreaterThanOrEqualTo(0));
+                Assert.That(code.IndexOf((byte)0xD6),
+                    Is.GreaterThanOrEqualTo(0));
+            }
+            else if (verificationMode is >= 118 and <= 121)
+            {
+                var code = bodyReader.Code;
+                var shiftOffset = code.IndexOf((byte)0xC1);
+                Assert.That(shiftOffset, Is.GreaterThanOrEqualTo(0));
+                Assert.That(code[shiftOffset + 1],
+                    Is.EqualTo((byte)shiftCompoundControl));
+                var reinterpretOffset = code.IndexOf((byte)0xD3);
+                if (shiftCompoundNeedsReinterpret)
                 {
                     Assert.That(reinterpretOffset,
                         Is.GreaterThanOrEqualTo(0));

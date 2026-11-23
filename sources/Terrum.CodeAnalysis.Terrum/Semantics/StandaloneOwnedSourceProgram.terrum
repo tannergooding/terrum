@@ -2437,6 +2437,9 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
             bool compoundIntegerOperation
                 = compoundExpressionKind >= 12
                     && compoundExpressionKind <= 14;
+            bool compoundShiftOperation
+                = compoundExpressionKind >= 31
+                    && compoundExpressionKind <= 33;
             if (Host.StandaloneSourceLocals[localOffset] != localCallableId
                 || tokenIndex < localNameToken
                 || !((bindingKind == 1 && localState == 1)
@@ -2447,9 +2450,12 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
                 || (compoundAssignment
                     && ((bindingKind != 1 && bindingKind != 3)
                         || localState != 1
-                        || (compoundIntegerOperation
-                            ? !IsStandaloneIntegerArithmeticType(typeId)
-                            : !IsStandaloneArithmeticType(typeId))
+                        || (compoundShiftOperation
+                            ? !IsStandaloneSourceShiftDataType(typeId)
+                            : compoundIntegerOperation
+                                ? !IsStandaloneIntegerArithmeticType(
+                                    typeId)
+                                : !IsStandaloneArithmeticType(typeId))
                         || !IsStandaloneBinaryOperatorSeparated(
                             tokenIndex + 1))))
             {
@@ -2496,6 +2502,21 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
             }
             else
             {
+                mut int32 compoundRightTypeId = typeId;
+                if (compoundShiftOperation)
+                {
+                    init int32 countTypeId;
+                    int32 countTypeStatus
+                        = FindStandaloneShiftCountType(
+                            localCallableId, tokenIndex + 2,
+                            semicolonToken, 0,
+                            ref init countTypeId);
+                    if (countTypeStatus != 0)
+                    {
+                        return countTypeStatus;
+                    }
+                    compoundRightTypeId = countTypeId;
+                }
                 init int32 leftExpressionId;
                 init int32 nextLeftToken;
                 int32 leftStatus = ParseStandaloneSourceExpression(
@@ -2511,7 +2532,8 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
                 init int32 nextRightToken;
                 int32 rightStatus = ParseStandaloneSourceExpression(
                     localCallableId, localCallableId, expressionFirst,
-                    typeId, tokenIndex + 2, semicolonToken, 0,
+                    compoundRightTypeId, tokenIndex + 2,
+                    semicolonToken, 0,
                     ref init rightExpressionId,
                     ref init nextRightToken);
                 if (rightStatus != 0)
@@ -2534,7 +2556,8 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
                     || Host.StandaloneSourceExpressions[
                         leftGlobalId * 8 + 1] != typeId
                     || Host.StandaloneSourceExpressions[
-                        rightGlobalId * 8 + 1] != typeId
+                        rightGlobalId * 8 + 1]
+                        != compoundRightTypeId
                     || Host.StandaloneSourceExpressionUseCounts[
                         leftGlobalId] != 0
                     || Host.StandaloneSourceExpressionUseCounts[
@@ -3722,7 +3745,10 @@ int32 GetStandaloneSourceCompoundAssignmentExpressionKind(
                     : tokenKind == 95 ? 25
                         : tokenKind == 96 ? 12
                             : tokenKind == 97 ? 13
-                                : tokenKind == 98 ? 14 : 0;
+                                            : tokenKind == 98 ? 14
+                                                : tokenKind == 99 ? 31
+                                                    : tokenKind == 100 ? 32
+                                                        : tokenKind == 101 ? 33 : 0;
 }
 
 bool HasStandaloneSourceTypeEvidence(int32 tokenStart,
