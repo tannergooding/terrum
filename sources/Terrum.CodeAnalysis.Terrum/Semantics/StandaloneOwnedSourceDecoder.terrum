@@ -3899,6 +3899,89 @@ int32 ValidateStandaloneBodyCode(int32 bodyId, int32 bodyOffset,
             }
             codeOffset = codeOffset + 4;
         }
+        else if (opcode == 0xC0)
+        {
+            if (codeOffset > codeLength - 4)
+            {
+                return 3;
+            }
+            init int32 control;
+            init uint32 registerPayload;
+            if (!TryReadStandaloneArtifactAbsoluteByte(artifactStart,
+                    artifactLength, codeStart + codeOffset + 1,
+                    ref init control)
+                || !TryReadStandaloneArtifactAbsoluteHalfWord(
+                    artifactStart, artifactLength,
+                    codeStart + codeOffset + 2,
+                    ref init registerPayload))
+            {
+                return 3;
+            }
+            int32 resultRegister
+                = int32(registerPayload & 0x0F);
+            int32 unusedResult
+                = int32((registerPayload >> 4) & 0x0F);
+            int32 sourceRegister
+                = int32((registerPayload >> 8) & 0x0F);
+            int32 unusedSource
+                = int32((registerPayload >> 12) & 0x0F);
+            if (resultRegister > 13
+                || resultRegister != sourceRegister
+                || unusedResult != 15 || unusedSource != 15)
+            {
+                return 3;
+            }
+            int32 registerTypeId
+                = Host.StandaloneDecoderRegisterTypeIds[
+                    bodyId * 14 + sourceRegister];
+            if (registerTypeId <= 0
+                || registerTypeId
+                    > Host.StandaloneTypeFactCount[0]
+                || Host.StandaloneTypeFacts[
+                    registerTypeId * 3] != 0)
+            {
+                return 3;
+            }
+            int32 typeCode
+                = Host.StandaloneTypeFacts[
+                    registerTypeId * 3 + 1];
+            bool integerType
+                = (typeCode >= 0x06 && typeCode <= 0x0F)
+                    || typeCode == 0x10 || typeCode == 0x11;
+            bool floatingType
+                = typeCode == 0x14 || typeCode == 0x15;
+            if (control == 0x04 || control == 0x08)
+            {
+                if (!integerType)
+                {
+                    return 3;
+                }
+            }
+            else if (control == 0x25)
+            {
+                if (!floatingType)
+                {
+                    return 3;
+                }
+            }
+            else if ((control >= 1 && control <= 0x0F)
+                || (control >= 0x20 && control <= 0x25))
+            {
+                return 2;
+            }
+            else
+            {
+                return 3;
+            }
+            int32 registerTypeStatus
+                = SetStandaloneDecoderRegisterType(
+                    bodyId, resultRegister, registerTypeId);
+            if (registerTypeStatus != 0)
+            {
+                return registerTypeStatus;
+            }
+            codeOffset = codeOffset + 4;
+        }
         else if (opcode == 0x90)
         {
             if (codeOffset > codeLength - 2)

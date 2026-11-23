@@ -2995,6 +2995,20 @@ int32 GetStandaloneWriterOperationCodeLength(int32 bodyId,
     {
         return 2;
     }
+    if (kind == 6 || kind == 7 || kind == 8)
+    {
+        int32 bodyOffset = bodyId * 12;
+        int32 homeCount
+            = Host.StandaloneRewrittenNormalizedBodies[
+                bodyOffset + 2];
+        if (operand0 < 0 || operand0 >= homeCount
+            || operand1 < 0 || operand1 >= homeCount
+            || operand0 == operand1)
+        {
+            return -1;
+        }
+        return 12;
+    }
     return -1;
 }
 
@@ -3631,6 +3645,42 @@ int32 WriteStandaloneWriterBodyCode(int32 bodyId,
             status = AppendStandaloneWriterByte(0x18);
             if (status != 0) { return status; }
             status = AppendStandaloneWriterByte(0);
+            if (status != 0) { return status; }
+        }
+        else if (kind == 6 || kind == 7 || kind == 8)
+        {
+            int32 homeCount
+                = Host.StandaloneRewrittenNormalizedBodies[
+                    bodyId * 12 + 2];
+            if (operand0 < 0 || operand0 >= homeCount
+                || operand1 < 0 || operand1 >= homeCount
+                || operand0 == operand1
+                || operand0 > 0xFFFF || operand1 > 0xFFFF)
+            {
+                return 3;
+            }
+            status = AppendStandaloneWriterByte(0xD5);
+            if (status != 0) { return status; }
+            status = AppendStandaloneWriterByte(0);
+            if (status != 0) { return status; }
+            status = AppendStandaloneWriterHalfWord(
+                uint32(operand0));
+            if (status != 0) { return status; }
+            status = AppendStandaloneWriterByte(0xC0);
+            if (status != 0) { return status; }
+            int32 control = kind == 6 ? 0x04
+                : kind == 7 ? 0x08 : 0x25;
+            status = AppendStandaloneWriterByte(control);
+            if (status != 0) { return status; }
+            status = AppendStandaloneWriterHalfWord(
+                uint32(0xF00F));
+            if (status != 0) { return status; }
+            status = AppendStandaloneWriterByte(0xD6);
+            if (status != 0) { return status; }
+            status = AppendStandaloneWriterByte(0x10);
+            if (status != 0) { return status; }
+            status = AppendStandaloneWriterHalfWord(
+                uint32(operand1));
             if (status != 0) { return status; }
         }
         else

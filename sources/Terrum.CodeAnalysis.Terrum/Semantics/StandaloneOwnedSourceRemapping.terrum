@@ -359,7 +359,9 @@ public static int32 RewriteStandaloneOwnedCallNodes()
             else if (Host.StandaloneSourceExpressions[
                     sourceOffset] == 6
                 || Host.StandaloneSourceExpressions[
-                    sourceOffset] == 8)
+                    sourceOffset] == 8
+                || Host.StandaloneSourceExpressions[
+                    sourceOffset] == 9)
             {
                 int32 childExpressionId
                     = Host.StandaloneSourceExpressions[
@@ -1167,7 +1169,8 @@ int32 VerifyStandaloneRewrittenSourceArenas()
                 return 3;
             }
         }
-        else if (expressionKind == 6 || expressionKind == 8)
+        else if (expressionKind == 6 || expressionKind == 8
+            || expressionKind == 9)
         {
             int32 childExpressionId
                 = Host.StandaloneSourceExpressions[oldOffset + 2];
@@ -1195,8 +1198,10 @@ int32 VerifyStandaloneRewrittenSourceArenas()
                 = Host.StandaloneSourceExpressions[oldOffset + 1];
             bool supportedIdentity = expressionKind == 6
                 ? IsStandaloneUnaryPlusType(expressionTypeId)
-                : IsStandaloneSourceConstructionType(
-                    expressionTypeId);
+                : expressionKind == 8
+                    ? IsStandaloneSourceConstructionType(
+                        expressionTypeId)
+                    : IsStandaloneUnaryMinusType(expressionTypeId);
             if (!supportedIdentity
                 || Host.StandaloneSourceExpressions[
                     childGlobalId * 8 + 1] != expressionTypeId

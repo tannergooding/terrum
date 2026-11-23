@@ -1581,7 +1581,8 @@ int32 TryGetStandaloneSourceExpressionDoesNotReturn(int32 bodyId,
     }
     int32 expressionKind
         = Host.StandaloneSourceExpressions[expressionIndex * 8];
-    if (expressionKind == 6 || expressionKind == 8)
+    if (expressionKind == 6 || expressionKind == 8
+        || expressionKind == 9)
     {
         int32 childExpressionId
             = Host.StandaloneSourceExpressions[
@@ -2326,7 +2327,8 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
                     expressionGlobal * 8];
             if (expressionKind != 3
                 && expressionKind != 6
-                && expressionKind != 8)
+                && expressionKind != 8
+                && expressionKind != 9)
             {
                 return 2;
             }
@@ -2951,6 +2953,9 @@ bool IsStandaloneUnaryPlusType(int32 typeId)
         || typeCode == 0x14 || typeCode == 0x15;
 }
 
+bool IsStandaloneUnaryMinusType(int32 typeId)
+    => IsStandaloneUnaryPlusType(typeId);
+
 bool IsStandaloneSourceConstructionType(int32 typeId)
 {
     if (typeId <= 0 || typeId > Host.StandaloneTypeFactCount[0]
@@ -2997,6 +3002,13 @@ bool CanBindStandaloneSourceArgument(int32 localCallableId,
     {
         return tokenStart + 1 < tokenEnd
             && IsStandaloneUnaryPlusType(expectedTypeId)
+            && CanBindStandaloneSourceArgument(localCallableId,
+                tokenStart + 1, tokenEnd, expectedTypeId, depth + 1);
+    }
+    if (kind == 58)
+    {
+        return tokenStart + 1 < tokenEnd
+            && IsStandaloneUnaryMinusType(expectedTypeId)
             && CanBindStandaloneSourceArgument(localCallableId,
                 tokenStart + 1, tokenEnd, expectedTypeId, depth + 1);
     }
@@ -4003,6 +4015,59 @@ int32 ParseStandaloneSourceExpression(int32 localCallableId,
         init int32 expressionId;
         int32 appendStatus = AppendStandaloneSourceExpression(
             bodyId, 6, typeId, operandExpressionId, 0,
+            0, 0, -1, expressionFirst,
+            ref init expressionId);
+        if (appendStatus != 0)
+        {
+            return appendStatus;
+        }
+        if (Host.StandaloneSourceExpressionUseCounts[
+                operandGlobalId] != 0)
+        {
+            return 3;
+        }
+        Host.StandaloneSourceExpressionUseCounts[operandGlobalId] = 1;
+        *expressionIdResult = expressionId;
+        *nextTokenResult = nextOperandToken;
+        return 0;
+    }
+    if (kind == 58)
+    {
+        if (tokenIndex + 1 >= tokenEnd)
+        {
+            return 1;
+        }
+        init int32 operandExpressionId;
+        init int32 nextOperandToken;
+        int32 operandStatus = ParseStandaloneSourceExpression(
+            localCallableId, bodyId, expressionFirst,
+            expectedTypeId, tokenIndex + 1, tokenEnd, depth + 1,
+            ref init operandExpressionId,
+            ref init nextOperandToken);
+        if (operandStatus != 0)
+        {
+            return operandStatus;
+        }
+        int32 operandGlobalId
+            = expressionFirst + operandExpressionId;
+        if (operandGlobalId < expressionFirst
+            || operandGlobalId
+                >= Host.StandaloneSourceExpressionCount[0])
+        {
+            return 3;
+        }
+        int32 typeId
+            = Host.StandaloneSourceExpressions[
+                operandGlobalId * 8 + 1];
+        if (!IsStandaloneUnaryMinusType(typeId)
+            || (expectedTypeId >= 0
+                && typeId != expectedTypeId))
+        {
+            return 2;
+        }
+        init int32 expressionId;
+        int32 appendStatus = AppendStandaloneSourceExpression(
+            bodyId, 9, typeId, operandExpressionId, 0,
             0, 0, -1, expressionFirst,
             ref init expressionId);
         if (appendStatus != 0)
@@ -5037,6 +5102,35 @@ int32 VerifyStandaloneDirectCalls()
                     = bodyExpressionFirst + operand0;
                 if (!IsStandaloneSourceConstructionType(
                         expressionTypeId)
+                    || operand1 != 0
+                    || Host.StandaloneSourceExpressions[
+                        expressionOffset + 4] != 0
+                    || Host.StandaloneSourceExpressions[
+                        expressionOffset + 5] != 0
+                    || Host.StandaloneSourceExpressions[
+                        expressionOffset + 6] != -1
+                    || Host.StandaloneSourceExpressions[
+                        childGlobalId * 8 + 1] != expressionTypeId
+                    || Host.StandaloneSourceExpressions[
+                        childGlobalId * 8 + 7] != bodyId
+                    || Host.StandaloneSourceExpressionUseCounts[
+                        childGlobalId] != 1)
+                {
+                    return 3;
+                }
+            }
+            else if (expressionKind == 9)
+            {
+                int32 operand1
+                    = Host.StandaloneSourceExpressions[
+                        expressionOffset + 3];
+                if (operand0 < 0 || operand0 >= expressionLocal)
+                {
+                    return 3;
+                }
+                int32 childGlobalId
+                    = bodyExpressionFirst + operand0;
+                if (!IsStandaloneUnaryMinusType(expressionTypeId)
                     || operand1 != 0
                     || Host.StandaloneSourceExpressions[
                         expressionOffset + 4] != 0

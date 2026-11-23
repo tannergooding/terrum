@@ -468,7 +468,8 @@ int32 VisitStandaloneSourceExpression(int32 bodyId,
             }
         }
     }
-    else if (expressionKind == 6 || expressionKind == 8)
+    else if (expressionKind == 6 || expressionKind == 8
+        || expressionKind == 9)
     {
         int32 childExpressionId
             = Host.StandaloneSourceExpressions[
@@ -941,6 +942,100 @@ int32 NormalizeStandaloneSourceExpression(int32 bodyId,
         *selectorKindResult = operandSelectorKind;
         *sourceUseResult = operandSourceUse;
         *selectorIndexResult = operandSelectorIndex;
+        *terminatedResult = false;
+        return 0;
+    }
+    if (expressionKind == 9)
+    {
+        int32 operandExpressionId
+            = Host.StandaloneSourceExpressions[
+                expressionOffset + 2];
+        if (!IsStandaloneUnaryMinusType(typeId)
+            || operandExpressionId < 0
+            || operandExpressionId >= expressionId)
+        {
+            return 3;
+        }
+        init int32 operandSelectorKind;
+        init int32 operandSourceUse;
+        init int32 operandSelectorIndex;
+        init bool operandTerminated;
+        int32 operandStatus = NormalizeStandaloneSourceExpression(
+            bodyId, operandExpressionId, depth + 1,
+            ref init operandSelectorKind,
+            ref init operandSourceUse,
+            ref init operandSelectorIndex,
+            ref init operandTerminated);
+        if (operandStatus != 0)
+        {
+            return operandStatus;
+        }
+        if (operandTerminated)
+        {
+            *selectorKindResult = 0;
+            *sourceUseResult = 0;
+            *selectorIndexResult = 0;
+            *terminatedResult = true;
+            return 0;
+        }
+        if (operandSelectorKind != 2 || operandSourceUse != 1
+            || operandSelectorIndex < 0)
+        {
+            return 2;
+        }
+        int32 sourceUse = GetStandaloneSourceUse(typeId);
+        int32 homeFirst
+            = Host.StandaloneNormalizedBodies[
+                bodyId * 12 + 1];
+        int32 bodyHomeCount
+            = Host.StandaloneNormalizedHomeCount[0] - homeFirst;
+        if (sourceUse != 1
+            || operandSelectorIndex >= bodyHomeCount)
+        {
+            return 3;
+        }
+        int32 sourceHomeOffset
+            = (homeFirst + operandSelectorIndex) * 5;
+        if (Host.StandaloneNormalizedHomes[
+                sourceHomeOffset] != bodyId
+            || Host.StandaloneNormalizedHomes[
+                sourceHomeOffset + 3] != typeId)
+        {
+            return 3;
+        }
+        int32 typeCode
+            = Host.StandaloneTypeFacts[typeId * 3 + 1];
+        int32 operationKind;
+        if (typeCode == 0x14 || typeCode == 0x15)
+        {
+            operationKind = 8;
+        }
+        else if (Host.StandaloneSourceArithmeticProfile[0] == 0)
+        {
+            operationKind = 6;
+        }
+        else
+        {
+            operationKind = 7;
+        }
+        init int32 resultHomeId;
+        int32 homeStatus = AppendStandaloneNormalizedHome(
+            bodyId, homeFirst, 3, typeId, 0,
+            ref init resultHomeId);
+        if (homeStatus != 0)
+        {
+            return homeStatus;
+        }
+        int32 operationStatus = AppendStandaloneNormalizedOperation(
+            bodyId, operationKind, operandSelectorIndex,
+            resultHomeId);
+        if (operationStatus != 0)
+        {
+            return operationStatus;
+        }
+        *selectorKindResult = 2;
+        *sourceUseResult = sourceUse;
+        *selectorIndexResult = resultHomeId;
         *terminatedResult = false;
         return 0;
     }
@@ -1847,6 +1942,50 @@ int32 VerifyStandaloneNormalizedProgram()
                     || !IsStandaloneUnitType(
                         Host.StandaloneSourceCallableInfo[
                             bodyId * 12 + 4]))
+                {
+                    return 3;
+                }
+            }
+            else if (kind == 6 || kind == 7 || kind == 8)
+            {
+                if (operand0 < 0 || operand0 >= bodyHomeCount
+                    || operand1 < 0 || operand1 >= bodyHomeCount
+                    || operand0 == operand1)
+                {
+                    return 3;
+                }
+                int32 sourceHomeOffset
+                    = (homeFirst + operand0) * 5;
+                int32 resultHomeOffset
+                    = (homeFirst + operand1) * 5;
+                int32 typeId
+                    = Host.StandaloneNormalizedHomes[
+                        sourceHomeOffset + 3];
+                int32 typeCode
+                    = Host.StandaloneTypeFacts[typeId * 3 + 1];
+                if (Host.StandaloneNormalizedHomes[
+                        sourceHomeOffset] != bodyId
+                    || Host.StandaloneNormalizedHomes[
+                        resultHomeOffset] != bodyId
+                    || Host.StandaloneNormalizedHomes[
+                        resultHomeOffset + 3] != typeId
+                    || Host.StandaloneNormalizedHomes[
+                        sourceHomeOffset + 2] != 0
+                    || Host.StandaloneNormalizedHomes[
+                        resultHomeOffset + 1] != 3
+                    || Host.StandaloneNormalizedHomes[
+                        resultHomeOffset + 2] != 0
+                    || !IsStandaloneUnaryMinusType(typeId)
+                    || (kind == 6
+                        && (typeCode == 0x14 || typeCode == 0x15
+                            || Host.StandaloneSourceArithmeticProfile[0]
+                                != 0))
+                    || (kind == 7
+                        && (typeCode == 0x14 || typeCode == 0x15
+                            || Host.StandaloneSourceArithmeticProfile[0]
+                                != 1))
+                    || (kind == 8
+                        && typeCode != 0x14 && typeCode != 0x15))
                 {
                     return 3;
                 }
