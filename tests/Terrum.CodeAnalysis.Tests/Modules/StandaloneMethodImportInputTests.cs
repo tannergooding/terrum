@@ -416,17 +416,74 @@ internal sealed class StandaloneMethodImportInputTests
         Assert.That(hostBuffers[4].Values[5], Is.EqualTo(0));
     }
 
-    [TestCase(BoundRuntimePolicy.FailFast)]
-    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "using api; int32 Main(int32 value) { "
+            + "Imported(Imported(value)); return Imported(7); }", 0, false)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,
+        "using api; int32 Main(int32 value) { "
+            + "Imported(Imported(value)); return Imported(7); }", 0, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { using api; namespace inner.deep { "
+            + "int32 Main(int32 value) { Imported(Imported(value)); "
+            + "return Imported(7); } } }", 0, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client; using api; int32 Main(int32 value) { "
+            + "Imported(Imported(value)); return Imported(7); }", 0, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { int32 Main(int32 value) { api.Imported("
+            + "api.Imported(value)); return api.Imported(7); } }", 0, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { using api; int32 Allowed(int32 value) { "
+            + "Imported(value); return value; } } namespace client { "
+            + "int32 Denied(int32 value) { Imported(value); return value; } }",
+        3, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace outer { int32 Helper() { return 0; } } "
+            + "namespace client; int32 Main(int32 value) { "
+            + "return value; }", 1, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { int32 Helper(int32 value) { return value; } "
+            + "int32 Main(int32 value) { return Helper(value); } }",
+        0, true)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { int32 Helper(int32 value) { return value; } } "
+            + "namespace client { int32 Main(int32 value) { "
+            + "return Helper(value); } }", 0, true)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { int32 Helper(int32 value) { return value; } } "
+            + "int32 Main(int32 value) { return client.Helper(value); }",
+        0, true)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { int32 Helper(int32 value) { return value; } "
+            + "namespace inner.deep { int32 Main(int32 value) { "
+            + "return Helper(value); } } }", 0, true)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "using api; namespace client { int32 Main(int32 value) { "
+            + "return Imported(value); } }", 0, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { using api; } namespace client.inner { "
+            + "int32 Main(int32 value) { return Imported(value); } }",
+        3, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace @client { int32 Helper(int32 value) { return value; } } "
+            + "namespace client.inner { int32 Main(int32 value) { "
+            + "return Helper(value); } }", 0, true)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { namespace inner.deep { "
+            + "int32 Helper(int32 value) { return value; } } } "
+            + "namespace client.inner.deep { int32 Main(int32 value) { "
+            + "return Helper(value); } }", 0, true)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client; namespace inner { "
+            + "int32 Main(int32 value) { return value; } }", 1, false)]
     public async Task TerrumOwnedSourceBinderValidatesOrderedCallUsesAsync(
-        BoundRuntimePolicy policy)
+        BoundRuntimePolicy policy, string sourceText,
+        int expectedSourceStatus, bool verifyLocalNamespaceCall)
     {
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
 
-        var source = SourceText.From(
-            "using api; int32 Main(int32 value) { "
-            + "Imported(Imported(value)); return Imported(7); }");
+        var source = SourceText.From(sourceText);
         var input = new StandaloneMethodImportInput(Agreement,
             "consumer/module", [
                 new TrRmStandardArtifactInput(SchemaIdentity,
@@ -469,7 +526,7 @@ internal sealed class StandaloneMethodImportInputTests
             "sources/Terrum.CodeAnalysis.Terrum/Semantics/StandaloneOwnedSourceRemapping.terrum",
             "sources/Terrum.CodeAnalysis.Terrum/Semantics/StandaloneOwnedSourceWriter.terrum",
         };
-        const string verificationSource = """
+        const string successfulVerificationSource = """
             namespace Terrum.CodeAnalysis;
             int32 Main() {
                 if (Scan() < 1) { return 40; }
@@ -615,6 +672,66 @@ internal sealed class StandaloneMethodImportInputTests
                 return 0;
             }
             """;
+        const string localNamespaceCallVerificationSource = """
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                if (Scan() < 1) { return 50; }
+                int32 status = BindStandaloneOwnedSourceProgram();
+                if (status != 0
+                    || Host.StandaloneSourceProgramStatus[0] != 0
+                    || Host.StandaloneLocalCallableCount[0] != 2
+                    || Host.StandaloneSourceBodyCount[0] != 2
+                    || Host.StandaloneSourceDirectCallCount[0] != 1
+                    || Host.StandaloneSourceCallArgumentCount[0] != 1
+                    || Host.StandaloneSourceDirectCalls[0] != 1
+                    || Host.StandaloneSourceDirectCalls[1] != 0
+                    || Host.StandaloneSourceDirectCalls[2]
+                        != Host.StandaloneLocalCallables[1]
+                    || Host.StandaloneSourceDirectCalls[3]
+                        != Host.StandaloneCallableTypeIds[
+                            Host.StandaloneLocalCallables[1]]
+                    || Host.StandaloneSourceDirectCalls[5] != 1
+                    || Host.StandaloneSourceDirectCallUseCounts[0] != 1) {
+                    return 51;
+                }
+                status = NormalizeStandaloneOwnedSourceProgram();
+                if (status != 0
+                    || Host.StandaloneNormalizedProgramStatus[0] != 0
+                    || Host.StandaloneNormalizedBodyCount[0] != 2
+                    || Host.StandaloneInvokeCount[0] != 1) {
+                    return 52;
+                }
+                status = RewriteStandaloneOwnedCallNodes();
+                if (status != 0) { return status; }
+                status = WriteStandaloneScalarModule();
+                if (status != 0
+                    || Host.StandaloneWriterStatus[0] != 0) {
+                    return 53;
+                }
+                return 0;
+            }
+            """;
+        var verificationSource = expectedSourceStatus != 0
+            ? $$"""
+                namespace Terrum.CodeAnalysis;
+                int32 Main() {
+                    if (Scan() < 1) { return 80; }
+                    int32 status = BindStandaloneOwnedSourceProgram();
+                    if (status != {{expectedSourceStatus}}
+                        || Host.StandaloneSourceProgramStatus[0]
+                            != {{expectedSourceStatus}}
+                        || Host.StandaloneLocalCallableCount[0] != 0
+                        || Host.StandaloneSourceUsingCount[0] != 0
+                        || Host.StandaloneSourceNamespaceScopeCount[0] != 0
+                        || Host.StandaloneSourceDirectCallCount[0] != 0) {
+                        return 81;
+                    }
+                    return 0;
+                }
+                """
+            : verifyLocalNamespaceCall
+                ? localNamespaceCallVerificationSource
+                : successfulVerificationSource;
 
         var root = RepositoryRoot();
         var components = new List<SyntaxTree>(sourcePaths.Length + 1);
@@ -641,6 +758,10 @@ internal sealed class StandaloneMethodImportInputTests
         var execution = NativeJit.ExecuteWithData(program,
             (NativeRuntimePolicy)policy);
         Assert.That(execution.ExitCode, Is.EqualTo(0));
+        if (expectedSourceStatus != 0)
+        {
+            return;
+        }
         var artifact = StandaloneMethodImportOutputFramer.Frame(
             execution, buffers);
         AssertStandaloneWrittenArtifact(artifact);

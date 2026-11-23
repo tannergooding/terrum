@@ -38,13 +38,6 @@ public static int32 BindStandaloneOwnedSourceProgram()
         return FailStandaloneSourceProgram(importedStatus);
     }
 
-    init int32 usingEnd;
-    int32 usingStatus
-        = ParseStandaloneSourceUsings(tokenEnd, ref init usingEnd);
-    if (usingStatus != 0)
-    {
-        return FailStandaloneSourceProgram(usingStatus);
-    }
     init int32 usingModuleDirectoryRow;
     if (!TryFindStandaloneModuleDirectoryRow(
             Host.StandaloneRequest[2], Host.StandaloneRequest[3],
@@ -53,23 +46,11 @@ public static int32 BindStandaloneOwnedSourceProgram()
         return FailStandaloneSourceProgram(3);
     }
     int32 usingModuleId = usingModuleDirectoryRow - 1;
-
-    mut int32 tokenIndex = usingEnd;
-    while (tokenIndex < tokenEnd)
+    int32 sourceStatus = InventoryStandaloneSourceFile(
+        tokenEnd, usingModuleId);
+    if (sourceStatus != 0)
     {
-        int32 localCallableId
-            = Host.StandaloneLocalCallableCount[0];
-        init int32 nextToken;
-        int32 headerStatus = InventoryStandaloneSourceCallable(
-            tokenIndex, tokenEnd, localCallableId, usingModuleId,
-            ref init nextToken);
-        if (headerStatus != 0)
-        {
-            return FailStandaloneSourceProgram(headerStatus);
-        }
-        Host.StandaloneLocalCallableCount[0]
-            = localCallableId + 1;
-        tokenIndex = nextToken;
+        return FailStandaloneSourceProgram(sourceStatus);
     }
     if (Host.StandaloneLocalCallableCount[0] == 0)
     {
@@ -107,6 +88,10 @@ bool ValidateStandaloneSourceCallBuffers()
         return false;
     }
     int32 tokenCapacity = Host.Source.Length + 1;
+    if (tokenCapacity > int32.MaxValue / 4)
+    {
+        return false;
+    }
     return Host.StandaloneSourceProgramStatus.Length == 1
         && Host.StandaloneLocalCallableCount.Length == 1
         && Host.StandaloneLocalCallables.Length == tokenCapacity * 3
@@ -142,8 +127,18 @@ bool ValidateStandaloneSourceCallBuffers()
         && Host.StandaloneSourceCallFormalSeen.Length
             == tokenCapacity
         && Host.StandaloneSourceUsingCount.Length == 1
+        && Host.StandaloneSourceNamespaceScopeCount.Length == 1
+        && Host.StandaloneSourceNamespaceIdentityCount.Length == 1
+        && Host.StandaloneSourceNamespaceDepthLimit.Length == 1
+        && Host.StandaloneSourceNamespaceDepthLimit[0] > 0
         && Host.StandaloneSourceUsings.Length
-            == tokenCapacity * 2;
+            == tokenCapacity * 3
+        && Host.StandaloneSourceNamespaceScopes.Length
+            == tokenCapacity * 2
+        && Host.StandaloneSourceNamespaceIdentityNodes.Length
+            == tokenCapacity * 3
+        && Host.StandaloneSourceNamespaceIdentitySlots.Length
+            == tokenCapacity * 2 + 1;
 }
 
 void ClearStandaloneSourceCallProgram()
@@ -158,6 +153,8 @@ void ClearStandaloneSourceCallProgram()
     Host.StandaloneSourceDirectCallCount[0] = 0;
     Host.StandaloneSourceCallArgumentCount[0] = 0;
     Host.StandaloneSourceUsingCount[0] = 0;
+    Host.StandaloneSourceNamespaceScopeCount[0] = 0;
+    Host.StandaloneSourceNamespaceIdentityCount[0] = 0;
     for (mut int32 index = 0;
         index < Host.StandaloneLocalCallables.Length;
         index = index + 1)
@@ -241,6 +238,24 @@ void ClearStandaloneSourceCallProgram()
         index = index + 1)
     {
         Host.StandaloneSourceUsings[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneSourceNamespaceScopes.Length;
+        index = index + 1)
+    {
+        Host.StandaloneSourceNamespaceScopes[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneSourceNamespaceIdentityNodes.Length;
+        index = index + 1)
+    {
+        Host.StandaloneSourceNamespaceIdentityNodes[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneSourceNamespaceIdentitySlots.Length;
+        index = index + 1)
+    {
+        Host.StandaloneSourceNamespaceIdentitySlots[index] = 0;
     }
 }
 
@@ -371,48 +386,583 @@ int32 ResolveStandaloneCallTarget(int32 targetKind,
     return 3;
 }
 
-int32 ParseStandaloneSourceUsings(int32 tokenEnd,
-    ref<init int32> tokenIndexResult)
+int32 InventoryStandaloneSourceFile(int32 tokenEnd, int32 usingModuleId)
+{
+    init int32 declarationStart;
+    int32 usingStatus = ParseStandaloneSourceUsings(
+        0, tokenEnd, -1, ref init declarationStart);
+    if (usingStatus != 0)
+    {
+        return usingStatus;
+    }
+
+    if (declarationStart >= tokenEnd
+        || Host.Tokens[declarationStart * 3] != 6)
+    {
+        init int32 afterDeclarations;
+        int32 declarationStatus = InventoryStandaloneSourceDeclarations(
+            declarationStart, tokenEnd, -1, usingModuleId, 0, true,
+            ref init afterDeclarations);
+        if (declarationStatus != 0
+            || afterDeclarations != tokenEnd)
+        {
+            return declarationStatus != 0 ? declarationStatus : 1;
+        }
+        return 0;
+    }
+
+    init int32 namespaceNameEnd;
+    int32 namespaceNameStatus = ParseStandaloneDottedIdentifier(
+        declarationStart + 1, tokenEnd, ref init namespaceNameEnd);
+    if (namespaceNameStatus != 0 || namespaceNameEnd >= tokenEnd)
+    {
+        return 1;
+    }
+
+    int32 namespaceDelimiter
+        = Host.Tokens[namespaceNameEnd * 3];
+    if (namespaceDelimiter == 52)
+    {
+        init int32 namespaceIdentity;
+        int32 identityStatus = InternStandaloneNamespacePath(0,
+            declarationStart + 1, namespaceNameEnd,
+            ref init namespaceIdentity);
+        if (identityStatus != 0)
+        {
+            return identityStatus;
+        }
+
+        init int32 namespaceScopeId;
+        int32 scopeStatus = AppendStandaloneNamespaceScope(-1,
+            namespaceIdentity, ref init namespaceScopeId);
+        if (scopeStatus != 0)
+        {
+            return scopeStatus;
+        }
+
+        init int32 afterDeclarations;
+        int32 declarationStatus = InventoryStandaloneSourceDeclarations(
+            namespaceNameEnd + 1, tokenEnd, namespaceScopeId,
+            usingModuleId, 1, false, ref init afterDeclarations);
+        if (declarationStatus != 0
+            || afterDeclarations != tokenEnd)
+        {
+            return declarationStatus != 0 ? declarationStatus : 1;
+        }
+        return 0;
+    }
+
+    if (namespaceDelimiter != 48)
+    {
+        return 1;
+    }
+    init int32 afterDeclarations;
+    int32 declarationStatus = InventoryStandaloneSourceDeclarations(
+        declarationStart, tokenEnd, -1, usingModuleId, 0, true,
+        ref init afterDeclarations);
+    if (declarationStatus != 0
+        || afterDeclarations != tokenEnd)
+    {
+        return declarationStatus != 0 ? declarationStatus : 1;
+    }
+    return 0;
+}
+
+int32 InventoryStandaloneSourceDeclarations(int32 tokenStart,
+    int32 tokenEnd, int32 namespaceScopeId, int32 usingModuleId,
+    int32 namespaceDepth, bool allowNamespaceBlocks,
+    ref<init int32> nextTokenResult)
+    ensure return == 0 ? *nextTokenResult is init : true
+{
+    if (namespaceDepth < 0
+        || namespaceDepth > Host.StandaloneSourceNamespaceDepthLimit[0])
+    {
+        return 2;
+    }
+
+    init int32 declarationStart;
+    int32 usingStatus = ParseStandaloneSourceUsings(tokenStart,
+        tokenEnd, namespaceScopeId, ref init declarationStart);
+    if (usingStatus != 0)
+    {
+        return usingStatus;
+    }
+
+    int32 namespaceIdentityId
+        = GetStandaloneNamespaceIdentity(namespaceScopeId);
+    if (namespaceIdentityId < 0)
+    {
+        return 3;
+    }
+    mut int32 tokenIndex = declarationStart;
+    while (tokenIndex < tokenEnd)
+    {
+        if (Host.Tokens[tokenIndex * 3] == 6)
+        {
+            if (!allowNamespaceBlocks)
+            {
+                return 1;
+            }
+
+            init int32 afterNamespace;
+            int32 namespaceStatus
+                = InventoryStandaloneSourceNamespaceBlock(tokenIndex,
+                    tokenEnd, namespaceScopeId, usingModuleId,
+                    namespaceDepth,
+                    ref init afterNamespace);
+            if (namespaceStatus != 0)
+            {
+                return namespaceStatus;
+            }
+            tokenIndex = afterNamespace;
+            continue;
+        }
+
+        int32 localCallableId
+            = Host.StandaloneLocalCallableCount[0];
+        init int32 nextToken;
+        int32 headerStatus = InventoryStandaloneSourceCallable(
+            tokenIndex, tokenEnd, localCallableId, usingModuleId,
+            namespaceScopeId, namespaceIdentityId,
+            ref init nextToken);
+        if (headerStatus != 0)
+        {
+            return headerStatus;
+        }
+        Host.StandaloneLocalCallableCount[0]
+            = localCallableId + 1;
+        tokenIndex = nextToken;
+    }
+
+    *nextTokenResult = tokenIndex;
+    return 0;
+}
+
+int32 InventoryStandaloneSourceNamespaceBlock(int32 namespaceToken,
+    int32 tokenEnd, int32 parentScopeId, int32 usingModuleId,
+    int32 parentNamespaceDepth,
+    ref<init int32> nextTokenResult)
+    ensure return == 0 ? *nextTokenResult is init : true
+{
+    if (namespaceToken < 0 || namespaceToken >= tokenEnd
+        || Host.Tokens[namespaceToken * 3] != 6)
+    {
+        return 1;
+    }
+    if (parentNamespaceDepth
+        >= Host.StandaloneSourceNamespaceDepthLimit[0])
+    {
+        return 2;
+    }
+
+    int32 nameStart = namespaceToken + 1;
+    init int32 nameEnd;
+    if (ParseStandaloneDottedIdentifier(nameStart, tokenEnd,
+            ref init nameEnd) != 0
+        || nameEnd >= tokenEnd
+        || Host.Tokens[nameEnd * 3] != 48)
+    {
+        return 1;
+    }
+
+    mut int32 nesting = 1;
+    mut int32 scan = nameEnd + 1;
+    while (scan < tokenEnd && nesting > 0)
+    {
+        int32 kind = Host.Tokens[scan * 3];
+        if (kind == 48)
+        {
+            nesting = nesting + 1;
+        }
+        else if (kind == 49)
+        {
+            nesting = nesting - 1;
+        }
+        scan = scan + 1;
+    }
+
+    if (nesting != 0)
+    {
+        return 1;
+    }
+    int32 closeBrace = scan - 1;
+    int32 parentIdentityId
+        = GetStandaloneNamespaceIdentity(parentScopeId);
+    if (parentIdentityId < 0)
+    {
+        return 3;
+    }
+    init int32 namespaceIdentity;
+    int32 identityStatus = InternStandaloneNamespacePath(
+        parentIdentityId, nameStart, nameEnd,
+        ref init namespaceIdentity);
+    if (identityStatus != 0)
+    {
+        return identityStatus;
+    }
+    init int32 namespaceScopeId;
+    int32 scopeStatus = AppendStandaloneNamespaceScope(parentScopeId,
+        namespaceIdentity, ref init namespaceScopeId);
+    if (scopeStatus != 0)
+    {
+        return scopeStatus;
+    }
+
+    init int32 afterBody;
+    int32 bodyStatus = InventoryStandaloneSourceDeclarations(
+        nameEnd + 1, closeBrace, namespaceScopeId, usingModuleId,
+        parentNamespaceDepth + 1, true, ref init afterBody);
+    if (bodyStatus != 0 || afterBody != closeBrace)
+    {
+        return bodyStatus != 0 ? bodyStatus : 1;
+    }
+
+    *nextTokenResult = closeBrace + 1;
+    return 0;
+}
+
+int32 ParseStandaloneSourceUsings(int32 tokenStart, int32 tokenEnd,
+    int32 namespaceScopeId, ref<init int32> tokenIndexResult)
     ensure return == 0 ? *tokenIndexResult is init : true
 {
-    mut int32 tokenIndex = 0;
+    mut int32 tokenIndex = tokenStart;
     while (tokenIndex < tokenEnd
         && Host.Tokens[tokenIndex * 3] == 5)
     {
         int32 usingStart = tokenIndex + 1;
-        if (usingStart >= tokenEnd
-            || Host.Tokens[usingStart * 3] != 2)
-        {
-            return 1;
-        }
-        mut int32 pathEnd = usingStart + 1;
-        while (pathEnd < tokenEnd
-            && Host.Tokens[pathEnd * 3] == 54)
-        {
-            pathEnd = pathEnd + 1;
-            if (pathEnd >= tokenEnd
-                || Host.Tokens[pathEnd * 3] != 2)
-            {
-                return 1;
-            }
-            pathEnd = pathEnd + 1;
-        }
-        if (pathEnd >= tokenEnd
+        init int32 pathEnd;
+        if (ParseStandaloneDottedIdentifier(usingStart, tokenEnd,
+                ref init pathEnd) != 0
+            || pathEnd >= tokenEnd
             || Host.Tokens[pathEnd * 3] != 52
             || Host.StandaloneSourceUsingCount[0]
-                >= Host.StandaloneSourceUsings.Length / 2)
+                >= Host.StandaloneSourceUsings.Length / 3)
         {
             return 1;
         }
+
         int32 usingOffset
-            = Host.StandaloneSourceUsingCount[0] * 2;
+            = Host.StandaloneSourceUsingCount[0] * 3;
         Host.StandaloneSourceUsings[usingOffset] = usingStart;
         Host.StandaloneSourceUsings[usingOffset + 1] = pathEnd;
+        Host.StandaloneSourceUsings[usingOffset + 2]
+            = namespaceScopeId;
         Host.StandaloneSourceUsingCount[0]
             = Host.StandaloneSourceUsingCount[0] + 1;
         tokenIndex = pathEnd + 1;
     }
     *tokenIndexResult = tokenIndex;
+    return 0;
+}
+
+int32 ParseStandaloneDottedIdentifier(int32 tokenStart,
+    int32 tokenEnd, ref<init int32> tokenIndexResult)
+    ensure return == 0 ? *tokenIndexResult is init : true
+{
+    if (tokenStart < 0 || tokenStart >= tokenEnd
+        || Host.Tokens[tokenStart * 3] != 2)
+    {
+        return 1;
+    }
+    mut int32 tokenIndex = tokenStart + 1;
+    while (tokenIndex < tokenEnd
+        && Host.Tokens[tokenIndex * 3] == 54)
+    {
+        tokenIndex = tokenIndex + 1;
+        if (tokenIndex >= tokenEnd
+            || Host.Tokens[tokenIndex * 3] != 2)
+        {
+            return 1;
+        }
+        tokenIndex = tokenIndex + 1;
+    }
+    *tokenIndexResult = tokenIndex;
+    return 0;
+}
+
+int32 AppendStandaloneNamespaceScope(int32 parentScopeId,
+    int32 namespaceIdentityId,
+    ref<init int32> scopeIdResult)
+    ensure return == 0 ? *scopeIdResult is init : true
+{
+    int32 count = Host.StandaloneSourceNamespaceScopeCount[0];
+    if (count < 0
+        || count >= Host.StandaloneSourceNamespaceScopes.Length / 2
+        || parentScopeId < -1
+        || parentScopeId >= count
+        || namespaceIdentityId < 0
+        || namespaceIdentityId
+            > Host.StandaloneSourceNamespaceIdentityCount[0])
+    {
+        return 3;
+    }
+    int32 scopeOffset = count * 2;
+    Host.StandaloneSourceNamespaceScopes[scopeOffset] = parentScopeId;
+    Host.StandaloneSourceNamespaceScopes[scopeOffset + 1]
+        = namespaceIdentityId;
+    Host.StandaloneSourceNamespaceScopeCount[0] = count + 1;
+    *scopeIdResult = count;
+    return 0;
+}
+
+int32 GetStandaloneNamespaceIdentity(int32 scopeId)
+{
+    if (scopeId == -1)
+    {
+        return 0;
+    }
+    if (scopeId < 0
+        || scopeId >= Host.StandaloneSourceNamespaceScopeCount[0])
+    {
+        return -1;
+    }
+    return Host.StandaloneSourceNamespaceScopes[scopeId * 2 + 1];
+}
+
+int32 GetStandaloneNamespaceParentIdentity(int32 identityId)
+{
+    if (identityId == 0)
+    {
+        return -1;
+    }
+    if (identityId < 0
+        || identityId
+            > Host.StandaloneSourceNamespaceIdentityCount[0])
+    {
+        return -1;
+    }
+    return Host.StandaloneSourceNamespaceIdentityNodes[
+        (identityId - 1) * 3];
+}
+
+int32 GetStandaloneNamespaceParentScope(int32 scopeId)
+{
+    if (scopeId < 0
+        || scopeId >= Host.StandaloneSourceNamespaceScopeCount[0])
+    {
+        return -1;
+    }
+    return Host.StandaloneSourceNamespaceScopes[scopeId * 2];
+}
+
+int32 FindStandaloneNamespaceScopeForIdentity(int32 currentScopeId,
+    int32 namespaceIdentityId)
+{
+    mut int32 scopeId = currentScopeId;
+    while (scopeId >= 0)
+    {
+        if (scopeId
+                >= Host.StandaloneSourceNamespaceScopeCount[0])
+        {
+            return -2;
+        }
+        if (GetStandaloneNamespaceIdentity(scopeId)
+            == namespaceIdentityId)
+        {
+            return scopeId;
+        }
+        scopeId = GetStandaloneNamespaceParentScope(scopeId);
+    }
+    return namespaceIdentityId == 0 ? -1 : -2;
+}
+
+int32 GetStandaloneNamespaceSegmentHash(int32 parentIdentityId,
+    int32 tokenIndex, ref<init int32> hashResult)
+    ensure return == 0 ? *hashResult is init : true
+{
+    init int32 kind;
+    init int32 tokenStart;
+    init int32 tokenLength;
+    if (parentIdentityId < 0
+        || parentIdentityId
+            > Host.StandaloneSourceNamespaceIdentityCount[0]
+        || !TryReadStandaloneSourceToken(tokenIndex,
+            ref init kind, ref init tokenStart,
+            ref init tokenLength)
+        || kind != 2)
+    {
+        return 1;
+    }
+    if (tokenLength > 0
+        && Host.Source[tokenStart] == char16(64))
+    {
+        tokenStart = tokenStart + 1;
+        tokenLength = tokenLength - 1;
+    }
+    if (tokenLength <= 0)
+    {
+        return 1;
+    }
+
+    mut int32 hash
+        = ((parentIdentityId % 65521) * 31 + 1) % 65521;
+    for (mut int32 index = 0;
+        index < tokenLength;
+        index = index + 1)
+    {
+        hash = (hash * 31
+            + int32(Host.Source[tokenStart + index])) % 65521;
+    }
+    *hashResult = hash;
+    return 0;
+}
+
+int32 InternStandaloneNamespaceSegment(int32 parentIdentityId,
+    int32 tokenIndex, ref<init int32> identityResult)
+    ensure return == 0 ? *identityResult is init : true
+{
+    init int32 hash;
+    if (GetStandaloneNamespaceSegmentHash(parentIdentityId,
+            tokenIndex, ref init hash) != 0
+        || Host.StandaloneSourceNamespaceIdentitySlots.Length == 0)
+    {
+        return 1;
+    }
+
+    int32 slotCount
+        = Host.StandaloneSourceNamespaceIdentitySlots.Length;
+    mut int32 slot = hash % slotCount;
+    mut int32 probes = 0;
+    while (probes < slotCount)
+    {
+        int32 existingIdentity
+            = Host.StandaloneSourceNamespaceIdentitySlots[slot];
+        if (existingIdentity == 0)
+        {
+            break;
+        }
+        int32 nodeOffset = (existingIdentity - 1) * 3;
+        if (Host.StandaloneSourceNamespaceIdentityNodes[
+                nodeOffset] == parentIdentityId
+            && IsStandaloneSourceName(tokenIndex,
+                Host.StandaloneSourceNamespaceIdentityNodes[
+                    nodeOffset + 1],
+                Host.StandaloneSourceNamespaceIdentityNodes[
+                    nodeOffset + 2]))
+        {
+            *identityResult = existingIdentity;
+            return 0;
+        }
+        slot = slot + 1;
+        if (slot == slotCount)
+        {
+            slot = 0;
+        }
+        probes = probes + 1;
+    }
+    if (probes >= slotCount)
+    {
+        return 3;
+    }
+
+    int32 identityCount
+        = Host.StandaloneSourceNamespaceIdentityCount[0];
+    if (identityCount
+        >= Host.StandaloneSourceNamespaceIdentityNodes.Length / 3)
+    {
+        return 3;
+    }
+    init int32 kind;
+    init int32 tokenStart;
+    init int32 tokenLength;
+    if (!TryReadStandaloneSourceToken(tokenIndex,
+            ref init kind, ref init tokenStart,
+            ref init tokenLength))
+    {
+        return 1;
+    }
+    int32 identity = identityCount + 1;
+    int32 nodeOffset = (identity - 1) * 3;
+    Host.StandaloneSourceNamespaceIdentityNodes[nodeOffset]
+        = parentIdentityId;
+    Host.StandaloneSourceNamespaceIdentityNodes[nodeOffset + 1]
+        = tokenStart;
+    Host.StandaloneSourceNamespaceIdentityNodes[nodeOffset + 2]
+        = tokenLength;
+    Host.StandaloneSourceNamespaceIdentitySlots[slot] = identity;
+    Host.StandaloneSourceNamespaceIdentityCount[0] = identity;
+    *identityResult = identity;
+    return 0;
+}
+
+bool TryFindStandaloneNamespaceIdentity(int32 parentIdentityId,
+    int32 tokenIndex, ref<init int32> identityResult)
+    ensure return ? *identityResult is init : true
+{
+    init int32 hash;
+    if (GetStandaloneNamespaceSegmentHash(parentIdentityId,
+            tokenIndex, ref init hash) != 0
+        || Host.StandaloneSourceNamespaceIdentitySlots.Length == 0)
+    {
+        return false;
+    }
+
+    int32 slotCount
+        = Host.StandaloneSourceNamespaceIdentitySlots.Length;
+    mut int32 slot = hash % slotCount;
+    for (mut int32 probes = 0;
+        probes < slotCount;
+        probes = probes + 1)
+    {
+        int32 existingIdentity
+            = Host.StandaloneSourceNamespaceIdentitySlots[slot];
+        if (existingIdentity == 0)
+        {
+            return false;
+        }
+        int32 nodeOffset = (existingIdentity - 1) * 3;
+        if (Host.StandaloneSourceNamespaceIdentityNodes[
+                nodeOffset] == parentIdentityId
+            && IsStandaloneSourceName(tokenIndex,
+                Host.StandaloneSourceNamespaceIdentityNodes[
+                    nodeOffset + 1],
+                Host.StandaloneSourceNamespaceIdentityNodes[
+                    nodeOffset + 2]))
+        {
+            *identityResult = existingIdentity;
+            return true;
+        }
+        slot = slot + 1;
+        if (slot == slotCount)
+        {
+            slot = 0;
+        }
+    }
+    return false;
+}
+
+int32 InternStandaloneNamespacePath(int32 parentIdentityId,
+    int32 tokenStart, int32 tokenEnd,
+    ref<init int32> identityResult)
+    ensure return == 0 ? *identityResult is init : true
+{
+    mut int32 identity = parentIdentityId;
+    mut int32 tokenIndex = tokenStart;
+    while (tokenIndex < tokenEnd)
+    {
+        init int32 nextIdentity;
+        int32 status = InternStandaloneNamespaceSegment(identity,
+            tokenIndex, ref init nextIdentity);
+        if (status != 0)
+        {
+            return status;
+        }
+        identity = nextIdentity;
+        tokenIndex = tokenIndex + 1;
+        if (tokenIndex < tokenEnd)
+        {
+            if (Host.Tokens[tokenIndex * 3] != 54)
+            {
+                return 1;
+            }
+            tokenIndex = tokenIndex + 1;
+        }
+    }
+    if (tokenStart >= tokenEnd)
+    {
+        return 1;
+    }
+    *identityResult = identity;
     return 0;
 }
 
@@ -694,6 +1244,7 @@ int32 ParseStandaloneSourceType(int32 tokenIndex, bool allowUnit,
 
 int32 InventoryStandaloneSourceCallable(int32 tokenStart,
     int32 tokenEnd, int32 localCallableId, int32 usingModuleId,
+    int32 namespaceScopeId, int32 namespaceIdentityId,
     ref<init int32> nextTokenResult)
     ensure return == 0 ? *nextTokenResult is init : true
 {
@@ -872,8 +1423,10 @@ int32 InventoryStandaloneSourceCallable(int32 tokenStart,
         = nameStart;
     Host.StandaloneSourceCallableInfo[infoOffset + 1]
         = nameLength;
-    Host.StandaloneSourceCallableInfo[infoOffset + 2] = 0;
-    Host.StandaloneSourceCallableInfo[infoOffset + 3] = 0;
+    Host.StandaloneSourceCallableInfo[infoOffset + 2]
+        = namespaceScopeId;
+    Host.StandaloneSourceCallableInfo[infoOffset + 3]
+        = namespaceIdentityId;
     Host.StandaloneSourceCallableInfo[infoOffset + 4]
         = returnTypeId;
     Host.StandaloneSourceCallableInfo[infoOffset + 5]
@@ -1372,7 +1925,7 @@ bool TryGetStandaloneKeyLastSegment(int32 keyStart,
 }
 
 bool TryMatchStandaloneImportedCallableName(int32 importedIndex,
-    int32 nameTokenStart, int32 nameTokenEnd)
+    int32 nameTokenStart, int32 nameTokenEnd, int32 usingScopeId)
 {
     if (importedIndex < 0
         || importedIndex
@@ -1385,37 +1938,45 @@ bool TryMatchStandaloneImportedCallableName(int32 importedIndex,
         = Host.StandaloneSourceImportedCallables[importedOffset + 2];
     int32 keyLength
         = Host.StandaloneSourceImportedCallables[importedOffset + 3];
+    init int32 prefixLength;
+    init int32 segmentStart;
+    init int32 segmentLength;
+    if (!TryGetStandaloneKeyLastSegment(keyStart, keyLength,
+            ref init prefixLength, ref init segmentStart,
+            ref init segmentLength))
+    {
+        return false;
+    }
     if (TryMatchStandaloneTokenPathToText(nameTokenStart,
             nameTokenEnd, keyStart, keyLength))
     {
-        return true;
+        return prefixLength != 0 || usingScopeId == -1;
     }
     if (nameTokenEnd != nameTokenStart + 1)
     {
         return false;
     }
 
-    init int32 prefixLength;
-    init int32 segmentStart;
-    init int32 segmentLength;
-    if (!TryGetStandaloneKeyLastSegment(keyStart, keyLength,
-            ref init prefixLength, ref init segmentStart,
-            ref init segmentLength)
-        || !StandaloneTokenMatchesText(nameTokenStart,
+    if (!StandaloneTokenMatchesText(nameTokenStart,
             segmentStart, segmentLength))
     {
         return false;
     }
     if (prefixLength == 0)
     {
-        return true;
+        return usingScopeId == -1;
     }
 
     for (mut int32 usingIndex = 0;
         usingIndex < Host.StandaloneSourceUsingCount[0];
         usingIndex = usingIndex + 1)
     {
-        int32 usingOffset = usingIndex * 2;
+        int32 usingOffset = usingIndex * 3;
+        if (Host.StandaloneSourceUsings[usingOffset + 2]
+            != usingScopeId)
+        {
+            continue;
+        }
         if (TryMatchStandaloneTokenPathToText(
                 Host.StandaloneSourceUsings[usingOffset],
                 Host.StandaloneSourceUsings[usingOffset + 1],
@@ -1472,6 +2033,179 @@ int32 CountStandaloneCallArguments(int32 openingParen,
     return -1;
 }
 
+int32 FindStandaloneLocalCandidateAtNamespace(int32 namespaceIdentityId,
+    int32 nameToken, int32 argumentCount,
+    ref<init int32> candidateResult,
+    ref<init bool> nameFoundResult)
+    ensure return == 0 ? (*candidateResult is init
+        && *nameFoundResult is init) : true
+{
+    mut int32 matchingCandidates = 0;
+    mut int32 candidateResultValue = -1;
+    mut bool nameFound = false;
+    for (mut int32 candidate = 0;
+        candidate < Host.StandaloneLocalCallableCount[0];
+        candidate = candidate + 1)
+    {
+        int32 infoOffset = candidate * 12;
+        if (Host.StandaloneSourceCallableInfo[infoOffset + 3]
+                != namespaceIdentityId
+            || !StandaloneTokenMatchesText(nameToken,
+                Host.StandaloneSourceCallableInfo[infoOffset],
+                Host.StandaloneSourceCallableInfo[infoOffset + 1]))
+        {
+            continue;
+        }
+
+        nameFound = true;
+        if (Host.StandaloneSourceCallableInfo[infoOffset + 6]
+            == argumentCount)
+        {
+            matchingCandidates = matchingCandidates + 1;
+            candidateResultValue = candidate;
+        }
+    }
+
+    *candidateResult = candidateResultValue;
+    *nameFoundResult = nameFound;
+    if (!nameFound)
+    {
+        return 0;
+    }
+    if (matchingCandidates == 0)
+    {
+        return 2;
+    }
+    return matchingCandidates == 1 ? 0 : 4;
+}
+
+int32 FindStandaloneImportedCandidateAtScope(int32 nameTokenStart,
+    int32 nameTokenEnd, int32 argumentCount, int32 usingScopeId,
+    ref<init int32> candidateResult,
+    ref<init bool> nameFoundResult)
+    ensure return == 0 ? (*candidateResult is init
+        && *nameFoundResult is init) : true
+{
+    mut int32 matchingCandidates = 0;
+    mut int32 candidateResultValue = -1;
+    mut bool nameFound = false;
+    for (mut int32 candidate = 0;
+        candidate < Host.StandaloneSourceImportedCallableCount[0];
+        candidate = candidate + 1)
+    {
+        if (!TryMatchStandaloneImportedCallableName(candidate,
+                nameTokenStart, nameTokenEnd, usingScopeId))
+        {
+            continue;
+        }
+
+        nameFound = true;
+        int32 resolvedRoot = Host.StandaloneSourceImportedCallables[
+            candidate * 8 + 4];
+        int32 rootOffset = resolvedRoot * 20;
+        if (int32(Host.StandaloneResolvedRoots[rootOffset + 11])
+            == argumentCount)
+        {
+            matchingCandidates = matchingCandidates + 1;
+            candidateResultValue = candidate;
+        }
+    }
+
+    *candidateResult = candidateResultValue;
+    *nameFoundResult = nameFound;
+    if (!nameFound)
+    {
+        return 0;
+    }
+    if (matchingCandidates == 0)
+    {
+        return 2;
+    }
+    return matchingCandidates == 1 ? 0 : 4;
+}
+
+int32 CompleteStandaloneCallCandidate(int32 targetKind,
+    int32 targetIndex, int32 resultTypeId, int32 parameterCount,
+    ref<init int32> targetKindResult,
+    ref<init int32> targetIndexResult,
+    ref<init int32> expectedCallableIdResult,
+    ref<init int32> resultTypeIdResult,
+    ref<init int32> parameterCountResult)
+    ensure return == 0 ? (*targetKindResult is init
+        && *targetIndexResult is init
+        && *expectedCallableIdResult is init
+        && *resultTypeIdResult is init
+        && *parameterCountResult is init) : true
+{
+    init int32 expectedCallableId;
+    int32 resolveStatus = ResolveStandaloneCallTarget(
+        targetKind, targetIndex, ref init expectedCallableId);
+    if (resolveStatus != 0)
+    {
+        return resolveStatus;
+    }
+    *targetKindResult = targetKind;
+    *targetIndexResult = targetIndex;
+    *expectedCallableIdResult = expectedCallableId;
+    *resultTypeIdResult = resultTypeId;
+    *parameterCountResult = parameterCount;
+    return 0;
+}
+
+bool TryResolveStandaloneQualifiedNamespaceIdentity(
+    int32 callerScopeId, int32 pathTokenStart, int32 pathTokenEnd,
+    ref<init int32> namespaceIdentityResult)
+    ensure return ? *namespaceIdentityResult is init : true
+{
+    if (pathTokenStart < 0 || pathTokenStart >= pathTokenEnd)
+    {
+        return false;
+    }
+    mut int32 baseIdentityId
+        = GetStandaloneNamespaceIdentity(callerScopeId);
+    while (baseIdentityId >= 0)
+    {
+        mut int32 resolvedIdentityId = baseIdentityId;
+        mut int32 tokenIndex = pathTokenStart;
+        mut bool matched = true;
+        while (tokenIndex < pathTokenEnd)
+        {
+            init int32 nextIdentityId;
+            if (Host.Tokens[tokenIndex * 3] != 2
+                || !TryFindStandaloneNamespaceIdentity(
+                    resolvedIdentityId, tokenIndex,
+                    ref init nextIdentityId))
+            {
+                matched = false;
+                break;
+            }
+            resolvedIdentityId = nextIdentityId;
+            tokenIndex = tokenIndex + 1;
+            if (tokenIndex < pathTokenEnd)
+            {
+                if (Host.Tokens[tokenIndex * 3] != 54)
+                {
+                    matched = false;
+                    break;
+                }
+                tokenIndex = tokenIndex + 1;
+            }
+        }
+        if (matched && tokenIndex == pathTokenEnd)
+        {
+            *namespaceIdentityResult = resolvedIdentityId;
+            return true;
+        }
+        if (baseIdentityId == 0)
+        {
+            break;
+        }
+        baseIdentityId
+            = GetStandaloneNamespaceParentIdentity(baseIdentityId);
+    }
+    return false;
+}
+
 int32 FindStandaloneCallCandidate(int32 localCallableId,
     int32 nameTokenStart, int32 nameTokenEnd, int32 argumentCount,
     ref<init int32> targetKindResult,
@@ -1485,118 +2219,177 @@ int32 FindStandaloneCallCandidate(int32 localCallableId,
         && *resultTypeIdResult is init
         && *parameterCountResult is init) : true
 {
-    mut int32 localNameMatches = 0;
-    mut int32 localCandidate = -1;
-    mut bool localNameFound = false;
-    if (nameTokenEnd == nameTokenStart + 1)
+    if (localCallableId < 0
+        || localCallableId >= Host.StandaloneLocalCallableCount[0]
+        || nameTokenStart < 0 || nameTokenStart >= nameTokenEnd
+        || nameTokenEnd > Host.Tokens.Length / 3)
     {
-        for (mut int32 candidate = 0;
-            candidate < Host.StandaloneLocalCallableCount[0];
-            candidate = candidate + 1)
-        {
-            int32 infoOffset = candidate * 12;
-            if (!StandaloneTokenMatchesText(nameTokenStart,
-                    Host.StandaloneSourceCallableInfo[infoOffset],
-                    Host.StandaloneSourceCallableInfo[infoOffset + 1]))
-            {
-                continue;
-            }
-            localNameFound = true;
-            if (Host.StandaloneSourceCallableInfo[
-                    infoOffset + 6] == argumentCount)
-            {
-                localNameMatches = localNameMatches + 1;
-                localCandidate = candidate;
-            }
-        }
-    }
-    if (localNameFound)
-    {
-        if (localNameMatches == 0)
-        {
-            return 2;
-        }
-        if (localNameMatches != 1)
-        {
-            return 4;
-        }
-        int32 infoOffset = localCandidate * 12;
-        int32 targetKind = 1;
-        init int32 expectedCallableId;
-        int32 resolveStatus = ResolveStandaloneCallTarget(
-            targetKind, localCandidate,
-            ref init expectedCallableId);
-        if (resolveStatus != 0)
-        {
-            return resolveStatus;
-        }
-        *targetKindResult = targetKind;
-        *targetIndexResult = localCandidate;
-        *expectedCallableIdResult = expectedCallableId;
-        *resultTypeIdResult
-            = Host.StandaloneSourceCallableInfo[infoOffset + 4];
-        *parameterCountResult
-            = Host.StandaloneSourceCallableInfo[infoOffset + 6];
-        return 0;
+        return 3;
     }
 
-    mut int32 importedMatches = 0;
-    mut int32 importedCandidate = -1;
-    mut bool importedNameFound = false;
-    for (mut int32 candidate = 0;
-        candidate < Host.StandaloneSourceImportedCallableCount[0];
-        candidate = candidate + 1)
+    mut int32 lastDot = -1;
+    for (mut int32 tokenIndex = nameTokenStart;
+        tokenIndex < nameTokenEnd;
+        tokenIndex = tokenIndex + 1)
     {
-        if (!TryMatchStandaloneImportedCallableName(candidate,
-                nameTokenStart, nameTokenEnd))
+        if (Host.Tokens[tokenIndex * 3] == 54)
         {
-            continue;
-        }
-        importedNameFound = true;
-        int32 resolvedRoot = Host.StandaloneSourceImportedCallables[
-            candidate * 8 + 4];
-        int32 rootOffset = resolvedRoot * 20;
-        int32 paramCount
-            = int32(Host.StandaloneResolvedRoots[rootOffset + 11]);
-        if (paramCount == argumentCount)
-        {
-            importedMatches = importedMatches + 1;
-            importedCandidate = candidate;
+            lastDot = tokenIndex;
         }
     }
-    if (importedMatches == 0)
+    int32 methodNameToken = lastDot < 0
+        ? nameTokenStart : lastDot + 1;
+    if (methodNameToken >= nameTokenEnd
+        || nameTokenEnd != methodNameToken + 1
+        || Host.Tokens[methodNameToken * 3] != 2)
     {
-        return importedNameFound ? 2 : 3;
-    }
-    if (importedMatches != 1)
-    {
-        return 4;
+        return 3;
     }
 
-    int32 importedOffset = importedCandidate * 8;
-    int32 importedCallableId
-        = Host.StandaloneSourceImportedCallables[
-            importedOffset + 4];
-    int32 importedRootOffset = importedCallableId * 20;
-    int32 importedParamCount
-        = int32(Host.StandaloneResolvedRoots[
-            importedRootOffset + 11]);
-    init int32 expectedCallableId;
-    int32 importedTargetKind = 2;
-    int32 targetStatus = ResolveStandaloneCallTarget(
-        importedTargetKind, importedCandidate,
-        ref init expectedCallableId);
-    if (targetStatus != 0)
+    int32 callerScopeId
+        = Host.StandaloneSourceCallableInfo[localCallableId * 12 + 2];
+    if (lastDot >= 0)
     {
-        return targetStatus;
+        init int32 namespaceIdentityId;
+        if (TryResolveStandaloneQualifiedNamespaceIdentity(
+                callerScopeId, nameTokenStart, lastDot,
+                ref init namespaceIdentityId))
+        {
+            init int32 localCandidate;
+            init bool localNameFound;
+            int32 localStatus
+                = FindStandaloneLocalCandidateAtNamespace(
+                    namespaceIdentityId, methodNameToken, argumentCount,
+                    ref init localCandidate, ref init localNameFound);
+            if (localNameFound)
+            {
+                if (localStatus != 0)
+                {
+                    return localStatus;
+                }
+                int32 infoOffset = localCandidate * 12;
+                return CompleteStandaloneCallCandidate(1,
+                    localCandidate,
+                    Host.StandaloneSourceCallableInfo[infoOffset + 4],
+                    Host.StandaloneSourceCallableInfo[infoOffset + 6],
+                    ref init targetKindResult, ref init targetIndexResult,
+                    ref init expectedCallableIdResult,
+                    ref init resultTypeIdResult,
+                    ref init parameterCountResult);
+            }
+        }
+
+        init int32 qualifiedImportedCandidate;
+        init bool qualifiedImportedNameFound;
+        int32 qualifiedImportStatus
+            = FindStandaloneImportedCandidateAtScope(nameTokenStart,
+                nameTokenEnd, argumentCount, -2,
+                ref init qualifiedImportedCandidate,
+                ref init qualifiedImportedNameFound);
+        if (qualifiedImportedNameFound)
+        {
+            if (qualifiedImportStatus != 0)
+            {
+                return qualifiedImportStatus;
+            }
+            int32 importedOffset
+                = qualifiedImportedCandidate * 8;
+            int32 importedCallableId
+                = Host.StandaloneSourceImportedCallables[
+                    importedOffset + 4];
+            int32 importedRootOffset = importedCallableId * 20;
+            return CompleteStandaloneCallCandidate(2,
+                qualifiedImportedCandidate,
+                Host.StandaloneCallableTypeIds[importedCallableId],
+                int32(Host.StandaloneResolvedRoots[
+                    importedRootOffset + 11]),
+                ref init targetKindResult, ref init targetIndexResult,
+                ref init expectedCallableIdResult,
+                ref init resultTypeIdResult,
+                ref init parameterCountResult);
+        }
+        return 3;
     }
-    *targetKindResult = importedTargetKind;
-    *targetIndexResult = importedCandidate;
-    *expectedCallableIdResult = expectedCallableId;
-    *resultTypeIdResult
-        = Host.StandaloneCallableTypeIds[importedCallableId];
-    *parameterCountResult = importedParamCount;
-    return 0;
+
+    mut int32 namespaceIdentityId
+        = Host.StandaloneSourceCallableInfo[
+            localCallableId * 12 + 3];
+    if (namespaceIdentityId < 0
+        || namespaceIdentityId
+            > Host.StandaloneSourceNamespaceIdentityCount[0])
+    {
+        return 3;
+    }
+    while (true)
+    {
+        init int32 localCandidate;
+        init bool localNameFound;
+        int32 localStatus = FindStandaloneLocalCandidateAtNamespace(
+            namespaceIdentityId, methodNameToken, argumentCount,
+            ref init localCandidate, ref init localNameFound);
+        if (localNameFound)
+        {
+            if (localStatus != 0)
+            {
+                return localStatus;
+            }
+            int32 infoOffset = localCandidate * 12;
+            return CompleteStandaloneCallCandidate(1, localCandidate,
+                Host.StandaloneSourceCallableInfo[infoOffset + 4],
+                Host.StandaloneSourceCallableInfo[infoOffset + 6],
+                ref init targetKindResult, ref init targetIndexResult,
+                ref init expectedCallableIdResult,
+                ref init resultTypeIdResult,
+                ref init parameterCountResult);
+        }
+
+        int32 usingScopeId = FindStandaloneNamespaceScopeForIdentity(
+            callerScopeId, namespaceIdentityId);
+        if (usingScopeId != -2)
+        {
+            init int32 importedCandidate;
+            init bool importedNameFound;
+            int32 importedStatus
+                = FindStandaloneImportedCandidateAtScope(
+                    nameTokenStart, nameTokenEnd, argumentCount,
+                    usingScopeId, ref init importedCandidate,
+                    ref init importedNameFound);
+            if (importedNameFound)
+            {
+                if (importedStatus != 0)
+                {
+                    return importedStatus;
+                }
+                int32 importedOffset = importedCandidate * 8;
+                int32 importedCallableId
+                    = Host.StandaloneSourceImportedCallables[
+                        importedOffset + 4];
+                int32 importedRootOffset = importedCallableId * 20;
+                return CompleteStandaloneCallCandidate(2,
+                    importedCandidate,
+                    Host.StandaloneCallableTypeIds[importedCallableId],
+                    int32(Host.StandaloneResolvedRoots[
+                        importedRootOffset + 11]),
+                    ref init targetKindResult,
+                    ref init targetIndexResult,
+                    ref init expectedCallableIdResult,
+                    ref init resultTypeIdResult,
+                    ref init parameterCountResult);
+            }
+        }
+
+        if (namespaceIdentityId == 0)
+        {
+            break;
+        }
+        namespaceIdentityId
+            = GetStandaloneNamespaceParentIdentity(namespaceIdentityId);
+        if (namespaceIdentityId < 0)
+        {
+            return 3;
+        }
+    }
+    return 3;
 }
 
 int32 GetStandaloneCallParameterTypeId(int32 targetKind,

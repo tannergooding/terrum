@@ -20,6 +20,14 @@ semantic projection crosses that boundary. This is transitional hosted
 compilation, not independent Terrum compilation or completion of the post-GA
 transition.
 
+`StandaloneOwnedSourceProgram` is a separate, bounded method-import prototype
+over the original scanner snapshot. It resolves local and selected imported
+calls across file-scoped and block namespaces while keeping namespace identity
+separate from lexical `using` scope. This does not change the selected compiler
+architecture or establish general source binding; overload applicability,
+broader expression/control-flow coverage, and authored effects/initialization
+verification remain separate work.
+
 The existing `TokenCursor`, v87/v88 scalar projection and private
 `Span<Token>` module paths are implementation prototypes, not selected
 compiler interfaces. The intended parser path uses `Span<Token>` directly
