@@ -179,6 +179,8 @@ bool ValidateStandaloneNormalizationBuffers()
             == tokenCapacity * 10
         && Host.StandaloneNormalizedParameterHomeIds.Length
             == tokenCapacity
+        && Host.StandaloneNormalizedSourceLocalHomeIds.Length
+            == tokenCapacity
         && Host.StandaloneNormalizedConstantCount.Length == 1
         && Host.StandaloneNormalizedConstants.Length
             == tokenCapacity * 4
@@ -235,6 +237,12 @@ void ClearStandaloneNormalizedProgram()
         index = index + 1)
     {
         Host.StandaloneNormalizedParameterHomeIds[index] = -1;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneNormalizedSourceLocalHomeIds.Length;
+        index = index + 1)
+    {
+        Host.StandaloneNormalizedSourceLocalHomeIds[index] = -1;
     }
     for (mut int32 index = 0;
         index < Host.StandaloneNormalizedConstants.Length;
@@ -550,6 +558,87 @@ int32 NormalizeStandaloneSourceStatement(int32 bodyId,
         = Host.StandaloneSourceStatements[statementOffset];
     int32 expressionId
         = Host.StandaloneSourceStatements[statementOffset + 1];
+    if (statementKind == 4)
+    {
+        int32 localId
+            = Host.StandaloneSourceStatements[statementOffset + 2];
+        int32 localRangeOffset = bodyId * 2;
+        int32 localFirst
+            = Host.StandaloneSourceBodyLocalRanges[
+                localRangeOffset];
+        int32 localCount
+            = Host.StandaloneSourceBodyLocalRanges[
+                localRangeOffset + 1];
+        if (localId < localFirst
+            || localId >= localFirst + localCount)
+        {
+            return 3;
+        }
+        int32 localOffset = localId * 10;
+        int32 bindingKind
+            = Host.StandaloneSourceLocals[localOffset + 3];
+        int32 typeId
+            = Host.StandaloneSourceLocals[localOffset + 2];
+        if (Host.StandaloneSourceLocals[localOffset] != bodyId
+            || typeId <= 0
+            || typeId > Host.StandaloneTypeFactCount[0])
+        {
+            return 3;
+        }
+        if (expressionId < 0)
+        {
+            if ((bindingKind != 2 && bindingKind != 3)
+                || Host.StandaloneSourceLocalStates[localId] != 0)
+            {
+                return 3;
+            }
+            return 0;
+        }
+        if (expressionId
+            >= Host.StandaloneSourceBodies[bodyId * 12 + 4]
+            || (bindingKind != 0 && bindingKind != 1)
+            || Host.StandaloneSourceLocalStates[localId] != 1)
+        {
+            return 3;
+        }
+
+        init int32 selectorKind;
+        init int32 sourceUse;
+        init int32 selectorIndex;
+        init bool terminated;
+        int32 expressionStatus = NormalizeStandaloneSourceExpression(
+            bodyId, expressionId, 0,
+            ref init selectorKind, ref init sourceUse,
+            ref init selectorIndex, ref init terminated);
+        if (expressionStatus != 0)
+        {
+            return expressionStatus;
+        }
+        if (terminated)
+        {
+            *terminalKind = 1;
+            return 0;
+        }
+        int32 expectedUse = GetStandaloneSourceUse(typeId);
+        if (expectedUse == 0)
+        {
+            if (selectorKind != 0 || sourceUse != 0
+                || selectorIndex != 0)
+            {
+                return 3;
+            }
+            Host.StandaloneNormalizedSourceLocalHomeIds[localId] = 0;
+            return 0;
+        }
+        if (expectedUse != 1 || selectorKind != 2
+            || sourceUse != 1 || selectorIndex < 0)
+        {
+            return 2;
+        }
+        Host.StandaloneNormalizedSourceLocalHomeIds[localId]
+            = selectorIndex;
+        return 0;
+    }
     if (statementKind == 1 && expressionId < 0)
     {
         if (!IsStandaloneUnitType(
@@ -720,6 +809,83 @@ int32 NormalizeStandaloneSourceExpression(int32 bodyId,
         *selectorKindResult = 2;
         *sourceUseResult = 1;
         *selectorIndexResult = homeId;
+        *terminatedResult = false;
+        return 0;
+    }
+    if (expressionKind == 5)
+    {
+        int32 placeId
+            = Host.StandaloneSourceExpressions[expressionOffset + 2];
+        int32 bodyPlaceRangeOffset = bodyId * 2;
+        int32 bodyPlaceFirst
+            = Host.StandaloneSourceBodyPlaceRanges[
+                bodyPlaceRangeOffset];
+        int32 bodyPlaceCount
+            = Host.StandaloneSourceBodyPlaceRanges[
+                bodyPlaceRangeOffset + 1];
+        if (placeId < bodyPlaceFirst
+            || placeId >= bodyPlaceFirst + bodyPlaceCount)
+        {
+            return 3;
+        }
+        int32 placeOffset = placeId * 5;
+        int32 localId
+            = Host.StandaloneSourcePlaces[placeOffset + 3];
+        int32 localRangeOffset = bodyId * 2;
+        int32 localFirst
+            = Host.StandaloneSourceBodyLocalRanges[
+                localRangeOffset];
+        int32 localCount
+            = Host.StandaloneSourceBodyLocalRanges[
+                localRangeOffset + 1];
+        if (Host.StandaloneSourcePlaces[placeOffset] != bodyId
+            || Host.StandaloneSourcePlaces[placeOffset + 1] != typeId
+            || Host.StandaloneSourcePlaces[placeOffset + 2] != 1
+            || localId < localFirst
+            || localId >= localFirst + localCount
+            || Host.StandaloneSourceLocalStates[localId] != 1
+            || Host.StandaloneSourceLocals[localId * 10 + 2]
+                != typeId)
+        {
+            return 3;
+        }
+
+        int32 sourceUse = GetStandaloneSourceUse(typeId);
+        int32 homeId
+            = Host.StandaloneNormalizedSourceLocalHomeIds[localId];
+        if (sourceUse == 0)
+        {
+            if (homeId != 0)
+            {
+                return 3;
+            }
+            *selectorKindResult = 0;
+            *sourceUseResult = 0;
+            *selectorIndexResult = 0;
+        }
+        else
+        {
+            int32 homeFirst
+                = Host.StandaloneNormalizedBodies[
+                    bodyId * 12 + 1];
+            int32 bodyHomeCount
+                = Host.StandaloneNormalizedHomeCount[0] - homeFirst;
+            if (sourceUse != 1 || homeId < 0
+                || homeId >= bodyHomeCount)
+            {
+                return 3;
+            }
+            int32 homeOffset = (homeFirst + homeId) * 5;
+            if (Host.StandaloneNormalizedHomes[homeOffset] != bodyId
+                || Host.StandaloneNormalizedHomes[
+                    homeOffset + 3] != typeId)
+            {
+                return 3;
+            }
+            *selectorKindResult = 2;
+            *sourceUseResult = sourceUse;
+            *selectorIndexResult = homeId;
+        }
         *terminatedResult = false;
         return 0;
     }
@@ -1177,6 +1343,74 @@ int32 VerifyStandaloneNormalizedProgram()
                     homeOffset + 4] != ordinal)
             {
                 return 3;
+            }
+        }
+
+        int32 localRangeOffset = bodyId * 2;
+        int32 localFirst
+            = Host.StandaloneSourceBodyLocalRanges[
+                localRangeOffset];
+        int32 localCount
+            = Host.StandaloneSourceBodyLocalRanges[
+                localRangeOffset + 1];
+        int32 sourceLocalCount
+            = Host.StandaloneSourceLocalCount[0];
+        if (localFirst < 0 || localCount < 0
+            || localFirst > sourceLocalCount - localCount)
+        {
+            return 3;
+        }
+        for (mut int32 localOrdinal = 0;
+            localOrdinal < localCount;
+            localOrdinal = localOrdinal + 1)
+        {
+            int32 localId = localFirst + localOrdinal;
+            int32 localTypeId
+                = Host.StandaloneSourceLocals[localId * 10 + 2];
+            int32 localState
+                = Host.StandaloneSourceLocalStates[localId];
+            int32 homeId
+                = Host.StandaloneNormalizedSourceLocalHomeIds[
+                    localId];
+            int32 localUse
+                = GetStandaloneSourceUse(localTypeId);
+            if (Host.StandaloneSourceLocals[localId * 10] != bodyId
+                || localUse < 0
+                || (localState != 0 && localState != 1)
+                || (localState == 0 && homeId != -1))
+            {
+                return 3;
+            }
+            if (localState == 1 && homeId < 0)
+            {
+                if (homeId != -1 || terminalKind != 1)
+                {
+                    return 3;
+                }
+                continue;
+            }
+            if (localState == 1 && localUse == 0)
+            {
+                if (homeId != 0)
+                {
+                    return 3;
+                }
+                continue;
+            }
+            if (localState == 1)
+            {
+                if (localUse != 1 || homeId >= bodyHomeCount)
+                {
+                    return 3;
+                }
+                int32 homeOffset = (homeFirst + homeId) * 5;
+                if (Host.StandaloneNormalizedHomes[
+                        homeOffset] != bodyId
+                    || Host.StandaloneNormalizedHomes[
+                        homeOffset + 3] != localTypeId)
+                {
+                    return 3;
+                }
             }
         }
 

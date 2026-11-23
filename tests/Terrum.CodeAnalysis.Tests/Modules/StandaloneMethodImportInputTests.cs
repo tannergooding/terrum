@@ -539,6 +539,10 @@ internal sealed class StandaloneMethodImportInputTests
             + "int32 copy = value; return Imported(copy); }",
         0, 15, false)]
     [TestCase(BoundRuntimePolicy.FailFast,
+        "using api; int32 Main(int32 value) { "
+            + "int32 copy = value; return Imported(copy); }",
+        0, 16, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
         "namespace client { int32 Main() { "
             + "return later; int32 later = 1; } }",
         2, 0, false)]
@@ -820,6 +824,33 @@ internal sealed class StandaloneMethodImportInputTests
                 return 0;
             }
             """;
+        const string localSourceNormalizationVerificationSource = """
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                if (Scan() < 1) { return 70; }
+                int32 status = BindStandaloneOwnedSourceProgram();
+                if (status != 0) { return status; }
+                status = NormalizeStandaloneOwnedSourceProgram();
+                if (status != 0
+                    || Host.StandaloneNormalizedProgramStatus[0] != 0
+                    || Host.StandaloneNormalizedBodyCount[0] != 1
+                    || Host.StandaloneNormalizedHomeCount[0] != 2
+                    || Host.StandaloneNormalizedSourceLocalHomeIds[0]
+                        != 0
+                    || Host.StandaloneNormalizedBodies[2] != 2
+                    || Host.StandaloneNormalizedBodies[10] != 2
+                    || Host.StandaloneInvokeCount[0] != 1
+                    || Host.StandaloneInvokeInputCount[0] != 1
+                    || Host.StandaloneInvokeInputs[0] != 2
+                    || Host.StandaloneInvokeInputs[1] != 1
+                    || Host.StandaloneInvokeInputs[2] != 0
+                    || Host.StandaloneNormalizedOperations[0] != 3
+                    || Host.StandaloneNormalizedOperations[4] != 4) {
+                    return 71;
+                }
+                return 0;
+            }
+            """;
         const string localNamespaceCallVerificationSource = """
             namespace Terrum.CodeAnalysis;
             int32 Main() {
@@ -990,9 +1021,11 @@ internal sealed class StandaloneMethodImportInputTests
                         ? genericSourceCallVerificationSource
                         : verificationMode == 15
                             ? localSourceArenaVerificationSource
-                            : verificationMode == 1
-                                ? localNamespaceCallVerificationSource
-                                : successfulVerificationSource;
+                            : verificationMode == 16
+                                ? localSourceNormalizationVerificationSource
+                                : verificationMode == 1
+                                    ? localNamespaceCallVerificationSource
+                                    : successfulVerificationSource;
 
         var root = RepositoryRoot();
         var components = new List<SyntaxTree>(sourcePaths.Length + 1);
@@ -1023,7 +1056,7 @@ internal sealed class StandaloneMethodImportInputTests
         {
             return;
         }
-        if (verificationMode == 15)
+        if (verificationMode == 15 || verificationMode == 16)
         {
             return;
         }
