@@ -861,7 +861,9 @@ internal static class NativeFunctionPointerContract
             && SameNativeParameterContracts(actual.NativeParameters,
                 expected.NativeParameters)
             && ((expected.EffectsMask & 2) == 0
-                || (actual.EffectsMask & 2) != 0);
+                || (actual.EffectsMask & 2) != 0)
+            && ((expected.EffectsMask & 4) != 0
+                || (actual.EffectsMask & 4) == 0);
     }
 
     internal static bool MatchesAddressableFunction(BoundFunction function,

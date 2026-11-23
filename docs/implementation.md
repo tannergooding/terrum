@@ -852,8 +852,9 @@ signature across TypeDef-row and anchor-MethodDef-row relocation; source,
 composition and replacement regressions are added but remain unverified under
 the active hold. The successor remains metadata-only: Standard emission now
 rejects bodies with `NativeAddress` or `call.value`, and source regressions
-reject projecting the Terrum convention address to each foreign convention.
-These cases remain unverified under the active hold. Standard method references
+reject projecting the Terrum convention address to each foreign convention
+and reject erasing a caller-unsafe function-address effect. These cases remain
+unverified under the active hold. Standard method references
 also retain hidden TypeDef closure and provider origins for pointer-to-structure
 signatures without making those types lookup roots; a consumer regression
 remains unverified under the hold. Other consumer routes, the separate

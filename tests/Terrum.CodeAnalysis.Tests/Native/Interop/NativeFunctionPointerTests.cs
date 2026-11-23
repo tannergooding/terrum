@@ -2816,6 +2816,26 @@ internal sealed class NativeFunctionPointerTests
     }
 
     [Test]
+    public void NativeFunctionAddressCannotEraseCallerUnsafeEffect()
+    {
+        var compilation = Create(SyntaxTree.Parse("""
+            unsafe int32 Answer() { return 42; }
+
+            int32 Main() {
+                unsafe {
+                    fnptr<int32> callback = &Answer;
+                    return callback();
+                }
+            }
+            """));
+
+        Assert.That(compilation.Diagnostics.Any(
+            static diagnostic => diagnostic.Code == "TRM3030"), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Program, Is.Null);
+    }
+
+    [Test]
     public void NativeAddressInfersOrdinaryTerrumFunctionContract()
     {
         var compilation = Create(SyntaxTree.Parse("""
