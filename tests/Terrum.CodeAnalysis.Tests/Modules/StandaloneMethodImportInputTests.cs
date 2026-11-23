@@ -3802,6 +3802,28 @@ internal sealed class StandaloneMethodImportInputTests
                         != {{updateTypeCode}}) {
                     return 299;
                 }
+                mut int32 updateTokenIndex = -1;
+                for (mut int32 tokenIndex = 0;
+                    tokenIndex < Host.Tokens.Length / 3;
+                    tokenIndex = tokenIndex + 1) {
+                    int32 tokenKind = Host.Tokens[tokenIndex * 3];
+                    if (tokenKind == 86 || tokenKind == 87) {
+                        if (updateTokenIndex >= 0) { return 303; }
+                        updateTokenIndex = tokenIndex;
+                    }
+                }
+                if (updateTokenIndex < 0
+                    || !CanBindStandaloneSourceArgument(
+                        0,
+                        Host.Tokens[updateTokenIndex * 3] == 86
+                            ? updateTokenIndex
+                            : updateTokenIndex - 1,
+                        Host.Tokens[updateTokenIndex * 3] == 86
+                            ? updateTokenIndex + 2
+                            : updateTokenIndex + 1,
+                        typeId, 0)) {
+                    return 304;
+                }
                 status = NormalizeStandaloneOwnedSourceProgram();
                 if (status != 0
                     || Host.StandaloneNormalizedHomeCount[0] != 5
