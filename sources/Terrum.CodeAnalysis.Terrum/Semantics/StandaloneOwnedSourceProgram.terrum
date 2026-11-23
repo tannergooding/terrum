@@ -5360,7 +5360,7 @@ int32 ParseStandaloneSourceNestedWhile(
     int32 nestedFalseCount
         = Host.StandaloneSourceIfNodes[nestedNodeOffset + 4];
     if (nestedChildFirst < 0
-        || (nestedChildCount != 1 && nestedChildCount != 2)
+        || nestedChildCount < 1
         || nestedFalseCount != 0
         || nestedChildFirst
             > Host.StandaloneSourceIfChildCount[0] - nestedChildCount)
@@ -5371,10 +5371,13 @@ int32 ParseStandaloneSourceNestedWhile(
     {
         return 2;
     }
-    if (nestedChildCount == 2)
+    for (mut int32 nestedChildOrdinal = 0;
+        nestedChildOrdinal < nestedChildCount - 1;
+        nestedChildOrdinal = nestedChildOrdinal + 1)
     {
         int32 assignmentStatementId
-            = Host.StandaloneSourceIfChildren[nestedChildFirst];
+            = Host.StandaloneSourceIfChildren[
+                nestedChildFirst + nestedChildOrdinal];
         if (assignmentStatementId < 0
             || assignmentStatementId
                 >= Host.StandaloneSourceStatementCount[0]
@@ -5387,13 +5390,8 @@ int32 ParseStandaloneSourceNestedWhile(
         }
     }
     int32 breakStatementId
-        = Host.StandaloneSourceIfChildren[nestedChildFirst];
-    if (nestedChildCount == 2)
-    {
-        breakStatementId
-            = Host.StandaloneSourceIfChildren[
-                nestedChildFirst + 1];
-    }
+        = Host.StandaloneSourceIfChildren[
+            nestedChildFirst + nestedChildCount - 1];
     if (breakStatementId < 0
         || breakStatementId
             >= Host.StandaloneSourceStatementCount[0]
@@ -11232,8 +11230,7 @@ int32 VerifyStandaloneDirectCalls()
                             || Host.StandaloneSourceExpressionUseCounts[
                                 nestedExpressionIndex] != 0
                             || nestedChildFirst < 0
-                            || (nestedChildCount != 1
-                                && nestedChildCount != 2)
+                            || nestedChildCount < 1
                             || nestedFalseCount != 0
                             || nestedChildFirst
                                 > Host.StandaloneSourceIfChildCount[0]
@@ -11257,11 +11254,14 @@ int32 VerifyStandaloneDirectCalls()
                             return nestedConditionStatus != 0
                                 ? nestedConditionStatus : 3;
                         }
-                        if (nestedChildCount == 2)
+                        for (mut int32 nestedChildOrdinal = 0;
+                            nestedChildOrdinal < nestedChildCount - 1;
+                            nestedChildOrdinal = nestedChildOrdinal + 1)
                         {
                             int32 nestedAssignmentStatementId
                                 = Host.StandaloneSourceIfChildren[
-                                    nestedChildFirst];
+                                    nestedChildFirst
+                                        + nestedChildOrdinal];
                             if (nestedAssignmentStatementId < 0
                                 || nestedAssignmentStatementId
                                     >= Host.StandaloneSourceStatementCount[0]

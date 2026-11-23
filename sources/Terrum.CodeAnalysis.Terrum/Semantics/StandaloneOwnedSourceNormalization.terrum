@@ -1157,7 +1157,7 @@ int32 NormalizeStandaloneSourceLoopBody(int32 bodyId,
                 || nestedConditionKind == 35
                 || nestedConditionKind == 36
                 || nestedChildFirst < 0
-                || (nestedChildCount != 1 && nestedChildCount != 2)
+                || nestedChildCount < 1
                 || nestedFalseCount != 0
                 || nestedChildFirst
                     > Host.StandaloneSourceIfChildCount[0]
@@ -1185,11 +1185,13 @@ int32 NormalizeStandaloneSourceLoopBody(int32 bodyId,
             {
                 return 3;
             }
-            if (nestedChildCount == 2)
+            for (mut int32 nestedChildOrdinal = 0;
+                nestedChildOrdinal < nestedChildCount - 1;
+                nestedChildOrdinal = nestedChildOrdinal + 1)
             {
                 int32 nestedAssignmentStatementId
                     = Host.StandaloneSourceIfChildren[
-                        nestedChildFirst];
+                        nestedChildFirst + nestedChildOrdinal];
                 if (nestedAssignmentStatementId < 0
                     || nestedAssignmentStatementId
                         >= Host.StandaloneSourceStatementCount[0]
@@ -1238,7 +1240,7 @@ int32 NormalizeStandaloneSourceLoopBody(int32 bodyId,
             {
                 return 2;
             }
-            if (nestedChildCount == 2)
+            if (nestedChildCount > 1)
             {
                 if (childCount != 1 || childIndex != 0
                     || bodyBlockCount != 2)
@@ -1276,21 +1278,27 @@ int32 NormalizeStandaloneSourceLoopBody(int32 bodyId,
                 {
                     return 3;
                 }
-                int32 nestedAssignmentStatementId
-                    = Host.StandaloneSourceIfChildren[
-                        nestedChildFirst];
                 int32 nestedAssignmentOperationFirst
                     = Host.StandaloneNormalizedOperationCount[0];
-                init int32 nestedAssignmentTerminalKind;
-                int32 nestedAssignmentStatus
-                    = NormalizeStandaloneSourceStatement(
-                        bodyId, nestedAssignmentStatementId * 3,
-                        ref init nestedAssignmentTerminalKind);
-                if (nestedAssignmentStatus != 0
-                    || nestedAssignmentTerminalKind != 0)
+                for (mut int32 nestedChildOrdinal = 0;
+                    nestedChildOrdinal < nestedChildCount - 1;
+                    nestedChildOrdinal = nestedChildOrdinal + 1)
                 {
-                    return nestedAssignmentStatus != 0
-                        ? nestedAssignmentStatus : 2;
+                    int32 nestedAssignmentStatementId
+                        = Host.StandaloneSourceIfChildren[
+                            nestedChildFirst + nestedChildOrdinal];
+                    init int32 nestedAssignmentTerminalKind;
+                    int32 nestedAssignmentStatus
+                        = NormalizeStandaloneSourceStatement(
+                            bodyId,
+                            nestedAssignmentStatementId * 3,
+                            ref init nestedAssignmentTerminalKind);
+                    if (nestedAssignmentStatus != 0
+                        || nestedAssignmentTerminalKind != 0)
+                    {
+                        return nestedAssignmentStatus != 0
+                            ? nestedAssignmentStatus : 2;
+                    }
                 }
                 int32 nestedAssignmentOperationCount
                     = Host.StandaloneNormalizedOperationCount[0]
@@ -1632,7 +1640,7 @@ int32 GetStandaloneSourceLoopBodyBlockCount(int32 statementId,
                 = Host.StandaloneSourceIfNodes[
                     nestedNodeOffset + 4];
             if (nestedChildFirst < 0
-                || (nestedChildCount != 1 && nestedChildCount != 2)
+                || nestedChildCount < 1
                 || nestedFalseCount != 0
                 || nestedChildFirst
                     > Host.StandaloneSourceIfChildCount[0]
@@ -1658,11 +1666,13 @@ int32 GetStandaloneSourceLoopBodyBlockCount(int32 statementId,
             {
                 return 3;
             }
-            if (nestedChildCount == 2)
+            for (mut int32 nestedChildOrdinal = 0;
+                nestedChildOrdinal < nestedChildCount - 1;
+                nestedChildOrdinal = nestedChildOrdinal + 1)
             {
                 int32 nestedAssignmentId
                     = Host.StandaloneSourceIfChildren[
-                        nestedChildFirst];
+                        nestedChildFirst + nestedChildOrdinal];
                 if (nestedAssignmentId < 0
                     || nestedAssignmentId
                         >= Host.StandaloneSourceStatementCount[0]
@@ -1673,10 +1683,8 @@ int32 GetStandaloneSourceLoopBodyBlockCount(int32 statementId,
                 {
                     return 3;
                 }
-                *blockCountResult = 2;
-                return 0;
             }
-            *blockCountResult = 1;
+            *blockCountResult = nestedChildCount > 1 ? 2 : 1;
             return 0;
         }
     }
