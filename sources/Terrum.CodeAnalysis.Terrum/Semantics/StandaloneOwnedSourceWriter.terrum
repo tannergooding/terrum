@@ -3014,7 +3014,8 @@ int32 GetStandaloneWriterOperationCodeLength(int32 bodyId,
         }
         return 12;
     }
-    if (kind == 10 || kind == 11 || kind == 12)
+    if (kind == 10 || kind == 11 || kind == 12
+        || kind == 13 || kind == 14)
     {
         int32 bodyOffset = bodyId * 12;
         int32 homeCount
@@ -3711,7 +3712,8 @@ int32 WriteStandaloneWriterBodyCode(int32 bodyId,
                 uint32(operand1));
             if (status != 0) { return status; }
         }
-        else if (kind == 10 || kind == 11 || kind == 12)
+        else if (kind == 10 || kind == 11 || kind == 12
+            || kind == 13 || kind == 14)
         {
             int32 homeFirst
                 = Host.StandaloneRewrittenNormalizedBodies[
@@ -3737,7 +3739,10 @@ int32 WriteStandaloneWriterBodyCode(int32 bodyId,
             int32 typeId
                 = Host.StandaloneRewrittenNormalizedHomes[
                     leftHomeOffset + 3];
-            if (!IsStandaloneNotType(typeId)
+            bool booleanEquality = kind == 13 || kind == 14;
+            if ((booleanEquality
+                    ? !IsStandaloneLogicalNotType(typeId)
+                    : !IsStandaloneNotType(typeId))
                 || Host.StandaloneRewrittenNormalizedHomes[
                     leftHomeOffset] != bodyId
                 || Host.StandaloneRewrittenNormalizedHomes[
@@ -3772,10 +3777,13 @@ int32 WriteStandaloneWriterBodyCode(int32 bodyId,
             if (status != 0) { return status; }
             status = AppendStandaloneWriterHalfWord(uint32(operand1));
             if (status != 0) { return status; }
-            status = AppendStandaloneWriterByte(0xC1);
+            status = AppendStandaloneWriterByte(
+                booleanEquality ? 0xC2 : 0xC1);
             if (status != 0) { return status; }
-            int32 control = kind == 10 ? 0x01
-                : kind == 11 ? 0x02 : 0x03;
+            int32 control = kind == 13 ? 0x01
+                : kind == 14 ? 0x02
+                    : kind == 10 ? 0x01
+                        : kind == 11 ? 0x02 : 0x03;
             status = AppendStandaloneWriterByte(control);
             if (status != 0) { return status; }
             status = AppendStandaloneWriterHalfWord(

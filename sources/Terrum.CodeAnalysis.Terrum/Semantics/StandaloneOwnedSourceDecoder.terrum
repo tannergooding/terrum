@@ -4093,6 +4093,67 @@ int32 ValidateStandaloneBodyCode(int32 bodyId, int32 bodyOffset,
             }
             codeOffset = codeOffset + 4;
         }
+        else if (opcode == 0xC2)
+        {
+            if (codeOffset > codeLength - 4)
+            {
+                return 3;
+            }
+            init int32 control;
+            init uint32 registerPayload;
+            if (!TryReadStandaloneArtifactAbsoluteByte(artifactStart,
+                    artifactLength, codeStart + codeOffset + 1,
+                    ref init control)
+                || !TryReadStandaloneArtifactAbsoluteHalfWord(
+                    artifactStart, artifactLength,
+                    codeStart + codeOffset + 2,
+                    ref init registerPayload))
+            {
+                return 3;
+            }
+            int32 resultRegister
+                = int32(registerPayload & 0x0F);
+            int32 unusedResult
+                = int32((registerPayload >> 4) & 0x0F);
+            int32 source0Register
+                = int32((registerPayload >> 8) & 0x0F);
+            int32 source1Register
+                = int32((registerPayload >> 12) & 0x0F);
+            if (resultRegister > 13 || unusedResult != 15
+                || source0Register > 13 || source1Register > 13)
+            {
+                return 3;
+            }
+            int32 leftTypeId
+                = Host.StandaloneDecoderRegisterTypeIds[
+                    bodyId * 14 + source0Register];
+            int32 rightTypeId
+                = Host.StandaloneDecoderRegisterTypeIds[
+                    bodyId * 14 + source1Register];
+            if (leftTypeId <= 0
+                || leftTypeId
+                    > Host.StandaloneTypeFactCount[0]
+                || rightTypeId != leftTypeId
+                || Host.StandaloneTypeFacts[
+                    leftTypeId * 3] != 0
+                || Host.StandaloneTypeFacts[
+                    leftTypeId * 3 + 1] != 1)
+            {
+                return 3;
+            }
+            if (control != 0x01 && control != 0x02)
+            {
+                return control == 0 ? 2 : 3;
+            }
+            int32 registerTypeStatus
+                = SetStandaloneDecoderRegisterType(
+                    bodyId, resultRegister, leftTypeId);
+            if (registerTypeStatus != 0)
+            {
+                return registerTypeStatus;
+            }
+            codeOffset = codeOffset + 4;
+        }
         else if (opcode == 0x90)
         {
             if (codeOffset > codeLength - 2)

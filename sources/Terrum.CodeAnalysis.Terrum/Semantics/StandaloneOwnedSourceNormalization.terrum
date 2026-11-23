@@ -484,7 +484,8 @@ int32 VisitStandaloneSourceExpression(int32 bodyId,
         }
     }
     else if (expressionKind == 12 || expressionKind == 13
-        || expressionKind == 14)
+        || expressionKind == 14 || expressionKind == 15
+        || expressionKind == 16)
     {
         int32 leftExpressionId
             = Host.StandaloneSourceExpressions[
@@ -972,7 +973,8 @@ int32 NormalizeStandaloneSourceExpression(int32 bodyId,
         return 0;
     }
     if (expressionKind == 12 || expressionKind == 13
-        || expressionKind == 14)
+        || expressionKind == 14 || expressionKind == 15
+        || expressionKind == 16)
     {
         int32 leftExpressionId
             = Host.StandaloneSourceExpressions[
@@ -980,7 +982,10 @@ int32 NormalizeStandaloneSourceExpression(int32 bodyId,
         int32 rightExpressionId
             = Host.StandaloneSourceExpressions[
                 expressionOffset + 3];
-        if (!IsStandaloneNotType(typeId)
+        if ((expressionKind <= 14
+                && !IsStandaloneNotType(typeId))
+            || (expressionKind >= 15
+                && !IsStandaloneLogicalNotType(typeId))
             || leftExpressionId < 0
             || leftExpressionId >= expressionId
             || rightExpressionId < 0
@@ -1078,7 +1083,9 @@ int32 NormalizeStandaloneSourceExpression(int32 bodyId,
             return homeStatus;
         }
         int32 operationKind = expressionKind == 12 ? 10
-            : expressionKind == 13 ? 11 : 12;
+            : expressionKind == 13 ? 11
+                : expressionKind == 14 ? 12
+                    : expressionKind == 15 ? 13 : 14;
         int32 operationStatus = AppendStandaloneNormalizedOperation(
             bodyId, operationKind, leftSelectorIndex,
             rightSelectorIndex, resultHomeId);
@@ -2156,7 +2163,8 @@ int32 VerifyStandaloneNormalizedProgram()
                     return 3;
                 }
             }
-            else if (kind == 10 || kind == 11 || kind == 12)
+            else if (kind == 10 || kind == 11 || kind == 12
+                || kind == 13 || kind == 14)
             {
                 if (operand0 < 0 || operand0 >= bodyHomeCount
                     || operand1 < 0 || operand1 >= bodyHomeCount
@@ -2174,7 +2182,9 @@ int32 VerifyStandaloneNormalizedProgram()
                 int32 typeId
                     = Host.StandaloneNormalizedHomes[
                         leftHomeOffset + 3];
-                if (!IsStandaloneNotType(typeId)
+                if ((kind <= 12
+                        ? !IsStandaloneNotType(typeId)
+                        : !IsStandaloneLogicalNotType(typeId))
                     || Host.StandaloneNormalizedHomes[
                         leftHomeOffset] != bodyId
                     || Host.StandaloneNormalizedHomes[

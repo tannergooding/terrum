@@ -392,7 +392,11 @@ public static int32 RewriteStandaloneOwnedCallNodes()
                 || Host.StandaloneSourceExpressions[
                     sourceOffset] == 13
                 || Host.StandaloneSourceExpressions[
-                    sourceOffset] == 14)
+                    sourceOffset] == 14
+                || Host.StandaloneSourceExpressions[
+                    sourceOffset] == 15
+                || Host.StandaloneSourceExpressions[
+                    sourceOffset] == 16)
             {
                 int32 leftExpressionId
                     = Host.StandaloneSourceExpressions[
@@ -1265,7 +1269,8 @@ int32 VerifyStandaloneRewrittenSourceArenas()
             }
         }
         else if (expressionKind == 12 || expressionKind == 13
-            || expressionKind == 14)
+            || expressionKind == 14 || expressionKind == 15
+            || expressionKind == 16)
         {
             int32 leftExpressionId
                 = Host.StandaloneSourceExpressions[oldOffset + 2];
@@ -1300,7 +1305,9 @@ int32 VerifyStandaloneRewrittenSourceArenas()
                     Host.StandaloneRewriteBodyIds[oldBodyId] * 12 + 3];
             int32 expressionTypeId
                 = Host.StandaloneSourceExpressions[oldOffset + 1];
-            if (!IsStandaloneNotType(expressionTypeId)
+            if ((expressionKind <= 14
+                    ? !IsStandaloneNotType(expressionTypeId)
+                    : !IsStandaloneLogicalNotType(expressionTypeId))
                 || Host.StandaloneSourceExpressions[
                     leftGlobalId * 8 + 1] != expressionTypeId
                 || Host.StandaloneSourceExpressions[
