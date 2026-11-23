@@ -27,8 +27,11 @@ separate from lexical `using` scope. The current scalar/init-reference subset
 maps local argument labels before applicability, checks supported input types,
 does not rank contextual integer literals by range or overloads by result type,
 and keeps colliding imported views ambiguous; imported roots remain positional
-and label-free. This does not change the selected compiler architecture or
-establish general source binding; direct conversions, defaults/`params`,
+and label-free. Non-unit call results require an explicit `_ =` discard or a
+value use; ordinary expression statements accept unit-valued expressions or
+no-return calls only.
+This does not change the selected compiler architecture or establish general
+source binding; direct conversions, defaults/`params`,
 generic/nominal calls, broader expression/control-flow coverage, and authored
 effects/initialization verification remain separate work.
 

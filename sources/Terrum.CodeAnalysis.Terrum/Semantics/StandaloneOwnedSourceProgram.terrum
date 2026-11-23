@@ -1476,6 +1476,59 @@ int32 InventoryStandaloneSourceCallable(int32 tokenStart,
     return 0;
 }
 
+int32 TryGetStandaloneSourceExpressionDoesNotReturn(int32 bodyId,
+    int32 expressionId, ref<init bool> doesNotReturnResult)
+    ensure return == 0 ? *doesNotReturnResult is init : true
+{
+    if (bodyId < 0
+        || bodyId >= Host.StandaloneSourceBodyCount[0]
+        || expressionId < 0)
+    {
+        return 3;
+    }
+
+    int32 bodyOffset = bodyId * 12;
+    int32 expressionFirst
+        = Host.StandaloneSourceBodies[bodyOffset + 3];
+    int32 expressionIndex = expressionFirst + expressionId;
+    if (expressionIndex < expressionFirst
+        || expressionIndex >= Host.StandaloneSourceExpressionCount[0]
+        || Host.StandaloneSourceExpressions[
+            expressionIndex * 8 + 7] != bodyId)
+    {
+        return 3;
+    }
+    if (Host.StandaloneSourceExpressions[expressionIndex * 8] != 3)
+    {
+        *doesNotReturnResult = false;
+        return 0;
+    }
+
+    int32 bodyCallFirst
+        = Host.StandaloneSourceBodies[bodyOffset + 5];
+    int32 callLocalIndex
+        = Host.StandaloneSourceExpressions[expressionIndex * 8 + 2];
+    if (callLocalIndex < 0
+        || bodyCallFirst < 0
+        || bodyCallFirst > Host.StandaloneSourceDirectCallCount[0]
+        || callLocalIndex
+            >= Host.StandaloneSourceDirectCallCount[0] - bodyCallFirst)
+    {
+        return 3;
+    }
+    int32 expectedCallableId
+        = Host.StandaloneSourceDirectCalls[
+            (bodyCallFirst + callLocalIndex) * 7 + 2];
+    if (expectedCallableId < 0
+        || expectedCallableId >= Host.StandaloneCallableEffects.Length)
+    {
+        return 3;
+    }
+    *doesNotReturnResult
+        = (Host.StandaloneCallableEffects[expectedCallableId] & 2) != 0;
+    return 0;
+}
+
 int32 BindStandaloneSourceBody(int32 localCallableId)
 {
     int32 bodyOffset = localCallableId * 12;
@@ -1594,12 +1647,25 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
             continue;
         }
 
+        mut int32 expressionStatementKind = 2;
+        mut int32 expressionStart = tokenIndex;
+        if (kind == 81)
+        {
+            if (tokenIndex + 1 >= bodyTokenEnd
+                || Host.Tokens[(tokenIndex + 1) * 3] != 64)
+            {
+                return 1;
+            }
+            expressionStatementKind = 3;
+            expressionStart = tokenIndex + 2;
+        }
+
         init int32 expressionId;
         init int32 nextToken;
         int32 expressionStatus
             = ParseStandaloneSourceExpression(localCallableId,
                 localCallableId, expressionFirst, -1,
-                tokenIndex, bodyTokenEnd, 0,
+                expressionStart, bodyTokenEnd, 0,
                 ref init expressionId, ref init nextToken);
         if (expressionStatus != 0)
         {
@@ -1607,13 +1673,37 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
         }
         int32 expressionGlobal
             = expressionFirst + expressionId;
-        if (Host.StandaloneSourceExpressions[
-                expressionGlobal * 8] != 3)
+        if (expressionGlobal < expressionFirst
+            || expressionGlobal >= Host.StandaloneSourceExpressionCount[0])
         {
             return 2;
         }
+        if (expressionStatementKind == 2
+            && !IsStandaloneUnitType(Host.StandaloneSourceExpressions[
+                expressionGlobal * 8 + 1]))
+        {
+            if (Host.StandaloneSourceExpressions[
+                    expressionGlobal * 8] != 3)
+            {
+                return 2;
+            }
+            init bool expressionDoesNotReturn;
+            int32 doesNotReturnStatus
+                = TryGetStandaloneSourceExpressionDoesNotReturn(
+                    localCallableId, expressionId,
+                    ref init expressionDoesNotReturn);
+            if (doesNotReturnStatus != 0)
+            {
+                return doesNotReturnStatus;
+            }
+            if (!expressionDoesNotReturn)
+            {
+                return 2;
+            }
+        }
         int32 statementStatus = AppendStandaloneSourceStatement(
-            localCallableId, expressionFirst, 2, expressionId, -1);
+            localCallableId, expressionFirst, expressionStatementKind,
+            expressionId, -1);
         if (statementStatus != 0)
         {
             return statementStatus;
@@ -3805,7 +3895,8 @@ int32 VerifyStandaloneDirectCalls()
             int32 expressionId
                 = Host.StandaloneSourceStatements[
                     statementOffset + 1];
-            if (statementKind != 1 && statementKind != 2)
+            if (statementKind != 1 && statementKind != 2
+                && statementKind != 3)
             {
                 return 3;
             }
@@ -3845,9 +3936,21 @@ int32 VerifyStandaloneDirectCalls()
             {
                 return 3;
             }
-            if (statementKind == 2 && expressionKind != 3)
+            if (statementKind == 2
+                && !IsStandaloneUnitType(expressionTypeId))
             {
-                return 3;
+                if (expressionKind != 3)
+                {
+                    return 3;
+                }
+                init bool expressionDoesNotReturn;
+                if (TryGetStandaloneSourceExpressionDoesNotReturn(
+                        bodyId, expressionId,
+                        ref init expressionDoesNotReturn) != 0
+                    || !expressionDoesNotReturn)
+                {
+                    return 3;
+                }
             }
         }
         if (!IsStandaloneUnitType(returnTypeId) && !sawReturn)

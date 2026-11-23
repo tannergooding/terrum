@@ -606,6 +606,26 @@ int32 NormalizeStandaloneSourceStatement(int32 bodyId,
     }
     if (statementKind == 2)
     {
+        int32 expressionOffset
+            = (Host.StandaloneSourceBodies[bodyId * 12 + 3]
+                + expressionId) * 8;
+        int32 expressionTypeId
+            = Host.StandaloneSourceExpressions[expressionOffset + 1];
+        if (IsStandaloneUnitType(expressionTypeId))
+        {
+            return 0;
+        }
+        init bool expressionDoesNotReturn;
+        if (TryGetStandaloneSourceExpressionDoesNotReturn(bodyId,
+                expressionId, ref init expressionDoesNotReturn) != 0
+            || !expressionDoesNotReturn)
+        {
+            return 3;
+        }
+        return 0;
+    }
+    if (statementKind == 3)
+    {
         return 0;
     }
     return 3;

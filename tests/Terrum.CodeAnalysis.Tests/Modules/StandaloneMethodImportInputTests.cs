@@ -418,23 +418,26 @@ internal sealed class StandaloneMethodImportInputTests
 
     [TestCase(BoundRuntimePolicy.FailFast,
         "using api; int32 Main(int32 value) { "
-            + "Imported(Imported(value)); return Imported(7); }", 0, 0, false)]
+            + "_ = Imported(Imported(value)); return Imported(7); }",
+        0, 0, false)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions,
         "using api; int32 Main(int32 value) { "
-            + "Imported(Imported(value)); return Imported(7); }", 0, 0, false)]
+            + "_ = Imported(Imported(value)); return Imported(7); }",
+        0, 0, false)]
     [TestCase(BoundRuntimePolicy.FailFast,
         "namespace client { using api; namespace inner.deep { "
-            + "int32 Main(int32 value) { Imported(Imported(value)); "
+            + "int32 Main(int32 value) { _ = Imported(Imported(value)); "
             + "return Imported(7); } } }", 0, 0, false)]
     [TestCase(BoundRuntimePolicy.FailFast,
         "namespace client; using api; int32 Main(int32 value) { "
-            + "Imported(Imported(value)); return Imported(7); }", 0, 0, false)]
+            + "_ = Imported(Imported(value)); return Imported(7); }",
+        0, 0, false)]
     [TestCase(BoundRuntimePolicy.FailFast,
-        "namespace client { int32 Main(int32 value) { api.Imported("
+        "namespace client { int32 Main(int32 value) { _ = api.Imported("
             + "api.Imported(value)); return api.Imported(7); } }", 0, 0, false)]
     [TestCase(BoundRuntimePolicy.FailFast,
         "namespace client { using api; int32 Allowed(int32 value) { "
-            + "Imported(value); return value; } } namespace client { "
+            + "_ = Imported(value); return value; } } namespace client { "
             + "int32 Denied(int32 value) { Imported(value); return value; } }",
         3, 0, false)]
     [TestCase(BoundRuntimePolicy.FailFast,
@@ -525,6 +528,9 @@ internal sealed class StandaloneMethodImportInputTests
     [TestCase(BoundRuntimePolicy.FailFast,
         "using api; int32 Main(int32 value) { "
             + "return Imported(value: value); }", 2, 0, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "using api; int32 Main(int32 value) { "
+            + "Imported(value); return value; }", 2, 0, false)]
     [TestCase(BoundRuntimePolicy.FailFast,
         "using api; int32 Main(int32 value) { "
             + "return Imported(value); }", 4, 0, true)]
@@ -659,7 +665,7 @@ internal sealed class StandaloneMethodImportInputTests
                     || Host.StandaloneSourceCallArgumentOwners[0] != 1
                     || Host.StandaloneSourceCallArgumentOwners[1] != 2
                     || Host.StandaloneSourceCallArgumentOwners[2] != 3
-                    || Host.StandaloneSourceStatements[0] != 2
+                    || Host.StandaloneSourceStatements[0] != 3
                     || Host.StandaloneSourceStatements[1] != 2
                     || Host.StandaloneSourceStatements[3] != 1
                     || Host.StandaloneSourceStatements[4] != 4
@@ -1688,7 +1694,7 @@ internal sealed class StandaloneMethodImportInputTests
         Assert.That(malformedDecoderExecution.ExitCode, Is.EqualTo(3));
 
         var aliasSource = SourceText.From(
-            "using api; int32 Main() { AliasA(); return AliasB(); }");
+            "using api; int32 Main() { _ = AliasA(); return AliasB(); }");
         var aliasInput = new StandaloneMethodImportInput(Agreement,
             "consumer/alias", [
                 new TrRmStandardArtifactInput(SchemaIdentity,
@@ -1916,7 +1922,8 @@ internal sealed class StandaloneMethodImportInputTests
         var callVariantSource = SourceText.From(
             "using api; void Main(void unitValue, "
             + "ref<init int32> output, int32 value) { unsafe { "
-            + "Unit(unitValue); Init(ref init output); Unsafe(value); } }");
+            + "Unit(unitValue); Init(ref init output); "
+            + "_ = Unsafe(value); } }");
         var callVariantInput = new StandaloneMethodImportInput(Agreement,
             "consumer/module", [
                 new TrRmStandardArtifactInput(SchemaIdentity,
