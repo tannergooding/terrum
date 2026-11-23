@@ -5107,9 +5107,7 @@ int32 ParseStandaloneSourceConditionalLoopTransfer(
         return semicolonStatus;
     }
     if (conditionalTransferKind == 0
-        || semicolonToken != transferToken + 1
-        || (semicolonToken + 1 < tokenEnd
-            && IsStandaloneSourceElseKeyword(semicolonToken + 1)))
+        || semicolonToken != transferToken + 1)
     {
         return 1;
     }
@@ -5131,7 +5129,75 @@ int32 ParseStandaloneSourceConditionalLoopTransfer(
     {
         return childStatus;
     }
-    *nextTokenResult = semicolonToken + 1;
+    mut int32 nextStatementToken = semicolonToken + 1;
+    if (nextStatementToken < tokenEnd
+        && IsStandaloneSourceElseKeyword(nextStatementToken))
+    {
+        if (priorChildCount != 0
+            || nextStatementToken + 1 >= tokenEnd)
+        {
+            return 2;
+        }
+        int32 assignmentStartToken = nextStatementToken + 1;
+        if (Host.Tokens[assignmentStartToken * 3] == 48)
+        {
+            return 2;
+        }
+        init int32 elseSemicolonToken;
+        int32 elseSemicolonStatus
+            = FindStandaloneSourceStatementSemicolon(
+                assignmentStartToken, tokenEnd,
+                ref init elseSemicolonToken);
+        if (elseSemicolonStatus != 0)
+        {
+            return elseSemicolonStatus;
+        }
+        init int32 elseStatementId;
+        init int32 afterElseStatement;
+        int32 elseStatementStatus
+            = ParseStandaloneSourceAssignmentBranch(
+                localCallableId, localCallableId, expressionFirst,
+                assignmentStartToken, elseSemicolonToken + 1, true,
+                ref init elseStatementId,
+                ref init afterElseStatement);
+        if (elseStatementStatus != 0)
+        {
+            return elseStatementStatus;
+        }
+        if (afterElseStatement != elseSemicolonToken + 1
+            || elseStatementId < 0
+            || elseStatementId
+                >= Host.StandaloneSourceStatementCount[0])
+        {
+            return 1;
+        }
+        if (Host.StandaloneSourceStatements[elseStatementId * 3] != 5)
+        {
+            return 2;
+        }
+        bool allowFixedInitialization
+            = Host.StandaloneSourceStatements[
+                loopStatementId * 3] == 11
+                && Host.StandaloneSourceStatements[
+                    loopStatementId * 3 + 1] == -1;
+        int32 elseValidationStatus
+            = ValidateStandaloneSourceWhileAssignment(
+                localCallableId, elseStatementId,
+                allowFixedInitialization);
+        if (elseValidationStatus != 0)
+        {
+            return elseValidationStatus;
+        }
+        int32 elseAppendStatus = AppendStandaloneSourceIfChild(
+            localCallableId, controlNodeId, loopStatementId, true,
+            elseStatementId);
+        if (elseAppendStatus != 0)
+        {
+            return elseAppendStatus;
+        }
+        nextStatementToken = afterElseStatement;
+    }
+    *nextTokenResult = nextStatementToken;
     return 0;
 }
 
