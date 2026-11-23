@@ -37,6 +37,8 @@ public static int32 NormalizeStandaloneOwnedSourceProgram()
         int32 inputFirst = Host.StandaloneInvokeInputCount[0];
         int32 operationFirst
             = Host.StandaloneNormalizedOperationCount[0];
+        int32 blockFirst
+            = Host.StandaloneNormalizedBlockCount[0];
         Host.StandaloneNormalizedBodies[
             normalizedBodyOffset] = bodyId;
         Host.StandaloneNormalizedBodies[
@@ -103,8 +105,25 @@ public static int32 NormalizeStandaloneOwnedSourceProgram()
             statementIndex < statementCount;
             statementIndex = statementIndex + 1)
         {
-            int32 statementOffset
-                = (statementFirst + statementIndex) * 3;
+            int32 statementId = statementFirst + statementIndex;
+            int32 statementOffset = statementId * 3;
+            if (Host.StandaloneSourceStatementParentIds[
+                    statementId] >= 0)
+            {
+                continue;
+            }
+            if (Host.StandaloneSourceStatements[
+                    statementOffset] == 6)
+            {
+                int32 ifStatus
+                    = NormalizeStandaloneSourceIfReturns(
+                        bodyId, statementId);
+                if (ifStatus != 0)
+                {
+                    return FailStandaloneNormalization(ifStatus);
+                }
+                continue;
+            }
             int32 statementStatus = NormalizeStandaloneSourceStatement(
                 bodyId, statementOffset, ref init terminalKind);
             if (statementStatus != 0)
@@ -114,6 +133,29 @@ public static int32 NormalizeStandaloneOwnedSourceProgram()
             if (terminalKind != 0)
             {
                 break;
+            }
+        }
+
+        int32 returnTypeId
+            = Host.StandaloneSourceCallableInfo[bodyId * 12 + 4];
+        if (terminalKind == 0 && IsStandaloneUnitType(returnTypeId))
+        {
+            int32 currentOperationCount
+                = Host.StandaloneNormalizedOperationCount[0]
+                    - operationFirst;
+            bool hasUnitReturn = currentOperationCount > 0
+                && Host.StandaloneNormalizedOperations[
+                    (operationFirst + currentOperationCount - 1) * 5]
+                    == 5;
+            if (!hasUnitReturn)
+            {
+                int32 returnStatus
+                    = AppendStandaloneNormalizedOperation(
+                        bodyId, 5, 0, 0, 0);
+                if (returnStatus != 0)
+                {
+                    return FailStandaloneNormalization(returnStatus);
+                }
             }
         }
 
@@ -137,6 +179,33 @@ public static int32 NormalizeStandaloneOwnedSourceProgram()
         {
             return FailStandaloneNormalization(3);
         }
+
+        int32 blockCount
+            = Host.StandaloneNormalizedBlockCount[0] - blockFirst;
+        if (blockCount == 0)
+        {
+            init int32 blockIndex;
+            int32 blockStatus
+                = AppendStandaloneNormalizedReturnBlock(
+                    bodyId, 0, operationFirst, operationCount,
+                    terminalKind, ref init blockIndex);
+            if (blockStatus != 0)
+            {
+                return FailStandaloneNormalization(blockStatus);
+            }
+            blockCount = 1;
+        }
+        if (blockCount <= 0
+            || bodyId * 2 + 1
+                >= Host.StandaloneNormalizedBodyBlockRanges.Length)
+        {
+            return FailStandaloneNormalization(3);
+        }
+        Host.StandaloneNormalizedBodyBlockRanges[bodyId * 2]
+            = blockFirst;
+        Host.StandaloneNormalizedBodyBlockRanges[bodyId * 2 + 1]
+            = blockCount;
+
         Host.StandaloneNormalizedBodies[
             normalizedBodyOffset + 2] = homeCount;
         Host.StandaloneNormalizedBodies[
@@ -174,6 +243,11 @@ bool ValidateStandaloneNormalizationBuffers()
         && Host.StandaloneNormalizedBodyCount.Length == 1
         && Host.StandaloneNormalizedBodies.Length
             == tokenCapacity * 12
+        && Host.StandaloneNormalizedBlockCount.Length == 1
+        && Host.StandaloneNormalizedBlocks.Length
+            == tokenCapacity * 16
+        && Host.StandaloneNormalizedBodyBlockRanges.Length
+            == tokenCapacity * 2
         && Host.StandaloneNormalizedHomeCount.Length == 1
         && Host.StandaloneNormalizedHomes.Length
             == tokenCapacity * 10
@@ -214,6 +288,7 @@ void ClearStandaloneNormalizedProgram()
 {
     Host.StandaloneNormalizedProgramStatus[0] = 0;
     Host.StandaloneNormalizedBodyCount[0] = 0;
+    Host.StandaloneNormalizedBlockCount[0] = 0;
     Host.StandaloneNormalizedHomeCount[0] = 0;
     Host.StandaloneNormalizedConstantCount[0] = 0;
     Host.StandaloneInvokeCount[0] = 0;
@@ -225,6 +300,18 @@ void ClearStandaloneNormalizedProgram()
         index = index + 1)
     {
         Host.StandaloneNormalizedBodies[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneNormalizedBlocks.Length;
+        index = index + 1)
+    {
+        Host.StandaloneNormalizedBlocks[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneNormalizedBodyBlockRanges.Length;
+        index = index + 1)
+    {
+        Host.StandaloneNormalizedBodyBlockRanges[index] = -1;
     }
     for (mut int32 index = 0;
         index < Host.StandaloneNormalizedHomes.Length;
@@ -611,6 +698,251 @@ int32 AppendStandaloneNormalizedOperation(int32 bodyId,
     Host.StandaloneNormalizedOperations[offset + 3] = operand2;
     Host.StandaloneNormalizedOperations[offset + 4] = bodyId;
     Host.StandaloneNormalizedOperationCount[0] = count + 1;
+    return 0;
+}
+
+int32 AppendStandaloneNormalizedBlock(int32 bodyId,
+    int32 blockId, int32 operationFirst, int32 operationCount,
+    int32 terminatorKind, int32 selectorKind, int32 selectorIndex,
+    int32 selectorTypeId, int32 target0, int32 target1,
+    int32 conditionSelectorKind, int32 conditionSelectorIndex,
+    int32 conditionTypeId, int32 conditionalEdgeRecordIndex,
+    int32 noReturnInvokeLocalId, int32 flags,
+    ref<init int32> blockIndexResult)
+    ensure return == 0 ? *blockIndexResult is init : true
+{
+    int32 count = Host.StandaloneNormalizedBlockCount[0];
+    if (count < 0
+        || count >= Host.StandaloneNormalizedBlocks.Length / 16
+        || bodyId < 0
+        || bodyId >= Host.StandaloneSourceBodyCount[0]
+        || blockId < 0 || blockId > 0xFFFF
+        || operationFirst < 0 || operationCount < 0
+        || operationFirst
+            > Host.StandaloneNormalizedOperationCount[0]
+                - operationCount
+        || (terminatorKind != 1 && terminatorKind != 2
+            && terminatorKind != 3 && terminatorKind != 4)
+        || (selectorKind != 0 && selectorKind != 2)
+        || (selectorKind == 0 && selectorIndex != 0)
+        || target0 < -1 || target0 > 0xFFFF
+        || target1 < -1 || target1 > 0xFFFF
+        || conditionSelectorKind < 0 || conditionSelectorKind > 2
+        || (conditionSelectorKind == 0
+            && conditionSelectorIndex != 0)
+        || conditionSelectorIndex < 0
+        || conditionSelectorIndex > 0xFFFF
+        || conditionalEdgeRecordIndex < -1
+        || conditionalEdgeRecordIndex > 0xFFFF
+        || noReturnInvokeLocalId < -1
+        || noReturnInvokeLocalId > 0xFFFF
+        || flags != 0)
+    {
+        return 3;
+    }
+
+    int32 offset = count * 16;
+    Host.StandaloneNormalizedBlocks[offset] = bodyId;
+    Host.StandaloneNormalizedBlocks[offset + 1] = blockId;
+    Host.StandaloneNormalizedBlocks[offset + 2] = operationFirst;
+    Host.StandaloneNormalizedBlocks[offset + 3] = operationCount;
+    Host.StandaloneNormalizedBlocks[offset + 4] = terminatorKind;
+    Host.StandaloneNormalizedBlocks[offset + 5] = selectorKind;
+    Host.StandaloneNormalizedBlocks[offset + 6] = selectorIndex;
+    Host.StandaloneNormalizedBlocks[offset + 7] = selectorTypeId;
+    Host.StandaloneNormalizedBlocks[offset + 8] = target0;
+    Host.StandaloneNormalizedBlocks[offset + 9] = target1;
+    Host.StandaloneNormalizedBlocks[offset + 10]
+        = conditionSelectorKind;
+    Host.StandaloneNormalizedBlocks[offset + 11]
+        = conditionSelectorIndex;
+    Host.StandaloneNormalizedBlocks[offset + 12] = conditionTypeId;
+    Host.StandaloneNormalizedBlocks[offset + 13]
+        = conditionalEdgeRecordIndex;
+    Host.StandaloneNormalizedBlocks[offset + 14]
+        = noReturnInvokeLocalId;
+    Host.StandaloneNormalizedBlocks[offset + 15] = flags;
+    Host.StandaloneNormalizedBlockCount[0] = count + 1;
+    *blockIndexResult = count;
+    return 0;
+}
+
+int32 AppendStandaloneNormalizedReturnBlock(int32 bodyId,
+    int32 blockId, int32 operationFirst, int32 operationCount,
+    int32 terminalKind, ref<init int32> blockIndexResult)
+    ensure return == 0 ? *blockIndexResult is init : true
+{
+    int32 returnTypeId
+        = Host.StandaloneSourceCallableInfo[bodyId * 12 + 4];
+    if (operationCount <= 0
+        || terminalKind < 0 || terminalKind > 1)
+    {
+        return 3;
+    }
+    int32 lastOperationOffset
+        = (operationFirst + operationCount - 1) * 5;
+    int32 finalOperationKind
+        = Host.StandaloneNormalizedOperations[
+            lastOperationOffset];
+    if (terminalKind == 1)
+    {
+        if (finalOperationKind != 3)
+        {
+            return 3;
+        }
+        return AppendStandaloneNormalizedBlock(bodyId, blockId,
+            operationFirst, operationCount, 2, 0, 0, 0, -1, -1,
+            0, 0, 0, -1,
+            Host.StandaloneNormalizedOperations[
+                lastOperationOffset + 1],
+            0, ref init *blockIndexResult);
+    }
+    if (IsStandaloneUnitType(returnTypeId))
+    {
+        if (finalOperationKind != 5)
+        {
+            return 3;
+        }
+        return AppendStandaloneNormalizedBlock(bodyId, blockId,
+            operationFirst, operationCount, 1, 0, 0, returnTypeId,
+            -1, -1, 0, 0, 0, -1, -1, 0,
+            ref init *blockIndexResult);
+    }
+    if (finalOperationKind != 4)
+    {
+        return 3;
+    }
+    return AppendStandaloneNormalizedBlock(bodyId, blockId,
+        operationFirst, operationCount, 1, 2,
+        Host.StandaloneNormalizedOperations[lastOperationOffset + 1],
+        returnTypeId, -1, -1, 0, 0, 0, -1, -1, 0,
+        ref init *blockIndexResult);
+}
+
+int32 NormalizeStandaloneSourceIfReturns(int32 bodyId,
+    int32 ifStatementId)
+{
+    int32 statementOffset = ifStatementId * 3;
+    int32 conditionExpressionId
+        = Host.StandaloneSourceStatements[statementOffset + 1];
+    int32 ifNodeId
+        = Host.StandaloneSourceStatements[statementOffset + 2];
+    if (conditionExpressionId < 0
+        || ifNodeId < 0 || ifNodeId
+            >= Host.StandaloneSourceIfNodeCount[0]
+        || Host.StandaloneSourceIfNodes[ifNodeId * 5] != bodyId)
+    {
+        return 3;
+    }
+    int32 ifNodeOffset = ifNodeId * 5;
+    int32 trueFirst
+        = Host.StandaloneSourceIfNodes[ifNodeOffset + 1];
+    int32 trueCount
+        = Host.StandaloneSourceIfNodes[ifNodeOffset + 2];
+    int32 falseFirst
+        = Host.StandaloneSourceIfNodes[ifNodeOffset + 3];
+    int32 falseCount
+        = Host.StandaloneSourceIfNodes[ifNodeOffset + 4];
+    if (trueCount != 1 || falseCount != 1
+        || trueFirst < 0 || falseFirst < 0
+        || trueFirst >= Host.StandaloneSourceIfChildCount[0]
+        || falseFirst >= Host.StandaloneSourceIfChildCount[0])
+    {
+        return 3;
+    }
+
+    int32 conditionExpressionOffset
+        = (Host.StandaloneSourceBodies[bodyId * 12 + 3]
+            + conditionExpressionId) * 8;
+    int32 conditionTypeId
+        = Host.StandaloneSourceExpressions[
+            conditionExpressionOffset + 1];
+    if (!IsStandaloneLogicalNotType(conditionTypeId))
+    {
+        return 3;
+    }
+    int32 conditionOperationFirst
+        = Host.StandaloneNormalizedOperationCount[0];
+    init int32 conditionSelectorKind;
+    init int32 conditionSourceUse;
+    init int32 conditionSelectorIndex;
+    init bool conditionTerminated;
+    int32 conditionStatus = NormalizeStandaloneSourceExpression(
+        bodyId, conditionExpressionId, 0,
+        ref init conditionSelectorKind,
+        ref init conditionSourceUse,
+        ref init conditionSelectorIndex,
+        ref init conditionTerminated);
+    if (conditionStatus != 0)
+    {
+        return conditionStatus;
+    }
+    if (conditionTerminated)
+    {
+        return 2;
+    }
+    if (conditionSelectorKind != 2 || conditionSourceUse != 1
+        || conditionSelectorIndex < 0)
+    {
+        return 3;
+    }
+    int32 conditionOperationCount
+        = Host.StandaloneNormalizedOperationCount[0]
+            - conditionOperationFirst;
+    init int32 conditionBlockIndex;
+    int32 conditionBlockStatus
+        = AppendStandaloneNormalizedBlock(
+            bodyId, 0, conditionOperationFirst,
+            conditionOperationCount, 4, 0, 0, 0, 1, 2,
+            2, conditionSelectorIndex, conditionTypeId, 3, -1, 0,
+            ref init conditionBlockIndex);
+    if (conditionBlockStatus != 0)
+    {
+        return conditionBlockStatus;
+    }
+
+    for (mut int32 branchIndex = 0;
+        branchIndex < 2;
+        branchIndex = branchIndex + 1)
+    {
+        int32 childFirst = branchIndex == 0 ? trueFirst : falseFirst;
+        int32 childStatementId
+            = Host.StandaloneSourceIfChildren[childFirst];
+        int32 childStatementOffset = childStatementId * 3;
+        if (childStatementId < 0
+            || childStatementId
+                >= Host.StandaloneSourceStatementCount[0]
+            || Host.StandaloneSourceStatementParentIds[
+                childStatementId] != ifStatementId
+            || Host.StandaloneSourceStatements[
+                childStatementOffset] != 1)
+        {
+            return 3;
+        }
+        int32 branchOperationFirst
+            = Host.StandaloneNormalizedOperationCount[0];
+        init int32 branchTerminalKind;
+        int32 branchStatus = NormalizeStandaloneSourceStatement(
+            bodyId, childStatementOffset,
+            ref init branchTerminalKind);
+        if (branchStatus != 0)
+        {
+            return branchStatus;
+        }
+        int32 branchOperationCount
+            = Host.StandaloneNormalizedOperationCount[0]
+                - branchOperationFirst;
+        init int32 branchBlockIndex;
+        int32 branchBlockStatus
+            = AppendStandaloneNormalizedReturnBlock(
+                bodyId, branchIndex + 1, branchOperationFirst,
+                branchOperationCount, branchTerminalKind,
+                ref init branchBlockIndex);
+        if (branchBlockStatus != 0)
+        {
+            return branchBlockStatus;
+        }
+    }
     return 0;
 }
 
@@ -2271,9 +2603,195 @@ int32 NormalizeStandaloneCallExpression(int32 bodyId,
     return 0;
 }
 
+int32 VerifyStandaloneNormalizedBodyBlocks(int32 bodyId,
+    int32 blockFirst, int32 bodyBlockCount, int32 bodyOperationFirst,
+    int32 bodyOperationCount, int32 bodyHomeFirst,
+    int32 bodyHomeCount, int32 bodyInvokeCount,
+    int32 returnTypeId)
+{
+    int32 blockCount
+        = Host.StandaloneNormalizedBlockCount[0];
+    if (blockFirst < 0 || bodyBlockCount <= 0
+        || blockFirst > blockCount - bodyBlockCount
+        || bodyOperationFirst < 0 || bodyOperationCount < 0
+        || bodyHomeFirst < 0 || bodyHomeCount < 0)
+    {
+        return 3;
+    }
+
+    mut int32 expectedOperationFirst = bodyOperationFirst;
+    for (mut int32 localBlockId = 0;
+        localBlockId < bodyBlockCount;
+        localBlockId = localBlockId + 1)
+    {
+        int32 blockOffset = (blockFirst + localBlockId) * 16;
+        int32 blockBodyId
+            = Host.StandaloneNormalizedBlocks[blockOffset];
+        int32 blockLocalId
+            = Host.StandaloneNormalizedBlocks[blockOffset + 1];
+        int32 operationFirst
+            = Host.StandaloneNormalizedBlocks[blockOffset + 2];
+        int32 operationCount
+            = Host.StandaloneNormalizedBlocks[blockOffset + 3];
+        int32 terminatorKind
+            = Host.StandaloneNormalizedBlocks[blockOffset + 4];
+        int32 selectorKind
+            = Host.StandaloneNormalizedBlocks[blockOffset + 5];
+        int32 selectorIndex
+            = Host.StandaloneNormalizedBlocks[blockOffset + 6];
+        int32 selectorTypeId
+            = Host.StandaloneNormalizedBlocks[blockOffset + 7];
+        int32 target0
+            = Host.StandaloneNormalizedBlocks[blockOffset + 8];
+        int32 target1
+            = Host.StandaloneNormalizedBlocks[blockOffset + 9];
+        int32 conditionSelectorKind
+            = Host.StandaloneNormalizedBlocks[blockOffset + 10];
+        int32 conditionSelectorIndex
+            = Host.StandaloneNormalizedBlocks[blockOffset + 11];
+        int32 conditionTypeId
+            = Host.StandaloneNormalizedBlocks[blockOffset + 12];
+        int32 conditionalEdgeRecordIndex
+            = Host.StandaloneNormalizedBlocks[blockOffset + 13];
+        int32 noReturnInvokeLocalId
+            = Host.StandaloneNormalizedBlocks[blockOffset + 14];
+        if (blockBodyId != bodyId || blockLocalId != localBlockId
+            || operationFirst != expectedOperationFirst
+            || operationCount < 0
+            || operationFirst
+                > bodyOperationFirst + bodyOperationCount
+                    - operationCount
+            || (terminatorKind != 1 && terminatorKind != 2
+                && terminatorKind != 3 && terminatorKind != 4)
+            || (selectorKind != 0 && selectorKind != 2)
+            || (selectorKind == 0 && selectorIndex != 0)
+            || target0 < -1 || target1 < -1
+            || conditionSelectorKind < 0
+            || conditionSelectorKind > 2
+            || (conditionSelectorKind == 0
+                && conditionSelectorIndex != 0)
+            || conditionalEdgeRecordIndex < -1
+            || noReturnInvokeLocalId < -1
+            || Host.StandaloneNormalizedBlocks[
+                blockOffset + 15] != 0)
+        {
+            return 3;
+        }
+
+        if (terminatorKind == 1)
+        {
+            if (operationCount == 0 || target0 != -1 || target1 != -1
+                || conditionSelectorKind != 0
+                || conditionTypeId != 0
+                || conditionalEdgeRecordIndex != -1
+                || noReturnInvokeLocalId != -1)
+            {
+                return 3;
+            }
+            int32 lastOperationOffset
+                = (operationFirst + operationCount - 1) * 5;
+            int32 lastOperationKind
+                = Host.StandaloneNormalizedOperations[
+                    lastOperationOffset];
+            if (IsStandaloneUnitType(returnTypeId))
+            {
+                if (selectorKind != 0 || selectorIndex != 0
+                    || selectorTypeId != returnTypeId
+                    || lastOperationKind != 5)
+                {
+                    return 3;
+                }
+            }
+            else if (selectorKind != 2
+                || selectorIndex < 0
+                || selectorIndex >= bodyHomeCount
+                || selectorTypeId != returnTypeId
+                || lastOperationKind != 4
+                || Host.StandaloneNormalizedOperations[
+                    lastOperationOffset + 1] != selectorIndex)
+            {
+                return 3;
+            }
+        }
+        else if (terminatorKind == 2)
+        {
+            if (operationCount == 0 || selectorKind != 0
+                || selectorIndex != 0 || selectorTypeId != 0
+                || target0 != -1 || target1 != -1
+                || conditionSelectorKind != 0
+                || conditionTypeId != 0
+                || conditionalEdgeRecordIndex != -1
+                || noReturnInvokeLocalId < 0
+                || noReturnInvokeLocalId >= bodyInvokeCount)
+            {
+                return 3;
+            }
+            int32 lastOperationOffset
+                = (operationFirst + operationCount - 1) * 5;
+            if (Host.StandaloneNormalizedOperations[
+                    lastOperationOffset] != 3
+                || Host.StandaloneNormalizedOperations[
+                    lastOperationOffset + 1]
+                    != noReturnInvokeLocalId)
+            {
+                return 3;
+            }
+        }
+        else if (terminatorKind == 3)
+        {
+            if (selectorKind != 0 || selectorIndex != 0
+                || selectorTypeId != 0
+                || target0 < 0 || target0 >= bodyBlockCount
+                || target1 != -1
+                || conditionSelectorKind != 0
+                || conditionTypeId != 0
+                || conditionalEdgeRecordIndex != -1
+                || noReturnInvokeLocalId != -1)
+            {
+                return 3;
+            }
+        }
+        else
+        {
+            if (selectorKind != 0 || selectorIndex != 0
+                || selectorTypeId != 0
+                || target0 < 0 || target0 >= bodyBlockCount
+                || target1 < 0 || target1 >= bodyBlockCount
+                || target0 == target1
+                || conditionSelectorKind != 2
+                || conditionSelectorIndex < 0
+                || conditionSelectorIndex >= bodyHomeCount
+                || !IsStandaloneLogicalNotType(conditionTypeId)
+                || conditionalEdgeRecordIndex < bodyBlockCount
+                || conditionalEdgeRecordIndex > 0xFFFF
+                || noReturnInvokeLocalId != -1)
+            {
+                return 3;
+            }
+            int32 conditionHomeOffset
+                = (bodyHomeFirst + conditionSelectorIndex) * 5;
+            if (Host.StandaloneNormalizedHomes[
+                    conditionHomeOffset] != bodyId
+                || Host.StandaloneNormalizedHomes[
+                    conditionHomeOffset + 3] != conditionTypeId
+                || Host.StandaloneNormalizedHomes[
+                    conditionHomeOffset + 2] != 0)
+            {
+                return 3;
+            }
+        }
+        expectedOperationFirst = expectedOperationFirst
+            + operationCount;
+    }
+    return expectedOperationFirst
+            == bodyOperationFirst + bodyOperationCount
+        ? 0 : 3;
+}
+
 int32 VerifyStandaloneNormalizedProgram()
 {
     int32 bodyCount = Host.StandaloneNormalizedBodyCount[0];
+    int32 blockCount = Host.StandaloneNormalizedBlockCount[0];
     int32 homeCount = Host.StandaloneNormalizedHomeCount[0];
     int32 constantCount
         = Host.StandaloneNormalizedConstantCount[0];
@@ -2284,6 +2802,11 @@ int32 VerifyStandaloneNormalizedProgram()
     if (bodyCount != Host.StandaloneSourceBodyCount[0]
         || bodyCount < 0
         || bodyCount > Host.StandaloneNormalizedBodies.Length / 12
+        || blockCount < bodyCount
+        || blockCount < 0
+        || blockCount > Host.StandaloneNormalizedBlocks.Length / 16
+        || bodyCount
+            > Host.StandaloneNormalizedBodyBlockRanges.Length / 2
         || homeCount < 0
         || homeCount > Host.StandaloneNormalizedHomes.Length / 5
         || constantCount < 0
@@ -2300,6 +2823,7 @@ int32 VerifyStandaloneNormalizedProgram()
         return 3;
     }
 
+    mut int32 expectedBlockFirst = 0;
     for (mut int32 bodyId = 0;
         bodyId < bodyCount;
         bodyId = bodyId + 1)
@@ -2327,6 +2851,13 @@ int32 VerifyStandaloneNormalizedProgram()
             = Host.StandaloneNormalizedBodies[bodyOffset + 10];
         int32 terminalKind
             = Host.StandaloneNormalizedBodies[bodyOffset + 11];
+        int32 blockRangeOffset = bodyId * 2;
+        int32 blockFirst
+            = Host.StandaloneNormalizedBodyBlockRanges[
+                blockRangeOffset];
+        int32 bodyBlockCount
+            = Host.StandaloneNormalizedBodyBlockRanges[
+                blockRangeOffset + 1];
         if (Host.StandaloneNormalizedBodies[bodyOffset] != bodyId
             || homeFirst < 0 || bodyHomeCount < 0
             || homeFirst > homeCount - bodyHomeCount
@@ -2339,12 +2870,41 @@ int32 VerifyStandaloneNormalizedProgram()
             || operationFirst < 0 || bodyOperationCount < 0
             || operationFirst
                 > operationCount - bodyOperationCount
+            || blockFirst != expectedBlockFirst
+            || bodyBlockCount <= 0
+            || blockFirst < 0
+            || blockFirst > blockCount - bodyBlockCount
             || (terminalKind != 0 && terminalKind != 1))
         {
             return 3;
         }
 
         int32 sourceInfoOffset = bodyId * 12;
+        int32 returnTypeId
+            = Host.StandaloneSourceCallableInfo[
+                sourceInfoOffset + 4];
+        int32 blockStatus = VerifyStandaloneNormalizedBodyBlocks(
+            bodyId, blockFirst, bodyBlockCount, operationFirst,
+            bodyOperationCount, homeFirst, bodyHomeCount,
+            bodyInvokeCount, returnTypeId);
+        if (blockStatus != 0)
+        {
+            return blockStatus;
+        }
+        if (terminalKind == 1)
+        {
+            for (mut int32 localBlock = 0;
+                localBlock < bodyBlockCount;
+                localBlock = localBlock + 1)
+            {
+                if (Host.StandaloneNormalizedBlocks[
+                        (blockFirst + localBlock) * 16 + 4] == 1)
+                {
+                    return 3;
+                }
+            }
+        }
+
         int32 parameterFirst
             = Host.StandaloneSourceCallableInfo[
                 sourceInfoOffset + 5];
@@ -2720,10 +3280,46 @@ int32 VerifyStandaloneNormalizedProgram()
 
         int32 finalOperationKind = 0;
         mut int32 pendingRelationHomeId = -1;
+        mut int32 operationBlockLocal = 0;
+        mut int32 operationBlockOffset = blockFirst * 16;
+        mut int32 operationBlockOperationFirst
+            = Host.StandaloneNormalizedBlocks[
+                operationBlockOffset + 2];
+        mut int32 operationBlockOperationCount
+            = Host.StandaloneNormalizedBlocks[
+                operationBlockOffset + 3];
+        mut int32 operationBlockTerminatorKind
+            = Host.StandaloneNormalizedBlocks[
+                operationBlockOffset + 4];
         for (mut int32 localOperation = 0;
             localOperation < bodyOperationCount;
             localOperation = localOperation + 1)
         {
+            while (operationFirst + localOperation
+                >= operationBlockOperationFirst
+                    + operationBlockOperationCount)
+            {
+                operationBlockLocal = operationBlockLocal + 1;
+                if (operationBlockLocal >= bodyBlockCount)
+                {
+                    return 3;
+                }
+                operationBlockOffset
+                    = (blockFirst + operationBlockLocal) * 16;
+                operationBlockOperationFirst
+                    = Host.StandaloneNormalizedBlocks[
+                        operationBlockOffset + 2];
+                operationBlockOperationCount
+                    = Host.StandaloneNormalizedBlocks[
+                        operationBlockOffset + 3];
+                operationBlockTerminatorKind
+                    = Host.StandaloneNormalizedBlocks[
+                        operationBlockOffset + 4];
+            }
+            bool operationIsBlockTerminator
+                = operationFirst + localOperation + 1
+                    == operationBlockOperationFirst
+                        + operationBlockOperationCount;
             int32 operationOffset
                 = (operationFirst + localOperation) * 5;
             int32 kind
@@ -2837,9 +3433,8 @@ int32 VerifyStandaloneNormalizedProgram()
                     = (Host.StandaloneCallableEffects[
                         invokedExpectedId] & 2) != 0;
                 if (invokedDoesNotReturn
-                    && (terminalKind != 1
-                        || localOperation
-                            != bodyOperationCount - 1))
+                    && (!operationIsBlockTerminator
+                        || operationBlockTerminatorKind != 2))
                 {
                     return 3;
                 }
@@ -2849,8 +3444,8 @@ int32 VerifyStandaloneNormalizedProgram()
             {
                 if (operand0 < 0 || operand0 >= bodyHomeCount
                     || operand1 != 0 || operand2 != 0
-                    || localOperation != bodyOperationCount - 1
-                    || terminalKind != 0
+                    || !operationIsBlockTerminator
+                    || operationBlockTerminatorKind != 1
                     || Host.StandaloneNormalizedHomes[
                         (homeFirst + operand0) * 5 + 3]
                         != Host.StandaloneSourceCallableInfo[
@@ -2863,8 +3458,8 @@ int32 VerifyStandaloneNormalizedProgram()
             {
                 if (operand0 != 0 || operand1 != 0
                     || operand2 != 0
-                    || localOperation != bodyOperationCount - 1
-                    || terminalKind != 0
+                    || !operationIsBlockTerminator
+                    || operationBlockTerminatorKind != 1
                     || !IsStandaloneUnitType(
                         Host.StandaloneSourceCallableInfo[
                             bodyId * 12 + 4]))
@@ -3257,8 +3852,13 @@ int32 VerifyStandaloneNormalizedProgram()
                 return 3;
             }
         }
+        expectedBlockFirst = blockFirst + bodyBlockCount;
     }
 
+    if (expectedBlockFirst != blockCount)
+    {
+        return 3;
+    }
     for (mut int32 invokeIndex = 0;
         invokeIndex < invokeCount;
         invokeIndex = invokeIndex + 1)

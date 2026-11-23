@@ -1238,6 +1238,10 @@ internal sealed class StandaloneMethodImportInputTests
         "namespace client { "
             + "bool Main(ref<init int32> destination) { "
             + "return destination is init; } }", 0, 95, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { bool Main(bool condition) { "
+            + "if (condition) { return true; } "
+            + "else { return false; } } }", 0, 130, false)]
     public async Task TerrumOwnedSourceBinderValidatesOrderedCallUsesAsync(
         BoundRuntimePolicy policy, string sourceText,
         int expectedSourceStatus, int verificationMode,
@@ -2833,6 +2837,17 @@ internal sealed class StandaloneMethodImportInputTests
                 }
                 status = NormalizeStandaloneOwnedSourceProgram();
                 if (status != 0
+                    || Host.StandaloneNormalizedBlockCount[0] != 1
+                    || Host.StandaloneNormalizedBodyBlockRanges[0] != 0
+                    || Host.StandaloneNormalizedBodyBlockRanges[1] != 1
+                    || Host.StandaloneNormalizedBlocks[0] != 0
+                    || Host.StandaloneNormalizedBlocks[1] != 0
+                    || Host.StandaloneNormalizedBlocks[2] != 0
+                    || Host.StandaloneNormalizedBlocks[3] != 2
+                    || Host.StandaloneNormalizedBlocks[4] != 1
+                    || Host.StandaloneNormalizedBlocks[5] != 2
+                    || Host.StandaloneNormalizedBlocks[6] != 2
+                    || Host.StandaloneNormalizedBlocks[7] != typeId
                     || Host.StandaloneNormalizedHomeCount[0] != 3
                     || Host.StandaloneNormalizedOperationCount[0] != 2
                     || Host.StandaloneNormalizedOperations[0]
@@ -2924,6 +2939,17 @@ internal sealed class StandaloneMethodImportInputTests
                 }
                 status = NormalizeStandaloneOwnedSourceProgram();
                 if (status != 0
+                    || Host.StandaloneNormalizedBlockCount[0] != 1
+                    || Host.StandaloneNormalizedBodyBlockRanges[0] != 0
+                    || Host.StandaloneNormalizedBodyBlockRanges[1] != 1
+                    || Host.StandaloneNormalizedBlocks[0] != 0
+                    || Host.StandaloneNormalizedBlocks[1] != 0
+                    || Host.StandaloneNormalizedBlocks[2] != 0
+                    || Host.StandaloneNormalizedBlocks[3] != 2
+                    || Host.StandaloneNormalizedBlocks[4] != 1
+                    || Host.StandaloneNormalizedBlocks[5] != 2
+                    || Host.StandaloneNormalizedBlocks[6] != 2
+                    || Host.StandaloneNormalizedBlocks[7] != typeId
                     || Host.StandaloneNormalizedHomeCount[0] != 3
                     || Host.StandaloneNormalizedOperationCount[0] != 2
                     || Host.StandaloneNormalizedOperations[0]
@@ -4052,6 +4078,18 @@ internal sealed class StandaloneMethodImportInputTests
                 }
                 status = NormalizeStandaloneOwnedSourceProgram();
                 if (status != 0
+                    || Host.StandaloneNormalizedBlockCount[0] != 1
+                    || Host.StandaloneNormalizedBodyBlockRanges[0] != 0
+                    || Host.StandaloneNormalizedBodyBlockRanges[1] != 1
+                    || Host.StandaloneNormalizedBlocks[0] != 0
+                    || Host.StandaloneNormalizedBlocks[1] != 0
+                    || Host.StandaloneNormalizedBlocks[2] != 0
+                    || Host.StandaloneNormalizedBlocks[3]
+                        != {{shiftOperationCount}}
+                    || Host.StandaloneNormalizedBlocks[4] != 1
+                    || Host.StandaloneNormalizedBlocks[5] != 2
+                    || Host.StandaloneNormalizedBlocks[6] != 2
+                    || Host.StandaloneNormalizedBlocks[7] != dataTypeId
                     || Host.StandaloneNormalizedHomeCount[0] != 3
                     || Host.StandaloneNormalizedOperationCount[0]
                         != {{shiftOperationCount}}
@@ -4621,6 +4659,43 @@ internal sealed class StandaloneMethodImportInputTests
                 return 0;
             }
             """;
+        const string multiBlockControlFlowVerificationSource = """
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                if (Scan() < 1) { return 80; }
+                int32 status = BindStandaloneOwnedSourceProgram();
+                if (status != 0) { return status; }
+                status = NormalizeStandaloneOwnedSourceProgram();
+                if (status != 0) { return status; }
+                if (Host.StandaloneNormalizedBlockCount[0] != 3
+                    || Host.StandaloneNormalizedBodyBlockRanges[0] != 0
+                    || Host.StandaloneNormalizedBodyBlockRanges[1] != 3
+                    || Host.StandaloneNormalizedBlocks[0] != 0
+                    || Host.StandaloneNormalizedBlocks[1] != 0
+                    || Host.StandaloneNormalizedBlocks[4] != 4
+                    || Host.StandaloneNormalizedBlocks[8] != 1
+                    || Host.StandaloneNormalizedBlocks[9] != 2
+                    || Host.StandaloneNormalizedBlocks[13] != 3
+                    || Host.StandaloneNormalizedBlocks[15] != 0
+                    || Host.StandaloneNormalizedBlocks[16] != 0
+                    || Host.StandaloneNormalizedBlocks[17] != 1
+                    || Host.StandaloneNormalizedBlocks[20] != 1
+                    || Host.StandaloneNormalizedBlocks[32] != 0
+                    || Host.StandaloneNormalizedBlocks[33] != 2
+                    || Host.StandaloneNormalizedBlocks[36] != 1) {
+                    return 81;
+                }
+                status = RewriteStandaloneOwnedCallNodes();
+                if (status != 0) { return status; }
+                status = WriteStandaloneScalarModule();
+                if (status != 0
+                    || Host.StandaloneWriterStatus[0] != 0
+                    || Host.StandaloneWriterBodyPlanCount[0] != 1) {
+                    return 82;
+                }
+                return 0;
+            }
+            """;
         var verificationSource = expectedSourceStatus != 0
             ? $$"""
                 namespace Terrum.CodeAnalysis;
@@ -4639,6 +4714,8 @@ internal sealed class StandaloneMethodImportInputTests
                     return 0;
                 }
                 """
+            : verificationMode == 130
+                ? multiBlockControlFlowVerificationSource
             : verificationMode == 2
                 ? localOverloadCallVerificationSource
                 : verificationMode == 3
@@ -4803,7 +4880,7 @@ internal sealed class StandaloneMethodImportInputTests
             or >= 60 and <= 74 or 75 or 77 or 81 or 82
             or >= 90 and <= 95 or >= 96 and <= 103
             or >= 104 and <= 109 or >= 111 and <= 117
-            or >= 118 and <= 121)
+            or >= 118 and <= 121 or 130)
         {
             var artifactIndex = new TrRmArtifactIndex(artifact);
             Assert.That(artifactIndex.TryGetSection(0x0020,
@@ -5057,6 +5134,19 @@ internal sealed class StandaloneMethodImportInputTests
                 Assert.That(code.IndexOf((byte)0xD6),
                     Is.GreaterThanOrEqualTo(0));
             }
+            else if (verificationMode == 130)
+            {
+                Assert.That(bodyReader.BlockCount, Is.EqualTo(3));
+                Assert.That(bodyReader.RecordCount, Is.EqualTo(4));
+                Assert.That(bodyReader.GetBlockCode(0)
+                    .IndexOf((byte)0xB1), Is.GreaterThanOrEqualTo(0));
+                var edgeRecord = bodyReader.GetRecord(3);
+                Assert.That(edgeRecord[0], Is.EqualTo((byte)6));
+                Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+                    edgeRecord[4..]), Is.EqualTo((ushort)1));
+                Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+                    edgeRecord[6..]), Is.EqualTo((ushort)2));
+            }
             else if (verificationMode is >= 90 and <= 95)
             {
                 Assert.That(bodyReader.Code.IndexOf((byte)0xC0),
@@ -5110,7 +5200,7 @@ internal sealed class StandaloneMethodImportInputTests
                     or >= 104 and <= 109
                     or 115
                     ? 1 : 0;
-            if (verificationMode == 71)
+            if (verificationMode is 71 or 130)
             {
                 expectedDecoderConstantMapCount = 2;
             }
@@ -5125,7 +5215,10 @@ internal sealed class StandaloneMethodImportInputTests
                         || Host.StandaloneDecoderCallCount[0]
                             != {{expectedDecoderCallCount}}
                         || Host.StandaloneDecoderConstantMapCount[0]
-                            != {{expectedDecoderConstantMapCount}}) {
+                            != {{expectedDecoderConstantMapCount}}
+                        || ({{verificationMode == 130
+                            ? "Host.StandaloneDecoderBodies[19] != 3 || Host.StandaloneDecoderBodies[21] != 4"
+                            : "false"}})) {
                         return 80;
                     }
                     return 0;
@@ -5157,6 +5250,110 @@ internal sealed class StandaloneMethodImportInputTests
             var decoderExecution = NativeJit.ExecuteWithData(
                 decoderProgram, (NativeRuntimePolicy)policy);
             Assert.That(decoderExecution.ExitCode, Is.EqualTo(0));
+            if (verificationMode == 130)
+            {
+                var artifactIndex = new TrRmArtifactIndex(artifact);
+                Assert.That(artifactIndex.TryGetSection(0x0020,
+                        out var bodySection, out var bodyCount),
+                    Is.True);
+                var bodyTable = new TrRmBodyTableReader(
+                    bodySection, bodyCount);
+                var bodyRow = bodyTable.GetRow(1);
+                var bodyReader = new TrRmRegisterBodyReader(bodyRow);
+                var sectionCount = checked((int)BinaryPrimitives
+                    .ReadUInt32LittleEndian(artifact.AsSpan(12)));
+                var bodySectionStart = -1;
+                for (var section = 0; section < sectionCount; section++)
+                {
+                    var entryOffset = checked(32 + section * 16);
+                    if (BinaryPrimitives.ReadUInt16LittleEndian(
+                            artifact.AsSpan(entryOffset)) == 0x0020)
+                    {
+                        bodySectionStart = checked((int)BinaryPrimitives
+                            .ReadUInt32LittleEndian(
+                                artifact.AsSpan(entryOffset + 8)));
+                        break;
+                    }
+                }
+                Assert.That(bodySectionStart, Is.GreaterThanOrEqualTo(32));
+                var mapCountBytes
+                    = ((bodyReader.MapMask & 1) != 0 ? 4 : 0)
+                    + ((bodyReader.MapMask & 2) != 0 ? 4 : 0)
+                    + ((bodyReader.MapMask & 4) != 0 ? 4 : 0)
+                    + ((bodyReader.MapMask & 8) != 0 ? 4 : 0)
+                    + ((bodyReader.MapMask & 16) != 0 ? 4 : 0);
+                var mapDataBytes = checked(bodyReader.HomeCount * 8
+                    + bodyReader.TypeCount * 4
+                    + bodyReader.MethodCount * 4
+                    + bodyReader.FieldCount * 4
+                    + bodyReader.ConstantCount * 8);
+                var blockStart = checked(5 + mapCountBytes + 12
+                    + mapDataBytes);
+                var recordIndexStart = checked(blockStart
+                    + bodyReader.BlockCount * 12);
+                var recordDataStart = checked(recordIndexStart
+                    + (bodyReader.RecordCount + 1) * sizeof(uint));
+                var bodyIndexLength = checked((bodyCount + 1)
+                    * sizeof(uint));
+                var bodyRowOffset = checked((int)BinaryPrimitives
+                    .ReadUInt32LittleEndian(artifact.AsSpan(
+                        bodySectionStart + sizeof(uint))));
+                var bodyRowAbsolute = checked(bodySectionStart
+                    + bodyIndexLength + bodyRowOffset);
+
+                void AssertMalformedBodyRejected(byte[] malformedArtifact,
+                    string sourcePath)
+                {
+                    var malformedInput
+                        = new StandaloneMethodImportArtifactInput(
+                            Agreement, "consumer/module",
+                            new TrRmStandardArtifactInput(
+                                SchemaIdentity, malformedArtifact),
+                            input.Artifacts);
+                    var malformedBuffers = malformedInput.Capture()
+                        .CreateSourceFreeReaderHostBuffers();
+                    decoderComponents[^1] = SyntaxTree.Parse("""
+                        namespace Terrum.CodeAnalysis;
+                        int32 Main() {
+                            int32 status = DecodeStandaloneModuleMetadata();
+                            return status == 3
+                                && Host.StandaloneDecoderStatus[0] == 3
+                                ? 0 : 1;
+                        }
+                        """, sourcePath);
+                    var malformedCompilation = Compilation.Create(
+                        decoderComponents, malformedBuffers, policy);
+                    Assert.That(malformedCompilation.HasErrors, Is.False,
+                        string.Join(Environment.NewLine,
+                            malformedCompilation.Diagnostics));
+                    var malformedProgram = malformedCompilation.Program
+                        ?? throw new AssertionException(
+                            "Expected a malformed-body source-free decoder.");
+                    var malformedExecution = NativeJit.ExecuteWithData(
+                        malformedProgram, (NativeRuntimePolicy)policy);
+                    Assert.That(malformedExecution.ExitCode,
+                        Is.EqualTo(0));
+                }
+
+                var malformedBlockArtifact = artifact.ToArray();
+                BinaryPrimitives.WriteUInt16LittleEndian(
+                    malformedBlockArtifact.AsSpan(bodyRowAbsolute
+                        + blockStart + 12 + 8), 0);
+                AssertMalformedBodyRejected(malformedBlockArtifact,
+                    "standalone-malformed-block-entry-tests.terrum");
+
+                var malformedEdgeArtifact = artifact.ToArray();
+                var edgeRecordOffset = checked((int)BinaryPrimitives
+                    .ReadUInt32LittleEndian(bodyRow.Slice(
+                        recordIndexStart + (bodyReader.BlockCount
+                            * sizeof(uint)))));
+                BinaryPrimitives.WriteUInt16LittleEndian(
+                    malformedEdgeArtifact.AsSpan(bodyRowAbsolute
+                        + recordDataStart + edgeRecordOffset + 4),
+                    ushort.MaxValue);
+                AssertMalformedBodyRejected(malformedEdgeArtifact,
+                    "standalone-malformed-conditional-edge-tests.terrum");
+            }
             if (verificationMode == 60)
             {
                 var malformedArtifact = artifact.ToArray();

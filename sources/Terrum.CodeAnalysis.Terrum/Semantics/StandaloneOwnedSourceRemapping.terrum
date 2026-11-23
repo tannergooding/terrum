@@ -703,6 +703,88 @@ public static int32 RewriteStandaloneOwnedCallNodes()
             targetOffset] = newBodyId;
     }
 
+    for (mut int32 bodyId = 0;
+        bodyId < bodyCount;
+        bodyId = bodyId + 1)
+    {
+        Host.StandaloneRewrittenNormalizedBodyBlockRanges[
+            bodyId * 2] = -1;
+    }
+    for (mut int32 oldBodyId = 0;
+        oldBodyId < bodyCount;
+        oldBodyId = oldBodyId + 1)
+    {
+        int32 newBodyId
+            = Host.StandaloneRewriteBodyIds[oldBodyId];
+        if (newBodyId < 0 || newBodyId >= bodyCount
+            || Host.StandaloneRewrittenNormalizedBodyBlockRanges[
+                newBodyId * 2] != -1)
+        {
+            return FailStandaloneRewrite(3);
+        }
+        Host.StandaloneRewrittenNormalizedBodyBlockRanges[
+            newBodyId * 2] = oldBodyId;
+    }
+    mut int32 rewrittenBlockCount = 0;
+    for (mut int32 newBodyId = 0;
+        newBodyId < bodyCount;
+        newBodyId = newBodyId + 1)
+    {
+        int32 oldBodyId
+            = Host.StandaloneRewrittenNormalizedBodyBlockRanges[
+                newBodyId * 2];
+        if (oldBodyId < 0 || oldBodyId >= bodyCount)
+        {
+            return FailStandaloneRewrite(3);
+        }
+        int32 rangeOffset = oldBodyId * 2;
+        int32 oldBlockFirst
+            = Host.StandaloneNormalizedBodyBlockRanges[
+                rangeOffset];
+        int32 bodyBlockCount
+            = Host.StandaloneNormalizedBodyBlockRanges[
+                rangeOffset + 1];
+        if (oldBlockFirst < 0 || bodyBlockCount <= 0
+            || oldBlockFirst
+                > Host.StandaloneNormalizedBlockCount[0]
+                    - bodyBlockCount
+            || rewrittenBlockCount
+                > Host.StandaloneRewrittenNormalizedBlocks.Length / 16
+                    - bodyBlockCount)
+        {
+            return FailStandaloneRewrite(3);
+        }
+        for (mut int32 localBlockId = 0;
+            localBlockId < bodyBlockCount;
+            localBlockId = localBlockId + 1)
+        {
+            int32 sourceOffset
+                = (oldBlockFirst + localBlockId) * 16;
+            int32 targetOffset
+                = (rewrittenBlockCount + localBlockId) * 16;
+            for (mut int32 field = 0; field < 16;
+                field = field + 1)
+            {
+                Host.StandaloneRewrittenNormalizedBlocks[
+                    targetOffset + field]
+                    = Host.StandaloneNormalizedBlocks[
+                        sourceOffset + field];
+            }
+            Host.StandaloneRewrittenNormalizedBlocks[targetOffset]
+                = newBodyId;
+        }
+        Host.StandaloneRewrittenNormalizedBodyBlockRanges[
+            newBodyId * 2] = rewrittenBlockCount;
+        Host.StandaloneRewrittenNormalizedBodyBlockRanges[
+            newBodyId * 2 + 1] = bodyBlockCount;
+        rewrittenBlockCount = rewrittenBlockCount + bodyBlockCount;
+    }
+    if (rewrittenBlockCount
+        != Host.StandaloneNormalizedBlockCount[0])
+    {
+        return FailStandaloneRewrite(3);
+    }
+
     for (mut int32 homeIndex = 0;
         homeIndex < Host.StandaloneNormalizedHomeCount[0];
         homeIndex = homeIndex + 1)
@@ -857,6 +939,8 @@ public static int32 RewriteStandaloneOwnedCallNodes()
         = Host.StandaloneParameterTypeIds.Length;
     Host.StandaloneRewrittenSourceBodyCount[0] = bodyCount;
     Host.StandaloneRewrittenNormalizedBodyCount[0] = bodyCount;
+    Host.StandaloneRewrittenNormalizedBlockCount[0]
+        = rewrittenBlockCount;
     Host.StandaloneRewrittenSourceParameterCount[0]
         = Host.StandaloneSourceParameterCount[0];
     Host.StandaloneRewrittenSourceExpressionCount[0]
@@ -897,9 +981,14 @@ int32 RewriteStandaloneSourceArenas()
     int32 scopeCount = Host.StandaloneSourceLexicalScopeCount[0];
     int32 localCount = Host.StandaloneSourceLocalCount[0];
     int32 placeCount = Host.StandaloneSourcePlaceCount[0];
+    int32 ifNodeCount = Host.StandaloneSourceIfNodeCount[0];
+    int32 ifChildCount = Host.StandaloneSourceIfChildCount[0];
     int32 typeCount = Host.StandaloneTypeFactCount[0];
     if (scopeCount != bodyCount || bodyCount < 0
-        || scopeCount < 0 || localCount < 0 || placeCount < 0)
+        || scopeCount < 0 || localCount < 0 || placeCount < 0
+        || ifNodeCount < 0 || ifChildCount < 0
+        || ifNodeCount > Host.StandaloneSourceIfNodes.Length / 5
+        || ifChildCount > Host.StandaloneSourceIfChildren.Length)
     {
         return 3;
     }
@@ -1123,9 +1212,61 @@ int32 RewriteStandaloneSourceArenas()
         }
     }
 
+    for (mut int32 ifNodeId = 0;
+        ifNodeId < ifNodeCount;
+        ifNodeId = ifNodeId + 1)
+    {
+        int32 sourceOffset = ifNodeId * 5;
+        int32 targetOffset = ifNodeId * 5;
+        int32 bodyId
+            = Host.StandaloneSourceIfNodes[sourceOffset];
+        int32 trueFirst
+            = Host.StandaloneSourceIfNodes[sourceOffset + 1];
+        int32 trueCount
+            = Host.StandaloneSourceIfNodes[sourceOffset + 2];
+        int32 falseFirst
+            = Host.StandaloneSourceIfNodes[sourceOffset + 3];
+        int32 falseCount
+            = Host.StandaloneSourceIfNodes[sourceOffset + 4];
+        if (bodyId < 0 || bodyId >= bodyCount
+            || trueFirst < 0 || trueCount < 0
+            || trueFirst > ifChildCount - trueCount
+            || falseFirst < 0 || falseCount < 0
+            || falseFirst > ifChildCount - falseCount)
+        {
+            return 3;
+        }
+        Host.StandaloneRewrittenSourceIfNodes[targetOffset]
+            = Host.StandaloneRewriteBodyIds[bodyId];
+        Host.StandaloneRewrittenSourceIfNodes[targetOffset + 1]
+            = trueFirst;
+        Host.StandaloneRewrittenSourceIfNodes[targetOffset + 2]
+            = trueCount;
+        Host.StandaloneRewrittenSourceIfNodes[targetOffset + 3]
+            = falseFirst;
+        Host.StandaloneRewrittenSourceIfNodes[targetOffset + 4]
+            = falseCount;
+    }
+    for (mut int32 childId = 0;
+        childId < ifChildCount;
+        childId = childId + 1)
+    {
+        Host.StandaloneRewrittenSourceIfChildren[childId]
+            = Host.StandaloneSourceIfChildren[childId];
+    }
+    for (mut int32 statementId = 0;
+        statementId < Host.StandaloneSourceStatementCount[0];
+        statementId = statementId + 1)
+    {
+        Host.StandaloneRewrittenSourceStatementParentIds[statementId]
+            = Host.StandaloneSourceStatementParentIds[statementId];
+    }
+
     Host.StandaloneRewrittenSourceLexicalScopeCount[0] = scopeCount;
     Host.StandaloneRewrittenSourceLocalCount[0] = localCount;
     Host.StandaloneRewrittenSourcePlaceCount[0] = placeCount;
+    Host.StandaloneRewrittenSourceIfNodeCount[0] = ifNodeCount;
+    Host.StandaloneRewrittenSourceIfChildCount[0] = ifChildCount;
     return 0;
 }
 
@@ -1143,7 +1284,11 @@ int32 VerifyStandaloneRewrittenSourceArenas()
         || Host.StandaloneRewrittenSourceLexicalScopeCount[0]
             != scopeCount
         || Host.StandaloneRewrittenSourceLocalCount[0] != localCount
-        || Host.StandaloneRewrittenSourcePlaceCount[0] != placeCount)
+        || Host.StandaloneRewrittenSourcePlaceCount[0] != placeCount
+        || Host.StandaloneRewrittenSourceIfNodeCount[0]
+            != Host.StandaloneSourceIfNodeCount[0]
+        || Host.StandaloneRewrittenSourceIfChildCount[0]
+            != Host.StandaloneSourceIfChildCount[0])
     {
         return 3;
     }
@@ -1211,6 +1356,51 @@ int32 VerifyStandaloneRewrittenSourceArenas()
                     sourceScopeOffset + 4])
         {
             return 3;
+        }
+        int32 bodyStatementFirst
+            = Host.StandaloneSourceBodies[bodyId * 12 + 9];
+        int32 bodyStatementCount
+            = Host.StandaloneSourceBodies[bodyId * 12 + 10];
+        for (mut int32 childOrdinal = 0;
+            childOrdinal < trueCount + falseCount;
+            childOrdinal = childOrdinal + 1)
+        {
+            int32 childId = childOrdinal < trueCount
+                ? trueFirst + childOrdinal
+                : falseFirst + childOrdinal - trueCount;
+            int32 childStatementId
+                = Host.StandaloneSourceIfChildren[childId];
+            if (childStatementId < bodyStatementFirst
+                || childStatementId
+                    >= bodyStatementFirst + bodyStatementCount)
+            {
+                return 3;
+            }
+            int32 rootStatementId
+                = Host.StandaloneSourceStatementParentIds[
+                    childStatementId];
+            if (rootStatementId < bodyStatementFirst
+                || rootStatementId
+                    >= bodyStatementFirst + bodyStatementCount
+                || Host.StandaloneSourceStatementParentIds[
+                    rootStatementId] != -1)
+            {
+                return 3;
+            }
+            int32 rootStatementOffset = rootStatementId * 3;
+            if (Host.StandaloneSourceStatements[
+                    rootStatementOffset] != 6
+                || Host.StandaloneSourceStatements[
+                    rootStatementOffset + 2] != ifNodeId)
+            {
+                return 3;
+            }
+            int32 childStatementOffset = childStatementId * 3;
+            if (Host.StandaloneSourceStatements[
+                    childStatementOffset] != 1)
+            {
+                return 3;
+            }
         }
     }
 
@@ -1613,6 +1803,64 @@ int32 VerifyStandaloneRewrittenSourceArenas()
         }
     }
 
+    int32 ifNodeCount = Host.StandaloneSourceIfNodeCount[0];
+    int32 ifChildCount = Host.StandaloneSourceIfChildCount[0];
+    for (mut int32 ifNodeId = 0;
+        ifNodeId < ifNodeCount;
+        ifNodeId = ifNodeId + 1)
+    {
+        int32 offset = ifNodeId * 5;
+        int32 bodyId
+            = Host.StandaloneSourceIfNodes[offset];
+        int32 trueFirst
+            = Host.StandaloneSourceIfNodes[offset + 1];
+        int32 trueCount
+            = Host.StandaloneSourceIfNodes[offset + 2];
+        int32 falseFirst
+            = Host.StandaloneSourceIfNodes[offset + 3];
+        int32 falseCount
+            = Host.StandaloneSourceIfNodes[offset + 4];
+        if (bodyId < 0 || bodyId >= bodyCount
+            || trueFirst < 0 || trueCount < 0
+            || trueFirst > ifChildCount - trueCount
+            || falseFirst < 0 || falseCount < 0
+            || falseFirst > ifChildCount - falseCount
+            || Host.StandaloneRewrittenSourceIfNodes[offset]
+                != Host.StandaloneRewriteBodyIds[bodyId]
+            || Host.StandaloneRewrittenSourceIfNodes[offset + 1]
+                != trueFirst
+            || Host.StandaloneRewrittenSourceIfNodes[offset + 2]
+                != trueCount
+            || Host.StandaloneRewrittenSourceIfNodes[offset + 3]
+                != falseFirst
+            || Host.StandaloneRewrittenSourceIfNodes[offset + 4]
+                != falseCount)
+        {
+            return 3;
+        }
+    }
+    for (mut int32 childId = 0;
+        childId < ifChildCount;
+        childId = childId + 1)
+    {
+        if (Host.StandaloneRewrittenSourceIfChildren[childId]
+            != Host.StandaloneSourceIfChildren[childId])
+        {
+            return 3;
+        }
+    }
+    for (mut int32 statementId = 0;
+        statementId < statementCount;
+        statementId = statementId + 1)
+    {
+        if (Host.StandaloneRewrittenSourceStatementParentIds[
+                statementId]
+            != Host.StandaloneSourceStatementParentIds[statementId])
+        {
+            return 3;
+        }
+    }
+
     for (mut int32 statementIndex = 0;
         statementIndex < statementCount;
         statementIndex = statementIndex + 1)
@@ -1659,6 +1907,22 @@ int32 VerifyStandaloneRewrittenSourceArenas()
                 || Host.StandaloneRewrittenSourceStatements[
                     offset + 2]
                     != Host.StandaloneRewritePlaceIds[placeId])
+            {
+                return 3;
+            }
+        }
+        else if (Host.StandaloneSourceStatements[offset] == 6)
+        {
+            int32 ifNodeId
+                = Host.StandaloneSourceStatements[offset + 2];
+            if (ifNodeId < 0 || ifNodeId >= ifNodeCount
+                || Host.StandaloneSourceIfNodes[ifNodeId * 5]
+                    != ownerBody
+                || Host.StandaloneRewrittenSourceStatements[
+                    offset + 2] != ifNodeId
+                || Host.StandaloneRewrittenSourceIfNodes[
+                    ifNodeId * 5]
+                    != Host.StandaloneRewriteBodyIds[ownerBody])
             {
                 return 3;
             }
@@ -1734,6 +1998,14 @@ bool ValidateStandaloneRewriteBuffers()
             == Host.StandaloneSourceExpressions.Length
         && Host.StandaloneRewrittenSourceStatements.Length
             == Host.StandaloneSourceStatements.Length
+        && Host.StandaloneRewrittenSourceIfNodeCount.Length == 1
+        && Host.StandaloneRewrittenSourceIfNodes.Length
+            == Host.StandaloneSourceIfNodes.Length
+        && Host.StandaloneRewrittenSourceIfChildCount.Length == 1
+        && Host.StandaloneRewrittenSourceIfChildren.Length
+            == Host.StandaloneSourceIfChildren.Length
+        && Host.StandaloneRewrittenSourceStatementParentIds.Length
+            == Host.StandaloneSourceStatementParentIds.Length
         && Host.StandaloneRewrittenSourceDirectCalls.Length
             == Host.StandaloneSourceDirectCalls.Length
         && Host.StandaloneRewrittenSourceCallArguments.Length
@@ -1747,6 +2019,15 @@ bool ValidateStandaloneRewriteBuffers()
             == Host.StandaloneDirectCallTraversal.Length
         && Host.StandaloneRewrittenNormalizedBodies.Length
             == Host.StandaloneNormalizedBodies.Length
+        && Host.StandaloneNormalizedBlockCount.Length == 1
+        && Host.StandaloneNormalizedBlocks.Length % 16 == 0
+        && Host.StandaloneNormalizedBodyBlockRanges.Length
+            == Host.StandaloneSourceBodies.Length / 6
+        && Host.StandaloneRewrittenNormalizedBlockCount.Length == 1
+        && Host.StandaloneRewrittenNormalizedBlocks.Length
+            == Host.StandaloneNormalizedBlocks.Length
+        && Host.StandaloneRewrittenNormalizedBodyBlockRanges.Length
+            == Host.StandaloneNormalizedBodyBlockRanges.Length
         && Host.StandaloneRewrittenNormalizedHomes.Length
             == Host.StandaloneNormalizedHomes.Length
         && Host.StandaloneRewrittenNormalizedConstants.Length
@@ -1772,6 +2053,14 @@ bool ValidateStandaloneRewriteBuffers()
         && Host.StandaloneRewrittenSourceParameterCount.Length == 1
         && Host.StandaloneRewrittenSourceExpressionCount.Length == 1
         && Host.StandaloneRewrittenSourceStatementCount.Length == 1
+        && Host.StandaloneSourceIfNodeCount.Length == 1
+        && Host.StandaloneSourceIfNodes.Length
+            == Host.StandaloneSourceExpressions.Length / 8 * 5
+        && Host.StandaloneSourceIfChildCount.Length == 1
+        && Host.StandaloneSourceIfChildren.Length
+            == Host.StandaloneSourceStatements.Length / 3
+        && Host.StandaloneSourceStatementParentIds.Length
+            == Host.StandaloneSourceStatements.Length / 3
         && Host.StandaloneRewrittenSourceDirectCallCount.Length == 1
         && Host.StandaloneRewrittenSourceCallArgumentCount.Length == 1
         && Host.StandaloneRewrittenNormalizedHomeCount.Length == 1
@@ -1788,7 +2077,10 @@ void ClearStandaloneRewriteOutputs()
     Host.StandaloneRewrittenSourceLexicalScopeCount[0] = 0;
     Host.StandaloneRewrittenSourceLocalCount[0] = 0;
     Host.StandaloneRewrittenSourcePlaceCount[0] = 0;
+    Host.StandaloneRewrittenSourceIfNodeCount[0] = 0;
+    Host.StandaloneRewrittenSourceIfChildCount[0] = 0;
     Host.StandaloneRewrittenNormalizedBodyCount[0] = 0;
+    Host.StandaloneRewrittenNormalizedBlockCount[0] = 0;
     Host.StandaloneRewrittenModuleCount[0] = 0;
     Host.StandaloneRewrittenLocalCallableCount[0] = 0;
     Host.StandaloneRewrittenImportedCallableCount[0] = 0;
@@ -1864,6 +2156,18 @@ void ClearStandaloneRewriteOutputs()
         Host.StandaloneRewrittenNormalizedBodies[index] = 0;
     }
     for (mut int32 index = 0;
+        index < Host.StandaloneRewrittenNormalizedBlocks.Length;
+        index = index + 1)
+    {
+        Host.StandaloneRewrittenNormalizedBlocks[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneRewrittenNormalizedBodyBlockRanges.Length;
+        index = index + 1)
+    {
+        Host.StandaloneRewrittenNormalizedBodyBlockRanges[index] = -1;
+    }
+    for (mut int32 index = 0;
         index < Host.StandaloneRewrittenSourceLexicalScopes.Length;
         index = index + 1)
     {
@@ -1922,6 +2226,24 @@ void ClearStandaloneRewriteOutputs()
         index = index + 1)
     {
         Host.StandaloneRewrittenSourceStatements[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneRewrittenSourceIfNodes.Length;
+        index = index + 1)
+    {
+        Host.StandaloneRewrittenSourceIfNodes[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneRewrittenSourceIfChildren.Length;
+        index = index + 1)
+    {
+        Host.StandaloneRewrittenSourceIfChildren[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneRewrittenSourceStatementParentIds.Length;
+        index = index + 1)
+    {
+        Host.StandaloneRewrittenSourceStatementParentIds[index] = -1;
     }
     for (mut int32 index = 0;
         index < Host.StandaloneRewrittenSourceDirectCalls.Length;
@@ -2647,6 +2969,8 @@ int32 VerifyStandaloneRewrittenCallNodes()
             }
         }
     }
+    mut int32 verifiedBlockCount = 0;
+    mut int32 expectedBlockFirst = 0;
     for (mut int32 bodyId = 0;
         bodyId < Host.StandaloneRewrittenNormalizedBodyCount[0];
         bodyId = bodyId + 1)
@@ -2667,15 +2991,276 @@ int32 VerifyStandaloneRewrittenCallNodes()
         int32 terminalKind
             = Host.StandaloneRewrittenNormalizedBodies[
                 bodyOffset + 11];
-        if (terminalKind != 0 && terminalKind != 1)
+        int32 blockRangeOffset = bodyId * 2;
+        int32 blockFirst
+            = Host.StandaloneRewrittenNormalizedBodyBlockRanges[
+                blockRangeOffset];
+        int32 bodyBlockCount
+            = Host.StandaloneRewrittenNormalizedBodyBlockRanges[
+                blockRangeOffset + 1];
+        int32 blockHomeFirst
+            = Host.StandaloneRewrittenNormalizedBodies[
+                bodyOffset + 1];
+        int32 blockHomeCount
+            = Host.StandaloneRewrittenNormalizedBodies[
+                bodyOffset + 2];
+        if ((terminalKind != 0 && terminalKind != 1)
+            || blockFirst < 0 || bodyBlockCount <= 0
+            || bodyBlockCount
+                > Host.StandaloneRewrittenNormalizedBlockCount[0]
+            || blockFirst
+                > Host.StandaloneRewrittenNormalizedBlockCount[0]
+                    - bodyBlockCount
+            || blockFirst != expectedBlockFirst
+            || operationFirst < 0 || operationCount <= 0
+            || operationFirst
+                > Host.StandaloneRewrittenNormalizedOperationCount[0]
+                    - operationCount
+            || blockHomeFirst < 0 || blockHomeCount < 0
+            || blockHomeFirst
+                > Host.StandaloneRewrittenNormalizedHomeCount[0]
+                    - blockHomeCount)
         {
             return 3;
         }
+        int32 returnTypeId
+            = Host.StandaloneRewrittenSourceCallableInfo[
+                bodyId * 12 + 4];
+        int32 finalOperationOffset
+            = (operationFirst + operationCount - 1) * 5;
+        mut int32 expectedOperationFirst = operationFirst;
+        mut int32 conditionalEdgeCount = 0;
+        for (mut int32 localBlock = 0;
+            localBlock < bodyBlockCount;
+            localBlock = localBlock + 1)
+        {
+            int32 blockIndex = blockFirst + localBlock;
+            int32 blockOffset = blockIndex * 16;
+            int32 blockOperationFirst
+                = Host.StandaloneRewrittenNormalizedBlocks[
+                    blockOffset + 2];
+            int32 blockOperationCount
+                = Host.StandaloneRewrittenNormalizedBlocks[
+                    blockOffset + 3];
+            int32 blockTerminatorKind
+                = Host.StandaloneRewrittenNormalizedBlocks[
+                    blockOffset + 4];
+            int32 selectorKind
+                = Host.StandaloneRewrittenNormalizedBlocks[
+                    blockOffset + 5];
+            int32 selectorIndex
+                = Host.StandaloneRewrittenNormalizedBlocks[
+                    blockOffset + 6];
+            int32 selectorTypeId
+                = Host.StandaloneRewrittenNormalizedBlocks[
+                    blockOffset + 7];
+            int32 target0
+                = Host.StandaloneRewrittenNormalizedBlocks[
+                    blockOffset + 8];
+            int32 target1
+                = Host.StandaloneRewrittenNormalizedBlocks[
+                    blockOffset + 9];
+            int32 conditionSelectorKind
+                = Host.StandaloneRewrittenNormalizedBlocks[
+                    blockOffset + 10];
+            int32 conditionSelectorIndex
+                = Host.StandaloneRewrittenNormalizedBlocks[
+                    blockOffset + 11];
+            int32 conditionTypeId
+                = Host.StandaloneRewrittenNormalizedBlocks[
+                    blockOffset + 12];
+            int32 edgeRecordIndex
+                = Host.StandaloneRewrittenNormalizedBlocks[
+                    blockOffset + 13];
+            int32 noReturnInvokeId
+                = Host.StandaloneRewrittenNormalizedBlocks[
+                    blockOffset + 14];
+            int32 flags
+                = Host.StandaloneRewrittenNormalizedBlocks[
+                    blockOffset + 15];
+            if (Host.StandaloneRewrittenNormalizedBlocks[
+                    blockOffset] != bodyId
+                || Host.StandaloneRewrittenNormalizedBlocks[
+                    blockOffset + 1] != localBlock
+                || blockOperationFirst != expectedOperationFirst
+                || blockOperationCount < 0
+                || blockOperationCount
+                    > operationFirst + operationCount
+                        - blockOperationFirst
+                || flags != 0)
+            {
+                return 3;
+            }
+            if (blockTerminatorKind == 1)
+            {
+                if (blockOperationCount == 0
+                    || terminalKind == 1
+                    || target0 != -1 || target1 != -1
+                    || conditionSelectorKind != 0
+                    || conditionSelectorIndex != 0
+                    || conditionTypeId != 0 || edgeRecordIndex != -1
+                    || noReturnInvokeId != -1)
+                {
+                    return 3;
+                }
+                int32 lastOperationOffset
+                    = (blockOperationFirst
+                        + blockOperationCount - 1) * 5;
+                int32 lastKind
+                    = Host.StandaloneRewrittenNormalizedOperations[
+                        lastOperationOffset];
+                if (IsStandaloneRewrittenUnitType(returnTypeId))
+                {
+                    if (selectorKind != 0 || selectorIndex != 0
+                        || selectorTypeId != returnTypeId
+                        || lastKind != 5)
+                    {
+                        return 3;
+                    }
+                }
+                else if (selectorKind != 2
+                    || selectorIndex < 0
+                    || selectorIndex >= blockHomeCount
+                    || selectorTypeId != returnTypeId
+                    || lastKind != 4
+                    || Host.StandaloneRewrittenNormalizedOperations[
+                        lastOperationOffset + 1] != selectorIndex
+                    || Host.StandaloneRewrittenNormalizedHomes[
+                        (blockHomeFirst + selectorIndex) * 5] != bodyId
+                    || Host.StandaloneRewrittenNormalizedHomes[
+                        (blockHomeFirst + selectorIndex) * 5 + 3]
+                        != returnTypeId)
+                {
+                    return 3;
+                }
+            }
+            else if (blockTerminatorKind == 2)
+            {
+                if (blockOperationCount == 0
+                    || selectorKind != 0 || selectorIndex != 0
+                    || selectorTypeId != 0
+                    || target0 != -1 || target1 != -1
+                    || conditionSelectorKind != 0
+                    || conditionSelectorIndex != 0
+                    || conditionTypeId != 0 || edgeRecordIndex != -1
+                    || noReturnInvokeId < 0
+                    || noReturnInvokeId >= invokeCount)
+                {
+                    return 3;
+                }
+                int32 lastOperationOffset
+                    = (blockOperationFirst
+                        + blockOperationCount - 1) * 5;
+                int32 invokeId = invokeFirst + noReturnInvokeId;
+                int32 expectedCallableId
+                    = Host.StandaloneRewrittenNormalizedInvokes[
+                        invokeId * 10 + 2];
+                if (Host.StandaloneRewrittenNormalizedOperations[
+                        lastOperationOffset] != 3
+                    || Host.StandaloneRewrittenNormalizedOperations[
+                        lastOperationOffset + 1]
+                        != noReturnInvokeId
+                    || expectedCallableId < 0
+                    || expectedCallableId
+                        >= Host.StandaloneRewrittenCallableEffects.Length
+                    || (Host.StandaloneRewrittenCallableEffects[
+                            expectedCallableId] & 2) == 0)
+                {
+                    return 3;
+                }
+            }
+            else if (blockTerminatorKind == 3)
+            {
+                if (selectorKind != 0 || selectorIndex != 0
+                    || selectorTypeId != 0
+                    || target0 < 0 || target0 >= bodyBlockCount
+                    || target1 != -1
+                    || conditionSelectorKind != 0
+                    || conditionSelectorIndex != 0
+                    || conditionTypeId != 0 || edgeRecordIndex != -1
+                    || noReturnInvokeId != -1)
+                {
+                    return 3;
+                }
+            }
+            else if (blockTerminatorKind == 4)
+            {
+                if (selectorKind != 0 || selectorIndex != 0
+                    || selectorTypeId != 0
+                    || target0 < 0 || target0 >= bodyBlockCount
+                    || target1 < 0 || target1 >= bodyBlockCount
+                    || target0 == target1
+                    || conditionSelectorKind != 2
+                    || conditionSelectorIndex < 0
+                    || conditionSelectorIndex >= blockHomeCount
+                    || !IsStandaloneRewrittenScalarType(
+                        conditionTypeId, 1)
+                    || edgeRecordIndex
+                        != bodyBlockCount + conditionalEdgeCount
+                    || noReturnInvokeId != -1
+                    || Host.StandaloneRewrittenNormalizedHomes[
+                        (blockHomeFirst + conditionSelectorIndex) * 5]
+                        != bodyId
+                    || Host.StandaloneRewrittenNormalizedHomes[
+                        (blockHomeFirst + conditionSelectorIndex) * 5 + 3]
+                        != conditionTypeId)
+                {
+                    return 3;
+                }
+                conditionalEdgeCount = conditionalEdgeCount + 1;
+            }
+            else
+            {
+                return 3;
+            }
+            expectedOperationFirst = expectedOperationFirst
+                + blockOperationCount;
+        }
+        if (expectedOperationFirst != operationFirst + operationCount)
+        {
+            return 3;
+        }
+        verifiedBlockCount = verifiedBlockCount + bodyBlockCount;
+        expectedBlockFirst = expectedBlockFirst + bodyBlockCount;
         mut int32 pendingRelationHomeId = -1;
+        mut int32 operationBlockLocal = 0;
+        mut int32 operationBlockOffset = blockFirst * 16;
+        mut int32 operationBlockFirst
+            = Host.StandaloneRewrittenNormalizedBlocks[
+                operationBlockOffset + 2];
+        mut int32 operationBlockCount
+            = Host.StandaloneRewrittenNormalizedBlocks[
+                operationBlockOffset + 3];
+        mut int32 operationBlockTerminatorKind
+            = Host.StandaloneRewrittenNormalizedBlocks[
+                operationBlockOffset + 4];
         for (mut int32 operationLocal = 0;
             operationLocal < operationCount;
             operationLocal = operationLocal + 1)
         {
+            while (operationFirst + operationLocal
+                >= operationBlockFirst + operationBlockCount)
+            {
+                operationBlockLocal = operationBlockLocal + 1;
+                if (operationBlockLocal >= bodyBlockCount)
+                {
+                    return 3;
+                }
+                operationBlockOffset
+                    = (blockFirst + operationBlockLocal) * 16;
+                operationBlockFirst
+                    = Host.StandaloneRewrittenNormalizedBlocks[
+                        operationBlockOffset + 2];
+                operationBlockCount
+                    = Host.StandaloneRewrittenNormalizedBlocks[
+                        operationBlockOffset + 3];
+                operationBlockTerminatorKind
+                    = Host.StandaloneRewrittenNormalizedBlocks[
+                        operationBlockOffset + 4];
+            }
+            bool operationIsBlockTerminator
+                = operationFirst + operationLocal + 1
+                    == operationBlockFirst + operationBlockCount;
             int32 operationOffset
                 = (operationFirst + operationLocal) * 5;
             int32 kind
@@ -2866,6 +3451,33 @@ int32 VerifyStandaloneRewrittenCallNodes()
                 }
                 continue;
             }
+            if (kind == 4)
+            {
+                if (!operationIsBlockTerminator
+                    || operationBlockTerminatorKind != 1
+                    || operand0 < 0 || operand0 >= blockHomeCount
+                    || operand1 != 0 || operand2 != 0
+                    || Host.StandaloneRewrittenNormalizedHomes[
+                        (blockHomeFirst + operand0) * 5] != bodyId
+                    || Host.StandaloneRewrittenNormalizedHomes[
+                        (blockHomeFirst + operand0) * 5 + 3]
+                        != returnTypeId)
+                {
+                    return 3;
+                }
+                continue;
+            }
+            if (kind == 5)
+            {
+                if (!operationIsBlockTerminator
+                    || operationBlockTerminatorKind != 1
+                    || operand0 != 0 || operand1 != 0 || operand2 != 0
+                    || !IsStandaloneRewrittenUnitType(returnTypeId))
+                {
+                    return 3;
+                }
+                continue;
+            }
             if (kind == 30 || kind == 31)
             {
                 if (operand0 < 0 || operand0 >= bodyHomeCount
@@ -2946,8 +3558,8 @@ int32 VerifyStandaloneRewrittenCallNodes()
                 = (Host.StandaloneRewrittenCallableEffects[
                     expectedCallableId] & 2) != 0;
             if (doesNotReturn
-                && (terminalKind != 1
-                    || operationLocal != operationCount - 1))
+                && (!operationIsBlockTerminator
+                    || operationBlockTerminatorKind != 2))
             {
                 return 3;
             }
@@ -2970,6 +3582,13 @@ int32 VerifyStandaloneRewrittenCallNodes()
             return 3;
         }
     }
+        if (verifiedBlockCount
+                != Host.StandaloneRewrittenNormalizedBlockCount[0]
+            || expectedBlockFirst
+                != Host.StandaloneRewrittenNormalizedBlockCount[0])
+        {
+            return 3;
+        }
     return 0;
 }
 

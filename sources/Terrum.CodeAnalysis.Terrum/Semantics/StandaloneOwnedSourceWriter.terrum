@@ -49,6 +49,10 @@ bool ValidateStandaloneWriterBuffers()
             == Host.StandaloneTypeFacts.Length / 3
         && Host.StandaloneWriterTypeSpecRowByTypeId.Length
             == Host.StandaloneTypeFacts.Length / 3 + 1
+        && Host.StandaloneRewrittenNormalizedBlockCount.Length == 1
+        && Host.StandaloneRewrittenNormalizedBlocks.Length % 16 == 0
+        && Host.StandaloneRewrittenNormalizedBodyBlockRanges.Length
+            == Host.StandaloneRewrittenNormalizedBodies.Length / 6
         && Host.StandaloneWriterBodyPlanCount.Length == 1
         && Host.StandaloneWriterBodyPlans.Length % 20 == 0
         && Host.StandaloneWriterTypeMapCount.Length == 1
@@ -3134,14 +3138,399 @@ int32 GetStandaloneWriterOperationCodeLength(int32 bodyId,
     return -1;
 }
 
+int32 GetStandaloneWriterInvokeEffectMask(int32 invokeId)
+{
+    if (invokeId < 0
+        || invokeId >= Host.StandaloneRewrittenInvokeCount[0])
+    {
+        return -1;
+    }
+    int32 expectedCallableId
+        = Host.StandaloneRewrittenInvokes[invokeId * 10 + 2];
+    if (expectedCallableId < 0
+        || expectedCallableId
+            >= Host.StandaloneRewrittenCallableCount[0])
+    {
+        return -1;
+    }
+    int32 effectMask
+        = Host.StandaloneRewrittenCallableEffects[expectedCallableId];
+    return (effectMask & ~6) == 0 ? effectMask : -1;
+}
+
+int32 GetStandaloneWriterBlockTerminatorCodeLength(int32 bodyId,
+    int32 blockIndex, int32 blockCount)
+{
+    int32 blockOffset = blockIndex * 16;
+    int32 operationFirst
+        = Host.StandaloneRewrittenNormalizedBlocks[
+            blockOffset + 2];
+    int32 operationCount
+        = Host.StandaloneRewrittenNormalizedBlocks[
+            blockOffset + 3];
+    int32 terminatorKind
+        = Host.StandaloneRewrittenNormalizedBlocks[
+            blockOffset + 4];
+    int32 resultSelectorKind
+        = Host.StandaloneRewrittenNormalizedBlocks[
+            blockOffset + 5];
+    int32 resultSelectorIndex
+        = Host.StandaloneRewrittenNormalizedBlocks[
+            blockOffset + 6];
+    int32 resultTypeId
+        = Host.StandaloneRewrittenNormalizedBlocks[
+            blockOffset + 7];
+    int32 target0
+        = Host.StandaloneRewrittenNormalizedBlocks[
+            blockOffset + 8];
+    int32 target1
+        = Host.StandaloneRewrittenNormalizedBlocks[
+            blockOffset + 9];
+    int32 conditionSelectorKind
+        = Host.StandaloneRewrittenNormalizedBlocks[
+            blockOffset + 10];
+    int32 conditionSelectorIndex
+        = Host.StandaloneRewrittenNormalizedBlocks[
+            blockOffset + 11];
+    int32 conditionTypeId
+        = Host.StandaloneRewrittenNormalizedBlocks[
+            blockOffset + 12];
+    int32 conditionalEdgeRecordIndex
+        = Host.StandaloneRewrittenNormalizedBlocks[
+            blockOffset + 13];
+    int32 noReturnInvokeId
+        = Host.StandaloneRewrittenNormalizedBlocks[
+            blockOffset + 14];
+    int32 returnTypeId
+        = Host.StandaloneRewrittenSourceCallableInfo[
+            bodyId * 12 + 4];
+    int32 flags
+        = Host.StandaloneRewrittenNormalizedBlocks[
+            blockOffset + 15];
+    int32 bodyOffset = bodyId * 12;
+    int32 homeFirst
+        = Host.StandaloneRewrittenNormalizedBodies[
+            bodyOffset + 1];
+    int32 homeCount
+        = Host.StandaloneRewrittenNormalizedBodies[
+            bodyOffset + 2];
+    if (Host.StandaloneRewrittenNormalizedBlocks[blockOffset]
+            != bodyId
+        || Host.StandaloneRewrittenNormalizedBlocks[
+            blockOffset + 1] < 0
+        || flags != 0
+        || operationFirst < 0 || operationCount < 0
+        || operationFirst
+            > Host.StandaloneRewrittenNormalizedOperationCount[0]
+                - operationCount
+        || homeFirst < 0 || homeCount < 0
+        || homeFirst
+            > Host.StandaloneRewrittenNormalizedHomeCount[0]
+                - homeCount)
+    {
+        return -1;
+    }
+
+    for (mut int32 operationOrdinal = 0;
+        operationOrdinal < operationCount;
+        operationOrdinal = operationOrdinal + 1)
+    {
+        int32 operationOffset
+            = (operationFirst + operationOrdinal) * 5;
+        int32 operationKind
+            = Host.StandaloneRewrittenNormalizedOperations[
+                operationOffset];
+        if (operationKind == 4 || operationKind == 5)
+        {
+            if (terminatorKind != 1
+                || operationOrdinal != operationCount - 1)
+            {
+                return -1;
+            }
+        }
+        if (operationKind == 3)
+        {
+            int32 invokeLocal
+                = Host.StandaloneRewrittenNormalizedOperations[
+                    operationOffset + 1];
+            int32 invokeCount
+                = Host.StandaloneRewrittenNormalizedBodies[
+                    bodyOffset + 6];
+            if (invokeLocal < 0 || invokeLocal >= invokeCount)
+            {
+                return -1;
+            }
+            int32 effectMask = GetStandaloneWriterInvokeEffectMask(
+                Host.StandaloneRewrittenNormalizedBodies[
+                    bodyOffset + 5] + invokeLocal);
+            if (effectMask < 0
+                || ((effectMask & 2) != 0
+                    && (terminatorKind != 2
+                        || operationOrdinal != operationCount - 1)))
+            {
+                return -1;
+            }
+        }
+    }
+
+    if (terminatorKind == 1)
+    {
+        if (operationCount <= 0
+            || target0 != -1 || target1 != -1
+            || conditionSelectorKind != 0
+            || conditionSelectorIndex != 0 || conditionTypeId != 0
+            || conditionalEdgeRecordIndex != -1
+            || noReturnInvokeId != -1)
+        {
+            return -1;
+        }
+        int32 operationOffset
+            = (operationFirst + operationCount - 1) * 5;
+        int32 operationKind
+            = Host.StandaloneRewrittenNormalizedOperations[
+                operationOffset];
+        int32 operationOperand
+            = Host.StandaloneRewrittenNormalizedOperations[
+                operationOffset + 1];
+        int32 operationOperand1
+            = Host.StandaloneRewrittenNormalizedOperations[
+                operationOffset + 2];
+        int32 operationOperand2
+            = Host.StandaloneRewrittenNormalizedOperations[
+                operationOffset + 3];
+        if (operationKind == 5)
+        {
+            return resultSelectorKind == 0
+                && resultSelectorIndex == 0
+                && resultTypeId == returnTypeId
+                && operationOperand == 0
+                && operationOperand1 == 0 && operationOperand2 == 0
+                ? 0 : -1;
+        }
+        if (operationKind != 4 || operationOperand1 != 0
+            || operationOperand2 != 0
+            || resultSelectorKind != 2
+            || operationOperand != resultSelectorIndex
+            || resultSelectorIndex < 0
+            || resultSelectorIndex >= homeCount
+            || resultSelectorIndex > 0xFFFF
+            || resultTypeId != returnTypeId)
+        {
+            return -1;
+        }
+        int32 homeOffset
+            = (homeFirst + resultSelectorIndex) * 5;
+        if (Host.StandaloneRewrittenNormalizedHomes[
+                homeOffset] != bodyId
+            || Host.StandaloneRewrittenNormalizedHomes[
+                homeOffset + 3] != resultTypeId
+            || resultTypeId <= 0
+            || resultTypeId
+                > Host.StandaloneRewrittenTypeFactCount[0])
+        {
+            return -1;
+        }
+        return 0;
+    }
+
+    if (resultSelectorKind != 0 || resultSelectorIndex != 0
+        || resultTypeId != 0)
+    {
+        return -1;
+    }
+    if (terminatorKind == 2)
+    {
+        if (operationCount <= 0
+            || target0 != -1 || target1 != -1
+            || conditionSelectorKind != 0
+            || conditionSelectorIndex != 0 || conditionTypeId != 0
+            || conditionalEdgeRecordIndex != -1
+            || noReturnInvokeId < 0
+            || noReturnInvokeId
+                >= Host.StandaloneRewrittenNormalizedBodies[
+                    bodyOffset + 6])
+        {
+            return -1;
+        }
+        int32 operationOffset
+            = (operationFirst + operationCount - 1) * 5;
+        int32 operationKind
+            = Host.StandaloneRewrittenNormalizedOperations[
+                operationOffset];
+        int32 operationInvoke
+            = Host.StandaloneRewrittenNormalizedOperations[
+                operationOffset + 1];
+        int32 invokeId
+            = Host.StandaloneRewrittenNormalizedBodies[
+                bodyOffset + 5] + noReturnInvokeId;
+        int32 effectMask
+            = GetStandaloneWriterInvokeEffectMask(invokeId);
+        return operationKind == 3
+            && operationInvoke == noReturnInvokeId
+            && Host.StandaloneRewrittenInvokes[invokeId * 10 + 5] == 0
+            && effectMask >= 0 && (effectMask & 2) != 0
+            ? 0 : -1;
+    }
+    if (noReturnInvokeId != -1)
+    {
+        return -1;
+    }
+    if (terminatorKind == 3)
+    {
+        return target0 >= 0 && target0 < blockCount
+            && target1 == -1
+            && conditionSelectorKind == 0
+            && conditionSelectorIndex == 0 && conditionTypeId == 0
+            && conditionalEdgeRecordIndex == -1
+            ? target0 <= 255 ? 2 : 4 : -1;
+    }
+    if (terminatorKind == 4)
+    {
+        if (target0 < 0 || target0 >= blockCount
+            || target1 < 0 || target1 >= blockCount
+            || conditionSelectorKind != 2
+            || conditionSelectorIndex < 0
+            || conditionSelectorIndex >= homeCount
+            || conditionSelectorIndex > 0xFFFF
+            || conditionalEdgeRecordIndex < blockCount
+            || conditionalEdgeRecordIndex > 0xFFFF)
+        {
+            return -1;
+        }
+        int32 conditionHomeOffset
+            = (homeFirst + conditionSelectorIndex) * 5;
+        if (Host.StandaloneRewrittenNormalizedHomes[
+                conditionHomeOffset] != bodyId
+            || Host.StandaloneRewrittenNormalizedHomes[
+                conditionHomeOffset + 3] != conditionTypeId
+            || !IsStandaloneRewrittenScalarType(conditionTypeId, 1))
+        {
+            return -1;
+        }
+        return conditionalEdgeRecordIndex <= 15 ? 6 : 8;
+    }
+    return -1;
+}
+
+int32 GetStandaloneWriterBlockCodeLength(int32 bodyId,
+    int32 blockIndex, int32 blockCount, int32 firstCallRecord)
+{
+    int32 blockOffset = blockIndex * 16;
+    int32 operationFirst
+        = Host.StandaloneRewrittenNormalizedBlocks[
+            blockOffset + 2];
+    int32 operationCount
+        = Host.StandaloneRewrittenNormalizedBlocks[
+            blockOffset + 3];
+    mut int32 codeLength = 0;
+    mut int32 localCallCount = 0;
+    for (mut int32 operationOrdinal = 0;
+        operationOrdinal < operationCount;
+        operationOrdinal = operationOrdinal + 1)
+    {
+        int32 operationIndex = operationFirst + operationOrdinal;
+        int32 operationKind
+            = Host.StandaloneRewrittenNormalizedOperations[
+                operationIndex * 5];
+        int32 callRecordIndex = firstCallRecord + localCallCount;
+        int32 instructionLength
+            = GetStandaloneWriterOperationCodeLength(
+                bodyId, operationIndex, callRecordIndex);
+        if (instructionLength <= 0
+            || codeLength > int32.MaxValue - instructionLength)
+        {
+            return -1;
+        }
+        codeLength = codeLength + instructionLength;
+        if (operationKind == 3)
+        {
+            localCallCount = localCallCount + 1;
+        }
+    }
+    int32 terminatorCodeLength
+        = GetStandaloneWriterBlockTerminatorCodeLength(
+            bodyId, blockIndex, blockCount);
+    if (terminatorCodeLength < 0
+        || codeLength > int32.MaxValue - terminatorCodeLength)
+    {
+        return -1;
+    }
+    return codeLength + terminatorCodeLength;
+}
+
+int32 WriteStandaloneWriterBlockTerminator(int32 blockIndex)
+{
+    int32 blockOffset = blockIndex * 16;
+    int32 terminatorKind
+        = Host.StandaloneRewrittenNormalizedBlocks[
+            blockOffset + 4];
+    if (terminatorKind == 1 || terminatorKind == 2)
+    {
+        return 0;
+    }
+    if (terminatorKind == 3)
+    {
+        int32 target
+            = Host.StandaloneRewrittenNormalizedBlocks[
+                blockOffset + 8];
+        int32 status;
+        if (target <= 255)
+        {
+            status = AppendStandaloneWriterByte(0xB0);
+            if (status != 0) { return status; }
+            return AppendStandaloneWriterByte(target);
+        }
+        status = AppendStandaloneWriterByte(0xE3);
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterByte(0);
+        if (status != 0) { return status; }
+        return AppendStandaloneWriterHalfWord(uint32(target));
+    }
+    if (terminatorKind == 4)
+    {
+        int32 conditionHome
+            = Host.StandaloneRewrittenNormalizedBlocks[
+                blockOffset + 11];
+        int32 edgeRecordIndex
+            = Host.StandaloneRewrittenNormalizedBlocks[
+                blockOffset + 13];
+        int32 status = AppendStandaloneWriterByte(0xD5);
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterByte(0);
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterHalfWord(
+            uint32(conditionHome));
+        if (status != 0) { return status; }
+        if (edgeRecordIndex <= 15)
+        {
+            status = AppendStandaloneWriterByte(0xB1);
+            if (status != 0) { return status; }
+            return AppendStandaloneWriterByte(
+                edgeRecordIndex << 4);
+        }
+        status = AppendStandaloneWriterByte(0xE4);
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterByte(0);
+        if (status != 0) { return status; }
+        return AppendStandaloneWriterHalfWord(
+            uint32(edgeRecordIndex));
+    }
+    return 3;
+}
+
 int32 BuildStandaloneWriterBodyPlans()
 {
     int32 bodyCount
         = Host.StandaloneRewrittenNormalizedBodyCount[0];
+    int32 normalizedBlockCount
+        = Host.StandaloneRewrittenNormalizedBlockCount[0];
     int32 localCount
         = Host.StandaloneRewrittenLocalCallableCount[0];
     if (bodyCount != localCount || bodyCount <= 0
-        || bodyCount > Host.StandaloneWriterBodyPlans.Length / 20)
+        || bodyCount > Host.StandaloneWriterBodyPlans.Length / 20
+        || normalizedBlockCount <= 0
+        || normalizedBlockCount
+            > Host.StandaloneRewrittenNormalizedBlocks.Length / 16)
     {
         return 3;
     }
@@ -3149,6 +3538,7 @@ int32 BuildStandaloneWriterBodyPlans()
     Host.StandaloneWriterTypeMapCount[0] = 0;
     Host.StandaloneWriterMethodMapCount[0] = 0;
     Host.StandaloneWriterConstantMapCount[0] = 0;
+    mut int32 nextBlockFirst = 0;
 
     for (mut int32 bodyId = 0;
         bodyId < bodyCount;
@@ -3185,6 +3575,12 @@ int32 BuildStandaloneWriterBodyPlans()
         int32 operationCount
             = Host.StandaloneRewrittenNormalizedBodies[
                 bodyOffset + 10];
+        int32 blockFirst
+            = Host.StandaloneRewrittenNormalizedBodyBlockRanges[
+                bodyId * 2];
+        int32 blockCount
+            = Host.StandaloneRewrittenNormalizedBodyBlockRanges[
+                bodyId * 2 + 1];
         int32 terminalKind
             = Host.StandaloneRewrittenNormalizedBodies[
                 bodyOffset + 11];
@@ -3208,7 +3604,92 @@ int32 BuildStandaloneWriterBodyPlans()
             || operationFirst
                 > Host.StandaloneRewrittenNormalizedOperationCount[0]
                     - operationCount
+            || blockFirst != nextBlockFirst
+            || blockCount <= 0 || blockCount > 65_536
+            || blockFirst < 0
+            || blockFirst
+                > normalizedBlockCount - blockCount
             || invokeCount > 65_535)
+        {
+            return 3;
+        }
+        nextBlockFirst = nextBlockFirst + blockCount;
+
+        mut int32 expectedOperationFirst = operationFirst;
+        mut int32 edgeCount = 0;
+        mut bool bodyHasNormalReturn = false;
+        int32 bodyEffectMask
+            = GetStandaloneWriterMethodEffectMask(bodyId);
+        if (bodyEffectMask < 0)
+        {
+            return 3;
+        }
+        for (mut int32 localBlock = 0;
+            localBlock < blockCount;
+            localBlock = localBlock + 1)
+        {
+            int32 blockIndex = blockFirst + localBlock;
+            int32 blockOffset = blockIndex * 16;
+            int32 blockOperationFirst
+                = Host.StandaloneRewrittenNormalizedBlocks[
+                    blockOffset + 2];
+            int32 blockOperationCount
+                = Host.StandaloneRewrittenNormalizedBlocks[
+                    blockOffset + 3];
+            int32 blockTerminatorKind
+                = Host.StandaloneRewrittenNormalizedBlocks[
+                    blockOffset + 4];
+            int32 blockEdgeRecordIndex
+                = Host.StandaloneRewrittenNormalizedBlocks[
+                    blockOffset + 13];
+            if (Host.StandaloneRewrittenNormalizedBlocks[
+                    blockOffset] != bodyId
+                || Host.StandaloneRewrittenNormalizedBlocks[
+                    blockOffset + 1] != localBlock
+                || blockOperationFirst != expectedOperationFirst
+                || blockOperationCount < 0
+                || blockOperationFirst
+                    > operationFirst + operationCount
+                        - blockOperationCount)
+            {
+                return 3;
+            }
+            if (GetStandaloneWriterBlockTerminatorCodeLength(
+                    bodyId, blockIndex, blockCount) < 0)
+            {
+                return 3;
+            }
+            if (blockTerminatorKind == 4)
+            {
+                if (blockEdgeRecordIndex != blockCount + edgeCount)
+                {
+                    return 3;
+                }
+                edgeCount = edgeCount + 1;
+            }
+            else if (blockEdgeRecordIndex != -1)
+            {
+                return 3;
+            }
+            if (blockTerminatorKind == 1)
+            {
+                if ((bodyEffectMask & 2) != 0)
+                {
+                    return 3;
+                }
+                bodyHasNormalReturn = true;
+            }
+            expectedOperationFirst
+                = expectedOperationFirst + blockOperationCount;
+        }
+        if (expectedOperationFirst != operationFirst + operationCount
+            || edgeCount > 65_536 - blockCount
+            || ((bodyEffectMask & 2) == 0 && !bodyHasNormalReturn))
+        {
+            return 3;
+        }
+        int32 recordPrefix = blockCount + edgeCount;
+        if (invokeCount > 65_536 - recordPrefix)
         {
             return 3;
         }
@@ -3282,7 +3763,7 @@ int32 BuildStandaloneWriterBodyPlans()
         }
 
         int32 operationCallCount = 0;
-        int32 recordDataLength = 8;
+        int32 recordDataLength = recordPrefix * 8;
         int32 codeLength = 0;
         for (mut int32 localOperation = 0;
             localOperation < operationCount;
@@ -3435,7 +3916,8 @@ int32 BuildStandaloneWriterBodyPlans()
                 }
             }
 
-            int32 callRecordIndex = operationCallCount;
+            int32 callRecordIndex = recordPrefix
+                + operationCallCount - 1;
             int32 instructionLength
                 = GetStandaloneWriterOperationCodeLength(
                     bodyId, operationIndex, callRecordIndex);
@@ -3447,8 +3929,27 @@ int32 BuildStandaloneWriterBodyPlans()
             codeLength = codeLength + instructionLength;
         }
         if (operationCallCount != invokeCount
-            || recordDataLength > int32.MaxValue
-            || codeLength <= 0)
+            || recordDataLength > int32.MaxValue)
+        {
+            return 3;
+        }
+        for (mut int32 localBlock = 0;
+            localBlock < blockCount;
+            localBlock = localBlock + 1)
+        {
+            int32 blockIndex = blockFirst + localBlock;
+            int32 terminatorCodeLength
+                = GetStandaloneWriterBlockTerminatorCodeLength(
+                    bodyId, blockIndex, blockCount);
+            if (terminatorCodeLength < 0
+                || codeLength
+                    > int32.MaxValue - terminatorCodeLength)
+            {
+                return 3;
+            }
+            codeLength = codeLength + terminatorCodeLength;
+        }
+        if (codeLength <= 0)
         {
             return 3;
         }
@@ -3460,7 +3961,9 @@ int32 BuildStandaloneWriterBodyPlans()
         {
             int32 invokeId = invokeFirst + localInvoke;
             if (Host.StandaloneWriterCallSiteRecordIndices[
-                    invokeId] <= 0
+                    invokeId] < recordPrefix
+                || Host.StandaloneWriterCallSiteRecordIndices[
+                    invokeId] > 0xFFFF
                 || Host.StandaloneWriterInvokeMethodMapIndices[
                     invokeId] < 0)
             {
@@ -3479,7 +3982,7 @@ int32 BuildStandaloneWriterBodyPlans()
         {
             return 3;
         }
-        int32 recordCount = invokeCount + 1;
+        int32 recordCount = recordPrefix + invokeCount;
         int32 mapMask = (homeCount != 0 ? 1 : 0)
             | (typeMapCount != 0 ? 2 : 0)
             | (methodMapCount != 0 ? 4 : 0)
@@ -3490,15 +3993,19 @@ int32 BuildStandaloneWriterBodyPlans()
         if ((mapMask & 4) != 0) { mapCount = mapCount + 1; }
         if ((mapMask & 8) != 0) { mapCount = mapCount + 1; }
         if ((mapMask & 16) != 0) { mapCount = mapCount + 1; }
-        int32 bodySize = 17 + (mapCount * 4)
-            + (homeCount * 8) + (typeMapCount * 4)
-            + (methodMapCount * 4) + (constantMapCount * 8)
-            + 12 + ((recordCount + 1) * 4)
-            + recordDataLength + codeLength;
-        if (bodySize <= 0 || bodySize > int32.MaxValue)
+        int64 bodySizeValue = 17 + (int64(mapCount) * 4)
+            + (int64(homeCount) * 8) + (int64(typeMapCount) * 4)
+            + (int64(methodMapCount) * 4)
+            + (int64(constantMapCount) * 8)
+            + (int64(blockCount) * 12)
+            + (int64(recordCount + 1) * 4)
+            + int64(recordDataLength) + int64(codeLength);
+        if (bodySizeValue <= 0
+            || bodySizeValue > int64(int32.MaxValue))
         {
             return 3;
         }
+        int32 bodySize = int32(bodySizeValue);
 
         int32 planOffset = bodyId * 20;
         Host.StandaloneWriterBodyPlans[planOffset] = bodyId;
@@ -3531,6 +4038,10 @@ int32 BuildStandaloneWriterBodyPlans()
         Host.StandaloneWriterBodyPlans[planOffset + 18] = bodySize;
         Host.StandaloneWriterBodyPlans[planOffset + 19] = recordCount;
         Host.StandaloneWriterBodyPlanCount[0] = bodyId + 1;
+    }
+    if (nextBlockFirst != normalizedBlockCount)
+    {
+        return 3;
     }
     return 0;
 }
@@ -3639,24 +4150,57 @@ int32 WriteStandaloneWriterCallSiteRecord(int32 bodyId,
 int32 WriteStandaloneWriterBodyCode(int32 bodyId,
     int32 codeLength)
 {
-    int32 bodyOffset = bodyId * 20;
-    int32 operationFirst
-        = Host.StandaloneWriterBodyPlans[bodyOffset + 14];
-    int32 operationCount
-        = Host.StandaloneWriterBodyPlans[bodyOffset + 15];
     int32 constantFirst
         = Host.StandaloneRewrittenNormalizedBodies[
             bodyId * 12 + 3];
     int32 invokeFirst
         = Host.StandaloneRewrittenNormalizedBodies[
             bodyId * 12 + 5];
+    int32 blockFirst
+        = Host.StandaloneRewrittenNormalizedBodyBlockRanges[
+            bodyId * 2];
+    int32 blockCount
+        = Host.StandaloneRewrittenNormalizedBodyBlockRanges[
+            bodyId * 2 + 1];
     int32 codeStart
         = Host.StandaloneWriterOutputByteCount[0];
     mut int32 observedCallCount = 0;
-    for (mut int32 localOperation = 0;
-        localOperation < operationCount;
-        localOperation = localOperation + 1)
+    mut int32 edgeCount = 0;
+    for (mut int32 localBlock = 0;
+        localBlock < blockCount;
+        localBlock = localBlock + 1)
     {
+        if (Host.StandaloneRewrittenNormalizedBlocks[
+                (blockFirst + localBlock) * 16 + 4] == 4)
+        {
+            edgeCount = edgeCount + 1;
+        }
+    }
+    for (mut int32 localBlock = 0;
+        localBlock < blockCount;
+        localBlock = localBlock + 1)
+    {
+        int32 blockIndex = blockFirst + localBlock;
+        int32 normalizedBlockOffset = blockIndex * 16;
+        int32 operationFirst
+            = Host.StandaloneRewrittenNormalizedBlocks[
+                normalizedBlockOffset + 2];
+        int32 operationCount
+            = Host.StandaloneRewrittenNormalizedBlocks[
+                normalizedBlockOffset + 3];
+        int32 blockCodeStart
+            = Host.StandaloneWriterOutputByteCount[0];
+        int32 blockCodeLength = GetStandaloneWriterBlockCodeLength(
+            bodyId, blockIndex, blockCount,
+            blockCount + edgeCount + observedCallCount);
+        if (blockCodeLength <= 0)
+        {
+            return 3;
+        }
+        for (mut int32 localOperation = 0;
+            localOperation < operationCount;
+            localOperation = localOperation + 1)
+        {
         int32 operationOffset
             = (operationFirst + localOperation) * 5;
         int32 kind
@@ -4414,6 +4958,19 @@ int32 WriteStandaloneWriterBodyCode(int32 bodyId,
         {
             return 3;
         }
+        }
+        int32 terminatorStatus
+            = WriteStandaloneWriterBlockTerminator(
+                blockIndex);
+        if (terminatorStatus != 0)
+        {
+            return terminatorStatus;
+        }
+        if (Host.StandaloneWriterOutputByteCount[0] - blockCodeStart
+            != blockCodeLength)
+        {
+            return 3;
+        }
     }
     int32 invokeCount
         = Host.StandaloneRewrittenNormalizedBodies[
@@ -4456,6 +5013,23 @@ int32 WriteStandaloneWriterBody(int32 bodyId)
         = Host.StandaloneWriterBodyPlans[planOffset + 14];
     int32 operationCount
         = Host.StandaloneWriterBodyPlans[planOffset + 15];
+    int32 blockFirst
+        = Host.StandaloneRewrittenNormalizedBodyBlockRanges[
+            bodyId * 2];
+    int32 blockCount
+        = Host.StandaloneRewrittenNormalizedBodyBlockRanges[
+            bodyId * 2 + 1];
+    mut int32 edgeCount = 0;
+    for (mut int32 localBlock = 0;
+        localBlock < blockCount;
+        localBlock = localBlock + 1)
+    {
+        if (Host.StandaloneRewrittenNormalizedBlocks[
+                (blockFirst + localBlock) * 16 + 4] == 4)
+        {
+            edgeCount = edgeCount + 1;
+        }
+    }
     int32 recordDataLength
         = Host.StandaloneWriterBodyPlans[planOffset + 16];
     int32 codeLength
@@ -4499,7 +5073,7 @@ int32 WriteStandaloneWriterBody(int32 bodyId)
         status = AppendStandaloneWriterWord(uint32(constantCount));
         if (status != 0) { return status; }
     }
-    status = AppendStandaloneWriterWord(1);
+    status = AppendStandaloneWriterWord(uint32(blockCount));
     if (status != 0) { return status; }
     status = AppendStandaloneWriterWord(uint32(recordCount));
     if (status != 0) { return status; }
@@ -4578,21 +5152,67 @@ int32 WriteStandaloneWriterBody(int32 bodyId)
         if (status != 0) { return status; }
     }
 
-    status = AppendStandaloneWriterWord(0);
-    if (status != 0) { return status; }
-    status = AppendStandaloneWriterWord(uint32(codeLength));
-    if (status != 0) { return status; }
-    status = AppendStandaloneWriterHalfWord(0);
-    if (status != 0) { return status; }
-    status = AppendStandaloneWriterHalfWord(0);
-    if (status != 0) { return status; }
+    mut int32 codeOffset = 0;
+    mut int32 callsBeforeBlock = 0;
+    for (mut int32 localBlock = 0;
+        localBlock < blockCount;
+        localBlock = localBlock + 1)
+    {
+        int32 blockIndex = blockFirst + localBlock;
+        int32 blockOffset = blockIndex * 16;
+        int32 blockOperationFirst
+            = Host.StandaloneRewrittenNormalizedBlocks[
+                blockOffset + 2];
+        int32 blockOperationCount
+            = Host.StandaloneRewrittenNormalizedBlocks[
+                blockOffset + 3];
+        int32 blockCodeLength = GetStandaloneWriterBlockCodeLength(
+            bodyId, blockIndex, blockCount,
+            blockCount + edgeCount + callsBeforeBlock);
+        if (blockCodeLength <= 0
+            || codeOffset > int32.MaxValue - blockCodeLength
+            || localBlock > 0xFFFF)
+        {
+            return 3;
+        }
+        status = AppendStandaloneWriterWord(uint32(codeOffset));
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterWord(
+            uint32(blockCodeLength));
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterHalfWord(uint32(localBlock));
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterHalfWord(0);
+        if (status != 0) { return status; }
+        codeOffset = codeOffset + blockCodeLength;
+        for (mut int32 operationOrdinal = 0;
+            operationOrdinal < blockOperationCount;
+            operationOrdinal = operationOrdinal + 1)
+        {
+            if (Host.StandaloneRewrittenNormalizedOperations[
+                    (blockOperationFirst + operationOrdinal) * 5]
+                == 3)
+            {
+                callsBeforeBlock = callsBeforeBlock + 1;
+            }
+        }
+    }
+    if (codeOffset != codeLength)
+    {
+        return 3;
+    }
 
     mut int32 recordOffset = 0;
     status = AppendStandaloneWriterWord(0);
     if (status != 0) { return status; }
-    recordOffset = 8;
-    status = AppendStandaloneWriterWord(uint32(recordOffset));
-    if (status != 0) { return status; }
+    for (mut int32 localRecord = 0;
+        localRecord < blockCount + edgeCount;
+        localRecord = localRecord + 1)
+    {
+        recordOffset = recordOffset + 8;
+        status = AppendStandaloneWriterWord(uint32(recordOffset));
+        if (status != 0) { return status; }
+    }
     for (mut int32 localOperation = 0;
         localOperation < operationCount;
         localOperation = localOperation + 1)
@@ -4625,14 +5245,45 @@ int32 WriteStandaloneWriterBody(int32 bodyId)
         return 3;
     }
 
-    status = AppendStandaloneWriterByte(1);
-    if (status != 0) { return status; }
-    status = AppendStandaloneWriterByte(0);
-    if (status != 0) { return status; }
-    status = AppendStandaloneWriterHalfWord(0);
-    if (status != 0) { return status; }
-    status = AppendStandaloneWriterWord(0);
-    if (status != 0) { return status; }
+    for (mut int32 localBlock = 0;
+        localBlock < blockCount;
+        localBlock = localBlock + 1)
+    {
+        status = AppendStandaloneWriterByte(1);
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterByte(0);
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterHalfWord(0);
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterWord(0);
+        if (status != 0) { return status; }
+    }
+    for (mut int32 localBlock = 0;
+        localBlock < blockCount;
+        localBlock = localBlock + 1)
+    {
+        int32 blockOffset
+            = (blockFirst + localBlock) * 16;
+        if (Host.StandaloneRewrittenNormalizedBlocks[
+                blockOffset + 4] != 4)
+        {
+            continue;
+        }
+        status = AppendStandaloneWriterByte(6);
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterByte(0);
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterHalfWord(0);
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterHalfWord(uint32(
+            Host.StandaloneRewrittenNormalizedBlocks[
+                blockOffset + 8]));
+        if (status != 0) { return status; }
+        status = AppendStandaloneWriterHalfWord(uint32(
+            Host.StandaloneRewrittenNormalizedBlocks[
+                blockOffset + 9]));
+        if (status != 0) { return status; }
+    }
     for (mut int32 localOperation = 0;
         localOperation < operationCount;
         localOperation = localOperation + 1)

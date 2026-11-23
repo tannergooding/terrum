@@ -30,6 +30,7 @@ bool ValidateStandaloneDecoderBuffers()
         && Host.StandaloneDecoderConstantMapCount.Length == 1
         && Host.StandaloneDecoderConstantMapEntries.Length % 3 == 0
         && Host.StandaloneDecoderCallCount.Length == 1
+        && Host.StandaloneDecoderEdgeUseCounts.Length > 0
         && Host.StandaloneDecoderTargetPlanBuilt.Length == 1
         && Host.StandaloneDecoderTargetBodiesValidated.Length == 1
         && Host.StandaloneDecoderCalls.Length % 22 == 0
@@ -141,6 +142,12 @@ void ClearStandaloneDecoderOutputs()
         index = index + 1)
     {
         Host.StandaloneDecoderCallInputs[index] = 0;
+    }
+    for (mut int32 index = 0;
+        index < Host.StandaloneDecoderEdgeUseCounts.Length;
+        index = index + 1)
+    {
+        Host.StandaloneDecoderEdgeUseCounts[index] = 0;
     }
     for (mut int32 index = 0;
         index < Host.StandaloneDecoderRegisterTypeIds.Length;
@@ -3181,6 +3188,89 @@ int32 DecodeStandaloneCallSiteRecord(int32 bodyId,
     return 0;
 }
 
+int32 ValidateStandaloneDecoderConditionalEdge(int32 bodyOffset,
+    int32 recordIndex, int32 artifactStart, int32 artifactLength)
+{
+    int32 blockCount
+        = Host.StandaloneDecoderBodies[bodyOffset + 19];
+    int32 recordCount
+        = Host.StandaloneDecoderBodies[bodyOffset + 21];
+    int32 recordIndexStart
+        = Host.StandaloneDecoderBodies[bodyOffset + 22];
+    int32 recordDataStart
+        = Host.StandaloneDecoderBodies[bodyOffset + 23];
+    int32 recordDataLength
+        = Host.StandaloneDecoderBodies[bodyOffset + 24];
+    if (recordIndex < blockCount || recordIndex >= recordCount
+        || recordIndexStart < 0 || recordDataStart < 0
+        || recordDataLength < 0)
+    {
+        return 3;
+    }
+
+    init uint32 recordStartOffset;
+    init uint32 recordEndOffset;
+    if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+            artifactLength, recordIndexStart + recordIndex * 4,
+            ref init recordStartOffset)
+        || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+            artifactLength, recordIndexStart + (recordIndex + 1) * 4,
+            ref init recordEndOffset)
+        || recordStartOffset > recordEndOffset
+        || recordEndOffset > uint32(recordDataLength)
+        || recordEndOffset - recordStartOffset != 8)
+    {
+        return 3;
+    }
+    int32 recordStart
+        = recordDataStart + int32(recordStartOffset);
+    init int32 recordKind;
+    init int32 recordFlags;
+    init uint32 reserved;
+    init uint32 trueBlock;
+    init uint32 falseBlock;
+    if (!TryReadStandaloneArtifactAbsoluteByte(artifactStart,
+            artifactLength, recordStart, ref init recordKind)
+        || !TryReadStandaloneArtifactAbsoluteByte(artifactStart,
+            artifactLength, recordStart + 1, ref init recordFlags)
+        || !TryReadStandaloneArtifactAbsoluteHalfWord(
+            artifactStart, artifactLength, recordStart + 2,
+            ref init reserved)
+        || !TryReadStandaloneArtifactAbsoluteHalfWord(
+            artifactStart, artifactLength, recordStart + 4,
+            ref init trueBlock)
+        || !TryReadStandaloneArtifactAbsoluteHalfWord(
+            artifactStart, artifactLength, recordStart + 6,
+            ref init falseBlock)
+        || recordKind != 6 || recordFlags != 0 || reserved != 0
+        || trueBlock >= uint32(blockCount)
+        || falseBlock >= uint32(blockCount))
+    {
+        return 3;
+    }
+    return 0;
+}
+
+int32 MarkStandaloneDecoderConditionalEdgeUse(int32 bodyOffset,
+    int32 edgeRecordIndex)
+{
+    int32 blockCount
+        = Host.StandaloneDecoderBodies[bodyOffset + 19];
+    int32 recordCount
+        = Host.StandaloneDecoderBodies[bodyOffset + 21];
+    if (edgeRecordIndex < blockCount
+        || edgeRecordIndex >= recordCount
+        || edgeRecordIndex
+            >= Host.StandaloneDecoderEdgeUseCounts.Length
+        || Host.StandaloneDecoderEdgeUseCounts[
+            edgeRecordIndex] != 0)
+    {
+        return 3;
+    }
+    Host.StandaloneDecoderEdgeUseCounts[edgeRecordIndex] = 1;
+    return 0;
+}
+
 int32 DecodeStandaloneBodyRecords()
 {
     int32 bodyCount = Host.StandaloneDecoderBodyCount[0];
@@ -3227,31 +3317,43 @@ int32 DecodeStandaloneBodyRecords()
         {
             return 3;
         }
-        if (blockCount != 1)
-        {
-            return 2;
-        }
-        if (recordCount <= 0
+        if (blockCount <= 0 || blockCount > recordCount
+            || recordCount <= 0
             || recordIndexStart < 0 || recordDataStart < 0
-            || recordDataLength < 0)
+            || recordDataLength < 0
+            || recordCount
+                > Host.StandaloneDecoderEdgeUseCounts.Length)
         {
             return 3;
+        }
+        for (mut int32 recordIndex = 0;
+            recordIndex < recordCount;
+            recordIndex = recordIndex + 1)
+        {
+            Host.StandaloneDecoderEdgeUseCounts[recordIndex] = 0;
         }
 
         int32 blockStart
             = Host.StandaloneDecoderBodies[bodyOffset + 20];
-        init uint32 blockEntryRecord;
-        if (!TryReadStandaloneArtifactAbsoluteHalfWord(
-                artifactStart, artifactLength, blockStart + 8,
-                ref init blockEntryRecord)
-            || blockEntryRecord >= uint32(recordCount))
+        for (mut int32 blockIndex = 0;
+            blockIndex < blockCount;
+            blockIndex = blockIndex + 1)
         {
-            return 3;
+            init uint32 blockEntryRecord;
+            if (!TryReadStandaloneArtifactAbsoluteHalfWord(
+                    artifactStart, artifactLength,
+                    blockStart + blockIndex * 12 + 8,
+                    ref init blockEntryRecord)
+                || blockEntryRecord != uint32(blockIndex))
+            {
+                return 3;
+            }
         }
 
         int32 callFirst = Host.StandaloneDecoderCallCount[0];
         Host.StandaloneDecoderBodies[bodyOffset + 32] = callFirst;
-        mut bool entryStateFound = false;
+        mut bool callRecordsStarted = false;
+        mut int32 edgeCount = 0;
         for (mut int32 recordIndex = 0;
             recordIndex < recordCount;
             recordIndex = recordIndex + 1)
@@ -3296,9 +3398,9 @@ int32 DecodeStandaloneBodyRecords()
                 return 3;
             }
 
-            if (recordKind == 1)
+            if (recordIndex < blockCount)
             {
-                if (recordLength < 8)
+                if (recordKind != 1 || recordLength != 8)
                 {
                     return 3;
                 }
@@ -3316,20 +3418,25 @@ int32 DecodeStandaloneBodyRecords()
                 {
                     return 2;
                 }
-                if (recordIndex == int32(blockEntryRecord))
+            }
+            else if (recordKind == 6)
+            {
+                if (callRecordsStarted
+                    || ValidateStandaloneDecoderConditionalEdge(
+                        bodyOffset, recordIndex, artifactStart,
+                        artifactLength) != 0)
                 {
-                    entryStateFound = true;
+                    return 3;
                 }
+                edgeCount = edgeCount + 1;
             }
             else if (recordKind == 2)
             {
+                callRecordsStarted = true;
                 int32 callStatus = DecodeStandaloneCallSiteRecord(
                     bodyId, bodyOffset, recordIndex, recordStart,
                     recordLength, artifactStart, artifactLength);
-                if (callStatus != 0)
-                {
-                    return callStatus;
-                }
+                if (callStatus != 0) { return callStatus; }
             }
             else if (recordKind >= 3 && recordKind <= 0x0B)
             {
@@ -3341,17 +3448,51 @@ int32 DecodeStandaloneBodyRecords()
             }
         }
 
-        if (!entryStateFound)
-        {
-            return 3;
-        }
         Host.StandaloneDecoderBodies[bodyOffset + 33]
             = Host.StandaloneDecoderCallCount[0] - callFirst;
-        int32 codeStatus = ValidateStandaloneBodyCode(
-            bodyId, bodyOffset, artifactStart, artifactLength);
-        if (codeStatus != 0)
+        bool methodDoesNotReturn
+            = (Host.StandaloneDecoderMethods[
+                Host.StandaloneDecoderBodies[bodyOffset] * 16 + 15]
+                & 2) != 0;
+        mut bool bodyHasNormalReturn = false;
+        for (mut int32 blockIndex = 0;
+            blockIndex < blockCount;
+            blockIndex = blockIndex + 1)
         {
-            return codeStatus;
+            for (mut int32 registerIndex = 0;
+                registerIndex < 14;
+                registerIndex = registerIndex + 1)
+            {
+                Host.StandaloneDecoderRegisterTypeIds[
+                    bodyId * 14 + registerIndex] = 0;
+            }
+            init bool returnsNormally;
+            int32 codeStatus = ValidateStandaloneBodyBlockCode(
+                bodyId, bodyOffset, blockIndex, artifactStart,
+                artifactLength, ref init returnsNormally);
+            if (codeStatus != 0
+                || (methodDoesNotReturn && returnsNormally))
+            {
+                return codeStatus != 0 ? codeStatus : 3;
+            }
+            if (returnsNormally)
+            {
+                bodyHasNormalReturn = true;
+            }
+        }
+        for (mut int32 edgeOrdinal = 0;
+            edgeOrdinal < edgeCount;
+            edgeOrdinal = edgeOrdinal + 1)
+        {
+            if (Host.StandaloneDecoderEdgeUseCounts[
+                    blockCount + edgeOrdinal] != 1)
+            {
+                return 3;
+            }
+        }
+        if (!methodDoesNotReturn && !bodyHasNormalReturn)
+        {
+            return 3;
         }
     }
     return 0;
@@ -3611,13 +3752,39 @@ int32 GetStandaloneDecoderUnsupportedOpcodeStatus(int32 opcode)
     return 3;
 }
 
-int32 ValidateStandaloneBodyCode(int32 bodyId, int32 bodyOffset,
-    int32 artifactStart, int32 artifactLength)
+int32 ValidateStandaloneBodyBlockCode(int32 bodyId, int32 bodyOffset,
+    int32 blockIndex, int32 artifactStart, int32 artifactLength,
+    ref bool returnsNormally)
 {
-    int32 codeStart
+    int32 bodyCodeStart
         = Host.StandaloneDecoderBodies[bodyOffset + 25];
-    int32 codeLength
-        = Host.StandaloneDecoderBodies[bodyOffset + 26];
+    int32 blockStart
+        = Host.StandaloneDecoderBodies[bodyOffset + 20];
+    int32 blockCount
+        = Host.StandaloneDecoderBodies[bodyOffset + 19];
+    if (blockIndex < 0 || blockIndex >= blockCount)
+    {
+        return 3;
+    }
+    init uint32 codeOffsetValue;
+    init uint32 codeLengthValue;
+    if (!TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+            artifactLength, blockStart + blockIndex * 12,
+            ref init codeOffsetValue)
+        || !TryReadStandaloneArtifactAbsoluteWord(artifactStart,
+            artifactLength, blockStart + blockIndex * 12 + 4,
+            ref init codeLengthValue)
+        || codeLengthValue == 0
+        || codeOffsetValue > uint32(
+            Host.StandaloneDecoderBodies[bodyOffset + 26])
+        || codeLengthValue > uint32(
+            Host.StandaloneDecoderBodies[bodyOffset + 26])
+                - codeOffsetValue)
+    {
+        return 3;
+    }
+    int32 codeStart = bodyCodeStart + int32(codeOffsetValue);
+    int32 codeLength = int32(codeLengthValue);
     int32 methodRecordId
         = Host.StandaloneDecoderBodies[bodyOffset];
     int32 homeCount
@@ -3654,6 +3821,7 @@ int32 ValidateStandaloneBodyCode(int32 bodyId, int32 bodyOffset,
     mut int32 codeOffset = 0;
     mut bool terminal = false;
     mut bool terminalDoesNotReturn = false;
+    mut bool normalReturn = false;
     while (codeOffset < codeLength)
     {
         init int32 opcode;
@@ -3677,6 +3845,7 @@ int32 ValidateStandaloneBodyCode(int32 bodyId, int32 bodyOffset,
                 }
             }
             terminal = true;
+            normalReturn = true;
         }
         else if (opcode >= 0x01 && opcode <= 0x03)
         {
@@ -4493,6 +4662,7 @@ int32 ValidateStandaloneBodyCode(int32 bodyId, int32 bodyOffset,
             }
             codeOffset = codeOffset + 2;
             terminal = true;
+            normalReturn = true;
         }
         else if (opcode == 0x17)
         {
@@ -4524,6 +4694,7 @@ int32 ValidateStandaloneBodyCode(int32 bodyId, int32 bodyOffset,
             }
             codeOffset = codeOffset + 2;
             terminal = true;
+            normalReturn = true;
         }
         else if (opcode == 0x18)
         {
@@ -4541,6 +4712,139 @@ int32 ValidateStandaloneBodyCode(int32 bodyId, int32 bodyOffset,
             }
             codeOffset = codeOffset + 2;
             terminal = true;
+            normalReturn = true;
+        }
+        else if (opcode == 0xB0)
+        {
+            if (codeOffset > codeLength - 2)
+            {
+                return 3;
+            }
+            init int32 targetBlock;
+            if (!TryReadStandaloneArtifactAbsoluteByte(
+                    artifactStart, artifactLength,
+                    codeStart + codeOffset + 1,
+                    ref init targetBlock)
+                || targetBlock
+                    >= Host.StandaloneDecoderBodies[
+                        bodyOffset + 19])
+            {
+                return 3;
+            }
+            codeOffset = codeOffset + 2;
+            terminal = true;
+        }
+        else if (opcode == 0xE3)
+        {
+            if (codeOffset > codeLength - 4)
+            {
+                return 3;
+            }
+            init int32 control;
+            init uint32 targetBlock;
+            if (!TryReadStandaloneArtifactAbsoluteByte(
+                    artifactStart, artifactLength,
+                    codeStart + codeOffset + 1,
+                    ref init control)
+                || !TryReadStandaloneArtifactAbsoluteHalfWord(
+                    artifactStart, artifactLength,
+                    codeStart + codeOffset + 2,
+                    ref init targetBlock)
+                || control != 0
+                || targetBlock >= uint32(
+                    Host.StandaloneDecoderBodies[
+                        bodyOffset + 19]))
+            {
+                return 3;
+            }
+            codeOffset = codeOffset + 4;
+            terminal = true;
+        }
+        else if (opcode == 0xB1)
+        {
+            if (codeOffset > codeLength - 2)
+            {
+                return 3;
+            }
+            init int32 control;
+            if (!TryReadStandaloneArtifactAbsoluteByte(
+                    artifactStart, artifactLength,
+                    codeStart + codeOffset + 1,
+                    ref init control))
+            {
+                return 3;
+            }
+            int32 conditionRegister = control & 0x0F;
+            int32 edgeRecordIndex = control >>> 4;
+            if (conditionRegister > 13)
+            {
+                return 3;
+            }
+            int32 conditionTypeId
+                = Host.StandaloneDecoderRegisterTypeIds[
+                    bodyId * 14 + conditionRegister];
+            if (conditionTypeId <= 0
+                || conditionTypeId
+                    > Host.StandaloneTypeFactCount[0]
+                || Host.StandaloneTypeFacts[
+                    conditionTypeId * 3] != 0
+                || Host.StandaloneTypeFacts[
+                    conditionTypeId * 3 + 1] != 1
+                || ValidateStandaloneDecoderConditionalEdge(
+                    bodyOffset, edgeRecordIndex, artifactStart,
+                    artifactLength) != 0
+                || MarkStandaloneDecoderConditionalEdgeUse(
+                    bodyOffset, edgeRecordIndex) != 0)
+            {
+                return 3;
+            }
+            codeOffset = codeOffset + 2;
+            terminal = true;
+        }
+        else if (opcode == 0xE4)
+        {
+            if (codeOffset > codeLength - 4)
+            {
+                return 3;
+            }
+            init int32 control;
+            init uint32 edgeRecordIndex;
+            if (!TryReadStandaloneArtifactAbsoluteByte(
+                    artifactStart, artifactLength,
+                    codeStart + codeOffset + 1,
+                    ref init control)
+                || !TryReadStandaloneArtifactAbsoluteHalfWord(
+                    artifactStart, artifactLength,
+                    codeStart + codeOffset + 2,
+                    ref init edgeRecordIndex))
+            {
+                return 3;
+            }
+            int32 conditionRegister = control & 0x0F;
+            if ((control & 0xF0) != 0 || conditionRegister > 13)
+            {
+                return 3;
+            }
+            int32 conditionTypeId
+                = Host.StandaloneDecoderRegisterTypeIds[
+                    bodyId * 14 + conditionRegister];
+            if (conditionTypeId <= 0
+                || conditionTypeId
+                    > Host.StandaloneTypeFactCount[0]
+                || Host.StandaloneTypeFacts[
+                    conditionTypeId * 3] != 0
+                || Host.StandaloneTypeFacts[
+                    conditionTypeId * 3 + 1] != 1
+                || ValidateStandaloneDecoderConditionalEdge(
+                    bodyOffset, int32(edgeRecordIndex), artifactStart,
+                    artifactLength) != 0
+                || MarkStandaloneDecoderConditionalEdgeUse(
+                    bodyOffset, int32(edgeRecordIndex)) != 0)
+            {
+                return 3;
+            }
+            codeOffset = codeOffset + 4;
+            terminal = true;
         }
         else
         {
@@ -4554,12 +4858,11 @@ int32 ValidateStandaloneBodyCode(int32 bodyId, int32 bodyOffset,
     }
 
     if (!terminal || codeOffset != codeLength
-        || terminalDoesNotReturn
-            != ((Host.StandaloneDecoderMethods[
-                callerMethodOffset + 15] & 2) != 0))
+        || (terminalDoesNotReturn && normalReturn))
     {
         return 3;
     }
+    *returnsNormally = normalReturn;
     return 0;
 }
 
