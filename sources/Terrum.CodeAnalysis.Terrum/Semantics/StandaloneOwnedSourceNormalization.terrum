@@ -468,7 +468,7 @@ int32 VisitStandaloneSourceExpression(int32 bodyId,
             }
         }
     }
-    else if (expressionKind == 6)
+    else if (expressionKind == 6 || expressionKind == 8)
     {
         int32 childExpressionId
             = Host.StandaloneSourceExpressions[
@@ -902,12 +902,15 @@ int32 NormalizeStandaloneSourceExpression(int32 bodyId,
         *terminatedResult = false;
         return 0;
     }
-    if (expressionKind == 6)
+    if (expressionKind == 6 || expressionKind == 8)
     {
         int32 operandExpressionId
             = Host.StandaloneSourceExpressions[
                 expressionOffset + 2];
-        if (!IsStandaloneUnaryPlusType(typeId)
+        if ((expressionKind == 6
+                && !IsStandaloneUnaryPlusType(typeId))
+            || (expressionKind == 8
+                && !IsStandaloneSourceConstructionType(typeId))
             || operandExpressionId < 0
             || operandExpressionId >= expressionId)
         {

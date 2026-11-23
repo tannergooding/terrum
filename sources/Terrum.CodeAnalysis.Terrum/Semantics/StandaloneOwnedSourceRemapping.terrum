@@ -357,7 +357,9 @@ public static int32 RewriteStandaloneOwnedCallNodes()
                     = Host.StandaloneRewritePlaceIds[placeId];
             }
             else if (Host.StandaloneSourceExpressions[
-                    sourceOffset] == 6)
+                    sourceOffset] == 6
+                || Host.StandaloneSourceExpressions[
+                    sourceOffset] == 8)
             {
                 int32 childExpressionId
                     = Host.StandaloneSourceExpressions[
@@ -1165,7 +1167,7 @@ int32 VerifyStandaloneRewrittenSourceArenas()
                 return 3;
             }
         }
-        else if (expressionKind == 6)
+        else if (expressionKind == 6 || expressionKind == 8)
         {
             int32 childExpressionId
                 = Host.StandaloneSourceExpressions[oldOffset + 2];
@@ -1189,13 +1191,15 @@ int32 VerifyStandaloneRewrittenSourceArenas()
             int32 newExpressionFirst
                 = Host.StandaloneRewrittenSourceBodies[
                     Host.StandaloneRewriteBodyIds[oldBodyId] * 12 + 3];
-            if (!IsStandaloneUnaryPlusType(
-                    Host.StandaloneSourceExpressions[
-                        oldOffset + 1])
+            int32 expressionTypeId
+                = Host.StandaloneSourceExpressions[oldOffset + 1];
+            bool supportedIdentity = expressionKind == 6
+                ? IsStandaloneUnaryPlusType(expressionTypeId)
+                : IsStandaloneSourceConstructionType(
+                    expressionTypeId);
+            if (!supportedIdentity
                 || Host.StandaloneSourceExpressions[
-                    childGlobalId * 8 + 1]
-                    != Host.StandaloneSourceExpressions[
-                        oldOffset + 1]
+                    childGlobalId * 8 + 1] != expressionTypeId
                 || Host.StandaloneRewrittenSourceExpressions[
                     newOffset + 2]
                     != newChildGlobalId - newExpressionFirst)

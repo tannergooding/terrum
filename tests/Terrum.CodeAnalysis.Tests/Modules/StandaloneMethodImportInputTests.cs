@@ -540,7 +540,8 @@ internal sealed class StandaloneMethodImportInputTests
         0, 15, false)]
     [TestCase(BoundRuntimePolicy.FailFast,
         "using api; int32 Main(int32 value) { "
-            + "int32 copy = value; return +Imported((+copy)); }",
+            + "int32 copy = value; "
+            + "return +Imported((int32(+copy))); }",
         0, 16, false)]
     [TestCase(BoundRuntimePolicy.FailFast,
         "namespace client { bool Main(bool value) { return +value; } }",
@@ -556,6 +557,14 @@ internal sealed class StandaloneMethodImportInputTests
         "namespace client { "
             + "int8 Main(int8 value) { return +value; } }",
         0, 18, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "int32 Main(int32 value) { return int32(value); } }",
+        0, 18, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,
+        "namespace client { "
+            + "int32 Main(int64 value) { return int32(value); } }",
+        2, 0, false)]
     [TestCase(BoundRuntimePolicy.FailFast,
         "namespace client { "
             + "int16 Main(int16 value) { return +value; } }",
@@ -901,11 +910,12 @@ internal sealed class StandaloneMethodImportInputTests
                 if (status != 0
                     || Host.StandaloneNormalizedProgramStatus[0] != 0
                     || Host.StandaloneNormalizedBodyCount[0] != 1
-                    || Host.StandaloneSourceExpressionCount[0] != 5
+                    || Host.StandaloneSourceExpressionCount[0] != 6
                     || Host.StandaloneSourceExpressions[16] != 6
-                    || Host.StandaloneSourceExpressions[24] != 3
-                    || Host.StandaloneSourceExpressions[32] != 6
-                    || Host.StandaloneSourceStatements[4] != 4
+                    || Host.StandaloneSourceExpressions[24] != 8
+                    || Host.StandaloneSourceExpressions[32] != 3
+                    || Host.StandaloneSourceExpressions[40] != 6
+                    || Host.StandaloneSourceStatements[4] != 5
                     || Host.StandaloneNormalizedHomeCount[0] != 2
                     || Host.StandaloneNormalizedSourceLocalHomeIds[0]
                         != 0
@@ -916,6 +926,7 @@ internal sealed class StandaloneMethodImportInputTests
                     || Host.StandaloneInvokeInputs[0] != 2
                     || Host.StandaloneInvokeInputs[1] != 1
                     || Host.StandaloneInvokeInputs[2] != 0
+                    || Host.StandaloneSourceCallArguments[0] != 3
                     || Host.StandaloneNormalizedOperations[0] != 3
                     || Host.StandaloneNormalizedOperations[4] != 4) {
                     return 71;
@@ -972,8 +983,10 @@ internal sealed class StandaloneMethodImportInputTests
                         != 0
                     || Host.StandaloneRewrittenSourceExpressions[18]
                         != 1
-                    || Host.StandaloneRewrittenSourceExpressions[34]
-                        != 3
+                    || Host.StandaloneRewrittenSourceExpressions[26]
+                        != 2
+                    || Host.StandaloneRewrittenSourceExpressions[42]
+                        != 4
                     || Host.StandaloneRewrittenNormalizedSourceLocalHomeIds[
                         0] != 0) {
                     return 72;
@@ -1077,10 +1090,13 @@ internal sealed class StandaloneMethodImportInputTests
                 int32 resultTypeCode
                     = Host.StandaloneTypeFacts[
                         Host.StandaloneSourceExpressions[1] * 3 + 1];
+                int32 identityExpressionKind
+                    = Host.StandaloneSourceExpressions[8];
                 if (status != 0
                     || Host.StandaloneSourceExpressionCount[0] != 2
                     || Host.StandaloneSourceExpressions[0] != 1
-                    || Host.StandaloneSourceExpressions[8] != 6
+                    || (identityExpressionKind != 6
+                        && identityExpressionKind != 8)
                     || Host.StandaloneSourceExpressions[1] !=
                         Host.StandaloneSourceExpressions[9]
                     || (resultTypeCode != 0x06
@@ -2746,7 +2762,7 @@ internal sealed class StandaloneMethodImportInputTests
 
         var source = SourceText.From(
             "using api; int32 Main(int32 value) { "
-            + "Imported(value); return Imported(7); }");
+            + "+Imported(value); return Imported(7); }");
         var input = new StandaloneMethodImportInput(Agreement,
             "consumer/module", [
                 new TrRmStandardArtifactInput(SchemaIdentity,
@@ -2802,7 +2818,7 @@ internal sealed class StandaloneMethodImportInputTests
                     || Host.StandaloneSourceImportedCallableCount[0] != 1
                     || Host.StandaloneLocalCallableCount[0] != 1
                     || Host.StandaloneSourceBodyCount[0] != 1
-                    || Host.StandaloneSourceExpressionCount[0] != 4
+                    || Host.StandaloneSourceExpressionCount[0] != 5
                     || Host.StandaloneSourceStatementCount[0] != 2
                     || Host.StandaloneSourceDirectCallCount[0] != 2
                     || Host.StandaloneSourceCallArgumentCount[0] != 2
@@ -2825,17 +2841,18 @@ internal sealed class StandaloneMethodImportInputTests
                     || Host.StandaloneSourceCallArguments[0] != 0
                     || Host.StandaloneSourceCallArguments[1] != 0
                     || Host.StandaloneSourceCallArguments[2] != 1
-                    || Host.StandaloneSourceCallArguments[3] != 2
+                    || Host.StandaloneSourceCallArguments[3] != 3
                     || Host.StandaloneSourceCallArguments[4] != 0
                     || Host.StandaloneSourceCallArguments[5] != 1
                     || Host.StandaloneSourceExpressions[0] != 1
                     || Host.StandaloneSourceExpressions[8] != 3
-                    || Host.StandaloneSourceExpressions[16] != 2
-                    || Host.StandaloneSourceExpressions[24] != 3
+                    || Host.StandaloneSourceExpressions[16] != 6
+                    || Host.StandaloneSourceExpressions[24] != 2
+                    || Host.StandaloneSourceExpressions[32] != 3
                     || Host.StandaloneSourceStatements[0] != 2
-                    || Host.StandaloneSourceStatements[1] != 1
+                    || Host.StandaloneSourceStatements[1] != 2
                     || Host.StandaloneSourceStatements[3] != 1
-                    || Host.StandaloneSourceStatements[4] != 3
+                    || Host.StandaloneSourceStatements[4] != 4
                     || Host.StandaloneNormalizedBodyCount[0] != 1
                     || Host.StandaloneNormalizedHomeCount[0] != 1
                     || Host.StandaloneNormalizedConstantCount[0] != 0
