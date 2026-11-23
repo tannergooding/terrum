@@ -2378,10 +2378,16 @@ int32 InventoryStandaloneSourceForHeaderLocals(int32 bodyId,
                 int32 localOffset = localId * 10;
                 int32 bindingKind
                     = Host.StandaloneSourceLocals[localOffset + 3];
+                int32 initializerStart
+                    = Host.StandaloneSourceLocals[localOffset + 8];
+                bool initializedBinding
+                    = bindingKind == 0 || bindingKind == 1;
+                bool vacantBinding
+                    = bindingKind == 2 || bindingKind == 3;
                 if (afterLocalToken != initializerSemicolon + 1
-                    || Host.StandaloneSourceLocals[
-                        localOffset + 8] < 0
-                    || (bindingKind != 0 && bindingKind != 1))
+                    || (!initializedBinding && !vacantBinding)
+                    || (initializedBinding && initializerStart < 0)
+                    || (vacantBinding && initializerStart >= 0))
                 {
                     return 2;
                 }
@@ -2501,13 +2507,24 @@ int32 VerifyStandaloneForLocalNames(int32 bodyId,
             int32 localOffset = localId * 10;
             int32 bindingKind
                 = Host.StandaloneSourceLocals[localOffset + 3];
+            int32 initializerStart
+                = Host.StandaloneSourceLocals[localOffset + 8];
+            int32 nameToken
+                = Host.StandaloneSourceLocals[localOffset + 6];
+            int32 semicolonToken
+                = Host.StandaloneSourceLocals[localOffset + 9];
+            bool initializedBinding
+                = (bindingKind == 0 || bindingKind == 1)
+                    && initializerStart >= 0;
+            bool vacantBinding
+                = (bindingKind == 2 || bindingKind == 3)
+                    && initializerStart < 0
+                    && semicolonToken == nameToken + 1;
             if (Host.StandaloneSourceLocals[localOffset + 1] != scopeId
                 || Host.StandaloneSourceLocals[localOffset + 7]
                     != headerStart
-                || Host.StandaloneSourceLocals[localOffset + 8] < 0
-                || Host.StandaloneSourceLocals[localOffset + 9]
-                    != initializerSemicolon
-                || (bindingKind != 0 && bindingKind != 1))
+                || semicolonToken != initializerSemicolon
+                || (!initializedBinding && !vacantBinding))
             {
                 return 3;
             }
@@ -2736,6 +2753,22 @@ int32 BindStandaloneSourceForHeaderLocal(int32 localCallableId,
         = Host.StandaloneSourceLocals[initializerLocalOffset + 3];
     int32 initializerExpressionStart
         = Host.StandaloneSourceLocals[initializerLocalOffset + 8];
+    if (initializerBindingKind == 2 || initializerBindingKind == 3)
+    {
+        int32 nameToken
+            = Host.StandaloneSourceLocals[initializerLocalOffset + 6];
+        if (initializerTypeId <= 0
+            || initializerExpressionStart >= 0
+            || Host.StandaloneSourceLocals[initializerLocalOffset + 9]
+                != initializerSemicolon
+            || initializerSemicolon != nameToken + 1)
+        {
+            return 2;
+        }
+        return AppendStandaloneSourceStatement(
+            localCallableId, expressionFirst, 4,
+            -1, initializerLocalId);
+    }
     if ((initializerBindingKind != 0 && initializerBindingKind != 1)
         || initializerExpressionStart < 0
         || Host.StandaloneSourceLocals[initializerLocalOffset + 9]
@@ -3399,6 +3432,7 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
                 return 1;
             }
             int32 headerStart = tokenIndex + 2;
+            mut int32 forHeaderLocalId = -1;
             init int32 initializerSemicolon;
             int32 initializerSemicolonStatus
                 = FindStandaloneSourceStatementSemicolon(
@@ -3419,6 +3453,7 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
                 }
                 if (initializerLocalId >= 0)
                 {
+                    forHeaderLocalId = initializerLocalId;
                     int32 initializerStatus
                         = BindStandaloneSourceForHeaderLocal(
                             localCallableId, expressionFirst,
@@ -3496,6 +3531,16 @@ int32 BindStandaloneSourceBody(int32 localCallableId)
 
             bool conditionOmitted
                 = conditionSemicolon == initializerSemicolon + 1;
+            if (!conditionOmitted && forHeaderLocalId >= 0)
+            {
+                int32 bindingKind
+                    = Host.StandaloneSourceLocals[
+                        forHeaderLocalId * 10 + 3];
+                if (bindingKind == 2 || bindingKind == 3)
+                {
+                    return 2;
+                }
+            }
             mut int32 conditionExpressionId = -1;
             if (!conditionOmitted)
             {
