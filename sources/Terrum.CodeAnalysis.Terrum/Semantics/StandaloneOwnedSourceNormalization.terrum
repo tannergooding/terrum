@@ -1491,9 +1491,97 @@ int32 NormalizeStandaloneSourceLoopBody(int32 bodyId,
                 childOrdinal < nestedDoChildCount - 1;
                 childOrdinal = childOrdinal + 1)
             {
-                int32 assignmentStatementId
+                int32 nestedDoBodyStatementId
                     = Host.StandaloneSourceIfChildren[
                         nestedDoChildFirst + childOrdinal];
+                int32 nestedDoBodyStatementKind
+                    = Host.StandaloneSourceStatements[
+                        nestedDoBodyStatementId * 3];
+                if (nestedDoBodyStatementKind == 7)
+                {
+                    int32 nestedWhileNodeId
+                        = Host.StandaloneSourceStatements[
+                            nestedDoBodyStatementId * 3 + 2];
+                    init int32 nestedWhileBlockCount;
+                    int32 nestedWhileStatus
+                        = GetStandaloneSourceNestedWhileBodyBlockCount(
+                            bodyId, nestedDoBodyStatementId,
+                            nestedWhileNodeId, true,
+                            ref init nestedWhileBlockCount);
+                    int32 nestedWhileConditionId
+                        = Host.StandaloneSourceStatements[
+                            nestedDoBodyStatementId * 3 + 1];
+                    if (nestedWhileStatus != 0
+                        || nestedWhileBlockCount != 1
+                        || nestedWhileConditionId < 0
+                        || nestedWhileConditionId
+                            >= Host.StandaloneSourceBodies[
+                                bodyId * 12 + 4])
+                    {
+                        return nestedWhileStatus != 0
+                            ? nestedWhileStatus : 3;
+                    }
+                    int32 nestedWhileConditionOffset
+                        = (Host.StandaloneSourceBodies[
+                            bodyId * 12 + 3]
+                            + nestedWhileConditionId) * 8;
+                    int32 nestedWhileConditionKind
+                        = Host.StandaloneSourceExpressions[
+                            nestedWhileConditionOffset];
+                    int32 nestedWhileConditionTypeId
+                        = Host.StandaloneSourceExpressions[
+                            nestedWhileConditionOffset + 1];
+                    if (!IsStandaloneLogicalNotType(
+                            nestedWhileConditionTypeId)
+                        || nestedWhileConditionKind == 34
+                        || nestedWhileConditionKind == 35
+                        || nestedWhileConditionKind == 36)
+                    {
+                        return 3;
+                    }
+                    init bool nestedWhileConditionDoesNotReturn;
+                    int32 nestedWhileConditionStatus
+                        = TryGetStandaloneSourceExpressionDoesNotReturn(
+                            bodyId, nestedWhileConditionId,
+                            ref init nestedWhileConditionDoesNotReturn);
+                    if (nestedWhileConditionStatus != 0
+                        || nestedWhileConditionDoesNotReturn)
+                    {
+                        return nestedWhileConditionStatus != 0
+                            ? nestedWhileConditionStatus : 2;
+                    }
+                    init int32 nestedWhileConditionSelectorKind;
+                    init int32 nestedWhileConditionSourceUse;
+                    init int32 nestedWhileConditionSelectorIndex;
+                    init bool nestedWhileConditionTerminated;
+                    int32 nestedWhileConditionNormalizeStatus
+                        = NormalizeStandaloneSourceExpression(
+                            bodyId, nestedWhileConditionId, 1,
+                            ref init nestedWhileConditionSelectorKind,
+                            ref init nestedWhileConditionSourceUse,
+                            ref init nestedWhileConditionSelectorIndex,
+                            ref init nestedWhileConditionTerminated);
+                    if (nestedWhileConditionNormalizeStatus != 0)
+                    {
+                        return nestedWhileConditionNormalizeStatus;
+                    }
+                    if (nestedWhileConditionTerminated
+                        || nestedWhileConditionSelectorKind != 2
+                        || nestedWhileConditionSourceUse != 1
+                        || nestedWhileConditionSelectorIndex < 0
+                        || Host.StandaloneNormalizedBlockCount[0]
+                            != currentBlockCountBeforeBody)
+                    {
+                        return 2;
+                    }
+                    continue;
+                }
+                if (nestedDoBodyStatementKind != 5)
+                {
+                    return 3;
+                }
+                int32 assignmentStatementId
+                    = nestedDoBodyStatementId;
                 init int32 assignmentTerminalKind;
                 int32 assignmentStatus
                     = NormalizeStandaloneSourceStatement(
