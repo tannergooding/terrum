@@ -397,6 +397,102 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     }
 
     [Test]
+    public void EmitsPI1MutableAutoSetterAndBackingWriteAuthority()
+    {
+        var tree = SyntaxTree.Parse("""
+            public mut class Box {
+                public int32 Value { get { return field; } mut set; }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var propertyDeclaration
+            = classDeclaration.Children.OfType<SyntaxNode>()
+                .Single(static node =>
+                    node.Kind == SyntaxKind.PropertyDeclaration);
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "PI1AutoSetterBox",
+            C1M1Construction2PropertyInitializedStateSchemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [
+                new TrRmSourceClassExport(program, 0,
+                    classDeclaration.Span, "BoxKey", [
+                        new TrRmSourceClassMemberExport(0,
+                            propertyDeclaration.Span, "Box.Value"),
+                    ]),
+            ]);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForC1M1Construction2L1R1PropertyInitializedStateDraft(
+                        artifact));
+
+        var setterMethod = tables.Properties.GetSetterMethod(1);
+        Assert.That(setterMethod, Is.GreaterThan(0));
+        Assert.That(tables.Properties.GetInitMethod(1), Is.Zero);
+        Assert.That(tables.Fields.GetFlags(
+                tables.Properties.GetBackingFieldDef(1)) & 0x14u,
+            Is.EqualTo(0x14u));
+        Assert.That(tables.Methods.GetFlags(setterMethod) & 4u,
+            Is.EqualTo(4u));
+        var setterBodyRow = tables.Methods.GetBodyRow(setterMethod);
+        Assert.That(setterBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(setterBodyRow,
+            tables.Contracts.Count);
+        tables.ValidateRegisterBodyMapsForMethod(setterMethod);
+    }
+
+    [Test]
+    public void RejectsPI1SetterThatWritesAnotherField()
+    {
+        var tree = SyntaxTree.Parse("""
+            public mut class Box {
+                public mut int32 Other;
+                public int32 Value {
+                    get { return field; }
+                    mut set { Other = value; }
+                }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var propertyDeclaration
+            = classDeclaration.Children.OfType<SyntaxNode>()
+                .Single(static node =>
+                    node.Kind == SyntaxKind.PropertyDeclaration);
+        var fieldDeclaration
+            = classDeclaration.Children.OfType<SyntaxNode>()
+                .Single(static node =>
+                    node.Kind == SyntaxKind.FieldDeclaration);
+
+        Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.EmitStandard(program,
+                "PI1WrongBackingSetterBox",
+                C1M1Construction2PropertyInitializedStateSchemaIdentity,
+                TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+                [], [], [
+                    new TrRmSourceClassExport(program, 0,
+                        classDeclaration.Span, "BoxKey", [
+                            new TrRmSourceClassMemberExport(0,
+                                fieldDeclaration.Span, "Box.Other"),
+                            new TrRmSourceClassMemberExport(0,
+                                propertyDeclaration.Span, "Box.Value"),
+                        ]),
+                ]));
+    }
+
+    [Test]
     public void EmitsPI1AutoInitializerAccessorAndRoleThreeLink()
     {
         var tree = SyntaxTree.Parse("""

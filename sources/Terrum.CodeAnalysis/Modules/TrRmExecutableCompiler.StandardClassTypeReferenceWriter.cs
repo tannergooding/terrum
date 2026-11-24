@@ -1004,16 +1004,20 @@ public static partial class TrRmExecutableCompiler
             var (classIndex, member) = propertyMemberExports[index];
             if (!emitsConstruction2 || !emitsPropertyInitializedState
                 || member.BackingFieldIndex < 0
-                || member.SetterFunctionIndex >= 0
                 || member.FunctionIndex < 0
                 || (uint)member.FunctionIndex
                     >= (uint)program.Functions.Length
+                || (member.SetterFunctionIndex >= 0
+                    && (uint)member.SetterFunctionIndex
+                        >= (uint)program.Functions.Length)
+                || (member.SetterFunctionIndex >= 0
+                    && member.InitializerFunctionIndex >= 0)
                 || (member.InitializerFunctionIndex >= 0
                     && (uint)member.InitializerFunctionIndex
                         >= (uint)program.Functions.Length))
             {
                 throw Unsupported(
-                    "The bounded PI1 class source route currently requires a selected backed getter-only property.");
+                    "The bounded PI1 class source route requires one selected backed property with supported accessor identities.");
             }
 
             var getter = program.Functions[member.FunctionIndex];
@@ -2386,14 +2390,38 @@ public static partial class TrRmExecutableCompiler
                     candidate.function.SourceDeclarationSpan))
                 .ToDictionary(static group => group.Key,
                     static group => group.ToArray());
+            var memberExportFunctionBindings
+                = new List<(int ClassIndex, int FunctionIndex,
+                    SourceClassMemberExport Member)>();
+            foreach (var export in sourceClassExports.Exports)
+            {
+                var classIndex = export.Declaration.ClassIndex;
+                foreach (var member in export.MemberExports)
+                {
+                    memberExportFunctionBindings.Add((
+                        classIndex, member.FunctionIndex, member));
+                    if (member.Kind != SourceClassMemberKind.Property)
+                    {
+                        continue;
+                    }
+
+                    if (member.SetterFunctionIndex >= 0)
+                    {
+                        memberExportFunctionBindings.Add((
+                            classIndex, member.SetterFunctionIndex, member));
+                    }
+                    if (member.InitializerFunctionIndex >= 0)
+                    {
+                        memberExportFunctionBindings.Add((
+                            classIndex,
+                            member.InitializerFunctionIndex, member));
+                    }
+                }
+            }
             var memberExportsByClassAndFunction
-                = sourceClassExports.Exports
-                    .SelectMany(static export =>
-                        export.MemberExports.Select(member => (
-                            export.Declaration.ClassIndex, Member: member)))
+                = memberExportFunctionBindings
                     .GroupBy(static candidate => (
-                        candidate.ClassIndex,
-                        candidate.Member.FunctionIndex))
+                        candidate.ClassIndex, candidate.FunctionIndex))
                     .ToDictionary(static group => group.Key,
                         static group => group
                             .Select(static candidate => candidate.Member)
@@ -2469,6 +2497,11 @@ public static partial class TrRmExecutableCompiler
                             var propertyMember = propertyMembers[0].Member;
                             methodDeclarations.Add((part, member,
                                 propertyMember.FunctionIndex));
+                            if (propertyMember.SetterFunctionIndex >= 0)
+                            {
+                                methodDeclarations.Add((part, member,
+                                    propertyMember.SetterFunctionIndex));
+                            }
                             if (propertyMember.InitializerFunctionIndex >= 0)
                             {
                                 methodDeclarations.Add((part, member,
@@ -2747,6 +2780,8 @@ public static partial class TrRmExecutableCompiler
                         if (propertyAccessorFunctionIndex
                                 != propertyMember.FunctionIndex
                             && propertyAccessorFunctionIndex
+                                != propertyMember.SetterFunctionIndex
+                            && propertyAccessorFunctionIndex
                                 != propertyMember.InitializerFunctionIndex)
                         {
                             throw new InvalidDataException(
@@ -2777,11 +2812,15 @@ public static partial class TrRmExecutableCompiler
                     var isPropertyGetter = propertyMember is not null
                         && methodFunction.PropertyAccessorKind
                             == BoundPropertyAccessorKind.Getter;
+                    var isPropertySetter = propertyMember is not null
+                        && methodFunction.PropertyAccessorKind
+                            == BoundPropertyAccessorKind.Setter;
                     var isPropertyInitializer = propertyMember is not null
                         && methodFunction.PropertyAccessorKind
                             == BoundPropertyAccessorKind.Initializer;
                     var isPropertyAccessor
-                        = isPropertyGetter || isPropertyInitializer;
+                        = isPropertyGetter || isPropertySetter
+                            || isPropertyInitializer;
                     var isSupportedNoOpInstanceMethod
                         = !methodFunction.IsStatic
                             && methodFunction.ParameterCount
@@ -2864,6 +2903,28 @@ public static partial class TrRmExecutableCompiler
                     {
                         throw Unsupported(
                             "The bounded PI1 class source route supports only an auto init accessor that assigns its exact backing field.");
+                    }
+                    var isSupportedPropertySetter
+                        = isPropertySetter
+                            && propertyMember is
+                                SourceClassMemberExport setterProperty
+                            && setterProperty.SetterFunctionIndex
+                                == methodFunctionIndex
+                            && StringComparer.Ordinal.Equals(
+                                methodFunction.PropertyName,
+                                program.Functions[
+                                    setterProperty.FunctionIndex]
+                                    .PropertyName)
+                            && setterProperty.BackingFieldIndex
+                                == directFieldWriteIndex
+                            && isSupportedDirectFieldWriteInstanceMethod
+                            && methodFunction.IsMutable
+                            && program.Classes[classIndex].Fields[
+                                setterProperty.BackingFieldIndex].IsMutable;
+                    if (isPropertySetter && !isSupportedPropertySetter)
+                    {
+                        throw Unsupported(
+                            "The bounded PI1 class source route supports only a mutable setter that assigns its exact mutable backing field.");
                     }
                     C1M1Construction2NestedFieldWrite? nestedFieldWrite
                         = !isSupportedDirectFieldWriteInstanceMethod
@@ -3147,7 +3208,7 @@ public static partial class TrRmExecutableCompiler
                                 or SourceClassMemberKind.Property))
                         || methodExports.Count(static member =>
                             member.Kind == SourceClassMemberKind.Property)
-                            != (isPropertyGetter ? 1 : 0)
+                            != (isPropertyAccessor ? 1 : 0)
                         || (isPropertyAccessor
                             && methodExportMembers.Length != 0))
                     {
@@ -4406,6 +4467,14 @@ public static partial class TrRmExecutableCompiler
             var propertyVisibility = getter.IsPrivate ? 0u
                 : getter.IsInternal ? 1u : 2u;
             var initializerMethodDefRow = 0;
+            var setterMethodDefRow = 0;
+            if (member.SetterFunctionIndex >= 0
+                && !methodDefRowByFunctionIndex.TryGetValue(
+                    member.SetterFunctionIndex, out setterMethodDefRow))
+            {
+                throw new InvalidDataException(
+                    "A retained PI1 property has no emitted setter MethodDef.");
+            }
             if (member.InitializerFunctionIndex >= 0
                 && !methodDefRowByFunctionIndex.TryGetValue(
                     member.InitializerFunctionIndex,
@@ -4418,6 +4487,7 @@ public static partial class TrRmExecutableCompiler
             propertyRows.Add(new TrRmPropertyDefRow(
                 typeDefRowByClass[classIndex], 0, propertyTypeSpecRef,
                 getterMethodDefRow, propertyVisibility) {
+                SetterMethodDefRow = setterMethodDefRow,
                 InitMethodDefRow = initializerMethodDefRow,
                 BackingFieldDefRow = backingFieldDefRow,
             });
