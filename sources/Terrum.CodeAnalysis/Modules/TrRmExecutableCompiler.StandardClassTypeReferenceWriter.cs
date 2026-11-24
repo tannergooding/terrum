@@ -1018,9 +1018,14 @@ public static partial class TrRmExecutableCompiler
             .ToArray();
         var propertyDefRowByClassAndField
             = new Dictionary<(int ClassIndex, int FieldIndex), int>();
+        var propertyDefRowByStandardClassViewAndId
+            = new Dictionary<(int StandardClassViewIndex,
+                uint PropertyDefinitionId), int>();
         var propertyRows
-            = new List<TrRmPropertyDefRow>(propertyMemberExports.Length);
-        var propertyNames = new List<string>(propertyMemberExports.Length);
+            = new List<TrRmPropertyDefRow>(propertyMemberExports.Length
+                + standardClassTypeDefViews.Sum(static view =>
+                    view.Declaration.Properties.Length));
+        var propertyNames = new List<string>(propertyRows.Capacity);
         for (var index = 0; index < propertyMemberExports.Length; index++)
         {
             var (classIndex, member) = propertyMemberExports[index];
@@ -1056,6 +1061,22 @@ public static partial class TrRmExecutableCompiler
             {
                 throw new InvalidDataException(
                     "A captured PI1 property does not retain one exact getter/backing-field identity.");
+            }
+        }
+        var nextStandardPropertyDefRow = propertyMemberExports.Length;
+        for (var viewIndex = 0;
+            viewIndex < standardClassTypeDefViews.Count; viewIndex++)
+        {
+            var view = standardClassTypeDefViews[viewIndex].Declaration;
+            foreach (var property in view.Properties)
+            {
+                if (!propertyDefRowByStandardClassViewAndId.TryAdd(
+                        (viewIndex, property.DefinitionId),
+                        ++nextStandardPropertyDefRow))
+                {
+                    throw new InvalidDataException(
+                        "A retained Standard class view contains a duplicate PropertyDef.");
+                }
             }
         }
         var sourceNames = new Dictionary<
@@ -4090,10 +4111,13 @@ public static partial class TrRmExecutableCompiler
                     AddMethodContract(1, effectPayload);
                 }
 
-                if (method.ConstructionRole is 1 or 2)
+                if (method.ConstructionRole is 1 or 2 or 3)
                 {
                     if (!schema.UsesObjectConstruction()
-                        || method.ConstructionPropertyDefinitionId != 0)
+                        || (method.ConstructionRole != 3
+                            && method.ConstructionPropertyDefinitionId != 0)
+                        || (method.ConstructionRole == 3
+                            && !schema.UsesPropertyInitializedState()))
                     {
                         throw Unsupported(
                             "A retained class MethodDef construction contract is not selected by this source schema.");
@@ -4118,6 +4142,30 @@ public static partial class TrRmExecutableCompiler
                             var fieldDefinitionId
                                 = method.InitializedMemberDefinitionIds[
                                     memberIndex];
+                            var memberKind = fieldDefinitionId >> 24;
+                            if (memberKind == 0x1E)
+                            {
+                                if (!schema.UsesPropertyInitializedState()
+                                    || !propertyDefRowByStandardClassViewAndId
+                                        .TryGetValue((classViewIndex,
+                                            fieldDefinitionId),
+                                            out var propertyDefRow))
+                                {
+                                    throw new InvalidDataException(
+                                        "A class initializer PropertyDef guarantee has no retained PI1 property row.");
+                                }
+
+                                initializedFields[memberIndex]
+                                    = 0x1E00_0000u
+                                        | checked((uint)propertyDefRow);
+                                continue;
+                            }
+                            if (memberKind != 0x14)
+                            {
+                                throw new InvalidDataException(
+                                    "A class initializer guarantee has an unsupported member DefId kind.");
+                            }
+
                             var fieldIndex = -1;
                             for (var candidateIndex = 0;
                                 candidateIndex < classView.Fields.Length;
@@ -4204,7 +4252,7 @@ public static partial class TrRmExecutableCompiler
                                 initializedFields[memberIndex]);
                         }
                     }
-                    else
+                    else if (method.ConstructionRole == 2)
                     {
                         if ((method.InitializerMethodDefinitionId >> 24)
                                 != 0x16
@@ -4220,6 +4268,33 @@ public static partial class TrRmExecutableCompiler
                         constructionPayload
                             = EncodeC1M1Construction2ProjectionContract(
                                 initializerMethodRow);
+                    }
+                    else
+                    {
+                        var property = classView.Properties
+                            .SingleOrDefault(candidate =>
+                                candidate.DefinitionId
+                                    == method.ConstructionPropertyDefinitionId);
+                        if (method.InitializerMethodDefinitionId != 0
+                            || !method.InitializedMemberDefinitionIds
+                                .IsDefaultOrEmpty
+                            || property is null
+                            || property.InitMethodDefinitionId
+                                != method.DefinitionId
+                            || !propertyDefRowByStandardClassViewAndId
+                                .TryGetValue((classViewIndex,
+                                    method.ConstructionPropertyDefinitionId),
+                                    out var propertyDefRow))
+                        {
+                            throw new InvalidDataException(
+                                "A class role-3 MethodDef lost its exact linked PI1 PropertyDef.");
+                        }
+
+                        constructionPayload = new byte[8];
+                        constructionPayload[0] = 3;
+                        BinaryPrimitives.WriteUInt32LittleEndian(
+                            constructionPayload.AsSpan(4),
+                            checked((uint)propertyDefRow));
                     }
 
                     AddMethodContract(0x0003, constructionPayload);
@@ -4514,6 +4589,111 @@ public static partial class TrRmExecutableCompiler
             exportRows.Add((
                 0x1E00_0000u | checked((uint)propertyRow),
                 member.ExportKey));
+        }
+
+        for (var classViewIndex = 0;
+            classViewIndex < standardClassTypeDefViews.Count;
+            classViewIndex++)
+        {
+            var viewPlan = standardClassTypeDefViews[classViewIndex];
+            var classView = viewPlan.Declaration;
+            foreach (var property in classView.Properties)
+            {
+                if (!propertyDefRowByStandardClassViewAndId.TryGetValue(
+                        (classViewIndex, property.DefinitionId),
+                        out var propertyRow)
+                    || !methodDefRowByStandardClassViewAndId.TryGetValue(
+                        (classViewIndex,
+                            property.GetterMethodDefinitionId),
+                        out var getterMethodDefRow)
+                    || getterMethodDefRow <= 0
+                    || getterMethodDefRow > methodRows.Count)
+                {
+                    throw new InvalidDataException(
+                        "A retained Standard PI1 PropertyDef has no emitted getter or property row.");
+                }
+
+                var getterSignatureRow
+                    = methodRows[getterMethodDefRow - 1].SignatureRow;
+                if (getterSignatureRow <= 0
+                    || getterSignatureRow > methodSignatureRows.Count)
+                {
+                    throw new InvalidDataException(
+                        "A retained Standard PI1 getter has no emitted MethodSig.");
+                }
+
+                var setterMethodDefRow
+                    = property.SetterMethodDefinitionId == 0 ? 0
+                        : methodDefRowByStandardClassViewAndId.TryGetValue(
+                            (classViewIndex,
+                                property.SetterMethodDefinitionId),
+                            out var mappedSetter) ? mappedSetter
+                        : throw new InvalidDataException(
+                            "A retained Standard PI1 PropertyDef has no emitted setter.");
+                var initMethodDefRow
+                    = property.InitMethodDefinitionId == 0 ? 0
+                        : methodDefRowByStandardClassViewAndId.TryGetValue(
+                            (classViewIndex,
+                                property.InitMethodDefinitionId),
+                            out var mappedInitializer) ? mappedInitializer
+                        : throw new InvalidDataException(
+                            "A retained Standard PI1 PropertyDef has no emitted init accessor.");
+                var backingFieldDefRow = 0;
+                if (property.BackingFieldDefinitionId != 0)
+                {
+                    var backingFieldIndex = -1;
+                    for (var fieldIndex = 0;
+                        fieldIndex < classView.Fields.Length;
+                        fieldIndex++)
+                    {
+                        if (classView.Fields[fieldIndex].DefinitionId
+                            == property.BackingFieldDefinitionId)
+                        {
+                            backingFieldIndex = fieldIndex;
+                            break;
+                        }
+                    }
+
+                    if (backingFieldIndex < 0
+                        || !fieldDefRowByStandardClassViewAndIndex.TryGetValue(
+                            (classViewIndex, backingFieldIndex),
+                            out backingFieldDefRow))
+                    {
+                        throw new InvalidDataException(
+                            "A retained Standard PI1 PropertyDef backing has no emitted FieldDef.");
+                    }
+                }
+
+                var propertyTypeSpecRef = methodSignatureRows[
+                    getterSignatureRow - 1].ResultTypeSpecRef;
+                propertyRows.Add(new TrRmPropertyDefRow(
+                    typeDefRowByStandardClassView[classViewIndex], 0,
+                    propertyTypeSpecRef, getterMethodDefRow,
+                    property.Flags) {
+                    SetterMethodDefRow = setterMethodDefRow,
+                    InitMethodDefRow = initMethodDefRow,
+                    BackingFieldDefRow = backingFieldDefRow,
+                });
+                propertyNames.Add(property.Name);
+
+                if (viewPlan.IsSelectedView)
+                {
+                    foreach (var propertyExportKey in property.ExportKeys)
+                    {
+                        if (!AddExportKey(viewPlan.Provider.ModuleRow,
+                                propertyExportKey))
+                        {
+                            throw new InvalidDataException(
+                                "C1M1 PI1 PropertyDef ExportKeys must be unique within the Module.");
+                        }
+
+                        exportRows.Add((
+                            0x1E00_0000u
+                                | checked((uint)propertyRow),
+                            propertyExportKey));
+                    }
+                }
+            }
         }
 
         var totalRows = (long)typeDefRows.Count + fieldRows.Count

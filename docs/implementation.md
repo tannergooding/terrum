@@ -2244,9 +2244,16 @@ links, and role-1 constructor CallSites with source-use-5 receivers and
 direct scalar value Homes. Constructor Bodies preserve repeated call order and
 can interleave calls to distinct properties with direct scalar FieldWrites.
 Producer regressions are authored but unverified.
-Other setter/init Body shapes and init contracts, private/unselected property
-closure, source-free binding/remapping, provider replacement,
-PropertyInitialized production, role-3 lifecycle and runtime remain open.
+The exact Construction-2 local TypeDef source-free route now remaps local
+PropertyDef rows/exports, PropertyBacking FieldDefs, role-1 PropertyDef
+guarantees and role-3 init links/Bodies. Class source emission also retains
+PropertyDef/accessor/backing views for selected imported PI1 classes; a
+consumer-to-source-free-re-emission/reload test and an incompatible-property
+replacement test are authored but unverified under the active hold. Other
+setter/init Body shapes and init contracts, private/unselected property
+closure, independent replacement/row relocation, PropertyInitialized graph
+production, role-3 lifecycle, separate-artifact class re-emission and runtime
+remain open.
 Type-only class reference composition now reconciles imported class-handle
 FieldDefs with selected direct provider roots across Modules, preserving exact
 provider expectations and remapping class TypeSpec/TypeDef Import rows by root

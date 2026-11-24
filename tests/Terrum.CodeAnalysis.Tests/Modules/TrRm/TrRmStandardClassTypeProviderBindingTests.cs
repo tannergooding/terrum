@@ -4736,6 +4736,123 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
         Assert.That(reloadedTables.Contracts.GetConstructionClause(
                 reloadedInitMethod).PropertyDefRow,
             Is.EqualTo(reloadedPropertyDefinition & 0x00FF_FFFFu));
+
+        var consumerTree = SyntaxTree.Parse("""
+            public class Container {
+                int32 _value;
+                public Container(int32 value) { _value = value; }
+                public static void Accept(Box value) {}
+            }
+            """);
+        var consumerCompilation = Compilation.CreateLibrary(consumerTree,
+            reference);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumerProgram = (BoundProgram)consumerCompilation.Program!;
+        var containerDeclaration = consumerTree.Root.Children
+            .OfType<SyntaxNode>().Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var containerMembers = containerDeclaration.Children
+            .OfType<SyntaxNode>();
+        var containerConstructor = containerMembers.Single(
+            static node => node.Kind == SyntaxKind.ConstructorDeclaration);
+        var acceptMethod = containerMembers.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration);
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            consumerProgram, "PI1PropertyConsumer",
+            C1M1Construction2PropertyInitializedStateSchemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [
+                new TrRmSourceClassExport(consumerProgram, 0,
+                    containerDeclaration.Span, "ContainerKey", [
+                        new TrRmSourceClassMemberExport(0,
+                            containerConstructor.Span,
+                            "Container.Initialize"),
+                        new TrRmSourceClassMemberExport(0,
+                            acceptMethod.Span, "Container.Accept"),
+                    ]),
+            ]);
+        var providerInput = new TrRmStandardArtifactInput(
+            C1M1Construction2PropertyInitializedStateSchemaIdentity,
+            artifact);
+        var consumerReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(
+                    C1M1Construction2PropertyInitializedStateSchemaIdentity,
+                    consumerArtifact),
+                "PI1PropertyConsumer", [providerInput], ["ContainerKey"]);
+        var expectedBox = consumerReference.StandardClassDeclarations.Single(
+            static declaration => declaration.Declaration.Name == "Box");
+        Assert.That(expectedBox.Expectations, Has.Length.EqualTo(1));
+        Assert.That(expectedBox.Expectations[0].ExpectedDeclaration.Properties,
+            Has.Length.EqualTo(1));
+
+        var consumerSourceFreeCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(""), consumerReference);
+        Assert.That(consumerSourceFreeCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerSourceFreeCompilation.Diagnostics));
+        var consumerReemitted = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)consumerSourceFreeCompilation.Program!,
+            "PI1PropertyConsumerReemitted",
+            C1M1Construction2PropertyInitializedStateSchemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var consumerReemittedReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(
+                    C1M1Construction2PropertyInitializedStateSchemaIdentity,
+                    consumerReemitted),
+                "PI1PropertyConsumerReemitted", [providerInput],
+                ["ContainerKey"]);
+        Assert.That(consumerReemittedReference.StandardClassDeclarations
+                .Single(static declaration =>
+                    declaration.Declaration.Name == "Box")
+                .Expectations,
+            Has.Length.EqualTo(1));
+
+        var changedProviderTree = SyntaxTree.Parse("""
+            public class Box {
+                int32 _value;
+                public Box(int32 value) { _value = value; }
+            }
+            """);
+        var changedProviderCompilation
+            = Compilation.CreateLibrary(changedProviderTree);
+        Assert.That(changedProviderCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                changedProviderCompilation.Diagnostics));
+        var changedProviderProgram
+            = (BoundProgram)changedProviderCompilation.Program!;
+        var changedClassDeclaration = changedProviderTree.Root.Children
+            .OfType<SyntaxNode>().Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var changedMembers = changedClassDeclaration.Children
+            .OfType<SyntaxNode>();
+        var changedConstructor = changedMembers.Single(static node =>
+            node.Kind == SyntaxKind.ConstructorDeclaration);
+        var changedProvider = TrRmExecutableCompiler.EmitStandard(
+            changedProviderProgram, "PI1ClassProviderChanged",
+            C1M1Construction2PropertyInitializedStateSchemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [
+                new TrRmSourceClassExport(changedProviderProgram, 0,
+                    changedClassDeclaration.Span, "BoxKey", [
+                        new TrRmSourceClassMemberExport(0,
+                            changedConstructor.Span,
+                            "Box.Initialize"),
+                    ]),
+            ]);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(
+                    C1M1Construction2PropertyInitializedStateSchemaIdentity,
+                    consumerArtifact),
+                "PI1PropertyConsumer", [
+                    new TrRmStandardArtifactInput(
+                        C1M1Construction2PropertyInitializedStateSchemaIdentity,
+                        changedProvider),
+                ], ["ContainerKey"]));
     }
 
     [Test]
