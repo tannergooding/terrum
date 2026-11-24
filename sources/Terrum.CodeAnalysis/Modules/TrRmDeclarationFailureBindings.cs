@@ -1103,6 +1103,19 @@ internal static class TrRmDeclarationFailureBindingContract
                     : classTables.TypeSpecs.GetNominalTypeDefRow(
                         selectedOwnerRef, classTables.TypeDefs,
                         classTables.Imports);
+                var selectedOwnerMatchesWitness
+                    = selectedOwnerRef == 0
+                        ? selectedOwnerTypeDef == classTypeDefRow
+                        : selectedOwnerTypeDef == classTypeDefRow
+                            ? classTables.TypeSpecs
+                                .AreEquivalentTypeSpecRefs(
+                                    selectedOwnerRef,
+                                    implementingTypeSpecRef)
+                            : selectedOwnerTypeDef == interfaceTypeDefRow
+                                && classTables.TypeSpecs
+                                    .AreEquivalentTypeSpecRefs(
+                                        selectedOwnerRef,
+                                        interfaceTypeSpecRef);
                 var requirementSignature = classTables.Methods.GetSignature(
                     requiredMethod);
                 var selectedSignature = classTables.Methods.GetSignature(
@@ -1122,6 +1135,7 @@ internal static class TrRmDeclarationFailureBindingContract
                             selectedOwnerTypeDef) is not (2 or 3))
                     || (selectedOwnerTypeDef != classTypeDefRow
                         && selectedOwnerTypeDef != interfaceTypeDefRow)
+                    || !selectedOwnerMatchesWitness
                     || requirementParameterCount != selectedParameterCount
                     || classTables.Signatures.GetGenericCount(
                         requirementSignature)
