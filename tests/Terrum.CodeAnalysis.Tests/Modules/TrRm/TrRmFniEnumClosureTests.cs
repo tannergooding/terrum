@@ -467,6 +467,7 @@ internal sealed class TrRmFniEnumClosureTests
                 [ForeignNativeInterface(VTableByteOffset: uint32(0))]
                 public interface IProbe {
                     public unsafe Shade GetShade(Tint value);
+                    public unsafe Shade GetCoreShade(LayoutKind value);
                     public unsafe Shade Echo(Shade value);
                     public unsafe NativeCallingConvention EchoConvention(
                         NativeCallingConvention value);
@@ -475,6 +476,13 @@ internal sealed class TrRmFniEnumClosureTests
                     unsafe {
                         return IProbe.Echo(receiver,
                             IProbe.GetShade(receiver, Tint.Green));
+                    }
+                }
+                Shade InvokeCoreNested(ptr<void> receiver) {
+                    unsafe {
+                        return IProbe.Echo(receiver,
+                            IProbe.GetCoreShade(receiver,
+                                LayoutKind.Sequential));
                     }
                 }
                 Shade InvokeDirect(ptr<void> receiver) {
@@ -622,6 +630,10 @@ internal sealed class TrRmFniEnumClosureTests
                 loaded.EnumDefinitions.Length)
             .Single(enumIndex => loaded.EnumDefinitions[enumIndex].Name
                 == "Terrum.Interop.NativeCallingConvention");
+        var loadedLayoutEnumIndex = Enumerable.Range(0,
+                loaded.EnumDefinitions.Length)
+            .Single(enumIndex => loaded.EnumDefinitions[enumIndex].Name
+                == "LayoutKind");
         BoundCall? FindCall(string functionName, string memberName)
         {
             BoundCall? result = null;
@@ -672,13 +684,21 @@ internal sealed class TrRmFniEnumClosureTests
             Is.EqualTo(BoundEnumTypes.Type(loadedCoreEnumIndex)));
         Assert.That(coreConstant.RepresentationType,
             Is.EqualTo(PrimitiveType.Int32));
+        var nestedCoreCall = FindCall("InvokeCoreNested", "GetCoreShade");
+        var nestedCoreConstant
+            = (BoundConstant)nestedCoreCall!.Arguments.Single();
+        Assert.That(nestedCoreConstant.Type,
+            Is.EqualTo(BoundEnumTypes.Type(loadedLayoutEnumIndex)));
+        Assert.That(nestedCoreConstant.RepresentationType,
+            Is.EqualTo(PrimitiveType.Int32));
         var nativeFunctionNames = loaded.Functions.Where(function =>
             HasSimpleName(function.Name, "Invoke")
             || HasSimpleName(function.Name, "InvokeDirect")
             || HasSimpleName(function.Name, "InvokeStaged")
-            || HasSimpleName(function.Name, "InvokeCore"))
+            || HasSimpleName(function.Name, "InvokeCore")
+            || HasSimpleName(function.Name, "InvokeCoreNested"))
             .Select(static function => function.Name).ToArray();
-        Assert.That(nativeFunctionNames.Length, Is.EqualTo(4));
+        Assert.That(nativeFunctionNames.Length, Is.EqualTo(5));
         Assert.That(NativeEmitter.EmitLibrary(loaded,
             nativeFunctionNames,
             NativeRuntimePolicy.FailFast), Is.Not.Empty);
