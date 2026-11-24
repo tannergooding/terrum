@@ -734,10 +734,13 @@ internal static class TrRmDeclarationFailureBindingContract
         }
 
         var record = body.GetRecord(recordIndex);
-        if (record.Length < 20 || record[0] != 0x0B)
+        if (record.Length != 20 || record[0] != 0x0B
+            || BinaryPrimitives.ReadUInt32LittleEndian(record[8..]) != 0
+            || BinaryPrimitives.ReadUInt32LittleEndian(record[12..]) != 0
+            || BinaryPrimitives.ReadUInt32LittleEndian(record[16..]) != 0)
         {
             throw new InvalidDataException(
-                "A declaration failure-binding plan does not select ConstructorBinding record 0B.");
+                "A declaration failure-binding plan requires the assigned zero-formal ConstructorBinding record 0B.");
         }
 
         var methodMapIndex = BinaryPrimitives.ReadUInt16LittleEndian(
@@ -800,15 +803,17 @@ internal static class TrRmDeclarationFailureBindingContract
 
         var targetMethodRow = checked((int)(
             targetDefinition & 0x00FF_FFFF));
+        var targetSignature = tables.Methods.GetSignature(targetMethodRow);
+        var (_, targetFormalCount)
+            = tables.Signatures.GetParamRange(targetSignature);
         var targetOwnerTypeDefRow
             = tables.Methods.GetOwnerType(targetMethodRow);
         var targetConstruction
             = tables.Contracts.GetConstructionClause(targetMethodRow);
-        if (targetConstruction.RoleTag != 2
+        if (targetFormalCount != 0 || targetConstruction.RoleTag != 2
             || targetOwnerTypeDefRow != exceptionTypeDefRow
             || !tables.TypeSpecs.AreEquivalentTypeSpecRefs(
-                tables.Signatures.GetResultTypeSpec(
-                    tables.Methods.GetSignature(targetMethodRow)),
+                tables.Signatures.GetResultTypeSpec(targetSignature),
                 exceptionTypeSpecRef))
         {
             throw new InvalidDataException(
