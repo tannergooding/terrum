@@ -402,8 +402,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         var tree = SyntaxTree.Parse("""
             public class Box {
                 public int32 Value { get { return field; } init; }
-                public int32 Seed;
-                public Box(int32 seed) { Seed = seed; }
+                public Box(int32 value) { Value = value; }
             }
             """);
         var compilation = Compilation.CreateLibrary(tree);
@@ -414,8 +413,6 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             .Single(static node =>
                 node.Kind == SyntaxKind.ClassDeclaration);
         var members = classDeclaration.Children.OfType<SyntaxNode>();
-        var fieldDeclaration = members.Single(static node =>
-            node.Kind == SyntaxKind.FieldDeclaration);
         var propertyDeclaration = members.Single(static node =>
             node.Kind == SyntaxKind.PropertyDeclaration);
         var constructorDeclaration = members.Single(static node =>
@@ -429,12 +426,12 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 new TrRmSourceClassExport(program, 0,
                     classDeclaration.Span, "BoxKey", [
                         new TrRmSourceClassMemberExport(0,
-                            fieldDeclaration.Span, "Box.Seed"),
-                        new TrRmSourceClassMemberExport(0,
                             propertyDeclaration.Span, "Box.Value"),
                         new TrRmSourceClassMemberExport(0,
                             constructorDeclaration.Span,
-                            "Box.Initialize"),
+                            "Box.Initialize") {
+                            ConstructionProjectionExportKey = "Box.Create",
+                        },
                     ]),
             ]);
         var tables = TrRmStructuralMetadataValidator
@@ -449,8 +446,62 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             = tables.Contracts.GetConstructionClause(initializerMethod);
         Assert.That(propertyClause.RoleTag, Is.EqualTo(3));
         Assert.That(propertyClause.PropertyDefRow, Is.EqualTo(1));
+        var initializerRow = Enumerable.Range(1, tables.Methods.Count)
+            .Single(row => tables.Methods.GetOwnerType(row) == 1
+                && tables.Contracts.HasConstructionClause(row)
+                && tables.Contracts.GetConstructionClause(row).RoleTag == 1);
+        var initializer
+            = tables.Contracts.GetConstructionClause(initializerRow);
+        Assert.That(initializer.InitializedMemberDefIds,
+            Is.EqualTo(new[] { 0x1E00_0001u }));
+        var initializerBody = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(initializerRow),
+            tables.Contracts.Count);
+        Assert.That(initializerBody.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] { 0xE0, 0, 1, 0, 0x18, 0 }));
+        Assert.That(initializerBody.HomeMap[0], Is.EqualTo(1));
+        Assert.That(initializerBody.HomeMap[8], Is.EqualTo(2));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+                initializerBody.HomeMap.Slice(12)),
+            Is.Zero);
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                initializerBody.MethodMap.Span),
+            Is.EqualTo(0x1600_0000u
+                | checked((uint)initializerMethod)));
+        tables.ValidateRegisterBodyMapsForMethod(initializerRow);
+        var initializerCall = initializerBody.GetRecord(1)[4..];
+        Assert.That(initializerCall[0], Is.EqualTo(1));
+        Assert.That(initializerCall[1], Is.Zero);
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+                initializerCall[4..]),
+            Is.Zero);
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                initializerCall[8..]),
+            Is.EqualTo(2u));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                initializerCall[12..]),
+            Is.Zero);
+        Assert.That(initializerCall[16], Is.EqualTo(2));
+        Assert.That(initializerCall[17], Is.EqualTo(5));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+                initializerCall[18..]),
+            Is.Zero);
+        Assert.That(initializerCall[20], Is.EqualTo(2));
+        Assert.That(initializerCall[21], Is.EqualTo(1));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+                initializerCall[22..]),
+            Is.EqualTo(1));
         var bodyRow = tables.Methods.GetBodyRow(initializerMethod);
         Assert.That(bodyRow, Is.GreaterThan(0));
+        var initializerBodyBytes = tables.Bodies.GetRow(bodyRow);
+        Assert.That(initializerBodyBytes[0], Is.EqualTo(0x03));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                initializerBodyBytes[4..]),
+            Is.EqualTo(0x1400_0001u));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+                initializerBodyBytes[8..]),
+            Is.Zero);
+        Assert.That(initializerBodyBytes[10], Is.EqualTo(1));
         var body = tables.Bodies.GetRow(bodyRow);
         Assert.That(body.Length, Is.EqualTo(12));
         Assert.That(body[0], Is.EqualTo(0x03));

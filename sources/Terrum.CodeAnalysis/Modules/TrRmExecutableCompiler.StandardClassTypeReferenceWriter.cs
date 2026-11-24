@@ -119,7 +119,12 @@ public static partial class TrRmExecutableCompiler
     private sealed record C1M1Construction2SourceInitializer(
         int ClassIndex, BoundFunction Function, uint ClassTypeSpecReference,
         ImmutableArray<BoundFieldAssignment> FieldAssignments,
-        int InitializerMethodDefRow, int ProjectionMethodDefRow);
+        int InitializerMethodDefRow, int ProjectionMethodDefRow,
+        C1M1Construction2PropertyInitializerCall?
+            PropertyInitializerCall);
+
+    private sealed record C1M1Construction2PropertyInitializerCall(
+        BoundCall Call, int PropertyDefRow, int BackingFieldIndex);
 
     private sealed record C1M1Construction2SourceMethod(
         BoundFunction Function, int MethodDefRow,
@@ -2560,11 +2565,17 @@ public static partial class TrRmExecutableCompiler
                             "The bounded Construction-2 class source emitter cannot discard constructor ownership, signature, access, effect, or completion facts.");
                     }
 
-                    var fieldAssignments
-                        = GetC1M1Construction2FieldAssignments(program,
+                    var propertyInitializerCall
+                        = TryGetC1M1Construction2PropertyInitializerCall(
+                            program, function, classIndex,
+                            propertyMemberExports,
+                            propertyDefRowByClassAndField);
+                    var fieldAssignments = propertyInitializerCall is null
+                        ? GetC1M1Construction2FieldAssignments(program,
                             function, classDeclaration,
                             sourceStructDeclarations, schema,
-                            schemaIdentity);
+                            schemaIdentity)
+                        : ImmutableArray<BoundFieldAssignment>.Empty;
                     foreach (var field in classDeclaration.Fields)
                     {
                         _ = FieldTypeSpecReference(field.Type);
@@ -2590,8 +2601,19 @@ public static partial class TrRmExecutableCompiler
                         .Select(static member =>
                             member.ConstructionProjectionExportKey!)
                         .ToImmutableArray();
+                    var initializedFieldIndexes = fieldAssignments
+                        .Select(static assignment => assignment.Field)
+                        .ToHashSet();
+                    if (propertyInitializerCall is not null
+                        && !initializedFieldIndexes.Add(
+                            propertyInitializerCall.BackingFieldIndex))
+                    {
+                        throw new InvalidDataException(
+                            "A Construction-2 initializer both calls and directly assigns the same property backing field.");
+                    }
+
                     var hasCompleteConstructionRecipe
-                        = fieldAssignments.Length
+                        = initializedFieldIndexes.Count
                             == classDeclaration.Fields.Length;
                     if (!hasCompleteConstructionRecipe
                         && !projectionExportKeys.IsEmpty)
@@ -2636,7 +2658,8 @@ public static partial class TrRmExecutableCompiler
                         0x0003,
                         EncodeC1M1Construction2InitializerContract(
                             fieldAssignments, fieldDefRowByClassAndIndex,
-                            propertyDefRowByClassAndField, classIndex)));
+                            propertyDefRowByClassAndField, classIndex,
+                            propertyInitializerCall?.PropertyDefRow ?? 0)));
                     var projectionContractFirst = 0;
                     if (hasCompleteConstructionRecipe)
                     {
@@ -2693,7 +2716,8 @@ public static partial class TrRmExecutableCompiler
                         new C1M1Construction2SourceInitializer(
                             classIndex, function, classTypeSpecReference,
                             fieldAssignments, initializerMethodDefRow,
-                            projectionMethodDefRow));
+                            projectionMethodDefRow,
+                            propertyInitializerCall));
                 }
 
                 foreach (var (methodPart, methodDeclaration,
@@ -3470,6 +3494,7 @@ public static partial class TrRmExecutableCompiler
             {
                 bodyRows.Add(EncodeC1M1Construction2InitializerBody(
                     program, initializer, fieldDefRowByClassAndIndex,
+                    methodDefRowByFunctionIndex,
                     Construction2ValueTypeSpecReference,
                     frozenScalarValueBuilder, contractRows.Count, schema));
                 methodRows[initializer.InitializerMethodDefRow - 1]
@@ -5207,6 +5232,134 @@ public static partial class TrRmExecutableCompiler
         => declaration.Children.OfType<SyntaxTokenElement>().Any(
             static token => token.Token.Kind == TokenKind.PartialKeyword);
 
+    private static C1M1Construction2PropertyInitializerCall?
+        TryGetC1M1Construction2PropertyInitializerCall(
+            BoundProgram program, BoundFunction constructor, int classIndex,
+            IReadOnlyList<(int ClassIndex,
+                SourceClassMemberExport Member)> propertyMemberExports,
+            Dictionary<(int ClassIndex, int FieldIndex), int>
+                propertyDefRowByClassAndField)
+    {
+        var call = constructor.Body.Statements switch
+        {
+            [BoundExpressionStatement { Expression: BoundCall call }]
+                => call,
+            [
+                BoundExpressionStatement {
+                    Expression: BoundCall call,
+                },
+                BoundReturn { Value: null },
+            ] => call,
+            _ => null,
+        };
+        if (call is null)
+        {
+            return null;
+        }
+
+        if ((uint)call.Function >= (uint)program.Functions.Length)
+        {
+            throw new InvalidDataException(
+                "A construction property call has an invalid target function.");
+        }
+
+        var target = program.Functions[call.Function];
+        if (target.PropertyAccessorKind
+            != BoundPropertyAccessorKind.Initializer)
+        {
+            return null;
+        }
+
+        var selectedProperties = propertyMemberExports.Where(candidate =>
+                candidate.ClassIndex == classIndex
+                && candidate.Member.InitializerFunctionIndex
+                    == call.Function)
+            .ToArray();
+        if (selectedProperties.Length != 1)
+        {
+            throw Unsupported(
+                "A Construction-2 property initializer call requires its exact selected PropertyDef.");
+        }
+
+        var property = selectedProperties[0].Member;
+        if ((uint)property.FunctionIndex
+            >= (uint)program.Functions.Length)
+        {
+            throw new InvalidDataException(
+                "A captured PI1 property has an invalid getter function.");
+        }
+
+        var getter = program.Functions[property.FunctionIndex];
+        if (constructor.IsStatic || !constructor.IsClassConstructor
+            || constructor.ParameterCount != 2
+            || constructor.Variables.Length != 2
+            || !constructor.Body.RetiredManagedLocals.IsEmpty
+            || call.Type != PrimitiveType.Void
+            || call.Arguments.Length != 2
+            || !call.DefaultedArguments.IsDefaultOrEmpty
+            || call.InterfaceCallIdentity is not null
+            || call.GenericMethodCall is not null
+            || call.ImportedGenericMethodCall is not null
+            || (!call.ArgumentParameterIndices.IsDefault
+                && (call.ArgumentParameterIndices.Length != 2
+                    || call.ArgumentParameterIndices[0] != 0
+                    || call.ArgumentParameterIndices[1] != 1))
+            || (!call.ArgumentImplicitReferenceTemporaries.IsDefault
+                && call.ArgumentImplicitReferenceTemporaries.Length != 2)
+            || call.ImplicitReferenceTemporary(0) != -1
+            || call.ImplicitReferenceTemporary(1) != -1)
+        {
+            throw Unsupported(
+                "The bounded Construction-2 PI1 caller supports one direct scalar value Home to a same-class property init accessor.");
+        }
+
+        if (call.Arguments[0] is not (
+                BoundRead { Variable: 0 }
+                or BoundReceiverLoan { Variable: 0 })
+            || call.Arguments[0].Type != constructor.Variables[0].Type
+            || call.Arguments[1] is not BoundRead value
+            || value.Variable != 1
+            || value.Type != constructor.Variables[1].Type
+            || constructor.Variables[1].IsMutable
+            || constructor.Variables[1].IsOut
+            || constructor.Variables[1].IsInit
+            || constructor.Variables[1].IsImplicitRef
+            || constructor.Variables[1].IsInitializationLocal
+            || target.IsStatic || target.ReturnType != PrimitiveType.Void
+            || target.ParameterCount != 2
+            || target.Variables.Length != 2
+            || target.PropertyAccessorKind
+                != BoundPropertyAccessorKind.Initializer
+            || target.DeclaringStruct != constructor.DeclaringStruct
+            || target.PropertyName != getter.PropertyName
+            || target.Variables[0].Type
+                != constructor.Variables[0].Type
+            || target.Variables[1].Type
+                != constructor.Variables[1].Type
+            || (uint)property.BackingFieldIndex
+                >= (uint)program.Classes[classIndex].Fields.Length
+            || program.Classes[classIndex]
+                .Fields[property.BackingFieldIndex].Type
+                != target.Variables[1].Type
+            || !TryGetC1M1SourceScalarTypeSpecReference(
+                target.Variables[1].Type, out _)
+            || target.Variables[1].IsMutable
+            || target.Variables[1].IsOut
+            || target.Variables[1].IsInit
+            || target.Variables[1].IsImplicitRef
+            || target.Variables[1].IsInitializationLocal
+            || !propertyDefRowByClassAndField.TryGetValue((
+                classIndex, property.BackingFieldIndex),
+                out var propertyDefRow))
+        {
+            throw Unsupported(
+                "The bounded Construction-2 PI1 caller requires exact receiver and value Homes for its selected property init accessor.");
+        }
+
+        return new C1M1Construction2PropertyInitializerCall(call,
+            propertyDefRow, property.BackingFieldIndex);
+    }
+
     private static ImmutableArray<BoundFieldAssignment>
         GetC1M1Construction2FieldAssignments(
             BoundProgram program, BoundFunction function, BoundClass @class,
@@ -5844,12 +5997,22 @@ public static partial class TrRmExecutableCompiler
             fieldDefRowByClassAndIndex,
         Dictionary<(int ClassIndex, int FieldIndex), int>
             propertyDefRowByClassAndField,
-        int classIndex)
+        int classIndex, int propertyInitializerDefRow)
     {
-        var payload = new byte[checked(8 + (assignments.Length * sizeof(uint)))];
+        if (propertyInitializerDefRow < 0
+            || propertyInitializerDefRow > 0xFF_FFFF)
+        {
+            throw new InvalidDataException(
+                "A Construction-2 initializer has an invalid PI1 PropertyDef row.");
+        }
+
+        var initializedMemberCount = checked(assignments.Length
+            + (propertyInitializerDefRow == 0 ? 0 : 1));
+        var payload = new byte[checked(8
+            + (initializedMemberCount * sizeof(uint)))];
         payload[0] = 1;
         BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(4),
-            checked((uint)assignments.Length));
+            checked((uint)initializedMemberCount));
         for (var index = 0; index < assignments.Length; index++)
         {
             if (!fieldDefRowByClassAndIndex.TryGetValue(
@@ -5869,6 +6032,14 @@ public static partial class TrRmExecutableCompiler
             BinaryPrimitives.WriteUInt32LittleEndian(
                 payload.AsSpan(8 + (index * sizeof(uint))),
                 memberDefinitionId);
+        }
+
+        if (propertyInitializerDefRow != 0)
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                payload.AsSpan(8 + (assignments.Length * sizeof(uint))),
+                0x1E00_0000u
+                    | checked((uint)propertyInitializerDefRow));
         }
 
         return payload;
@@ -6018,11 +6189,26 @@ public static partial class TrRmExecutableCompiler
         BoundProgram program, C1M1Construction2SourceInitializer initializer,
         Dictionary<(int ClassIndex, int FieldIndex), int>
             fieldDefRowByClassAndIndex,
+        Dictionary<int, int> methodDefRowByFunctionIndex,
         Func<PrimitiveType, uint> typeSpecReferenceFor,
         TrRmFrozenScalarValueBuilder frozenScalarValueBuilder,
         int contractCount, TrRmArtifactSchema schema)
     {
         var function = initializer.Function;
+        if (initializer.PropertyInitializerCall is not null)
+        {
+            if (!initializer.FieldAssignments.IsEmpty)
+            {
+                throw Unsupported(
+                    "The bounded Construction-2 PI1 caller does not mix property-init calls with direct field stores.");
+            }
+
+            return EncodeC1M1Construction2PropertyInitializerCallBody(
+                function, initializer.PropertyInitializerCall,
+                methodDefRowByFunctionIndex, typeSpecReferenceFor,
+                contractCount, schema);
+        }
+
         if (function.Body.Statements.Length > 0
             && function.Body.Statements[^1] is BoundIf conditional)
         {
@@ -6234,6 +6420,70 @@ public static partial class TrRmExecutableCompiler
             code.Add((byte)index);
             code.Add((byte)(index >> 8));
         }
+    }
+
+    private static byte[] EncodeC1M1Construction2PropertyInitializerCallBody(
+        BoundFunction function,
+        C1M1Construction2PropertyInitializerCall propertyCall,
+        Dictionary<int, int> methodDefRowByFunctionIndex,
+        Func<PrimitiveType, uint> typeSpecReferenceFor,
+        int contractCount, TrRmArtifactSchema schema)
+    {
+        if (!schema.UsesPropertyInitializedState()
+            || function.IsStatic || function.ParameterCount != 2
+            || function.Variables.Length != 2
+            || !methodDefRowByFunctionIndex.TryGetValue(
+                propertyCall.Call.Function, out var targetMethodDefRow))
+        {
+            throw new InvalidDataException(
+                "A PI1 property initializer CallSite has an invalid caller or target.");
+        }
+
+        var targetMethodToken
+            = 0x1600_0000u | checked((uint)targetMethodDefRow);
+        var typeTokens = function.Variables
+            .Select(variable => CreateStandardBodyTypeMapToken(
+                typeSpecReferenceFor(variable.Type)))
+            .ToArray();
+        var maps = TrRmRegisterBodyMapBuilder.Create(typeTokens,
+            [targetMethodToken]);
+        var homeMap = new byte[checked(function.Variables.Length * 8)];
+        for (var variableIndex = 0;
+            variableIndex < function.Variables.Length;
+            variableIndex++)
+        {
+            var home = homeMap.AsSpan(variableIndex * 8, 8);
+            var homeKind = variableIndex == 0 ? (byte)1 : (byte)2;
+            home[0] = homeKind;
+            BinaryPrimitives.WriteUInt16LittleEndian(home[2..],
+                checked((ushort)maps.GetTypeMapIndex(
+                    typeTokens[variableIndex])));
+            if (homeKind == 2)
+            {
+                BinaryPrimitives.WriteUInt16LittleEndian(home[4..],
+                    checked((ushort)(variableIndex - 1)));
+            }
+        }
+
+        var callInputs = new TrRmRegisterBodyCallInput[] {
+            new(2, 5, 0),
+            new(2, 1, 1),
+        };
+        var callSite = TrRmRegisterBodyRecordWriter.EncodeCallSite(1, 0,
+            maps.GetMethodMapIndex(targetMethodToken), 0, callInputs, [],
+            schema: schema);
+        ReadOnlyMemory<byte>[] records = [
+            new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 },
+            new(callSite),
+        ];
+        var code = new byte[] { 0xE0, 0, 1, 0, 0x18, 0 };
+        return TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
+            maps.MethodMap, default, default,
+            [new TrRmRegisterBodyBlock(0,
+                checked((uint)code.Length), 0)],
+            records, code, contractCount: contractCount, schema: schema,
+            generalPredicateGraphsInitializationReferenceBodies
+                : schema.UsesGeneralPredicateGraphs());
     }
 
     private static byte[] EncodeC1M1Construction2ConditionalInitializerBody(
