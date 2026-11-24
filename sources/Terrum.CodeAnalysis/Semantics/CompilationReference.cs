@@ -340,9 +340,15 @@ public sealed class CompilationReference
                 "The selected Core contract-failure identities are invalid.",
                 nameof(coreContractFailureIdentitySelections));
         }
+        var selectedPreconditionFailureBindings
+            = preconditionFailureBindings.IsDefault
+                ? [] : preconditionFailureBindings;
+        var selectedPostconditionConstructionBindings
+            = postconditionConstructionBindings.IsDefault
+                ? [] : postconditionConstructionBindings;
         if (!TrRmDeclarationFailureBindingContract.IsValidShape(
-                preconditionFailureBindings,
-                postconditionConstructionBindings))
+                selectedPreconditionFailureBindings,
+                selectedPostconditionConstructionBindings))
         {
             throw new ArgumentException(
                 "The declaration failure-binding tables are invalid.");
@@ -381,11 +387,10 @@ public sealed class CompilationReference
         CoreContractFailureIdentitySelections
             = coreContractFailureIdentitySelections.IsDefault
                 ? [] : coreContractFailureIdentitySelections;
-        PreconditionFailureBindings = preconditionFailureBindings.IsDefault
-            ? [] : preconditionFailureBindings;
+        PreconditionFailureBindings
+            = selectedPreconditionFailureBindings;
         PostconditionConstructionBindings
-            = postconditionConstructionBindings.IsDefault
-                ? [] : postconditionConstructionBindings;
+            = selectedPostconditionConstructionBindings;
         PrivateNominalTypeOrigins = privateNominalTypeOrigins.IsDefault
             ? [] : privateNominalTypeOrigins;
         Classes = classes.IsDefault ? [] : classes;
