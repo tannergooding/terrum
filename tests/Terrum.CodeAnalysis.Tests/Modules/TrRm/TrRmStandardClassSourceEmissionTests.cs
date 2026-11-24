@@ -24,6 +24,8 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1";
     private const string C1M1Construction2SchemaIdentity
         = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2";
+    private const string C1M1Construction2PropertyInitializedStateSchemaIdentity
+        = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-property-initialized-state-1";
     private const string C1M1Construction2ClassParameterDefaultsSchemaIdentity
         = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-class-parameter-defaults-1";
     private const string C1M1Construction2ClassParameterDefaultsCopyEvidenceSchemaIdentity
@@ -324,6 +326,74 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         privateProjectionTables.ValidateRegisterBodyMapsForMethod(4);
         privateProjectionTables.ValidateRegisterBodyMapsForMethod(1);
         privateProjectionTables.ValidateRegisterBodyMapsForMethod(2);
+    }
+
+    [Test]
+    public void EmitsPI1GetterOnlyBackingProperty()
+    {
+        var tree = SyntaxTree.Parse("""
+            public class Box {
+                public int32 Value { get { return field; } }
+                public Box(int32 value) { Value = value; }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var members = classDeclaration.Children.OfType<SyntaxNode>();
+        var propertyDeclaration = members.Single(static node =>
+            node.Kind == SyntaxKind.PropertyDeclaration);
+        var constructorDeclaration = members.Single(static node =>
+            node.Kind == SyntaxKind.ConstructorDeclaration);
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "PI1GetterOnlyBox",
+            C1M1Construction2PropertyInitializedStateSchemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [
+                new TrRmSourceClassExport(program, 0,
+                    classDeclaration.Span, "BoxKey", [
+                        new TrRmSourceClassMemberExport(0,
+                            propertyDeclaration.Span, "Box.Value"),
+                        new TrRmSourceClassMemberExport(0,
+                            constructorDeclaration.Span,
+                            "Box.Initialize"),
+                    ]),
+            ]);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForC1M1Construction2L1R1PropertyInitializedStateDraft(
+                        artifact));
+
+        Assert.That(tables.Properties.Count, Is.EqualTo(1));
+        Assert.That(tables.Properties.GetName(1), Is.EqualTo("Value"));
+        Assert.That(tables.Properties.GetSetterMethod(1), Is.Zero);
+        Assert.That(tables.Properties.GetInitMethod(1), Is.Zero);
+        var backingField = tables.Properties.GetBackingFieldDef(1);
+        Assert.That(backingField, Is.EqualTo(1));
+        Assert.That(tables.Fields.IsPropertyBackingField(backingField),
+            Is.True);
+        Assert.That(tables.Fields.GetName(backingField), Is.Empty);
+        Assert.That(tables.Fields.GetFlags(backingField) & 0x10u,
+            Is.EqualTo(0x10u));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.Value", out var propertyDefinition), Is.True);
+        Assert.That(propertyDefinition >> 24, Is.EqualTo(0x1Eu));
+        Assert.That(propertyDefinition & 0x00FF_FFFFu, Is.EqualTo(1u));
+
+        var initializerRow = Enumerable.Range(1, tables.Methods.Count)
+            .Single(row => tables.Methods.GetOwnerType(row) == 1
+                && tables.Contracts.HasConstructionClause(row)
+                && tables.Contracts.GetConstructionClause(row).RoleTag == 1);
+        var initializer = tables.Contracts.GetConstructionClause(
+            initializerRow);
+        Assert.That(initializer.InitializedMemberDefIds,
+            Is.EqualTo(new[] { 0x1E00_0001u }));
     }
 
     [Test]
