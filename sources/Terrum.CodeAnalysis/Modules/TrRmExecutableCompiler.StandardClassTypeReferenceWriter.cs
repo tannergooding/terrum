@@ -5135,21 +5135,17 @@ public static partial class TrRmExecutableCompiler
             }
 
             var firstPath = paths[0];
+            var firstFields = firstPath
+                .Select(static assignment => assignment.Field)
+                .ToHashSet();
             foreach (var path in paths.Skip(1))
             {
-                if (path.Length != firstPath.Length)
+                if (path.Length != firstFields.Count
+                    || path.Any(assignment =>
+                        !firstFields.Contains(assignment.Field)))
                 {
                     throw Unsupported(
-                        "Every Construction-2 initializer path must initialize the same ordered fields.");
-                }
-
-                for (var index = 0; index < firstPath.Length; index++)
-                {
-                    if (path[index].Field != firstPath[index].Field)
-                    {
-                        throw Unsupported(
-                            "Every Construction-2 initializer path must initialize the same ordered fields.");
-                    }
+                        "Every Construction-2 initializer path must initialize the same field set.");
                 }
             }
 
@@ -5960,12 +5956,14 @@ public static partial class TrRmExecutableCompiler
             = new List<ImmutableArray<BoundFieldAssignment>>();
         var remainingVisits = SemanticVerifier.MaximumAnalysisVisits;
         CollectConditionalPaths(conditional, pathAssignments, depth: 0);
+        var expectedFields = initializer.FieldAssignments
+            .Select(static assignment => assignment.Field)
+            .ToHashSet();
         if (pathAssignments.Count == 0
             || pathAssignments.Any(path =>
-                path.Length != initializer.FieldAssignments.Length
-                || !path.Select(static assignment => assignment.Field)
-                    .SequenceEqual(initializer.FieldAssignments.Select(
-                        static assignment => assignment.Field))))
+                path.Length != expectedFields.Count
+                || path.Any(assignment =>
+                    !expectedFields.Contains(assignment.Field))))
         {
             throw new InvalidDataException(
                 "A Construction-2 conditional Body differs from its checked field-initiation paths.");
@@ -6249,19 +6247,20 @@ public static partial class TrRmExecutableCompiler
         byte[] EmitArm(
             ImmutableArray<BoundFieldAssignment> assignments)
         {
-            if (assignments.Length != initializer.FieldAssignments.Length)
+            if (assignments.Length != expectedFields.Count)
             {
                 throw new InvalidDataException(
                     "A Construction-2 conditional initializer path differs from its checked field set.");
             }
 
-            for (var index = 0; index < assignments.Length; index++)
+            var emittedFields = new HashSet<int>();
+            foreach (var assignment in assignments)
             {
-                if (assignments[index].Field
-                    != initializer.FieldAssignments[index].Field)
+                if (!expectedFields.Contains(assignment.Field)
+                    || !emittedFields.Add(assignment.Field))
                 {
                     throw new InvalidDataException(
-                        "A Construction-2 conditional initializer path changes its checked field order.");
+                        "A Construction-2 conditional initializer path changes its checked field set.");
                 }
             }
 

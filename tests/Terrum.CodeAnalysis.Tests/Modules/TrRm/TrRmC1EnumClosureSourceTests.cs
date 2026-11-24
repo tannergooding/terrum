@@ -2145,19 +2145,24 @@ internal sealed class TrRmC1EnumClosureSourceTests
             namespace Demo {
                 public class Box {
                     public int32 Value;
+                    public int32 Other;
                     public Box(bool first, bool second, int32 left,
                         int32 middle, int32 right) {
                         int32 copiedLeft = left;
                         if (first) {
                             if (second) {
                                 Value = copiedLeft;
+                                Other = left;
                             } else {
+                                Other = middle;
                                 Value = middle;
                             }
                         } else {
                             if (second) {
                                 Value = middle;
+                                Other = middle;
                             } else {
+                                Other = right;
                                 Value = right;
                             }
                         }
@@ -2170,7 +2175,8 @@ internal sealed class TrRmC1EnumClosureSourceTests
             string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = (BoundProgram)compilation.Program!;
         var classExport = CreateSourceClassExport(program, tree, "Box",
-            "type.box", "constructor.box", (0, "field.box.value"));
+            "type.box", "constructor.box", (0, "field.box.value"),
+            (1, "field.box.other"));
 
         foreach (var schemaIdentity in s_initializerCopyEvidenceSchemaIdentities)
         {
@@ -2277,7 +2283,7 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 s_initializerCopyEvidenceSchemaIdentities[0],
                 [classExport]));
         Assert.That(exception!.Message,
-            Does.Contain("same ordered fields"));
+            Does.Contain("same field set"));
     }
 
     [Test]
