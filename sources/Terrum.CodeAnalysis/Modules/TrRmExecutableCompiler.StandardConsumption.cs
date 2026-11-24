@@ -211,6 +211,26 @@ public static partial class TrRmExecutableCompiler
         ArgumentException.ThrowIfNullOrEmpty(moduleIdentity);
         ArgumentNullException.ThrowIfNull(input);
         ArgumentNullException.ThrowIfNull(providers);
+        var inputs
+            = new TrRmStandardArtifactInput[providers.Count + 1];
+        inputs[0] = input;
+        for (var index = 0; index < providers.Count; index++)
+        {
+            inputs[index + 1] = providers[index]
+                ?? throw new ArgumentNullException(
+                    $"{nameof(providers)}[{index}]");
+        }
+
+        if (inputs.Any(static candidate =>
+                GetForeignInvocationSchema(candidate.SchemaIdentity)
+                    .UsesGeneralPredicateGraphs())
+            && TrRmDeclarationFailureBindingContract
+                .HasRetainedPhaseFailureAttachments(inputs, moduleIdentity))
+        {
+            throw Unsupported(
+                "Standard source references require phase-specific failure-binding maps for retained declaration predicates.");
+        }
+
         if (StringComparer.Ordinal.Equals(input.SchemaIdentity,
                 StandardGenericMethodCallsSchemaIdentity)
             || StringComparer.Ordinal.Equals(input.SchemaIdentity,
@@ -756,6 +776,27 @@ public static partial class TrRmExecutableCompiler
         moduleValidation = ValidateStandardInputModules(artifacts,
             schemaIdentities, moduleIdentity, a3LayoutResourceLedger,
             coreContractFailureIdentitySelections);
+        if (schemaIdentities.Any(schemaIdentity =>
+                GetForeignInvocationSchema(schemaIdentity)
+                    .UsesGeneralPredicateGraphs()))
+        {
+            var inputs
+                = new TrRmStandardArtifactInput[artifacts.Length];
+            for (var index = 0; index < artifacts.Length; index++)
+            {
+                inputs[index] = new TrRmStandardArtifactInput(
+                    schemaIdentities[index], artifacts[index]);
+            }
+
+            if (TrRmDeclarationFailureBindingContract
+                .HasRetainedPhaseFailureAttachments(inputs,
+                    moduleIdentity))
+            {
+                throw Unsupported(
+                    "Standard loading requires phase-specific failure-binding maps for retained declaration predicates.");
+            }
+        }
+
         var rootModuleRow = moduleValidation.RootModuleRow;
         var construction2MethodLinking
             = IsConstruction2MethodProviderClosureSchemaSet(

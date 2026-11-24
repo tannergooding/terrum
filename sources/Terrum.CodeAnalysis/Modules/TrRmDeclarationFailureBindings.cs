@@ -386,6 +386,85 @@ internal static class TrRmDeclarationFailureBindingContract
         }
     }
 
+    internal static bool HasRetainedPhaseFailureAttachments(
+        IReadOnlyList<TrRmStandardArtifactInput> inputs,
+        string moduleIdentity)
+    {
+        ArgumentNullException.ThrowIfNull(inputs);
+        ArgumentException.ThrowIfNullOrEmpty(moduleIdentity);
+        if (inputs.Count == 0 || inputs[0] is null)
+        {
+            throw new ArgumentException(
+                "The declaration predicate input set is empty.",
+                nameof(inputs));
+        }
+
+        var facts = new InputFacts[inputs.Count];
+        var moduleLocations = new Dictionary<string, (int InputIndex,
+            int ModuleRow)>(StringComparer.Ordinal);
+        for (var inputIndex = 0; inputIndex < inputs.Count; inputIndex++)
+        {
+            var input = inputs[inputIndex]
+                ?? throw new ArgumentNullException(
+                    $"{nameof(inputs)}[{inputIndex}]");
+            facts[inputIndex] = ReadInputFacts(inputIndex, input);
+            for (var moduleRow = 1;
+                moduleRow < facts[inputIndex].ModuleIdentities.Length;
+                moduleRow++)
+            {
+                if (!moduleLocations.TryAdd(
+                        facts[inputIndex].ModuleIdentities[moduleRow],
+                        (inputIndex, moduleRow)))
+                {
+                    throw new InvalidDataException(
+                        "A declaration predicate input set has an ambiguous Module identity.");
+                }
+            }
+        }
+
+        if (!moduleLocations.TryGetValue(moduleIdentity,
+                out var rootModule)
+            || rootModule.InputIndex != 0)
+        {
+            throw new InvalidDataException(
+                "The selected root Module is absent from the declaration predicate input set.");
+        }
+
+        var retainedModules = new HashSet<(int InputIndex, int ModuleRow)> {
+            rootModule,
+        };
+        var pendingModules = new Queue<(int InputIndex, int ModuleRow)>();
+        pendingModules.Enqueue(rootModule);
+        while (pendingModules.TryDequeue(out var currentModule))
+        {
+            foreach (var edge in facts[currentModule.InputIndex].ImportEdges)
+            {
+                if (edge.OwnerModuleRow != currentModule.ModuleRow)
+                {
+                    continue;
+                }
+
+                if (!moduleLocations.TryGetValue(edge.ProviderIdentity,
+                        out var providerModule))
+                {
+                    throw new InvalidDataException(
+                        "A retained declaration predicate Module imports an absent provider.");
+                }
+
+                if (retainedModules.Add(providerModule))
+                {
+                    pendingModules.Enqueue(providerModule);
+                }
+            }
+        }
+
+        return facts.Any(inputFacts =>
+            inputFacts.Clauses.Any(clause =>
+                clause.Phase is 1 or 2
+                && retainedModules.Contains((inputFacts.InputIndex,
+                    clause.OwnerModuleRow))));
+    }
+
     private static InputFacts ReadInputFacts(int inputIndex,
         TrRmStandardArtifactInput input)
     {
