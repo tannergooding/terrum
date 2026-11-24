@@ -1070,6 +1070,7 @@ internal static class TrRmDeclarationFailureBindingContract
                 var requiredMethod = classTables.InterfaceMethods
                     .GetMethodDefRow(methodFirst + methodOrdinal);
                 var matchingBindings = 0;
+                var matchingMemberRow = 0;
                 for (var memberOrdinal = 0; memberOrdinal < memberCount;
                     memberOrdinal++)
                 {
@@ -1083,6 +1084,7 @@ internal static class TrRmDeclarationFailureBindingContract
                             interfaceTypeSpecRef))
                     {
                         matchingBindings++;
+                        matchingMemberRow = memberRow;
                     }
                 }
 
@@ -1090,6 +1092,44 @@ internal static class TrRmDeclarationFailureBindingContract
                 {
                     throw new InvalidDataException(
                         "The selected exception-class witness has a missing or ambiguous direct IException requirement binding.");
+                }
+
+                var selectedMethod = classTables.WitnessMembers
+                    .GetSelectedMethodDef(matchingMemberRow);
+                var selectedOwnerRef = classTables.WitnessMembers
+                    .GetSelectedOwnerTypeSpecRef(matchingMemberRow);
+                var selectedOwnerTypeDef = selectedOwnerRef == 0
+                    ? classTypeDefRow
+                    : classTables.TypeSpecs.GetNominalTypeDefRow(
+                        selectedOwnerRef, classTables.TypeDefs,
+                        classTables.Imports);
+                var requirementSignature = classTables.Methods.GetSignature(
+                    requiredMethod);
+                var selectedSignature = classTables.Methods.GetSignature(
+                    selectedMethod);
+                var (_, requirementParameterCount)
+                    = classTables.Signatures.GetParamRange(
+                        requirementSignature);
+                var (_, selectedParameterCount)
+                    = classTables.Signatures.GetParamRange(
+                        selectedSignature);
+                if (classTables.Methods.GetOwnerType(selectedMethod)
+                        != selectedOwnerTypeDef
+                    || (selectedOwnerRef == 0
+                        && selectedOwnerTypeDef != classTypeDefRow)
+                    || (selectedOwnerRef != 0
+                        && classTables.TypeDefs.GetKind(
+                            selectedOwnerTypeDef) is not (2 or 3))
+                    || (selectedOwnerTypeDef != classTypeDefRow
+                        && selectedOwnerTypeDef != interfaceTypeDefRow)
+                    || requirementParameterCount != selectedParameterCount
+                    || classTables.Signatures.GetGenericCount(
+                        requirementSignature)
+                        != classTables.Signatures.GetGenericCount(
+                            selectedSignature))
+                {
+                    throw new InvalidDataException(
+                        "A selected exception witness MethodDef has an incompatible owner or callable arity.");
                 }
             }
 
