@@ -5645,7 +5645,7 @@ internal sealed class TrRmC1EnumClosureSourceTests
     }
 
     [Test]
-    public void PacksClassHandlesNestedInImportedStructTypeDefs()
+    public void PacksClassPointeesNestedInImportedStructTypeDefs()
     {
         var schemaIdentity
             = $"{s_schemaIdentities[0]}-class-instance-layout-1";
@@ -5683,7 +5683,7 @@ internal sealed class TrRmC1EnumClosureSourceTests
             namespace Demo {
                 public struct Payload {
                     public int32 Header;
-                    public Child Handle;
+                    public ptr<Child> Address;
                 }
             }
             """);
@@ -5714,11 +5714,20 @@ internal sealed class TrRmC1EnumClosureSourceTests
         var payloadProviderHandleField = Enumerable.Range(
                 payloadProviderFields.Start,
                 payloadProviderFields.End - payloadProviderFields.Start)
-            .Single(row => payloadTables.Fields.GetName(row) == "Handle");
+            .Single(row => payloadTables.Fields.GetName(row) == "Address");
+        var payloadProviderPointerTypeSpecRef
+            = payloadTables.Fields.GetTypeSpecRef(
+                payloadProviderHandleField);
         var importedHandleType = payloadTables.TypeSpecs.GetTypeSpecRef(
-            payloadTables.Fields.GetTypeSpecRef(
-                payloadProviderHandleField));
-        Assert.That(importedHandleType.Form, Is.EqualTo((byte)0x03));
+            payloadProviderPointerTypeSpecRef);
+        Assert.That(importedHandleType.Form, Is.EqualTo((byte)0x0C));
+        Assert.That(payloadTables.TypeSpecs
+            .TryGetNativePointerPointeeTypeSpecRef(
+                payloadProviderPointerTypeSpecRef,
+                out var importedPointeeTypeSpecRef), Is.True);
+        Assert.That(payloadTables.TypeSpecs
+                .GetTypeSpecRef(importedPointeeTypeSpecRef).Form,
+            Is.EqualTo((byte)0x03));
         var payloadProviderChildImportRow = Enumerable.Range(
                 1, payloadTables.Imports.Count)
             .Single(row =>
@@ -5830,11 +5839,19 @@ internal sealed class TrRmC1EnumClosureSourceTests
             payloadTypeDefRow);
         var payloadHandleField = Enumerable.Range(payloadFields.Start,
                 payloadFields.End - payloadFields.Start)
-            .Single(row => packedTables.Fields.GetName(row) == "Handle");
+            .Single(row => packedTables.Fields.GetName(row) == "Address");
+        var payloadPointerTypeSpecRef = packedTables.Fields
+            .GetTypeSpecRef(payloadHandleField);
         var payloadHandleType = packedTables.TypeSpecs.GetTypeSpecRef(
-            packedTables.Fields.GetTypeSpecRef(payloadHandleField));
-        Assert.That(payloadHandleType.Form, Is.EqualTo((byte)0x02));
-        Assert.That(payloadHandleType.Row,
+            payloadPointerTypeSpecRef);
+        Assert.That(payloadHandleType.Form, Is.EqualTo((byte)0x0C));
+        Assert.That(packedTables.TypeSpecs
+            .TryGetNativePointerPointeeTypeSpecRef(payloadPointerTypeSpecRef,
+                out var packedPointeeTypeSpecRef), Is.True);
+        var packedPointeeType = packedTables.TypeSpecs.GetTypeSpecRef(
+            packedPointeeTypeSpecRef);
+        Assert.That(packedPointeeType.Form, Is.EqualTo((byte)0x02));
+        Assert.That(packedPointeeType.Row,
             Is.EqualTo(checked((uint)childTypeDefRow)));
         var payloadChildImportRow = Enumerable.Range(1,
                 packedTables.Imports.Count)
@@ -5891,11 +5908,21 @@ internal sealed class TrRmC1EnumClosureSourceTests
         var reemittedHandleRow = Enumerable.Range(
                 reemittedPayloadFields.Start,
                 reemittedPayloadFields.End - reemittedPayloadFields.Start)
-            .Single(row => reemittedTables.Fields.GetName(row) == "Handle");
+            .Single(row =>
+                reemittedTables.Fields.GetName(row) == "Address");
+        var reemittedPointerTypeSpecRef = reemittedTables.Fields
+            .GetTypeSpecRef(reemittedHandleRow);
         var reemittedHandleType = reemittedTables.TypeSpecs.GetTypeSpecRef(
-            reemittedTables.Fields.GetTypeSpecRef(reemittedHandleRow));
-        Assert.That(reemittedHandleType.Form, Is.EqualTo((byte)0x02));
-        Assert.That(reemittedHandleType.Row,
+            reemittedPointerTypeSpecRef);
+        Assert.That(reemittedHandleType.Form, Is.EqualTo((byte)0x0C));
+        Assert.That(reemittedTables.TypeSpecs
+            .TryGetNativePointerPointeeTypeSpecRef(
+                reemittedPointerTypeSpecRef,
+                out var reemittedPointeeTypeSpecRef), Is.True);
+        var reemittedPointeeType = reemittedTables.TypeSpecs
+            .GetTypeSpecRef(reemittedPointeeTypeSpecRef);
+        Assert.That(reemittedPointeeType.Form, Is.EqualTo((byte)0x02));
+        Assert.That(reemittedPointeeType.Row,
             Is.EqualTo(checked((uint)reemittedChildRow)));
         var reloaded = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(schemaIdentity,
