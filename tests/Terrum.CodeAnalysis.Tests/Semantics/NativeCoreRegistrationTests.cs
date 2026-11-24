@@ -8432,6 +8432,21 @@ internal sealed class NativeCoreRegistrationTests
     }
 
     [Test]
+    public void StandardForeignNativeInterfacePointerOutputReceiverFeedsOuterCallWithMultipleOutputsUnderPs1()
+    {
+        var program = CreatePointerOutputConsumerProgram(
+            pointerOutputAsReceiver: true, multipleOutputs: true);
+        var function = program.Functions.Single(
+            static function => function.Name == "InvokePointer");
+        Assert.That(function.ReturnType, Is.EqualTo(PrimitiveType.Int32));
+        var image = NativeEmitter.EmitLibrary(program, ["InvokePointer"],
+            NativeRuntimePolicy.FailFast);
+        Assert.That(image[..2], Is.EqualTo(new byte[] {
+            (byte)'M', (byte)'Z',
+        }));
+    }
+
+    [Test]
     public void StandardForeignNativeInterfacePointerOutputFeedsOuterCallWithMultipleOutputsUnderPs1()
     {
         var program = CreatePointerOutputConsumerProgram(
