@@ -1056,6 +1056,9 @@ internal static class TrRmDeclarationFailureBindingContract
 
             var (methodFirst, methodCount)
                 = classTables.Interfaces.GetMethodRange(interfaceDefRow);
+            var interfaceSelfFormalRow
+                = classTables.Interfaces.GetSelfGenericParam(
+                    interfaceDefRow);
             var (memberFirst, memberCount)
                 = classTables.InterfaceWitnesses.GetMemberRange(witnessRow);
             if (memberCount != methodCount)
@@ -1086,6 +1089,198 @@ internal static class TrRmDeclarationFailureBindingContract
                         matchingBindings++;
                         matchingMemberRow = memberRow;
                     }
+                }
+
+                static bool AreEquivalentWitnessTypeSpecs(
+                    TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+                    uint requirementTypeSpecRef, uint selectedTypeSpecRef,
+                    int interfaceSelfFormalRow, uint classTypeSpecRef,
+                    int requirementMethodRow, int selectedMethodRow, int depth)
+                {
+                    if (depth > SemanticVerifier.MaximumDepth)
+                    {
+                        throw InvalidTypeSpec();
+                    }
+
+                    if (tables.TypeSpecs.AreEquivalentTypeSpecRefs(
+                            requirementTypeSpecRef, selectedTypeSpecRef))
+                    {
+                        return true;
+                    }
+
+                    var requirementType = tables.TypeSpecs.GetTypeSpecRef(
+                        requirementTypeSpecRef, allowInitQualifier: true);
+                    var selectedType = tables.TypeSpecs.GetTypeSpecRef(
+                        selectedTypeSpecRef, allowInitQualifier: true);
+                    if (requirementType.Qualifiers != selectedType.Qualifiers)
+                    {
+                        return false;
+                    }
+
+                    if (!requirementType.IsRow || !selectedType.IsRow)
+                    {
+                        return requirementType.Value == selectedType.Value
+                            && requirementType.Form == selectedType.Form
+                            && requirementType.TypeCode == selectedType.TypeCode
+                            && requirementType.ArgumentCode == selectedType.ArgumentCode;
+                    }
+
+                    var requirementRow
+                        = tables.TypeSpecs.GetRow(requirementType.Row);
+                    var selectedRow = tables.TypeSpecs.GetRow(selectedType.Row);
+                    if (requirementType.Form == 0x04)
+                    {
+                        var genericParamRow = checked((int)
+                            BinaryPrimitives.ReadUInt32LittleEndian(
+                                requirementRow[2..]));
+                        if (genericParamRow == interfaceSelfFormalRow)
+                        {
+                            return AreEquivalentWitnessTypeSpecs(tables,
+                                classTypeSpecRef, selectedTypeSpecRef,
+                                interfaceSelfFormalRow, classTypeSpecRef,
+                                requirementMethodRow, selectedMethodRow,
+                                depth + 1);
+                        }
+
+                        var expectedOwner
+                            = tables.GenericParams.GetOwnerDefId(genericParamRow);
+                        var expectedOrdinal
+                            = tables.GenericParams.GetOrdinal(genericParamRow);
+                        var expectedKind
+                            = tables.GenericParams.GetFormalKind(genericParamRow);
+                        if (expectedOwner != (0x1600_0000u
+                                | checked((uint)requirementMethodRow))
+                            || selectedType.Form != 0x04)
+                        {
+                            return false;
+                        }
+
+                        var selectedGenericParamRow = checked((int)
+                            BinaryPrimitives.ReadUInt32LittleEndian(selectedRow[2..]));
+                        return tables.GenericParams.GetOwnerDefId(
+                                selectedGenericParamRow)
+                                == (0x1600_0000u
+                                    | checked((uint)selectedMethodRow))
+                            && tables.GenericParams.GetOrdinal(
+                                selectedGenericParamRow) == expectedOrdinal
+                            && tables.GenericParams.GetFormalKind(
+                                selectedGenericParamRow) == expectedKind
+                            && tables.GenericParams.GetOwnershipDomain(
+                                selectedGenericParamRow)
+                                == tables.GenericParams.GetOwnershipDomain(
+                                    genericParamRow)
+                            && tables.GenericParams.GetNullabilityDomain(
+                                selectedGenericParamRow)
+                                == tables.GenericParams.GetNullabilityDomain(
+                                    genericParamRow);
+                    }
+
+                    if (selectedType.Form == 0x04)
+                    {
+                        return false;
+                    }
+
+                    if (requirementType.Form is 0x02 or 0x03
+                        && selectedType.Form is 0x02 or 0x03)
+                    {
+                        return tables.TypeSpecs.GetNominalTypeDefRow(
+                                requirementTypeSpecRef, tables.TypeDefs,
+                                tables.Imports)
+                            == tables.TypeSpecs.GetNominalTypeDefRow(
+                                selectedTypeSpecRef, tables.TypeDefs,
+                                tables.Imports);
+                    }
+
+                    if (requirementType.Form != selectedType.Form)
+                    {
+                        return false;
+                    }
+
+                    if (requirementType.Form == 0x05)
+                    {
+                        var requirementGenericTypeSpecRef
+                            = BinaryPrimitives.ReadUInt32LittleEndian(
+                                requirementRow[2..]);
+                        var selectedGenericTypeSpecRef
+                            = BinaryPrimitives.ReadUInt32LittleEndian(
+                                selectedRow[2..]);
+                        if (!AreEquivalentWitnessTypeSpecs(tables,
+                                requirementGenericTypeSpecRef,
+                                selectedGenericTypeSpecRef, interfaceSelfFormalRow,
+                                classTypeSpecRef, requirementMethodRow,
+                                selectedMethodRow, depth + 1))
+                        {
+                            return false;
+                        }
+
+                        var requirementCount
+                            = tables.TypeSpecs.GetConstructedArgumentCount(
+                                requirementType.Row);
+                        if (requirementCount
+                            != tables.TypeSpecs.GetConstructedArgumentCount(
+                                selectedType.Row))
+                        {
+                            return false;
+                        }
+
+                        var genericTypeDefRow
+                            = tables.TypeSpecs.GetNominalTypeDefRow(
+                                requirementGenericTypeSpecRef, tables.TypeDefs,
+                                tables.Imports);
+                        var (firstFormal, formalCount)
+                            = tables.TypeDefs.GetGenericRange(genericTypeDefRow);
+                        if (formalCount != requirementCount)
+                        {
+                            throw InvalidTypeSpec();
+                        }
+
+                        for (var ordinal = 0; ordinal < requirementCount; ordinal++)
+                        {
+                            var requirementArgument
+                                = tables.TypeSpecs.GetConstructedArgument(
+                                    requirementType.Row, ordinal);
+                            var selectedArgument
+                                = tables.TypeSpecs.GetConstructedArgument(
+                                    selectedType.Row, ordinal);
+                            if (tables.GenericParams.GetFormalKind(
+                                    firstFormal + ordinal) == 1
+                                ? !AreEquivalentWitnessTypeSpecs(tables,
+                                    requirementArgument, selectedArgument,
+                                    interfaceSelfFormalRow, classTypeSpecRef,
+                                    requirementMethodRow, selectedMethodRow,
+                                    depth + 1)
+                                : requirementArgument != selectedArgument)
+                            {
+                                return false;
+                            }
+                        }
+
+                        return true;
+                    }
+
+                    if (requirementType.Form is (>= 0x06 and <= 0x0B) or 0x0E)
+                    {
+                        return AreEquivalentWitnessTypeSpecs(tables,
+                            BinaryPrimitives.ReadUInt32LittleEndian(
+                                requirementRow[2..]),
+                            BinaryPrimitives.ReadUInt32LittleEndian(selectedRow[2..]),
+                            interfaceSelfFormalRow, classTypeSpecRef,
+                            requirementMethodRow, selectedMethodRow, depth + 1);
+                    }
+
+                    if (requirementType.Form == 0x0C)
+                    {
+                        return requirementRow[2] == selectedRow[2]
+                            && AreEquivalentWitnessTypeSpecs(tables,
+                                BinaryPrimitives.ReadUInt32LittleEndian(
+                                    requirementRow[3..]),
+                                BinaryPrimitives.ReadUInt32LittleEndian(
+                                    selectedRow[3..]),
+                                interfaceSelfFormalRow, classTypeSpecRef,
+                                requirementMethodRow, selectedMethodRow, depth + 1);
+                    }
+
+                    return false;
                 }
 
                 if (matchingBindings != 1)
@@ -1133,6 +1328,12 @@ internal static class TrRmDeclarationFailureBindingContract
                 var (_, selectedParameterCount)
                     = classTables.Signatures.GetParamRange(
                         selectedSignature);
+                var (requiredParamFirst, _)
+                    = classTables.Signatures.GetParamRange(
+                        requirementSignature);
+                var (selectedParamFirst, _)
+                    = classTables.Signatures.GetParamRange(
+                        selectedSignature);
                 if (classTables.Methods.GetOwnerType(selectedMethod)
                         != selectedOwnerTypeDef
                     || (selectedOwnerRef == 0
@@ -1155,10 +1356,56 @@ internal static class TrRmDeclarationFailureBindingContract
                     || classTables.Signatures.GetGenericCount(
                         requirementSignature)
                         != classTables.Signatures.GetGenericCount(
-                            selectedSignature))
+                            selectedSignature)
+                    || classTables.Contracts.GetEffectsMask(requiredMethod)
+                        != classTables.Contracts.GetEffectsMask(
+                            selectedMethod))
                 {
                     throw new InvalidDataException(
                         "A selected exception witness MethodDef has an incompatible owner or callable arity.");
+                }
+
+                if (!AreEquivalentWitnessTypeSpecs(classTables,
+                        classTables.Signatures.GetResultTypeSpec(
+                            requirementSignature),
+                        classTables.Signatures.GetResultTypeSpec(
+                            selectedSignature),
+                        interfaceSelfFormalRow,
+                        implementingTypeSpecRef, requiredMethod,
+                        selectedMethod, depth: 0))
+                {
+                    throw new InvalidDataException(
+                        "A selected exception witness MethodDef has an incompatible result TypeSpec.");
+                }
+
+                for (var parameterOrdinal = 0;
+                    parameterOrdinal < requirementParameterCount;
+                    parameterOrdinal++)
+                {
+                    var requiredParameterRow
+                        = requiredParamFirst + parameterOrdinal;
+                    var selectedParameterRow
+                        = selectedParamFirst + parameterOrdinal;
+                    if (classTables.Parameters.GetMode(
+                            requiredParameterRow)
+                            != classTables.Parameters.GetMode(
+                                selectedParameterRow)
+                        || classTables.Parameters.GetFlags(
+                            requiredParameterRow)
+                            != classTables.Parameters.GetFlags(
+                                selectedParameterRow)
+                        || !AreEquivalentWitnessTypeSpecs(classTables,
+                            classTables.Parameters.GetTypeSpec(
+                                requiredParameterRow),
+                            classTables.Parameters.GetTypeSpec(
+                                selectedParameterRow),
+                            interfaceSelfFormalRow,
+                            implementingTypeSpecRef, requiredMethod,
+                            selectedMethod, depth: 0))
+                    {
+                        throw new InvalidDataException(
+                            "A selected exception witness MethodDef has an incompatible formal mode, flags or TypeSpec.");
+                    }
                 }
             }
 
@@ -1285,50 +1532,6 @@ internal static class TrRmDeclarationFailureBindingContract
             return false;
         }
 
-        private static void ValidateOriginCorrespondence(InputFacts[] facts,
-            int clauseInputIndex, int clauseMethodDefRow, uint clauseOrdinal,
-            int originInputIndex, int originMethodDefRow, uint originOrdinal,
-            int originModuleRow)
-        {
-            if (clauseInputIndex == originInputIndex
-                && clauseMethodDefRow == originMethodDefRow
-                && clauseOrdinal == originOrdinal)
-            {
-                return;
-            }
-
-            if (!facts[clauseInputIndex].MethodImports.TryGetValue(
-                    clauseMethodDefRow, out var methodImports))
-            {
-                throw new InvalidDataException(
-                    "A non-local declaration failure-binding origin has no exact imported MethodDef correspondence.");
-            }
-
-            var originFacts = facts[originInputIndex];
-            var originModuleIdentity
-                = originFacts.ModuleIdentities[originModuleRow];
-            var clauseOwnerModuleRow
-                = facts[clauseInputIndex]
-                    .MethodOwnerModuleRows[clauseMethodDefRow];
-            var expectedDefinition = 0x1600_0000u
-                | checked((uint)originMethodDefRow);
-            var clauseImports = methodImports
-                .Where(import => import.OwnerModuleRow == clauseOwnerModuleRow)
-                .Distinct()
-                .ToArray();
-            if (clauseImports.Length != 1
-                || !StringComparer.Ordinal.Equals(
-                    clauseImports[0].ProviderIdentity, originModuleIdentity)
-                || !originFacts.ExportsByKey.TryGetValue(
-                    (originModuleRow, clauseImports[0].ExportKey),
-                    out var exportedDefinition)
-                || exportedDefinition != expectedDefinition)
-            {
-                throw new InvalidDataException(
-                    "A declaration failure-binding origin does not match the clause's unique exact public MethodDef import.");
-            }
-        }
-
         var binding = tables.Imports.GetBindingForImportRow(
             tables.TypeSpecs.GetImportRow(exceptionType.Value));
         return StringComparer.Ordinal.Equals(binding.ProducerIdentity,
@@ -1336,6 +1539,53 @@ internal static class TrRmDeclarationFailureBindingContract
             && StringComparer.Ordinal.Equals(binding.ExportKey,
                 identity.ExportKey);
     }
+
+    private static void ValidateOriginCorrespondence(InputFacts[] facts,
+        int clauseInputIndex, int clauseMethodDefRow, uint clauseOrdinal,
+        int originInputIndex, int originMethodDefRow, uint originOrdinal,
+        int originModuleRow)
+    {
+        if (clauseInputIndex == originInputIndex
+            && clauseMethodDefRow == originMethodDefRow
+            && clauseOrdinal == originOrdinal)
+        {
+            return;
+        }
+
+        if (!facts[clauseInputIndex].MethodImports.TryGetValue(
+                clauseMethodDefRow, out var methodImports))
+        {
+            throw new InvalidDataException(
+                "A non-local declaration failure-binding origin has no exact imported MethodDef correspondence.");
+        }
+
+        var originFacts = facts[originInputIndex];
+        var originModuleIdentity
+            = originFacts.ModuleIdentities[originModuleRow];
+        var clauseOwnerModuleRow
+            = facts[clauseInputIndex]
+                .MethodOwnerModuleRows[clauseMethodDefRow];
+        var expectedDefinition = 0x1600_0000u
+            | checked((uint)originMethodDefRow);
+        var clauseImports = methodImports
+            .Where(import => import.OwnerModuleRow == clauseOwnerModuleRow)
+            .Distinct()
+            .ToArray();
+        if (clauseImports.Length != 1
+            || !StringComparer.Ordinal.Equals(
+                clauseImports[0].ProviderIdentity, originModuleIdentity)
+            || !originFacts.ExportsByKey.TryGetValue(
+                (originModuleRow, clauseImports[0].ExportKey),
+                out var exportedDefinition)
+            || exportedDefinition != expectedDefinition)
+        {
+            throw new InvalidDataException(
+                "A declaration failure-binding origin does not match the clause's unique exact public MethodDef import.");
+        }
+    }
+
+    private static InvalidDataException InvalidTypeSpec()
+        => new("Invalid exception witness MethodDef TypeSpec.");
 
     private static ClauseOccurrence FindClause(InputFacts facts,
         int methodDefRow, uint ordinal, byte phase)
