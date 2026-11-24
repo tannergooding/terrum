@@ -2242,8 +2242,8 @@ FieldWrite targets that backing field. It emits hidden PropertyBacking
 FieldDefs, constructor role-1 PropertyDef identities, role-3 FieldWrite Body
 links, and role-1 constructor CallSites with source-use-5 receivers and
 direct scalar value Homes. Constructor Bodies preserve repeated call order and
-can interleave those calls with direct scalar FieldWrites. Producer
-regressions are authored but unverified.
+can interleave calls to distinct properties with direct scalar FieldWrites.
+Producer regressions are authored but unverified.
 Other setter/init Body shapes and init contracts, private/unselected property
 closure, source-free binding/remapping, provider replacement,
 PropertyInitialized production, role-3 lifecycle and runtime remain open.
