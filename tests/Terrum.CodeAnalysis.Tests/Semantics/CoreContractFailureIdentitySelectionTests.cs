@@ -52,6 +52,30 @@ internal sealed class CoreContractFailureIdentitySelectionTests
     }
 
     [Test]
+    public void StandardFailureMapValidationRequiresExactSchemaAndCapturedInputs()
+    {
+        var root = new TrRmStandardArtifactInput("unselected-schema",
+            ReadOnlyMemory<byte>.Empty);
+        Assert.That(() =>
+                TrRmDeclarationFailureBindingContract
+                    .ValidateForStandardInputs(root, [], "sample.root",
+                        [], [], []),
+            Throws.TypeOf<NotSupportedException>());
+
+        var origin = new TrRmStandardArtifactInput("unselected-schema",
+            ReadOnlyMemory<byte>.Empty);
+        var plan = new TrRmConstructorBindingLocation(origin, 1, 0);
+        var uncapturedOrigin = new TrRmPreconditionFailureBinding(root, 1,
+            0, origin, 1, 0, TrRmPreconditionFailureSource.ExplicitType,
+            plan);
+        Assert.That(() =>
+                TrRmDeclarationFailureBindingContract
+                    .ValidateForStandardInputs(root, [], "sample.root",
+                        [], [uncapturedOrigin], []),
+            Throws.TypeOf<ArgumentException>());
+    }
+
+    [Test]
     public void SelectionAllowsOnlyRolesNeededByTheModule()
     {
         var requirementOnly = CreateSelection() with {
