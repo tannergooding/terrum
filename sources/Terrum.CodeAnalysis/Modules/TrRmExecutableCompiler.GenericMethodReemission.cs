@@ -33,6 +33,7 @@ public static partial class TrRmExecutableCompiler
         IReadOnlyList<TrRmRetainedGenericMethodExport> genericMethodExports)
     {
         ArgumentNullException.ThrowIfNull(program);
+        RejectUnconsumedDeclarationFailureBindings(program);
         ArgumentNullException.ThrowIfNull(genericMethodExports);
         ArgumentException.ThrowIfNullOrEmpty(moduleIdentity);
         ArgumentException.ThrowIfNullOrEmpty(schemaIdentity);

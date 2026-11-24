@@ -89,6 +89,8 @@ public static partial class TrRmExecutableCompiler
                 "The combined method/type reference requires one exact Construction-2 Copy-evidence selection for every artifact.");
         }
 
+        RejectMaplessStandardDeclarationFailureReferences(input,
+            moduleIdentity, capturedProviders);
         var artifacts = SnapshotStandardInputs(input, capturedProviders);
         return CreateC1M1MethodTypeSourceReference(artifacts,
             schemaIdentities, moduleIdentity, capturedMethodKeys,

@@ -63,6 +63,16 @@ public static partial class TrRmExecutableCompiler
                     nameof(references));
         }
 
+        if (selectedReferences.Any(static reference =>
+                !reference.PreconditionFailureBindings.IsEmpty
+                || !reference.PostconditionConstructionBindings.IsEmpty
+                || reference.Functions.Any(static function =>
+                    !function.DeclarationContractClauses.IsDefaultOrEmpty)))
+        {
+            throw Unsupported(
+                "Standard reference-set composition does not yet remap declaration failure-binding contexts.");
+        }
+
         var foreignNativeInterfaceParents = selectedReferences
             .Where(static reference => reference.Interfaces.Any(
                 static definition =>

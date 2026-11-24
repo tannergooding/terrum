@@ -1319,6 +1319,12 @@ internal sealed partial class PeCompiler
         IReadOnlyDictionary<int, NativeImportBinding>? imports = null, bool[]? sourceDependent = null,
         CancellationToken cancellationToken = default)
     {
+        if (!program.PreconditionFailureBindings.IsDefaultOrEmpty
+            || !program.PostconditionConstructionBindings.IsDefaultOrEmpty)
+        {
+            throw new NotSupportedException(
+                "Native lowering does not yet consume declaration failure-binding maps.");
+        }
         if (program.Functions.Any(function =>
             !SemanticVerifier
                 .HasOnlyUnconditionalInitializationOutputContracts(

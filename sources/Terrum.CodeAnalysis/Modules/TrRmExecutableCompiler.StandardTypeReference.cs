@@ -28,6 +28,8 @@ public static partial class TrRmExecutableCompiler
         IReadOnlyList<string> typeExportKeys)
     {
         ArgumentException.ThrowIfNullOrEmpty(moduleIdentity);
+        ArgumentNullException.ThrowIfNull(input);
+        ArgumentNullException.ThrowIfNull(providers);
         ArgumentNullException.ThrowIfNull(typeExportKeys);
         var exportKeys = new string[typeExportKeys.Count];
         var seenKeys = new HashSet<string>(StringComparer.Ordinal);
@@ -70,6 +72,8 @@ public static partial class TrRmExecutableCompiler
                 nameof(typeExportKeys));
         }
 
+        RejectMaplessStandardDeclarationFailureReferences(input,
+            moduleIdentity, providers);
         var artifacts = SnapshotStandardInputs(input, providers);
         var schemaIdentities = GetStandardSchemaIdentities(input, providers);
         if (schemaIdentities.Any(
@@ -230,6 +234,8 @@ public static partial class TrRmExecutableCompiler
             nameof(typeExportKeys), requireOne: true);
         var fieldKeys = CaptureLayoutQueryExportKeys(fieldExportKeys,
             nameof(fieldExportKeys), requireOne: false);
+        RejectMaplessStandardDeclarationFailureReferences(input,
+            moduleIdentity, providers);
         var artifacts = SnapshotStandardInputs(input, providers);
         var schemaIdentities = GetStandardSchemaIdentities(input, providers);
         if (schemaIdentities.Any(

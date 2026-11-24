@@ -652,6 +652,7 @@ public static partial class TrRmExecutableCompiler
         IReadOnlyList<TrRmSourceTypeExport> typeExports)
     {
         ArgumentNullException.ThrowIfNull(program);
+        RejectUnconsumedDeclarationFailureBindings(program);
         ArgumentNullException.ThrowIfNull(typeExports);
         ArgumentException.ThrowIfNullOrEmpty(moduleIdentity);
         ArgumentException.ThrowIfNullOrEmpty(schemaIdentity);
@@ -804,6 +805,7 @@ public static partial class TrRmExecutableCompiler
         IReadOnlyList<TrRmSourceEnumDeclarationExport> enumExports)
     {
         ArgumentNullException.ThrowIfNull(program);
+        RejectUnconsumedDeclarationFailureBindings(program);
         ArgumentNullException.ThrowIfNull(typeExports);
         ArgumentNullException.ThrowIfNull(enumExports);
         ArgumentException.ThrowIfNullOrEmpty(moduleIdentity);
@@ -885,6 +887,7 @@ public static partial class TrRmExecutableCompiler
         IReadOnlyList<TrRmSourceGenericMethodExport> genericMethodExports)
     {
         ArgumentNullException.ThrowIfNull(program);
+        RejectUnconsumedDeclarationFailureBindings(program);
         ArgumentNullException.ThrowIfNull(typeExports);
         ArgumentNullException.ThrowIfNull(genericMethodExports);
         ArgumentException.ThrowIfNullOrEmpty(moduleIdentity);
@@ -966,6 +969,7 @@ public static partial class TrRmExecutableCompiler
         IReadOnlyList<TrRmSourceClassExport> classExports)
     {
         ArgumentNullException.ThrowIfNull(program);
+        RejectUnconsumedDeclarationFailureBindings(program);
         ArgumentNullException.ThrowIfNull(typeExports);
         ArgumentNullException.ThrowIfNull(genericMethodExports);
         ArgumentNullException.ThrowIfNull(classExports);
@@ -1091,6 +1095,7 @@ public static partial class TrRmExecutableCompiler
         IReadOnlyList<TrRmSourceEnumDeclarationExport> enumExports)
     {
         ArgumentNullException.ThrowIfNull(program);
+        RejectUnconsumedDeclarationFailureBindings(program);
         ArgumentNullException.ThrowIfNull(typeExports);
         ArgumentNullException.ThrowIfNull(genericMethodExports);
         ArgumentNullException.ThrowIfNull(classExports);
@@ -1192,6 +1197,17 @@ public static partial class TrRmExecutableCompiler
             sourceMethodExports, sourceClassExports, sourceEnumExports);
     }
 
+    private static void RejectUnconsumedDeclarationFailureBindings(
+        BoundProgram program)
+    {
+        if (!program.PreconditionFailureBindings.IsDefaultOrEmpty
+            || !program.PostconditionConstructionBindings.IsDefaultOrEmpty)
+        {
+            throw Unsupported(
+                "This Standard emission route does not return declaration failure-binding maps.");
+        }
+    }
+
     private static byte[] EmitStandardCore(BoundProgram program,
         string moduleIdentity, string schemaIdentity,
         uint moduleTargetRequirement,
@@ -1204,12 +1220,7 @@ public static partial class TrRmExecutableCompiler
             sourceEnumDeclarationExports = null)
     {
         ArgumentNullException.ThrowIfNull(program);
-        if (!program.PreconditionFailureBindings.IsDefaultOrEmpty
-            || !program.PostconditionConstructionBindings.IsDefaultOrEmpty)
-        {
-            throw Unsupported(
-                "This Standard emission route does not return declaration failure-binding maps.");
-        }
+        RejectUnconsumedDeclarationFailureBindings(program);
         if (retainedGenericMethodDefinitions is not null
             && (sourceGenericMethodExports is null
                 || !ReferenceEquals(sourceGenericMethodExports.Program,

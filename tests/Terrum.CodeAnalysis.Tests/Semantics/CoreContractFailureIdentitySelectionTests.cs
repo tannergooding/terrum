@@ -278,6 +278,47 @@ internal sealed class CoreContractFailureIdentitySelectionTests
             Throws.TypeOf<NotSupportedException>());
     }
 
+    [Test]
+    public void StandardReferenceSetDoesNotDropFailureBindingContexts()
+    {
+        var artifact = new TrRmStandardArtifactInput("exact-schema",
+            ReadOnlyMemory<byte>.Empty);
+        var plan = new TrRmConstructorBindingLocation(artifact, 1, 0);
+        var binding = new TrRmPreconditionFailureBinding(artifact, 1, 0,
+            artifact, 1, 0,
+            TrRmPreconditionFailureSource.ExplicitType, plan);
+        var reference = new CompilationReference([], [],
+            BoundRuntimePolicy.FailFast,
+            preconditionFailureBindings: [binding]);
+        var emptyReference = new CompilationReference([], [],
+            BoundRuntimePolicy.FailFast);
+
+        Assert.That(() => TrRmExecutableCompiler.CreateStandardReferenceSet(
+                [reference, emptyReference]),
+            Throws.TypeOf<NotSupportedException>());
+    }
+
+    [Test]
+    public void NativeLoweringDoesNotDropFailureBindingContexts()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public int32 Identity(int32 value) { return value; }
+            """));
+        var artifact = new TrRmStandardArtifactInput("exact-schema",
+            ReadOnlyMemory<byte>.Empty);
+        var plan = new TrRmConstructorBindingLocation(artifact, 1, 0);
+        var binding = new TrRmPreconditionFailureBinding(artifact, 1, 0,
+            artifact, 1, 0,
+            TrRmPreconditionFailureSource.ExplicitType, plan);
+        var program = compilation.Program! with {
+            PreconditionFailureBindings = [binding],
+        };
+
+        Assert.That(() => NativeEmitter.EmitLibrary(program, ["Identity"],
+                NativeRuntimePolicy.FailFast),
+            Throws.TypeOf<NotSupportedException>());
+    }
+
     private static CoreContractFailureIdentitySelection CreateSelection()
         => new("sample.consumer",
             new CoreContractFailureDeclarationIdentity("core.contracts",

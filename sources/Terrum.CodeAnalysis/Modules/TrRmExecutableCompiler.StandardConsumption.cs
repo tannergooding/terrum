@@ -200,6 +200,35 @@ public static partial class TrRmExecutableCompiler
             [], coreContractFailureIdentitySelections);
     }
 
+    private static void RejectMaplessStandardDeclarationFailureReferences(
+        TrRmStandardArtifactInput input, string moduleIdentity,
+        IReadOnlyList<TrRmStandardArtifactInput> providers)
+    {
+        var inputs
+            = new TrRmStandardArtifactInput[providers.Count + 1];
+        inputs[0] = input;
+        var usesGeneralPredicateGraphs
+            = GetForeignInvocationSchema(input.SchemaIdentity)
+                .UsesGeneralPredicateGraphs();
+        for (var index = 0; index < providers.Count; index++)
+        {
+            var provider = providers[index]
+                ?? throw new ArgumentNullException(
+                    $"{nameof(providers)}[{index}]");
+            inputs[index + 1] = provider;
+            usesGeneralPredicateGraphs |= GetForeignInvocationSchema(
+                provider.SchemaIdentity).UsesGeneralPredicateGraphs();
+        }
+
+        if (usesGeneralPredicateGraphs
+            && TrRmDeclarationFailureBindingContract
+                .HasRetainedPhaseFailureAttachments(inputs, moduleIdentity))
+        {
+            throw Unsupported(
+                "Standard source references require phase-specific failure-binding maps for retained declaration predicates.");
+        }
+    }
+
     private static CompilationReference CreateStandardReferenceCore(
         TrRmStandardArtifactInput input, string moduleIdentity,
         IReadOnlyList<TrRmStandardArtifactInput> providers,
@@ -211,25 +240,8 @@ public static partial class TrRmExecutableCompiler
         ArgumentException.ThrowIfNullOrEmpty(moduleIdentity);
         ArgumentNullException.ThrowIfNull(input);
         ArgumentNullException.ThrowIfNull(providers);
-        var inputs
-            = new TrRmStandardArtifactInput[providers.Count + 1];
-        inputs[0] = input;
-        for (var index = 0; index < providers.Count; index++)
-        {
-            inputs[index + 1] = providers[index]
-                ?? throw new ArgumentNullException(
-                    $"{nameof(providers)}[{index}]");
-        }
-
-        if (inputs.Any(static candidate =>
-                GetForeignInvocationSchema(candidate.SchemaIdentity)
-                    .UsesGeneralPredicateGraphs())
-            && TrRmDeclarationFailureBindingContract
-                .HasRetainedPhaseFailureAttachments(inputs, moduleIdentity))
-        {
-            throw Unsupported(
-                "Standard source references require phase-specific failure-binding maps for retained declaration predicates.");
-        }
+        RejectMaplessStandardDeclarationFailureReferences(input,
+            moduleIdentity, providers);
 
         if (StringComparer.Ordinal.Equals(input.SchemaIdentity,
                 StandardGenericMethodCallsSchemaIdentity)
