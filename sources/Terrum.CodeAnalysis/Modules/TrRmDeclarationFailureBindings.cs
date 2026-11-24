@@ -213,6 +213,29 @@ internal static class TrRmDeclarationFailureBindingContract
         };
         var pendingModules = new Queue<(int InputIndex, int ModuleRow)>();
         pendingModules.Enqueue(rootModule);
+        while (pendingModules.TryDequeue(out var currentModule))
+        {
+            var currentFacts = facts[currentModule.InputIndex];
+            foreach (var edge in currentFacts.ImportEdges)
+            {
+                if (edge.OwnerModuleRow != currentModule.ModuleRow)
+                {
+                    continue;
+                }
+
+                if (!moduleLocations.TryGetValue(edge.ProviderIdentity,
+                        out var providerModule))
+                {
+                    throw new InvalidDataException(
+                        "A retained declaration failure-binding Module imports an absent provider.");
+                }
+
+                if (retainedModules.Add(providerModule))
+                {
+                    pendingModules.Enqueue(providerModule);
+                }
+            }
+        }
 
         var preconditionClauseKeys = new HashSet<(int InputIndex,
             int MethodDefRow, uint Ordinal)>();
@@ -232,10 +255,6 @@ internal static class TrRmDeclarationFailureBindingContract
                 binding.MethodDefRow);
             var originOwner = GetMethodOwner(facts[originInputIndex],
                 binding.OriginMethodDefRow);
-            AddRetainedModule((clauseInputIndex, clauseOwner),
-                retainedModules, pendingModules);
-            AddRetainedModule((originInputIndex, originOwner),
-                retainedModules, pendingModules);
             var planInputIndex = FindReference(inputs,
                 binding.ConstructorPlan.Artifact);
             if (planInputIndex < 0)
@@ -246,8 +265,13 @@ internal static class TrRmDeclarationFailureBindingContract
 
             var planOwner = GetMethodOwner(facts[planInputIndex],
                 binding.ConstructorPlan.MethodDefRow);
-            AddRetainedModule((planInputIndex, planOwner),
-                retainedModules, pendingModules);
+            if (!retainedModules.Contains((clauseInputIndex, clauseOwner))
+                || !retainedModules.Contains((originInputIndex, originOwner))
+                || !retainedModules.Contains((planInputIndex, planOwner)))
+            {
+                throw new InvalidDataException(
+                    "A declaration failure binding refers to a Module outside the selected root's provider closure.");
+            }
             if (!preconditionClauseKeys.Add((clauseInputIndex,
                     checked((int)binding.MethodDefRow),
                     binding.PhaseLocalOrdinal)))
@@ -275,10 +299,6 @@ internal static class TrRmDeclarationFailureBindingContract
                 binding.MethodDefRow);
             var originOwner = GetMethodOwner(facts[originInputIndex],
                 binding.OriginMethodDefRow);
-            AddRetainedModule((clauseInputIndex, clauseOwner),
-                retainedModules, pendingModules);
-            AddRetainedModule((originInputIndex, originOwner),
-                retainedModules, pendingModules);
             var planInputIndex = FindReference(inputs,
                 binding.ConstructorPlan.Artifact);
             if (planInputIndex < 0)
@@ -289,38 +309,19 @@ internal static class TrRmDeclarationFailureBindingContract
 
             var planOwner = GetMethodOwner(facts[planInputIndex],
                 binding.ConstructorPlan.MethodDefRow);
-            AddRetainedModule((planInputIndex, planOwner),
-                retainedModules, pendingModules);
+            if (!retainedModules.Contains((clauseInputIndex, clauseOwner))
+                || !retainedModules.Contains((originInputIndex, originOwner))
+                || !retainedModules.Contains((planInputIndex, planOwner)))
+            {
+                throw new InvalidDataException(
+                    "A declaration failure binding refers to a Module outside the selected root's provider closure.");
+            }
             if (!postconditionClauseKeys.Add((clauseInputIndex,
                     checked((int)binding.MethodDefRow),
                     binding.PhaseLocalOrdinal)))
             {
                 throw new InvalidDataException(
                     "A phase-2 declaration occurrence has duplicate construction bindings.");
-            }
-        }
-
-        while (pendingModules.TryDequeue(out var currentModule))
-        {
-            var currentFacts = facts[currentModule.InputIndex];
-            foreach (var edge in currentFacts.ImportEdges)
-            {
-                if (edge.OwnerModuleRow != currentModule.ModuleRow)
-                {
-                    continue;
-                }
-
-                if (!moduleLocations.TryGetValue(edge.ProviderIdentity,
-                        out var providerModule))
-                {
-                    throw new InvalidDataException(
-                        "A retained declaration failure-binding Module imports an absent provider.");
-                }
-
-                if (retainedModules.Add(providerModule))
-                {
-                    pendingModules.Enqueue(providerModule);
-                }
             }
         }
 
@@ -927,17 +928,6 @@ internal static class TrRmDeclarationFailureBindingContract
         }
 
         return -1;
-    }
-
-    private static void AddRetainedModule(
-        (int InputIndex, int ModuleRow) module,
-        HashSet<(int InputIndex, int ModuleRow)> retainedModules,
-        Queue<(int InputIndex, int ModuleRow)> pendingModules)
-    {
-        if (retainedModules.Add(module))
-        {
-            pendingModules.Enqueue(module);
-        }
     }
 
     private static bool IsValidClause(
