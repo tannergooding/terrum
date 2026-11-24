@@ -4930,16 +4930,19 @@ public static partial class TrRmExecutableCompiler
                         "A Construction-2 conditional initializer permits only ordered scalar locals before its branch tree.");
                 }
 
-                CollectLocal(local);
+                CollectLocal(local, localVariables);
             }
 
+            var conditionalAssignments
+                = CollectConditionalFieldAssignments(conditional,
+                    localVariables);
             if (nextLocalVariable != function.Variables.Length)
             {
                 throw Unsupported(
                     "A Construction-2 conditional initializer requires each scalar local to have a checked source declaration.");
             }
 
-            return CollectConditionalFieldAssignments(conditional);
+            return conditionalAssignments;
         }
 
         Collect(function.Body);
@@ -4951,7 +4954,8 @@ public static partial class TrRmExecutableCompiler
 
         return assignments.ToImmutable();
 
-        void CollectLocal(BoundLocal local)
+        void CollectLocal(BoundLocal local,
+            HashSet<int> availableLocals)
         {
             if (local.Variable != nextLocalVariable
                 || (uint)local.Variable >= (uint)function.Variables.Length)
@@ -4967,7 +4971,7 @@ public static partial class TrRmExecutableCompiler
                         && initialRead.Variable >= 0
                         && initialRead.Variable < local.Variable
                         && (initialRead.Variable < function.ParameterCount
-                            || localVariables.Contains(
+                            || availableLocals.Contains(
                                 initialRead.Variable))
                         && function.Variables[initialRead.Variable].Type
                             == variable.Type,
@@ -4981,9 +4985,11 @@ public static partial class TrRmExecutableCompiler
                         && binary.Operator is (TokenKind.Ampersand
                             or TokenKind.Pipe or TokenKind.Caret)
                         && IsSupportedScalarInitializerOperand(
-                            binary.Left, variable.Type, local.Variable)
+                            binary.Left, variable.Type, local.Variable,
+                            availableLocals)
                         && IsSupportedScalarInitializerOperand(
-                            binary.Right, variable.Type, local.Variable),
+                            binary.Right, variable.Type, local.Variable,
+                            availableLocals),
                 _ => false,
             };
             if (variable.IsMutable || variable.IsOut || variable.IsInit
@@ -4997,7 +5003,7 @@ public static partial class TrRmExecutableCompiler
                     "A Construction-2 initializer local must copy an initialized same-typed scalar Home or constant.");
             }
 
-            _ = localVariables.Add(local.Variable);
+            _ = availableLocals.Add(local.Variable);
             nextLocalVariable++;
         }
 
@@ -5025,7 +5031,7 @@ public static partial class TrRmExecutableCompiler
 
                 if (statement is BoundLocal local)
                 {
-                    CollectLocal(local);
+                    CollectLocal(local, localVariables);
                     continue;
                 }
 
@@ -5106,14 +5112,14 @@ public static partial class TrRmExecutableCompiler
 
         bool IsSupportedScalarInitializerOperand(
             BoundExpression expression, PrimitiveType type,
-            int beforeVariable)
+            int beforeVariable, HashSet<int> availableLocals)
             => expression switch
             {
                 BoundRead read => read.Type == type
                     && read.Variable >= 0
                     && read.Variable < beforeVariable
                     && (read.Variable < function.ParameterCount
-                        || localVariables.Contains(read.Variable))
+                        || availableLocals.Contains(read.Variable))
                     && function.Variables[read.Variable].Type == type,
                 BoundConstant constant => constant.Type == type
                     && constant.RepresentationType == type
@@ -5122,12 +5128,14 @@ public static partial class TrRmExecutableCompiler
             };
 
         ImmutableArray<BoundFieldAssignment>
-            CollectConditionalFieldAssignments(BoundIf branch)
+            CollectConditionalFieldAssignments(BoundIf branch,
+                HashSet<int> availableLocals)
         {
             var paths
                 = new List<ImmutableArray<BoundFieldAssignment>>();
             var remainingVisits = SemanticVerifier.MaximumAnalysisVisits;
-            CollectConditionalPath(branch, paths, depth: 0);
+            CollectConditionalPath(branch, paths,
+                new HashSet<int>(availableLocals), depth: 0);
             if (paths.Count == 0)
             {
                 throw new InvalidDataException(
@@ -5153,6 +5161,7 @@ public static partial class TrRmExecutableCompiler
 
             void CollectConditionalPath(BoundStatement statement,
                 List<ImmutableArray<BoundFieldAssignment>> results,
+                HashSet<int> pathLocals,
                 int depth)
             {
                 if (++depth > SemanticVerifier.MaximumDepth
@@ -5173,7 +5182,7 @@ public static partial class TrRmExecutableCompiler
                     if (block.Statements.Length == 1)
                     {
                         CollectConditionalPath(block.Statements[0], results,
-                            checked(depth + 1));
+                            pathLocals, checked(depth + 1));
                         return;
                     }
 
@@ -5181,19 +5190,8 @@ public static partial class TrRmExecutableCompiler
                     var assignments
                         = ImmutableArray.CreateBuilder<
                             BoundFieldAssignment>(block.Statements.Length);
-                    foreach (var nestedStatement in block.Statements)
-                    {
-                        if (nestedStatement
-                            is not BoundFieldAssignment assignment)
-                        {
-                            throw Unsupported(
-                                "A Construction-2 conditional leaf supports only direct field stores.");
-                        }
-
-                        AddFieldAssignment(assignment, fields,
-                            localVariables, assignments);
-                    }
-
+                    CollectConditionalLeaf(block, pathLocals, fields,
+                        assignments);
                     results.Add(assignments.ToImmutable());
                     return;
                 }
@@ -5215,20 +5213,59 @@ public static partial class TrRmExecutableCompiler
                     }
 
                     CollectConditionalPath(nestedBranch.Then, results,
+                        new HashSet<int>(pathLocals),
                         checked(depth + 1));
                     CollectConditionalPath(elseBranch, results,
+                        new HashSet<int>(pathLocals),
                         checked(depth + 1));
+                    return;
+                }
+
+                var leafFields = new HashSet<int>();
+                var leafAssignments
+                    = ImmutableArray.CreateBuilder<BoundFieldAssignment>(1);
+                CollectConditionalLeaf(statement, pathLocals, leafFields,
+                    leafAssignments);
+                results.Add(leafAssignments.ToImmutable());
+            }
+
+            void CollectConditionalLeaf(BoundStatement statement,
+                HashSet<int> pathLocals, HashSet<int> fields,
+                ImmutableArray<BoundFieldAssignment>.Builder assignments)
+            {
+                if (--remainingVisits < 0)
+                {
+                    throw Unsupported(
+                        "A Construction-2 conditional initializer exceeds its checked leaf-visit limit.");
+                }
+
+                if (statement is BoundBlock block)
+                {
+                    if (!block.RetiredManagedLocals.IsEmpty)
+                    {
+                        throw Unsupported(
+                            "A Construction-2 conditional initializer cannot retire managed locals.");
+                    }
+
+                    foreach (var nestedStatement in block.Statements)
+                    {
+                        CollectConditionalLeaf(nestedStatement, pathLocals,
+                            fields, assignments);
+                    }
+
+                    return;
+                }
+
+                if (statement is BoundLocal local)
+                {
+                    CollectLocal(local, pathLocals);
                     return;
                 }
 
                 if (statement is BoundFieldAssignment fieldAssignment)
                 {
-                    var fields = new HashSet<int>();
-                    var assignments
-                        = ImmutableArray.CreateBuilder<BoundFieldAssignment>(1);
-                    AddFieldAssignment(fieldAssignment, fields,
-                        localVariables, assignments);
-                    results.Add(assignments.MoveToImmutable());
+                    AddFieldAssignment(fieldAssignment, fields, pathLocals,
+                        assignments);
                     return;
                 }
 
@@ -6080,7 +6117,7 @@ public static partial class TrRmExecutableCompiler
 
                 if (block.Statements.Length != 1)
                 {
-                    paths.Add(CollectArm(block));
+                    paths.Add(CollectArm(block).Assignments);
                     return;
                 }
 
@@ -6113,7 +6150,7 @@ public static partial class TrRmExecutableCompiler
                 return;
             }
 
-            paths.Add(CollectArm(statement));
+            paths.Add(CollectArm(statement).Assignments);
         }
 
         void EmitConditionalBlock(int blockIndex,
@@ -6194,16 +6231,19 @@ public static partial class TrRmExecutableCompiler
             return block;
         }
 
-        ImmutableArray<BoundFieldAssignment> CollectArm(
-            BoundStatement arm)
+        (ImmutableArray<BoundStatement> Statements,
+            ImmutableArray<BoundFieldAssignment> Assignments)
+            CollectArm(BoundStatement arm)
         {
+            var statements = ImmutableArray.CreateBuilder<BoundStatement>();
             var assignments
                 = ImmutableArray.CreateBuilder<BoundFieldAssignment>();
-            CollectArmStatements(arm, assignments, []);
-            return assignments.ToImmutable();
+            CollectArmStatements(arm, statements, assignments, []);
+            return (statements.ToImmutable(), assignments.ToImmutable());
         }
 
         void CollectArmStatements(BoundStatement statement,
+            ImmutableArray<BoundStatement>.Builder statements,
             ImmutableArray<BoundFieldAssignment>.Builder assignments,
             HashSet<int> fields)
         {
@@ -6223,9 +6263,16 @@ public static partial class TrRmExecutableCompiler
 
                 foreach (var nested in block.Statements)
                 {
-                    CollectArmStatements(nested, assignments, fields);
+                    CollectArmStatements(nested, statements, assignments,
+                        fields);
                 }
 
+                return;
+            }
+
+            if (statement is BoundLocal)
+            {
+                statements.Add(statement);
                 return;
             }
 
@@ -6241,20 +6288,22 @@ public static partial class TrRmExecutableCompiler
                     "A Construction-2 conditional initializer branch assigns one field more than once.");
             }
 
+            statements.Add(assignment);
             assignments.Add(assignment);
         }
 
         byte[] EmitArm(
-            ImmutableArray<BoundFieldAssignment> assignments)
+            (ImmutableArray<BoundStatement> Statements,
+                ImmutableArray<BoundFieldAssignment> Assignments) arm)
         {
-            if (assignments.Length != expectedFields.Count)
+            if (arm.Assignments.Length != expectedFields.Count)
             {
                 throw new InvalidDataException(
                     "A Construction-2 conditional initializer path differs from its checked field set.");
             }
 
             var emittedFields = new HashSet<int>();
-            foreach (var assignment in assignments)
+            foreach (var assignment in arm.Assignments)
             {
                 if (!expectedFields.Contains(assignment.Field)
                     || !emittedFields.Add(assignment.Field))
@@ -6265,8 +6314,21 @@ public static partial class TrRmExecutableCompiler
             }
 
             var armCode = new List<byte>();
-            foreach (var assignment in assignments)
+            foreach (var statement in arm.Statements)
             {
+                if (statement is BoundLocal local)
+                {
+                    EncodeC1M1Construction2InitializerLocal(function, local,
+                        armCode, GetConstantMapIndex);
+                    continue;
+                }
+
+                if (statement is not BoundFieldAssignment assignment)
+                {
+                    throw new InvalidDataException(
+                        "A Construction-2 conditional initializer arm contains an unvalidated statement.");
+                }
+
                 if (!fieldDefRowByClassAndIndex.TryGetValue((
                         initializer.ClassIndex, assignment.Field),
                         out var fieldDefRow))

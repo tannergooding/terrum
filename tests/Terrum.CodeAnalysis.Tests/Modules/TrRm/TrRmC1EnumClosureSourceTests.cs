@@ -2151,18 +2151,22 @@ internal sealed class TrRmC1EnumClosureSourceTests
                         int32 copiedLeft = left;
                         if (first) {
                             if (second) {
-                                Value = copiedLeft;
+                                int32 selectedLeft = copiedLeft;
+                                Value = selectedLeft;
                                 Other = left;
                             } else {
-                                Other = middle;
+                                int32 selectedMiddle = middle;
+                                Other = selectedMiddle;
                                 Value = middle;
                             }
                         } else {
                             if (second) {
-                                Value = middle;
+                                int32 selectedOtherMiddle = middle;
+                                Value = selectedOtherMiddle;
                                 Other = middle;
                             } else {
-                                Other = right;
+                                int32 selectedRight = right;
+                                Other = selectedRight;
                                 Value = right;
                             }
                         }
@@ -2200,10 +2204,13 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 tables.Contracts.Count);
             Assert.That(initializerBody.BlockCount, Is.EqualTo(7),
                 schemaIdentity);
-            Assert.That(initializerBody.HomeCount, Is.EqualTo(7),
+            Assert.That(initializerBody.HomeCount, Is.EqualTo(11),
                 schemaIdentity);
-            Assert.That(initializerBody.HomeMap[48], Is.EqualTo(3),
-                schemaIdentity);
+            for (var homeIndex = 6; homeIndex < 11; homeIndex++)
+            {
+                Assert.That(initializerBody.HomeMap[homeIndex * 8],
+                    Is.EqualTo(3), schemaIdentity);
+            }
             Assert.That(initializerBody.GetBlockCode(0).ToArray(),
                 Is.EqualTo(new byte[] {
                     0xD5, 0, 3, 0, 0xD6, 0x10, 6, 0,
@@ -2212,6 +2219,10 @@ internal sealed class TrRmC1EnumClosureSourceTests
             Assert.That(initializerBody.GetBlockCode(1).ToArray(),
                 Is.EqualTo(new byte[] {
                     0xD5, 0, 2, 0, 0xE4, 0, 2, 0,
+                }), schemaIdentity);
+            Assert.That(initializerBody.GetBlockCode(3)[..8].ToArray(),
+                Is.EqualTo(new byte[] {
+                    0xD5, 0, 6, 0, 0xD6, 0x10, 7, 0,
                 }), schemaIdentity);
 
             var reference = TrRmExecutableCompiler.CreateStandardReference(
@@ -2245,10 +2256,16 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 reemittedTables.Contracts.Count);
             Assert.That(reemittedBody.BlockCount, Is.EqualTo(7),
                 schemaIdentity);
-            Assert.That(reemittedBody.HomeMap[48], Is.EqualTo(3),
-                schemaIdentity);
+            for (var homeIndex = 6; homeIndex < 11; homeIndex++)
+            {
+                Assert.That(reemittedBody.HomeMap[homeIndex * 8],
+                    Is.EqualTo(3), schemaIdentity);
+            }
             Assert.That(reemittedBody.GetBlockCode(0).ToArray(),
                 Is.EqualTo(initializerBody.GetBlockCode(0).ToArray()),
+                schemaIdentity);
+            Assert.That(reemittedBody.GetBlockCode(3)[..8].ToArray(),
+                Is.EqualTo(initializerBody.GetBlockCode(3)[..8].ToArray()),
                 schemaIdentity);
         }
     }
