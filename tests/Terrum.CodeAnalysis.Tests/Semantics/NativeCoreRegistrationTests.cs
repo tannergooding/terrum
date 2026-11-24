@@ -8462,6 +8462,21 @@ internal sealed class NativeCoreRegistrationTests
     }
 
     [Test]
+    public void StandardForeignNativeInterfaceFunctionPointerOutputFeedsOuterCallUnderPs1()
+    {
+        var program = CreatePointerOutputConsumerProgram(
+            functionPointerOutput: true, pointerOutputOuterCall: true);
+        var function = program.Functions.Single(
+            static function => function.Name == "InvokePointer");
+        Assert.That(function.ReturnType, Is.EqualTo(PrimitiveType.Int32));
+        var image = NativeEmitter.EmitLibrary(program, ["InvokePointer"],
+            NativeRuntimePolicy.FailFast);
+        Assert.That(image[..2], Is.EqualTo(new byte[] {
+            (byte)'M', (byte)'Z',
+        }));
+    }
+
+    [Test]
     public void StandardForeignNativeInterfacePointerOutputFeedsOuterCallWithSideEffectingArgumentUnderPs1()
     {
         var program = CreatePointerOutputConsumerProgram(
@@ -8641,10 +8656,12 @@ internal sealed class NativeCoreRegistrationTests
             throw new ArgumentOutOfRangeException(
                 nameof(successNestedCallCount));
         }
-        if (usesOuterCall && functionPointerOutput)
+        if ((pointerOutputAsReceiver && functionPointerOutput)
+            || (usesOuterCall && functionPointerOutput
+                && (multipleOutputs || successNestedCallCount != 0)))
         {
             throw new InvalidOperationException(
-                "The pointer-output outer-call shapes require a raw pointer output.");
+                "The selected outer-call shape does not accept a function-pointer output.");
         }
         if (successNestedCallCount != 0
             && (multipleOutputs || pointerOutputAsReceiver))
@@ -8718,9 +8735,11 @@ internal sealed class NativeCoreRegistrationTests
                     ? "public unsafe int32 Observe(ptr<int32> value, int32 status, int32 mode);"
                     : successNestedCallCount == 1
                         ? "public unsafe int32 Observe(ptr<int32> value, int32 tag);"
-                        : multipleOutputs
-                            ? "public unsafe int32 Observe(ptr<int32> value, int32 statusValue);"
-                            : "public unsafe int32 Observe(ptr<int32> value);";
+                        : functionPointerOutput
+                            ? $"public unsafe int32 Observe({outputValueType} value);"
+                            : multipleOutputs
+                                ? "public unsafe int32 Observe(ptr<int32> value, int32 statusValue);"
+                                : "public unsafe int32 Observe(ptr<int32> value);";
         var successReturn = usesOuterCall
             ? pointerOutputAsReceiver
                 ? multipleOutputs
@@ -8862,7 +8881,7 @@ internal sealed class NativeCoreRegistrationTests
         var outputValueHome = consumerProgram.Functions.Single(
             static function => function.Name == "InvokePointer")
             .ParameterCount + (multipleOutputs ? 1 : 0);
-        if (usesOuterCall)
+        if (usesOuterCall && !functionPointerOutput)
         {
             var successCode = body.GetBlockCode(1);
             var successCallSiteCount = successNestedCallCount + 1;
@@ -8961,7 +8980,7 @@ internal sealed class NativeCoreRegistrationTests
                 Is.EqualTo(PrimitiveType.Int32));
             AssertPointerOutputOuterCall(loadedFunction,
                 pointerOutputAsReceiver, multipleOutputs,
-                successNestedCallCount);
+                successNestedCallCount, functionPointerOutput);
         }
         else
         {
@@ -9000,7 +9019,7 @@ internal sealed class NativeCoreRegistrationTests
                 Is.EqualTo(PrimitiveType.Int32));
             AssertPointerOutputOuterCall(reloadedFunction,
                 pointerOutputAsReceiver, multipleOutputs,
-                successNestedCallCount);
+                successNestedCallCount, functionPointerOutput);
         }
         else
         {
@@ -9091,7 +9110,7 @@ internal sealed class NativeCoreRegistrationTests
 
         static void AssertPointerOutputOuterCall(BoundFunction candidate,
             bool outputAsReceiver, bool multipleOutputs,
-            int nestedCallCount)
+            int nestedCallCount, bool functionPointerOutput)
         {
             BoundCall? observeCall = null;
             _ = BoundTreeTraversal.VisitExpressions(candidate.Body,
@@ -9143,7 +9162,9 @@ internal sealed class NativeCoreRegistrationTests
                 Assert.That(outputRead.Variable,
                     Is.EqualTo(candidate.ParameterCount
                         + (multipleOutputs ? 1 : 0)));
-                Assert.That(NativePointerTypes.IsType(outputRead.Type),
+                Assert.That(functionPointerOutput
+                        ? NativeFunctionPointerTypes.IsType(outputRead.Type)
+                        : NativePointerTypes.IsType(outputRead.Type),
                     Is.True);
                 Assert.That(((BoundRead)receiver).Variable, Is.Zero);
                 Assert.That(selectedCall.ParameterIndex(outputArgumentIndex),
