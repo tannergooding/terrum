@@ -2234,6 +2234,12 @@ local/imported class-handle FieldDef TypeSpecs with their exact root
 TypeSpec/provider identities. Nested structs preserve unknown class ownership
 and are rejected by Copy-sensitive verification. These class and struct
 routes remain unverified under the active hold. The
+Construction-2 class Body-01 reader now follows a bounded nested field path
+through a selected nonoptional imported class-handle field and into its
+selected provider's public FieldDef, preserving the root-owned TypeDef and
+FieldDef Import identities. A Wrapper-to-Leaf source/rebind/source-free
+regression is authored but unverified; optional receiver paths, deeper/general
+CFG dereferences and provider aliases remain open. The
 separate Construction-2 PI1 source producer now emits selected public
 scalar explicit-field-backed properties with a field-reading getter, either
 explicit or auto, and either no mutator, a mutable setter whose Body directly

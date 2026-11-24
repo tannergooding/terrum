@@ -4265,6 +4265,113 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
     }
 
     [Test]
+    public void EmitsNestedReadThroughImportedClassHandleFields()
+    {
+        var schemaIdentity
+            = C1M1Construction2ClassParameterDefaultsSchemaIdentity;
+        var leafProvider = CreateClassArtifact("NestedLeafProvider",
+            "Leaf", "LeafKey", 0xF200_0008, schemaIdentity,
+            layoutKind: 0, pack: 0, fieldExportKey: "Leaf.Value");
+        var wrapperProvider = CreateArtifact("NestedWrapperProvider",
+            "Wrapper", "WrapperKey", 0xF200_0008, schemaIdentity,
+            "NestedLeafProvider", "LeafKey",
+            TrRmTypeSpecTableWriter.Reference(0x03, 1),
+            layoutKind: 0, pack: 0, useRequestedLayoutForImports: true,
+            fieldExportKey: "Wrapper.Child", fieldName: "Child");
+        var wrapperReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    wrapperProvider),
+                "NestedWrapperProvider", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        leafProvider),
+                ], ["WrapperKey"], ["Wrapper.Child", "Leaf.Value"]);
+
+        var tree = SyntaxTree.Parse("""
+            public class Container {
+                int32 _seed;
+                public Container(int32 seed) { _seed = seed; }
+                public int32 Read(Wrapper value) {
+                    return value.Child.Value;
+                }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree,
+            wrapperReference);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var members = classDeclaration.Children.OfType<SyntaxNode>();
+        var constructor = members.Single(static node =>
+            node.Kind == SyntaxKind.ConstructorDeclaration);
+        var readMethod = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration);
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "NestedClassConsumer", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [
+                new TrRmSourceClassExport(program, 0,
+                    classDeclaration.Span, "ContainerKey", [
+                        new TrRmSourceClassMemberExport(0,
+                            constructor.Span, "Container.Initialize"),
+                        new TrRmSourceClassMemberExport(0,
+                            readMethod.Span, "Container.Read"),
+                    ]),
+            ]);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                new TrRmArtifactIndex(artifact,
+                    TrRmArtifactSchema
+                        .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft,
+                    standardSchemaIdentity: schemaIdentity));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Container.Read", out var readDefinition), Is.True);
+        var readMethodRow = checked((int)(readDefinition
+            & 0x00FF_FFFFu));
+        var readBodyRow = tables.Methods.GetBodyRow(readMethodRow);
+        Assert.That(readBodyRow, Is.GreaterThan(0));
+        Assert.That(tables.Bodies.GetRow(readBodyRow)[0], Is.EqualTo(0x01));
+        var readBody = tables.Bodies.GetRegisterBody(readBodyRow,
+            tables.Contracts.Count);
+        Assert.That(readBody.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD8, 1, 1, 0,
+                0xDA, 0, 2, 0,
+                0x17, 0,
+            }));
+
+        var consumerReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, artifact),
+                "NestedClassConsumer", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        wrapperProvider),
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        leafProvider),
+                ], ["ContainerKey"], ["Wrapper.Child", "Leaf.Value"]);
+        var sourceFreeCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(""), consumerReference);
+        Assert.That(sourceFreeCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                sourceFreeCompilation.Diagnostics));
+        var reemitted = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)sourceFreeCompilation.Program!,
+            "NestedClassConsumerReemitted", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        _ = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, reemitted),
+            "NestedClassConsumerReemitted", [
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    wrapperProvider),
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    leafProvider),
+            ], ["ContainerKey"], ["Wrapper.Child", "Leaf.Value"]);
+    }
+
+    [Test]
     public void RejectsImportedClassFieldStoresWithoutWriteAuthority()
     {
         var schemaIdentity

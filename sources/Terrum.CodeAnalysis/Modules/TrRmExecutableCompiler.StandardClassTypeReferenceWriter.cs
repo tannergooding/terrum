@@ -11047,6 +11047,78 @@ public static partial class TrRmExecutableCompiler
 
                 fieldType = classFields[fieldRead.Field].Type;
             }
+            else if (ManagedClassTypes.IsClass(ownerType)
+                && !ManagedClassTypes.IsOptional(ownerType))
+            {
+                if (TryGetC1M1ImportedClassFieldType(ownerType, program,
+                        standardClassIndexByIdentity,
+                        out var nestedStandardClassIndex,
+                        out var nestedStandardClassInstanceIndex))
+                {
+                    var nestedClassViewIndex
+                        = getStandardClassTypeDefViewIndex(
+                            nestedStandardClassIndex,
+                            nestedStandardClassInstanceIndex);
+                    var nestedClassViewPlan
+                        = standardClassTypeDefViews[
+                            nestedClassViewIndex];
+                    var nestedClassFields
+                        = nestedClassViewPlan.Declaration.Fields;
+                    var nestedProviderFields
+                        = program.StandardClassDeclarations[
+                            nestedStandardClassIndex]
+                            .Declaration.Fields;
+                    if ((uint)fieldRead.Field
+                            >= (uint)nestedClassFields.Length
+                        || (uint)fieldRead.Field
+                            >= (uint)nestedProviderFields.Length
+                        || !typeImportPlanByStandardClassView.TryGetValue(
+                            nestedClassViewIndex, out var nestedImportPlan)
+                        || !IsC1M1ImportedClassFieldImportable(
+                            program.StandardClassDeclarations[
+                                nestedStandardClassIndex].Declaration,
+                            nestedProviderFields[fieldRead.Field],
+                            nestedImportPlan)
+                        || !fieldDefRowByStandardClassViewAndIndex.TryGetValue(
+                            (nestedClassViewIndex, fieldRead.Field),
+                            out fieldDefRow))
+                    {
+                        return null;
+                    }
+
+                    fieldType = nestedClassFields[fieldRead.Field].Type;
+                }
+                else
+                {
+                    var nestedClassIndex
+                        = ManagedClassTypes.ClassIndex(ownerType);
+                    if ((uint)nestedClassIndex >= (uint)program.Classes.Length
+                        || (uint)fieldRead.Field
+                            >= (uint)program.Classes[nestedClassIndex]
+                                .Fields.Length
+                        || !fieldDefRowByClassAndIndex.TryGetValue((
+                            nestedClassIndex, fieldRead.Field),
+                            out fieldDefRow))
+                    {
+                        return null;
+                    }
+
+                    var nestedClass
+                        = program.Classes[nestedClassIndex];
+                    var nestedField
+                        = nestedClass.Fields[fieldRead.Field];
+                    if (nestedField.RequiresUnsafeCaller
+                        || (nestedField.IsPrivate
+                            && !StringComparer.Ordinal.Equals(
+                                function.DeclaringStruct,
+                                nestedClass.Name)))
+                    {
+                        return null;
+                    }
+
+                    fieldType = nestedField.Type;
+                }
+            }
             else
             {
                 if (!TryGetC1M1SourceStructFieldType(ownerType,
@@ -11086,20 +11158,33 @@ public static partial class TrRmExecutableCompiler
                 return null;
             }
 
-            if (index + 1 < fieldPath.Count
-                && (!TryGetC1M1SourceStructFieldType(fieldType,
-                        sourceStructDeclarations,
-                        out var nestedStructureIndex)
+            if (index + 1 < fieldPath.Count)
+            {
+                if (fieldPath[index + 1].Receiver.Type != fieldType)
+                {
+                    return null;
+                }
+
+                if (ManagedClassTypes.IsClass(fieldType))
+                {
+                    if (ManagedClassTypes.IsOptional(fieldType))
+                    {
+                        return null;
+                    }
+                }
+                else if (!TryGetC1M1SourceStructFieldType(fieldType,
+                             sourceStructDeclarations,
+                             out var nestedStructureIndex)
                     || (uint)nestedStructureIndex
                         >= (uint)program.Structures.Length
                     || !sourceStructDeclarations.TryGetValue(
                         nestedStructureIndex, out var nestedDeclaration)
                     || !IsC1M1SourceStructLayoutSupported(
                         program.Structures[nestedStructureIndex],
-                        nestedDeclaration)
-                    || fieldPath[index + 1].Receiver.Type != fieldType))
-            {
-                return null;
+                        nestedDeclaration))
+                {
+                    return null;
+                }
             }
 
             fieldDefRows.Add(fieldDefRow);
