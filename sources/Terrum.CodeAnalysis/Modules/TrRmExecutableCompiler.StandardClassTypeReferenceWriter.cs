@@ -5218,14 +5218,10 @@ public static partial class TrRmExecutableCompiler
             return false;
         }
 
-        return left.Type == PrimitiveType.Bool
-            && right.Type == PrimitiveType.Bool
-            && comparison.Operator is (TokenKind.EqualsEquals
-                or TokenKind.BangEquals)
-            || left.Type == right.Type
-                && IsC1M1Construction2BodyIntegerType(left.Type)
-                && IsC1M1Construction2IntegerComparisonOperator(
-                    comparison.Operator);
+        return left.Type == right.Type
+            && IsC1M1Construction2BodyIntegerType(left.Type)
+            && IsC1M1Construction2IntegerComparisonOperator(
+                comparison.Operator);
     }
 
     private static bool IsC1M1Construction2SourceCopyType(
@@ -5914,38 +5910,35 @@ public static partial class TrRmExecutableCompiler
             {
                 AppendHomeLoad(conditionCode, 0, left.Variable);
                 AppendHomeLoad(conditionCode, 1, right.Variable);
+                if (left.Type != right.Type
+                    || !IsC1M1Construction2BodyIntegerType(left.Type)
+                    || !IsC1M1Construction2IntegerComparisonOperator(
+                        comparison.Operator))
+                {
+                    throw new InvalidDataException(
+                        "A Construction-2 conditional initializer has an unvalidated integer comparison.");
+                }
+
                 const byte destinationRegister = 0;
                 const byte leftRegister = 0;
                 const byte rightRegister = 1;
                 var payload = (ushort)(destinationRegister
                     | (0x0F << 4) | (leftRegister << 8)
                     | (rightRegister << 12));
-                if (left.Type == PrimitiveType.Bool
-                    && right.Type == PrimitiveType.Bool)
-                {
-                    conditionCode.Add(0xC2);
-                    conditionCode.Add(comparison.Operator
-                        == TokenKind.EqualsEquals ? (byte)0x01 : (byte)0x02);
-                    conditionCode.Add((byte)payload);
-                    conditionCode.Add((byte)(payload >> 8));
-                }
-                else
-                {
-                    conditionCode.Add(0xC2);
-                    conditionCode.Add(0);
-                    conditionCode.Add((byte)payload);
-                    conditionCode.Add((byte)(payload >> 8));
-                    var predicatePayload = (ushort)(
-                        destinationRegister
-                        | (destinationRegister << 4) | (0x0F << 8)
-                        | (0x0F << 12));
-                    conditionCode.Add(0xC3);
-                    conditionCode.Add(
-                        GetC1M1Construction2IntegerComparisonPredicate(
-                            comparison.Operator));
-                    conditionCode.Add((byte)predicatePayload);
-                    conditionCode.Add((byte)(predicatePayload >> 8));
-                }
+                conditionCode.Add(0xC2);
+                conditionCode.Add(0);
+                conditionCode.Add((byte)payload);
+                conditionCode.Add((byte)(payload >> 8));
+                var predicatePayload = (ushort)(
+                    destinationRegister
+                    | (destinationRegister << 4) | (0x0F << 8)
+                    | (0x0F << 12));
+                conditionCode.Add(0xC3);
+                conditionCode.Add(
+                    GetC1M1Construction2IntegerComparisonPredicate(
+                        comparison.Operator));
+                conditionCode.Add((byte)predicatePayload);
+                conditionCode.Add((byte)(predicatePayload >> 8));
             }
             else
             {
