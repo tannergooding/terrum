@@ -8376,6 +8376,21 @@ internal sealed class NativeCoreRegistrationTests
     }
 
     [Test]
+    public void StandardForeignNativeInterfacePointerOutputCanBeOuterCallReceiverUnderPs1()
+    {
+        var program = CreatePointerOutputConsumerProgram(
+            pointerOutputAsReceiver: true);
+        var function = program.Functions.Single(
+            static function => function.Name == "InvokePointer");
+        Assert.That(function.ReturnType, Is.EqualTo(PrimitiveType.Int32));
+        var image = NativeEmitter.EmitLibrary(program, ["InvokePointer"],
+            NativeRuntimePolicy.FailFast);
+        Assert.That(image[..2], Is.EqualTo(new byte[] {
+            (byte)'M', (byte)'Z',
+        }));
+    }
+
+    [Test]
     public void StandardForeignNativeInterfaceReadsFunctionPointerOutputUnderPs1()
     {
         var program = CreatePointerOutputConsumerProgram(
@@ -8475,35 +8490,40 @@ internal sealed class NativeCoreRegistrationTests
         bool assertFunctionPointerProviderReplacement = false,
         bool floatInputConversion = false,
         bool multipleOutputs = false,
-        bool pointerOutputOuterCall = false)
+        bool pointerOutputOuterCall = false,
+        bool pointerOutputAsReceiver = false)
     {
-        if (pointerOutputOuterCall
+        var usesOuterCall = pointerOutputOuterCall || pointerOutputAsReceiver;
+        if (usesOuterCall
             && (functionPointerOutput || multipleOutputs))
         {
             throw new InvalidOperationException(
-                "The pointer-output outer-call shape requires one pointer output.");
+                "The pointer-output outer-call shapes require one pointer output.");
         }
 
         const string schemaIdentity
             = "trrm/1-draft-foreign-native-interface-parameter-surface-1";
         const string providerIdentity = "pointer-output-provider";
         const string consumerIdentity = "pointer-output-consumer";
-        var functionReturnType = pointerOutputOuterCall
+        var functionReturnType = usesOuterCall
             ? "int32"
             : functionPointerOutput
                 ? "[Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Cdecl)] fnptr<int32, int32>"
                 : "ptr<int32>";
-        var outputValueType = functionPointerOutput
-            ? "[Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Cdecl)] fnptr<int32, int32>"
-            : "ptr<int32>";
+        var outputValueType = pointerOutputAsReceiver
+            ? "ptr<void>"
+            : functionPointerOutput
+                ? "[Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Cdecl)] fnptr<int32, int32>"
+                : "ptr<int32>";
         var outputParameterDependencies = functionPointerOutput
+            || pointerOutputAsReceiver
             ? string.Empty
             : """
                 [Terrum.CodeAnalysis.DependsOn(nameof(source))]
                 [Terrum.CodeAnalysis.ForwardsBacking(nameof(source))]
                 """;
         var outputReturnDependencies = functionPointerOutput
-            || pointerOutputOuterCall
+            || usesOuterCall
             ? string.Empty
             : """
                 [return: Terrum.CodeAnalysis.DependsOn(
@@ -8526,11 +8546,15 @@ internal sealed class NativeCoreRegistrationTests
             : string.Empty;
         var tagSourceType = floatInputConversion ? "float64" : "int32";
         var tagExpression = floatInputConversion ? "int32(tag)" : "tag";
-        var outerCallInterfaceMethod = pointerOutputOuterCall
-            ? "public unsafe int32 Observe(ptr<int32> value);"
+        var outerCallInterfaceMethod = usesOuterCall
+            ? pointerOutputAsReceiver
+                ? "public unsafe int32 Observe();"
+                : "public unsafe int32 Observe(ptr<int32> value);"
             : string.Empty;
-        var successReturn = pointerOutputOuterCall
-            ? "return IPointerProbe.Observe(receiver, value);"
+        var successReturn = usesOuterCall
+            ? pointerOutputAsReceiver
+                ? "return IPointerProbe.Observe(value);"
+                : "return IPointerProbe.Observe(receiver, value);"
             : "return value;";
         var providerSource = $$"""
             using Terrum.Interop;
@@ -8582,9 +8606,12 @@ internal sealed class NativeCoreRegistrationTests
         var providerMember = providerProgram.Interfaces.Single().Members
             .Single(static member => member.Name == "TryGetPointer");
         var outputContract = providerMember.NativeOutputContracts.Single(
-            contract => functionPointerOutput
-                ? NativeFunctionPointerTypes.IsType(contract.PointeeType)
-                : NativePointerTypes.IsType(contract.PointeeType));
+            contract => pointerOutputAsReceiver
+                ? contract.PointeeType == PrimitiveType.NativeRawPointer
+                : functionPointerOutput
+                    ? NativeFunctionPointerTypes.IsType(
+                        contract.PointeeType)
+                    : NativePointerTypes.IsType(contract.PointeeType));
         var outputType = outputContract.PointeeType;
         AssertOutputType(providerProgram, outputType);
         var providerArtifact = TrRmExecutableCompiler.EmitStandard(
@@ -8656,7 +8683,7 @@ internal sealed class NativeCoreRegistrationTests
         var outputValueHome = consumerProgram.Functions.Single(
             static function => function.Name == "InvokePointer")
             .ParameterCount + (multipleOutputs ? 1 : 0);
-        if (pointerOutputOuterCall)
+        if (usesOuterCall)
         {
             var successCode = body.GetBlockCode(1);
             Assert.That(successCode.Length, Is.EqualTo(4));
@@ -8674,7 +8701,7 @@ internal sealed class NativeCoreRegistrationTests
         }
         Assert.That(body.GetBlockCode(2).ToArray(),
             Is.EqualTo(new byte[] { 0xD5, 0, 3, 0, 0x17, 0 }));
-        if (pointerOutputOuterCall)
+        if (usesOuterCall)
         {
             var invalidOutputConsumerArtifact
                 = RewriteSuccessCallInputHome(consumerArtifact);
@@ -8736,11 +8763,12 @@ internal sealed class NativeCoreRegistrationTests
             consumerIdentity, [providerInput]);
         var loadedFunction = loaded.Functions.Single(
             static function => function.Name == "InvokePointer");
-        if (pointerOutputOuterCall)
+        if (usesOuterCall)
         {
             Assert.That(loadedFunction.ReturnType,
                 Is.EqualTo(PrimitiveType.Int32));
-            AssertPointerOutputOuterCall(loadedFunction);
+            AssertPointerOutputOuterCall(loadedFunction,
+                pointerOutputAsReceiver);
         }
         else
         {
@@ -8754,7 +8782,7 @@ internal sealed class NativeCoreRegistrationTests
         {
             AssertOutputFormalOrder(loaded);
         }
-        if (!pointerOutputOuterCall)
+        if (!usesOuterCall)
         {
             var successReturn = (BoundReturn)loadedFunction.Body.Statements
                 .OfType<BoundIf>().Single().Then.Statements.Single();
@@ -8773,11 +8801,12 @@ internal sealed class NativeCoreRegistrationTests
                 reemittedArtifact), consumerIdentity, [providerInput]);
         var reloadedFunction = reloaded.Functions.Single(
             static function => function.Name == "InvokePointer");
-        if (pointerOutputOuterCall)
+        if (usesOuterCall)
         {
             Assert.That(reloadedFunction.ReturnType,
                 Is.EqualTo(PrimitiveType.Int32));
-            AssertPointerOutputOuterCall(reloadedFunction);
+            AssertPointerOutputOuterCall(reloadedFunction,
+                pointerOutputAsReceiver);
         }
         else
         {
@@ -8821,9 +8850,13 @@ internal sealed class NativeCoreRegistrationTests
                             = body.GetRecord(recordIndex).ToArray();
                     }
 
+                    var inputHomeOffset = pointerOutputAsReceiver ? 22 : 26;
+                    var replacementHome = pointerOutputAsReceiver
+                        ? (ushort)0
+                        : (ushort)1;
                     BinaryPrimitives.WriteUInt16LittleEndian(
-                        records[successCode[1]].AsSpan(26, sizeof(ushort)),
-                        checked((ushort)1));
+                        records[successCode[1]].AsSpan(inputHomeOffset,
+                            sizeof(ushort)), replacementHome);
                     var blocks = new TrRmRegisterBodyBlock[
                         body.BlockCount];
                     for (var blockIndex = 0;
@@ -8859,7 +8892,8 @@ internal sealed class NativeCoreRegistrationTests
             return TrRmArtifactWriter.Encode(sections, schema);
         }
 
-        static void AssertPointerOutputOuterCall(BoundFunction candidate)
+        static void AssertPointerOutputOuterCall(BoundFunction candidate,
+            bool outputAsReceiver)
         {
             BoundCall? observeCall = null;
             _ = BoundTreeTraversal.VisitExpressions(candidate.Body,
@@ -8876,21 +8910,39 @@ internal sealed class NativeCoreRegistrationTests
                 ?? throw new AssertionException(
                     "Expected the FNI Observe call.");
             Assert.That(selectedCall.Type, Is.EqualTo(PrimitiveType.Int32));
-            Assert.That(selectedCall.Arguments, Has.Length.EqualTo(1));
-            Assert.That(selectedCall.Arguments[0], Is.TypeOf<BoundRead>());
-            var outputRead = (BoundRead)selectedCall.Arguments[0];
-            Assert.That(outputRead.Variable,
-                Is.EqualTo(candidate.ParameterCount));
-            Assert.That(NativePointerTypes.IsType(outputRead.Type), Is.True);
-            Assert.That(selectedCall.ForeignInterfaceCall!.Receiver,
-                Is.TypeOf<BoundRead>());
-            Assert.That(((BoundRead)selectedCall.ForeignInterfaceCall
-                .Receiver).Variable, Is.Zero);
+            var receiver = selectedCall.ForeignInterfaceCall!.Receiver;
+            Assert.That(receiver, Is.TypeOf<BoundRead>());
+            if (outputAsReceiver)
+            {
+                Assert.That(selectedCall.Arguments, Is.Empty);
+                var outputReceiver = (BoundRead)receiver;
+                Assert.That(outputReceiver.Variable,
+                    Is.EqualTo(candidate.ParameterCount));
+                Assert.That(outputReceiver.Type,
+                    Is.EqualTo(PrimitiveType.NativeRawPointer));
+            }
+            else
+            {
+                Assert.That(selectedCall.Arguments, Has.Length.EqualTo(1));
+                Assert.That(selectedCall.Arguments[0],
+                    Is.TypeOf<BoundRead>());
+                var outputRead = (BoundRead)selectedCall.Arguments[0];
+                Assert.That(outputRead.Variable,
+                    Is.EqualTo(candidate.ParameterCount));
+                Assert.That(NativePointerTypes.IsType(outputRead.Type),
+                    Is.True);
+                Assert.That(((BoundRead)receiver).Variable, Is.Zero);
+            }
         }
 
         void AssertOutputType(BoundProgram candidate, PrimitiveType type)
         {
-            if (functionPointerOutput)
+            if (pointerOutputAsReceiver)
+            {
+                Assert.That(type,
+                    Is.EqualTo(PrimitiveType.NativeRawPointer));
+            }
+            else if (functionPointerOutput)
             {
                 Assert.That(NativeFunctionPointerTypes.IsType(type), Is.True);
                 var signature = candidate.NativeFunctionPointerSignatures[

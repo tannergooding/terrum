@@ -2293,10 +2293,13 @@ public static partial class TrRmExecutableCompiler
                 || consumerTarget.ParameterCount
                     != consumerCall.Arguments.Length
                 || consumerCall.Arguments.IsDefault
-                || consumerForeignCall.Receiver is not BoundRead {
-                    Variable: 0,
-                    Type: PrimitiveType.NativeRawPointer,
-                }
+                || consumerForeignCall.Receiver is not BoundRead receiver
+                || receiver.Type != PrimitiveType.NativeRawPointer
+                || (receiver.Variable != 0
+                    && receiver.Variable != reservedOutputVariable)
+                || (receiver.Variable == reservedOutputVariable
+                    && function.Variables[reservedOutputVariable].Type
+                        != PrimitiveType.NativeRawPointer)
                 || !IsForeignNativeInterfacePointerValueType(
                     function.Variables[reservedOutputVariable].Type))
             {
@@ -2304,7 +2307,8 @@ public static partial class TrRmExecutableCompiler
             }
 
             var seenParameters = new bool[consumerTarget.ParameterCount];
-            var outputUses = 0;
+            var outputUses = receiver.Variable == reservedOutputVariable
+                ? 1 : 0;
             for (var argumentIndex = 0;
                 argumentIndex < consumerCall.Arguments.Length;
                 argumentIndex++)
@@ -6333,10 +6337,13 @@ public static partial class TrRmExecutableCompiler
                 || successTarget.ParameterCount
                     != successCall.Arguments.Length
                 || successCall.Arguments.IsDefault
-                || successForeignCall.Receiver is not BoundRead {
-                    Variable: 0,
-                    Type: PrimitiveType.NativeRawPointer,
-                }
+                || successForeignCall.Receiver is not BoundRead
+                    successReceiver
+                || successReceiver.Type != PrimitiveType.NativeRawPointer
+                || (successReceiver.Variable != 0
+                    && successReceiver.Variable != outputVariable)
+                || function.Variables[successReceiver.Variable].Type
+                    != PrimitiveType.NativeRawPointer
                 || outputVariables.Length != 1
                 || !IsForeignNativeInterfacePointerValueType(
                     function.Variables[outputVariable].Type)
@@ -6348,7 +6355,8 @@ public static partial class TrRmExecutableCompiler
 
             var successArgumentsByFormal
                 = new BoundRead?[successTarget.ParameterCount];
-            var outputUses = 0;
+            var outputUses = successReceiver.Variable == outputVariable
+                ? 1 : 0;
             for (var argumentIndex = 0;
                 argumentIndex < successCall.Arguments.Length;
                 argumentIndex++)
@@ -6798,7 +6806,13 @@ public static partial class TrRmExecutableCompiler
 
             var successInputs = new TrRmRegisterBodyCallInput[
                 successTarget.ParameterCount + 1];
-            successInputs[0] = new TrRmRegisterBodyCallInput(2, 1, 0);
+            if (successForeignCall.Receiver is not BoundRead receiver)
+            {
+                throw Invalid(
+                    "A Standard F+I conditional-output success call has no direct receiver Home.");
+            }
+            successInputs[0] = new TrRmRegisterBodyCallInput(2, 1,
+                checked((ushort)receiver.Variable));
             var argumentsByFormal = new BoundRead?[
                 successTarget.ParameterCount];
             for (var argumentIndex = 0;
@@ -14371,13 +14385,21 @@ public static partial class TrRmExecutableCompiler
             }
 
             var successReceiverInput = successPayload[16..];
+            var successReceiverHome = BinaryPrimitives
+                .ReadUInt16LittleEndian(successReceiverInput[2..]);
             if (successReceiverInput[0] != 2
                 || successReceiverInput[1] != 1
-                || BinaryPrimitives.ReadUInt16LittleEndian(
-                    successReceiverInput[2..]) != 0)
+                || successReceiverHome >= body.HomeCount
+                || (successReceiverHome != 0
+                    && successReceiverHome != returnOutputVariable)
+                || homeRoles[successReceiverHome] is not (2 or 3)
+                || homeVariables[successReceiverHome]
+                    != successReceiverHome
+                || homeTypes[successReceiverHome]
+                    != PrimitiveType.NativeRawPointer)
             {
                 throw Invalid(
-                    "The Standard F+I conditional-output success CallSite has no direct receiver Home.");
+                    "The Standard F+I conditional-output success CallSite has no direct raw-pointer receiver Home.");
             }
 
             var successArguments
@@ -14387,7 +14409,8 @@ public static partial class TrRmExecutableCompiler
                 = ImmutableArray.CreateBuilder<int>(
                     successMember.Parameters.Length);
             var successInputOffset = 20;
-            var successOutputUses = 0;
+            var successOutputUses
+                = successReceiverHome == returnOutputVariable ? 1 : 0;
             for (var formal = 0;
                 formal < successMember.Parameters.Length;
                 formal++)
@@ -14484,7 +14507,7 @@ public static partial class TrRmExecutableCompiler
                 default) {
                 IsUnsafeAuthorized = true,
                 ForeignInterfaceCall = new BoundForeignNativeInterfaceCall(
-                    new BoundRead(homeVariables[0],
+                    new BoundRead(homeVariables[successReceiverHome],
                         PrimitiveType.NativeRawPointer, default),
                     successIdentity, successLayout.VTableByteOffset,
                     successConvention,
