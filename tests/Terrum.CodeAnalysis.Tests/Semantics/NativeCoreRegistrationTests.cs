@@ -8406,6 +8406,22 @@ internal sealed class NativeCoreRegistrationTests
     }
 
     [Test]
+    public void StandardForeignNativeInterfacePointerOutputFeedsOuterCallWithSideEffectingArgumentUnderPs1()
+    {
+        var program = CreatePointerOutputConsumerProgram(
+            pointerOutputOuterCall: true,
+            sideEffectingSuccessArgument: true);
+        var function = program.Functions.Single(
+            static function => function.Name == "InvokePointer");
+        Assert.That(function.ReturnType, Is.EqualTo(PrimitiveType.Int32));
+        var image = NativeEmitter.EmitLibrary(program, ["InvokePointer"],
+            NativeRuntimePolicy.FailFast);
+        Assert.That(image[..2], Is.EqualTo(new byte[] {
+            (byte)'M', (byte)'Z',
+        }));
+    }
+
+    [Test]
     public void StandardForeignNativeInterfaceReadsFunctionPointerOutputUnderPs1()
     {
         var program = CreatePointerOutputConsumerProgram(
@@ -8506,13 +8522,21 @@ internal sealed class NativeCoreRegistrationTests
         bool floatInputConversion = false,
         bool multipleOutputs = false,
         bool pointerOutputOuterCall = false,
-        bool pointerOutputAsReceiver = false)
+        bool pointerOutputAsReceiver = false,
+        bool sideEffectingSuccessArgument = false)
     {
-        var usesOuterCall = pointerOutputOuterCall || pointerOutputAsReceiver;
+        var usesOuterCall = pointerOutputOuterCall || pointerOutputAsReceiver
+            || sideEffectingSuccessArgument;
         if (usesOuterCall && functionPointerOutput)
         {
             throw new InvalidOperationException(
                 "The pointer-output outer-call shapes require a raw pointer output.");
+        }
+        if (sideEffectingSuccessArgument
+            && (multipleOutputs || pointerOutputAsReceiver))
+        {
+            throw new InvalidOperationException(
+                "The side-effecting success argument requires one direct pointer output.");
         }
 
         const string schemaIdentity
@@ -8560,23 +8584,30 @@ internal sealed class NativeCoreRegistrationTests
             : string.Empty;
         var tagSourceType = floatInputConversion ? "float64" : "int32";
         var tagExpression = floatInputConversion ? "int32(tag)" : "tag";
-        var outerCallInterfaceMethod = usesOuterCall
-            ? pointerOutputAsReceiver
+        var nestedSuccessInterfaceMethod = sideEffectingSuccessArgument
+            ? "public unsafe int32 GetStatus();"
+            : string.Empty;
+        var outerCallInterfaceMethod = !usesOuterCall
+            ? string.Empty
+            : pointerOutputAsReceiver
                 ? multipleOutputs
                     ? "public unsafe int32 Observe(int32 statusValue);"
                     : "public unsafe int32 Observe();"
-                : multipleOutputs
-                    ? "public unsafe int32 Observe(ptr<int32> value, int32 statusValue);"
-                    : "public unsafe int32 Observe(ptr<int32> value);"
-            : string.Empty;
+                : sideEffectingSuccessArgument
+                    ? "public unsafe int32 Observe(ptr<int32> value, int32 tag);"
+                    : multipleOutputs
+                        ? "public unsafe int32 Observe(ptr<int32> value, int32 statusValue);"
+                        : "public unsafe int32 Observe(ptr<int32> value);";
         var successReturn = usesOuterCall
             ? pointerOutputAsReceiver
                 ? multipleOutputs
                     ? "return IPointerProbe.Observe(value, statusValue: statusValue);"
                     : "return IPointerProbe.Observe(value);"
-                : multipleOutputs
-                    ? "return IPointerProbe.Observe(receiver, statusValue: statusValue, value: value);"
-                    : "return IPointerProbe.Observe(receiver, value);"
+                : sideEffectingSuccessArgument
+                    ? "return IPointerProbe.Observe(receiver, value, tag: IPointerProbe.GetStatus(receiver));"
+                    : multipleOutputs
+                        ? "return IPointerProbe.Observe(receiver, statusValue: statusValue, value: value);"
+                        : "return IPointerProbe.Observe(receiver, value);"
             : "return value;";
         var providerSource = $$"""
             using Terrum.Interop;
@@ -8591,6 +8622,7 @@ internal sealed class NativeCoreRegistrationTests
                     {{outputParameterDependencies}}
                     write ptr<{{outputValueType}}> value);
                 {{outerCallInterfaceMethod}}
+                {{nestedSuccessInterfaceMethod}}
             }
             """;
         var consumerSource = $$"""
@@ -8708,9 +8740,21 @@ internal sealed class NativeCoreRegistrationTests
         if (usesOuterCall)
         {
             var successCode = body.GetBlockCode(1);
-            Assert.That(successCode.Length, Is.EqualTo(4));
-            Assert.That(successCode[0], Is.EqualTo((byte)0x90));
-            Assert.That(successCode[2..].ToArray(),
+            var successCallSiteCount
+                = sideEffectingSuccessArgument ? 2 : 1;
+            Assert.That(successCode.Length,
+                Is.EqualTo((successCallSiteCount * 2) + 2));
+            for (var callIndex = 0;
+                callIndex < successCallSiteCount; callIndex++)
+            {
+                Assert.That(successCode[callIndex * 2],
+                    Is.EqualTo((byte)0x90));
+            }
+            if (sideEffectingSuccessArgument)
+            {
+                Assert.That(successCode[1], Is.LessThan(successCode[3]));
+            }
+            Assert.That(successCode[^2..].ToArray(),
                 Is.EqualTo(new byte[] { 0x17, 0 }));
         }
         else
@@ -8790,7 +8834,8 @@ internal sealed class NativeCoreRegistrationTests
             Assert.That(loadedFunction.ReturnType,
                 Is.EqualTo(PrimitiveType.Int32));
             AssertPointerOutputOuterCall(loadedFunction,
-                pointerOutputAsReceiver, multipleOutputs);
+                pointerOutputAsReceiver, multipleOutputs,
+                sideEffectingSuccessArgument);
         }
         else
         {
@@ -8828,7 +8873,8 @@ internal sealed class NativeCoreRegistrationTests
             Assert.That(reloadedFunction.ReturnType,
                 Is.EqualTo(PrimitiveType.Int32));
             AssertPointerOutputOuterCall(reloadedFunction,
-                pointerOutputAsReceiver, multipleOutputs);
+                pointerOutputAsReceiver, multipleOutputs,
+                sideEffectingSuccessArgument);
         }
         else
         {
@@ -8876,8 +8922,11 @@ internal sealed class NativeCoreRegistrationTests
                     var replacementHome = pointerOutputAsReceiver
                         ? (ushort)0
                         : (ushort)1;
+                    var successCallSiteRecordIndex
+                        = successCode[^3];
                     BinaryPrimitives.WriteUInt16LittleEndian(
-                        records[successCode[1]].AsSpan(inputHomeOffset,
+                        records[successCallSiteRecordIndex]
+                            .AsSpan(inputHomeOffset,
                             sizeof(ushort)), replacementHome);
                     var blocks = new TrRmRegisterBodyBlock[
                         body.BlockCount];
@@ -8915,7 +8964,8 @@ internal sealed class NativeCoreRegistrationTests
         }
 
         static void AssertPointerOutputOuterCall(BoundFunction candidate,
-            bool outputAsReceiver, bool multipleOutputs)
+            bool outputAsReceiver, bool multipleOutputs,
+            bool sideEffectingArgument)
         {
             BoundCall? observeCall = null;
             _ = BoundTreeTraversal.VisitExpressions(candidate.Body,
@@ -8955,7 +9005,8 @@ internal sealed class NativeCoreRegistrationTests
             else
             {
                 Assert.That(selectedCall.Arguments,
-                    Has.Length.EqualTo(multipleOutputs ? 2 : 1));
+                    Has.Length.EqualTo(
+                        multipleOutputs || sideEffectingArgument ? 2 : 1));
                 Assert.That(selectedCall.Arguments[0],
                     Is.TypeOf<BoundRead>());
                 var outputRead = (BoundRead)selectedCall.Arguments[0];
@@ -8965,15 +9016,35 @@ internal sealed class NativeCoreRegistrationTests
                 Assert.That(NativePointerTypes.IsType(outputRead.Type),
                     Is.True);
                 Assert.That(((BoundRead)receiver).Variable, Is.Zero);
-                if (multipleOutputs)
+                if (multipleOutputs || sideEffectingArgument)
                 {
-                    Assert.That(selectedCall.Arguments[1],
-                        Is.TypeOf<BoundRead>());
-                    Assert.That(((BoundRead)selectedCall.Arguments[1])
-                        .Variable, Is.EqualTo(candidate.ParameterCount));
                     Assert.That(selectedCall.ParameterIndex(0), Is.Zero);
                     Assert.That(selectedCall.ParameterIndex(1),
                         Is.EqualTo(1));
+                    if (sideEffectingArgument)
+                    {
+                        Assert.That(selectedCall.Arguments[1],
+                            Is.TypeOf<BoundUnsafeExpression>());
+                        BoundCall? nestedCall = null;
+                        _ = BoundTreeTraversal.VisitExpressions(candidate.Body,
+                            expression =>
+                            {
+                                if (expression is BoundCall call
+                                    && call.ForeignInterfaceCall?.Member.Name
+                                        == "GetStatus")
+                                {
+                                    nestedCall = call;
+                                }
+                            });
+                        Assert.That(nestedCall, Is.Not.Null);
+                    }
+                    else
+                    {
+                        Assert.That(selectedCall.Arguments[1],
+                            Is.TypeOf<BoundRead>());
+                        Assert.That(((BoundRead)selectedCall.Arguments[1])
+                            .Variable, Is.EqualTo(candidate.ParameterCount));
+                    }
                 }
             }
         }
