@@ -74,6 +74,10 @@ internal sealed class NativeCoreRegistrationTests
         IntPtr receiver, IntPtr value);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int NativePointerReceiverObserveCallback(
+        IntPtr receiver);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int NativePointerObserveTaggedCallback(
         IntPtr receiver, IntPtr value, int tag);
 
@@ -8478,6 +8482,23 @@ internal sealed class NativeCoreRegistrationTests
     }
 
     [Test]
+    public async Task StandardForeignNativeInterfacePointerOutputReceiverExecutesOnWindowsX64()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+
+        var program = CreatePointerOutputConsumerProgram(
+            pointerOutputAsReceiver: true);
+        var image = NativeEmitter.EmitLibrary(program, ["InvokePointer"],
+            NativeRuntimePolicy.FailFast);
+        Assert.That(image[..2], Is.EqualTo(new byte[] {
+            (byte)'M', (byte)'Z',
+        }));
+        await AssertPointerOutputReceiverAsync(image, "InvokePointer")
+            .ConfigureAwait(true);
+    }
+
+    [Test]
     public void StandardForeignNativeInterfaceReadsFunctionPointerOutputUnderPs1()
     {
         var program = CreatePointerOutputConsumerProgram(
@@ -14676,6 +14697,106 @@ internal sealed class NativeCoreRegistrationTests
             if (vtable != IntPtr.Zero)
             {
                 Marshal.FreeHGlobal(vtable);
+            }
+            if (receiver != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(receiver);
+            }
+            await TestFileCleanup.DeleteWithRetryAsync(path)
+                .ConfigureAwait(true);
+        }
+    }
+
+    private static async Task AssertPointerOutputReceiverAsync(byte[] image,
+        string functionName)
+    {
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"native-fni-pointer-output-receiver-{Guid.NewGuid():N}.dll");
+        var module = IntPtr.Zero;
+        var receiver = IntPtr.Zero;
+        var receiverVtable = IntPtr.Zero;
+        var target = IntPtr.Zero;
+        var targetVtable = IntPtr.Zero;
+        var source = IntPtr.Zero;
+        NativePointerOutputCallback? outputCallback = null;
+        NativePointerReceiverObserveCallback? observeCallback = null;
+        try
+        {
+            await File.WriteAllBytesAsync(path, image).ConfigureAwait(true);
+            module = NativeLibrary.Load(path);
+            receiver = Marshal.AllocHGlobal(IntPtr.Size);
+            receiverVtable = Marshal.AllocHGlobal(IntPtr.Size * 2);
+            target = Marshal.AllocHGlobal(IntPtr.Size);
+            targetVtable = Marshal.AllocHGlobal(IntPtr.Size * 2);
+            source = Marshal.AllocHGlobal(sizeof(int));
+            Marshal.WriteInt32(source, 17);
+            var succeeds = true;
+            var outputCalls = 0;
+            var observeCalls = 0;
+            outputCallback = (actualReceiver, actualSource, tag,
+                out IntPtr value) => {
+                outputCalls++;
+                value = target;
+                if (actualReceiver != receiver || actualSource != source
+                    || tag != 7)
+                {
+                    return 0;
+                }
+
+                return succeeds ? 1 : 0;
+            };
+            observeCallback = actualReceiver => {
+                observeCalls++;
+                return actualReceiver == target
+                    && Marshal.ReadInt32(source) == 17
+                    ? 19 : -1;
+            };
+            Marshal.WriteIntPtr(receiverVtable, 0,
+                Marshal.GetFunctionPointerForDelegate(outputCallback));
+            Marshal.WriteIntPtr(targetVtable, IntPtr.Size,
+                Marshal.GetFunctionPointerForDelegate(observeCallback));
+            Marshal.WriteIntPtr(receiver, receiverVtable);
+            Marshal.WriteIntPtr(target, targetVtable);
+
+            var invoke = Marshal.GetDelegateForFunctionPointer<
+                NativePointerOutputOuterCallFunction>(
+                    NativeLibrary.GetExport(module, functionName));
+            var result = invoke(receiver, source, 7, 42);
+            Assert.That(result, Is.EqualTo(19));
+            Assert.That(outputCalls, Is.EqualTo(1));
+            Assert.That(observeCalls, Is.EqualTo(1));
+
+            succeeds = false;
+            outputCalls = 0;
+            observeCalls = 0;
+            result = invoke(receiver, source, 7, 42);
+            Assert.That(result, Is.EqualTo(42));
+            Assert.That(outputCalls, Is.EqualTo(1));
+            Assert.That(observeCalls, Is.Zero);
+            GC.KeepAlive(outputCallback);
+            GC.KeepAlive(observeCallback);
+        }
+        finally
+        {
+            if (module != IntPtr.Zero)
+            {
+                NativeLibrary.Free(module);
+            }
+            if (source != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(source);
+            }
+            if (targetVtable != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(targetVtable);
+            }
+            if (target != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(target);
+            }
+            if (receiverVtable != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(receiverVtable);
             }
             if (receiver != IntPtr.Zero)
             {
