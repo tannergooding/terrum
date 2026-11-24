@@ -9179,6 +9179,12 @@ internal sealed class NativeCoreRegistrationTests
             TrRmFeatureTableReader.LayoutQueriesFeatureId, schema), Is.True);
         var providerBody = GetBody(providerTables, "InvokePoint");
         AssertAggregateOutputBody(providerBody, 0x13);
+        var malformedD5Artifact = RewriteD5Home(providerArtifact, schema,
+            "InvokePoint", 1, 2);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    malformedD5Artifact), "provider.module", []));
 
         var loadedProvider = TrRmExecutableCompiler.LoadStandard(
             providerInput, "provider.module", []);
@@ -9253,7 +9259,7 @@ internal sealed class NativeCoreRegistrationTests
                 .Single(row => parameterSurfaceTables.TypeDefs.GetName(row)
                     == "Point");
         Assert.That(parameterSurfaceTables.TypeDefs.HasDeclaredCopy(
-            parameterSurfacePointTypeDef), Is.True);
+            parameterSurfacePointTypeDef), Is.False);
         Assert.That(TrRmFeatureManifestValidator.Requires(
             parameterSurfaceTables.Features,
             parameterSurfaceTables.Modules, 1,
@@ -9270,6 +9276,9 @@ internal sealed class NativeCoreRegistrationTests
         var providerReference
             = TrRmExecutableCompiler.CreateStandardReference(
                 parameterSurfaceInput, "parameter-surface.module", []);
+        Assert.That(providerReference.Structures.Single(
+                static structure => structure.Name == "Point")
+            .DeclaredCopyEvidence, Is.Null);
         var consumerCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse("""
                 Point InvokeImportedPoint(ptr<void> receiver,
@@ -9288,66 +9297,12 @@ internal sealed class NativeCoreRegistrationTests
                 consumerCompilation.Diagnostics));
         var consumerProgram = consumerCompilation.Program
             ?? throw new AssertionException("Expected a bound consumer.");
-        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
-            consumerProgram, "consumer.module", schemaIdentity, 1, []);
-        var consumerInput = new TrRmStandardArtifactInput(schemaIdentity,
-            consumerArtifact);
-        var consumerTables = TrRmStructuralMetadataValidator
-            .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
-                consumerArtifact, schema));
-        var pointImportRow = Enumerable.Range(1,
-                consumerTables.Imports.Count).Single(row =>
-                (consumerTables.Imports
-                    .GetExpectedDefinitionForImportRow(row) >> 24) == 0x13
-                && StringComparer.Ordinal.Equals(
-                    consumerTables.Imports.GetBindingForImportRow(row)
-                        .ExportKey, "provider/Point"));
-        var expectedPointTypeDef = checked((int)(
-            consumerTables.Imports
-                .GetExpectedDefinitionForImportRow(pointImportRow)
-            & 0x00FF_FFFF));
-        Assert.That(consumerTables.TypeDefs.HasDeclaredCopy(
-            expectedPointTypeDef), Is.True);
-        var missingExpectedCopy = RewriteTypeDefFlags(
-            consumerArtifact, schema, expectedPointTypeDef,
-            clearMask: 0x20);
+        Assert.That(consumerProgram.Structures.Single(
+                static structure => structure.Name == "Point")
+            .DeclaredCopyEvidence, Is.Null);
         Assert.Throws<InvalidDataException>(() =>
-            TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
-                new TrRmArtifactIndex(missingExpectedCopy, schema)));
-        var consumerBody = GetBody(consumerTables,
-            "InvokeImportedPoint");
-        AssertAggregateOutputBody(consumerBody, 0x1C);
-
-        var providers = new[] { parameterSurfaceInput };
-        var malformedD5Artifact = RewriteD5Home(consumerArtifact, schema,
-            "InvokeImportedPoint", 1, 2);
-        Assert.Throws<InvalidDataException>(() =>
-            TrRmExecutableCompiler.LoadStandard(
-                new TrRmStandardArtifactInput(schemaIdentity,
-                    malformedD5Artifact), "consumer.module", providers));
-
-        var loadedConsumer = TrRmExecutableCompiler.LoadStandard(
-            consumerInput, "consumer.module", providers);
-        AssertAggregateOutputFunction(loadedConsumer,
-            "InvokeImportedPoint");
-        var consumerImage = NativeEmitter.EmitLibrary(loadedConsumer,
-            ["InvokeImportedPoint"], NativeRuntimePolicy.FailFast);
-        Assert.That(consumerImage[..2], Is.EqualTo(new byte[] {
-            (byte)'M', (byte)'Z',
-        }));
-        await AssertAggregatePointOutputAsync(consumerImage,
-            "InvokeImportedPoint").ConfigureAwait(true);
-        var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(
-            loadedConsumer, "consumer.module", schemaIdentity, 1, []);
-        var reloadedConsumer = TrRmExecutableCompiler.LoadStandard(
-            new TrRmStandardArtifactInput(schemaIdentity,
-                reemittedArtifact), "consumer.module", providers);
-        AssertAggregateOutputFunction(reloadedConsumer,
-            "InvokeImportedPoint");
-        var reloadedImage = NativeEmitter.EmitLibrary(reloadedConsumer,
-            ["InvokeImportedPoint"], NativeRuntimePolicy.FailFast);
-        await AssertAggregatePointOutputAsync(reloadedImage,
-            "InvokeImportedPoint").ConfigureAwait(true);
+            TrRmExecutableCompiler.EmitStandard(consumerProgram,
+                "consumer.module", schemaIdentity, 1, []));
 
         Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
@@ -9443,34 +9398,6 @@ internal sealed class NativeCoreRegistrationTests
                 sections[sectionIndex] = new TrRmSection(kind, flags,
                     checked((uint)count),
                     kind == 0x0020 ? bodySectionBytes : bytes.ToArray());
-            }
-
-            return TrRmArtifactWriter.Encode(sections, schema);
-        }
-
-        static byte[] RewriteTypeDefFlags(byte[] artifact,
-            TrRmArtifactSchema schema, int typeDefRow, uint clearMask)
-        {
-            var index = new TrRmArtifactIndex(artifact, schema);
-            Assert.That(index.TryGetSection(0x0013,
-                out var typeDefSection, out _), Is.True);
-            var typeDefBytes = typeDefSection.ToArray();
-            var flagsOffset = checked((typeDefRow - 1) * 44 + 8);
-            var typeDefFlags = BinaryPrimitives.ReadUInt32LittleEndian(
-                typeDefBytes.AsSpan(flagsOffset));
-            BinaryPrimitives.WriteUInt32LittleEndian(
-                typeDefBytes.AsSpan(flagsOffset),
-                typeDefFlags & ~clearMask);
-            var sections = new TrRmSection[index.SectionCount];
-            for (var sectionIndex = 0;
-                sectionIndex < index.SectionCount;
-                sectionIndex++)
-            {
-                index.GetSection(sectionIndex, out var kind,
-                    out var sectionFlags, out var bytes, out var count);
-                sections[sectionIndex] = new TrRmSection(kind, sectionFlags,
-                    checked((uint)count),
-                    kind == 0x0013 ? typeDefBytes : bytes.ToArray());
             }
 
             return TrRmArtifactWriter.Encode(sections, schema);
