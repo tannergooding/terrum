@@ -8391,6 +8391,21 @@ internal sealed class NativeCoreRegistrationTests
     }
 
     [Test]
+    public void StandardForeignNativeInterfacePointerOutputFeedsOuterCallWithMultipleOutputsUnderPs1()
+    {
+        var program = CreatePointerOutputConsumerProgram(
+            pointerOutputOuterCall: true, multipleOutputs: true);
+        var function = program.Functions.Single(
+            static function => function.Name == "InvokePointer");
+        Assert.That(function.ReturnType, Is.EqualTo(PrimitiveType.Int32));
+        var image = NativeEmitter.EmitLibrary(program, ["InvokePointer"],
+            NativeRuntimePolicy.FailFast);
+        Assert.That(image[..2], Is.EqualTo(new byte[] {
+            (byte)'M', (byte)'Z',
+        }));
+    }
+
+    [Test]
     public void StandardForeignNativeInterfaceReadsFunctionPointerOutputUnderPs1()
     {
         var program = CreatePointerOutputConsumerProgram(
@@ -8494,11 +8509,10 @@ internal sealed class NativeCoreRegistrationTests
         bool pointerOutputAsReceiver = false)
     {
         var usesOuterCall = pointerOutputOuterCall || pointerOutputAsReceiver;
-        if (usesOuterCall
-            && (functionPointerOutput || multipleOutputs))
+        if (usesOuterCall && functionPointerOutput)
         {
             throw new InvalidOperationException(
-                "The pointer-output outer-call shapes require one pointer output.");
+                "The pointer-output outer-call shapes require a raw pointer output.");
         }
 
         const string schemaIdentity
@@ -8548,13 +8562,21 @@ internal sealed class NativeCoreRegistrationTests
         var tagExpression = floatInputConversion ? "int32(tag)" : "tag";
         var outerCallInterfaceMethod = usesOuterCall
             ? pointerOutputAsReceiver
-                ? "public unsafe int32 Observe();"
-                : "public unsafe int32 Observe(ptr<int32> value);"
+                ? multipleOutputs
+                    ? "public unsafe int32 Observe(int32 statusValue);"
+                    : "public unsafe int32 Observe();"
+                : multipleOutputs
+                    ? "public unsafe int32 Observe(ptr<int32> value, int32 statusValue);"
+                    : "public unsafe int32 Observe(ptr<int32> value);"
             : string.Empty;
         var successReturn = usesOuterCall
             ? pointerOutputAsReceiver
-                ? "return IPointerProbe.Observe(value);"
-                : "return IPointerProbe.Observe(receiver, value);"
+                ? multipleOutputs
+                    ? "return IPointerProbe.Observe(value, statusValue: statusValue);"
+                    : "return IPointerProbe.Observe(value);"
+                : multipleOutputs
+                    ? "return IPointerProbe.Observe(receiver, statusValue: statusValue, value: value);"
+                    : "return IPointerProbe.Observe(receiver, value);"
             : "return value;";
         var providerSource = $$"""
             using Terrum.Interop;
@@ -8768,7 +8790,7 @@ internal sealed class NativeCoreRegistrationTests
             Assert.That(loadedFunction.ReturnType,
                 Is.EqualTo(PrimitiveType.Int32));
             AssertPointerOutputOuterCall(loadedFunction,
-                pointerOutputAsReceiver);
+                pointerOutputAsReceiver, multipleOutputs);
         }
         else
         {
@@ -8806,7 +8828,7 @@ internal sealed class NativeCoreRegistrationTests
             Assert.That(reloadedFunction.ReturnType,
                 Is.EqualTo(PrimitiveType.Int32));
             AssertPointerOutputOuterCall(reloadedFunction,
-                pointerOutputAsReceiver);
+                pointerOutputAsReceiver, multipleOutputs);
         }
         else
         {
@@ -8893,7 +8915,7 @@ internal sealed class NativeCoreRegistrationTests
         }
 
         static void AssertPointerOutputOuterCall(BoundFunction candidate,
-            bool outputAsReceiver)
+            bool outputAsReceiver, bool multipleOutputs)
         {
             BoundCall? observeCall = null;
             _ = BoundTreeTraversal.VisitExpressions(candidate.Body,
@@ -8914,24 +8936,45 @@ internal sealed class NativeCoreRegistrationTests
             Assert.That(receiver, Is.TypeOf<BoundRead>());
             if (outputAsReceiver)
             {
-                Assert.That(selectedCall.Arguments, Is.Empty);
                 var outputReceiver = (BoundRead)receiver;
                 Assert.That(outputReceiver.Variable,
-                    Is.EqualTo(candidate.ParameterCount));
+                    Is.EqualTo(candidate.ParameterCount
+                        + (multipleOutputs ? 1 : 0)));
                 Assert.That(outputReceiver.Type,
                     Is.EqualTo(PrimitiveType.NativeRawPointer));
+                Assert.That(selectedCall.Arguments,
+                    Has.Length.EqualTo(multipleOutputs ? 1 : 0));
+                if (multipleOutputs)
+                {
+                    Assert.That(selectedCall.Arguments[0],
+                        Is.TypeOf<BoundRead>());
+                    Assert.That(((BoundRead)selectedCall.Arguments[0])
+                        .Variable, Is.EqualTo(candidate.ParameterCount));
+                }
             }
             else
             {
-                Assert.That(selectedCall.Arguments, Has.Length.EqualTo(1));
+                Assert.That(selectedCall.Arguments,
+                    Has.Length.EqualTo(multipleOutputs ? 2 : 1));
                 Assert.That(selectedCall.Arguments[0],
                     Is.TypeOf<BoundRead>());
                 var outputRead = (BoundRead)selectedCall.Arguments[0];
                 Assert.That(outputRead.Variable,
-                    Is.EqualTo(candidate.ParameterCount));
+                    Is.EqualTo(candidate.ParameterCount
+                        + (multipleOutputs ? 1 : 0)));
                 Assert.That(NativePointerTypes.IsType(outputRead.Type),
                     Is.True);
                 Assert.That(((BoundRead)receiver).Variable, Is.Zero);
+                if (multipleOutputs)
+                {
+                    Assert.That(selectedCall.Arguments[1],
+                        Is.TypeOf<BoundRead>());
+                    Assert.That(((BoundRead)selectedCall.Arguments[1])
+                        .Variable, Is.EqualTo(candidate.ParameterCount));
+                    Assert.That(selectedCall.ParameterIndex(0), Is.Zero);
+                    Assert.That(selectedCall.ParameterIndex(1),
+                        Is.EqualTo(1));
+                }
             }
         }
 

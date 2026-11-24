@@ -2235,9 +2235,9 @@ public static partial class TrRmExecutableCompiler
             successReturnValue);
         if (successCallCandidate is not null)
         {
-            if (!successOnTrue || outputVariablesLocal.Length != 1
+            if (!successOnTrue
                 || !TryGetOutputConsumerVariable(successCallCandidate,
-                    outputVariablesLocal[0],
+                    outputVariablesLocal,
                     out successOutputVariable))
             {
                 return false;
@@ -2276,9 +2276,11 @@ public static partial class TrRmExecutableCompiler
         return true;
 
         bool TryGetOutputConsumerVariable(BoundCall consumerCall,
-            int reservedOutputVariable, out int consumedOutputVariable)
+            ImmutableArray<int> reservedOutputVariables,
+            out int consumedOutputVariable)
         {
             consumedOutputVariable = -1;
+            var reservedOutputHomes = reservedOutputVariables.ToHashSet();
             if (consumerCall.Function
                     != BoundCall.ForeignInterfaceFunction
                 || consumerCall.ForeignInterfaceCall is not
@@ -2296,19 +2298,23 @@ public static partial class TrRmExecutableCompiler
                 || consumerForeignCall.Receiver is not BoundRead receiver
                 || receiver.Type != PrimitiveType.NativeRawPointer
                 || (receiver.Variable != 0
-                    && receiver.Variable != reservedOutputVariable)
-                || (receiver.Variable == reservedOutputVariable
-                    && function.Variables[reservedOutputVariable].Type
+                    && !reservedOutputHomes.Contains(receiver.Variable))
+                || (reservedOutputHomes.Contains(receiver.Variable)
+                    && function.Variables[receiver.Variable].Type
                         != PrimitiveType.NativeRawPointer)
-                || !IsForeignNativeInterfacePointerValueType(
-                    function.Variables[reservedOutputVariable].Type))
+                || reservedOutputVariables.IsEmpty)
             {
                 return false;
             }
 
             var seenParameters = new bool[consumerTarget.ParameterCount];
-            var outputUses = receiver.Variable == reservedOutputVariable
-                ? 1 : 0;
+            var consumedOutputHomes = new HashSet<int>();
+            var hasPointerOutputUse = false;
+            if (reservedOutputHomes.Contains(receiver.Variable))
+            {
+                _ = consumedOutputHomes.Add(receiver.Variable);
+                hasPointerOutputUse = true;
+            }
             for (var argumentIndex = 0;
                 argumentIndex < consumerCall.Arguments.Length;
                 argumentIndex++)
@@ -2334,9 +2340,15 @@ public static partial class TrRmExecutableCompiler
                     return false;
                 }
 
-                if (read.Variable == reservedOutputVariable)
+                if (reservedOutputHomes.Contains(read.Variable))
                 {
-                    outputUses++;
+                    if (!consumedOutputHomes.Add(read.Variable))
+                    {
+                        return false;
+                    }
+
+                    hasPointerOutputUse |=
+                        IsForeignNativeInterfacePointerValueType(read.Type);
                 }
                 else if (read.Variable <= 0
                     || read.Variable >= fallbackLocal)
@@ -2352,16 +2364,24 @@ public static partial class TrRmExecutableCompiler
             }
 
             if (seenParameters.Any(static seen => !seen)
-                || outputUses != 1
-                || !outputVariableByFormal.Any(pair =>
-                    pair.Value == reservedOutputVariable
-                    && function.Variables[reservedOutputVariable].Type
-                        == outputContractsByFormal[pair.Key].PointeeType))
+                || consumedOutputHomes.Count == 0
+                || !hasPointerOutputUse
+                || !reservedOutputHomes.SetEquals(
+                    outputVariableByFormal.Values)
+                || !consumedOutputHomes.All(outputHome =>
+                    outputVariableByFormal.Any(pair =>
+                        pair.Value == outputHome
+                        && function.Variables[outputHome].Type
+                            == outputContractsByFormal[pair.Key].PointeeType)))
             {
                 return false;
             }
 
-            consumedOutputVariable = reservedOutputVariable;
+            consumedOutputVariable = reservedOutputVariables.First(
+                outputHome =>
+                consumedOutputHomes.Contains(outputHome)
+                && IsForeignNativeInterfacePointerValueType(
+                    function.Variables[outputHome].Type));
             return true;
         }
 
@@ -6341,10 +6361,11 @@ public static partial class TrRmExecutableCompiler
                     successReceiver
                 || successReceiver.Type != PrimitiveType.NativeRawPointer
                 || (successReceiver.Variable != 0
-                    && successReceiver.Variable != outputVariable)
+                    && !outputVariables.Contains(
+                        successReceiver.Variable))
                 || function.Variables[successReceiver.Variable].Type
                     != PrimitiveType.NativeRawPointer
-                || outputVariables.Length != 1
+                || outputVariables.IsEmpty
                 || !IsForeignNativeInterfacePointerValueType(
                     function.Variables[outputVariable].Type)
                 || preludeCalls.Length + nestedCalls.Count + 2 > 13)
@@ -6355,8 +6376,13 @@ public static partial class TrRmExecutableCompiler
 
             var successArgumentsByFormal
                 = new BoundRead?[successTarget.ParameterCount];
-            var outputUses = successReceiver.Variable == outputVariable
-                ? 1 : 0;
+            var consumedOutputHomes = new HashSet<int>();
+            var hasPointerOutputUse = false;
+            if (outputVariables.Contains(successReceiver.Variable))
+            {
+                _ = consumedOutputHomes.Add(successReceiver.Variable);
+                hasPointerOutputUse = true;
+            }
             for (var argumentIndex = 0;
                 argumentIndex < successCall.Arguments.Length;
                 argumentIndex++)
@@ -6383,9 +6409,16 @@ public static partial class TrRmExecutableCompiler
                         $"Function '{function.Name}' has a conditional F+I success input outside the direct-Home subset.");
                 }
 
-                if (read.Variable == outputVariable)
+                if (outputVariables.Contains(read.Variable))
                 {
-                    outputUses++;
+                    if (!consumedOutputHomes.Add(read.Variable))
+                    {
+                        throw Invalid(
+                            "A Standard F+I conditional-output success call consumes an output Home more than once.");
+                    }
+
+                    hasPointerOutputUse |=
+                        IsForeignNativeInterfacePointerValueType(read.Type);
                 }
                 else if (read.Variable <= 0
                     || read.Variable >= fallbackVariable)
@@ -6399,10 +6432,14 @@ public static partial class TrRmExecutableCompiler
 
             if (successArgumentsByFormal.Any(
                     static argument => argument is null)
-                || outputUses != 1)
+                || consumedOutputHomes.Count == 0
+                || !hasPointerOutputUse
+                || !consumedOutputHomes.All(outputHome =>
+                    outputVariables.Contains(outputHome))
+                || !consumedOutputHomes.Contains(outputVariable))
             {
                 throw Invalid(
-                    "A Standard F+I conditional-output success call does not consume exactly one reserved output Home.");
+                    "A Standard F+I conditional-output success call does not consume a pointer-valued output Home.");
             }
 
             successCallMethodMapToken
@@ -13063,8 +13100,7 @@ public static partial class TrRmExecutableCompiler
         if (outputVariableByFormal.Count != outputCount
             || !reservedOutputHomes.SetEquals(outputVariables)
             || (hasSuccessCall
-                ? outputCount != 1
-                    || !outputVariableByFormal.Values.Contains(
+                ? !outputVariableByFormal.Values.Contains(
                         returnOutputVariable)
                 : !outputVariableByFormal.Any(pair =>
                     pair.Value == returnOutputVariable
@@ -14391,7 +14427,8 @@ public static partial class TrRmExecutableCompiler
                 || successReceiverInput[1] != 1
                 || successReceiverHome >= body.HomeCount
                 || (successReceiverHome != 0
-                    && successReceiverHome != returnOutputVariable)
+                    && !reservedOutputHomes.Contains(
+                        successReceiverHome))
                 || homeRoles[successReceiverHome] is not (2 or 3)
                 || homeVariables[successReceiverHome]
                     != successReceiverHome
@@ -14409,8 +14446,13 @@ public static partial class TrRmExecutableCompiler
                 = ImmutableArray.CreateBuilder<int>(
                     successMember.Parameters.Length);
             var successInputOffset = 20;
-            var successOutputUses
-                = successReceiverHome == returnOutputVariable ? 1 : 0;
+            var consumedOutputHomes = new HashSet<int>();
+            var hasPointerOutputUse = false;
+            if (reservedOutputHomes.Contains(successReceiverHome))
+            {
+                _ = consumedOutputHomes.Add(successReceiverHome);
+                hasPointerOutputUse = true;
+            }
             for (var formal = 0;
                 formal < successMember.Parameters.Length;
                 formal++)
@@ -14439,16 +14481,16 @@ public static partial class TrRmExecutableCompiler
                         "A Standard F+I conditional-output success input does not match a direct pointer or scalar Home.");
                 }
 
-                if (homeIndex == returnOutputVariable)
+                if (reservedOutputHomes.Contains(homeIndex))
                 {
-                    if (!IsForeignNativeInterfacePointerValueType(
-                            formalType))
+                    if (!consumedOutputHomes.Add(homeIndex))
                     {
                         throw Invalid(
-                            "A Standard F+I conditional-output success call does not consume a pointer-valued output.");
+                            "A Standard F+I conditional-output success call consumes an output Home more than once.");
                     }
 
-                    successOutputUses++;
+                    hasPointerOutputUse |=
+                        IsForeignNativeInterfacePointerValueType(formalType);
                 }
                 else
                 {
@@ -14469,10 +14511,10 @@ public static partial class TrRmExecutableCompiler
                 successInputOffset += 4;
             }
 
-            if (successOutputUses != 1)
+            if (consumedOutputHomes.Count == 0 || !hasPointerOutputUse)
             {
                 throw Invalid(
-                    "A Standard F+I conditional-output success call does not consume its selected pointer output.");
+                    "A Standard F+I conditional-output success call does not consume a pointer-valued output Home.");
             }
 
             var successDeclarationKey = successMember.DeclarationKey;
