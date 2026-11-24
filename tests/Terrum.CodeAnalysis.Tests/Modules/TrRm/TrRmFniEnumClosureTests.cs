@@ -454,6 +454,32 @@ internal sealed class TrRmFniEnumClosureTests
             TrRmFeatureTableReader.MethodParameterLabelsFeatureId));
         Assert.That(enumDefinition.Members.Length, Is.EqualTo(2));
 
+        var input = new TrRmStandardArtifactInput(SchemaIdentity, artifact);
+        var loaded = TrRmExecutableCompiler.LoadStandard(input,
+            "FniEnumProvider", [coreProvider.Input]);
+        var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(loaded,
+            "FniEnumProviderReemitted", SchemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var reemittedIndex
+            = TrRmArtifactIndex
+                .ForForeignNativeInterfaceParameterSurfaceEnumClosureDraft(
+                    reemittedArtifact);
+        var reemittedTables = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(reemittedIndex);
+        Assert.That(reemittedTables.EnumDefs.Count, Is.EqualTo(5));
+        Assert.That(reemittedTables.EnumMembers.Count, Is.EqualTo(14));
+        Assert.That(reemittedTables.StandardNativeImports.Count,
+            Is.EqualTo(1));
+        Assert.That(reemittedIndex.TryGetSection(0x0030, out _,
+            out var reemittedConstantSourceCount), Is.True);
+        Assert.That(reemittedConstantSourceCount, Is.EqualTo(14));
+        var reloaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(SchemaIdentity,
+                reemittedArtifact),
+            "FniEnumProviderReemitted", [input, coreProvider.Input]);
+        Assert.That(reloaded.EnumDefinitions.Single(
+                static item => item.Name == "Demo.Shade").UnderlyingType,
+            Is.EqualTo(PrimitiveType.Int8));
     }
 
     [Test]
