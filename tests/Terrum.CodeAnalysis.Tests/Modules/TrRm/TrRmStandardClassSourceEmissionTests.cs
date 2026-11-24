@@ -389,7 +389,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 """
                 public void Consume(Box value, int32 count) {}
                 public int32 Invoke(Box value, int32 count) {
-                    return HelperAgain(value, count);
+                    return value.CallHidden(HelperAgain(value, count));
                 }
                 internal int32 Helper(Box value, int32 count) {
                     return Transform(count);
@@ -523,6 +523,27 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 reemittedTables.Imports.GetModuleRefForImportRow(
                     transformImportRow)),
             Is.EqualTo(classProviderIdentity));
+        var callHiddenImportRow = Enumerable.Range(1,
+                reemittedTables.Imports.Count)
+            .Single(row => reemittedTables.Imports
+                .GetBindingForImportRow(row).ExportKey == "Box.CallHidden");
+        var invokeMethodRow = Enumerable.Range(1,
+                reemittedTables.Methods.Count)
+            .Single(row => reemittedTables.Methods.GetOwnerType(row) == 0
+                && reemittedTables.Methods.GetName(row) == "Invoke");
+        var invokeBody = reemittedTables.Bodies.GetRegisterBody(
+            reemittedTables.Methods.GetBodyRow(invokeMethodRow),
+            reemittedTables.Contracts.Count);
+        var invokeMethodTargets = Enumerable.Range(0,
+                invokeBody.MethodCount)
+            .Select(index => BinaryPrimitives.ReadUInt32LittleEndian(
+                invokeBody.MethodMap.Slice(index * sizeof(uint),
+                    sizeof(uint))))
+            .ToArray();
+        Assert.That(invokeMethodTargets, Is.EquivalentTo([
+            0x1600_0000u | checked((uint)helperAgainMethodRow),
+            0x1C00_0000u | checked((uint)callHiddenImportRow),
+        ]));
 
         var reemittedReference
             = TrRmExecutableCompiler.CreateStandardReference(
@@ -531,8 +552,8 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 reemittedModuleIdentity, []);
         var reloadedDownstream = Compilation.CreateLibrary(
             SyntaxTree.Parse("""
-                public void ForwardAgain(Box value, int32 count) {
-                    Consume(value, count);
+                public int32 ForwardAgain(Box value, int32 count) {
+                    return value.CallHidden(Invoke(value, count));
                 }
                 """), reemittedReference);
         Assert.That(reloadedDownstream.HasErrors, Is.False,
