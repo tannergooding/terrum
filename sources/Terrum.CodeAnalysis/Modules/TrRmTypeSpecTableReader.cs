@@ -905,6 +905,17 @@ public readonly ref struct TrRmTypeSpecTableReader
         return typeDefRow;
     }
 
+    internal int GetImportRow(uint typeSpecRef)
+    {
+        var typeSpec = GetTypeSpecRef(typeSpecRef);
+        if (!typeSpec.IsRow || typeSpec.Form != 0x03)
+        {
+            throw InvalidType();
+        }
+
+        return checked((int)Read(GetRowCore(typeSpec.Row), 2));
+    }
+
     /// <summary>Gets the number of validated TypeSpec rows.</summary>
     public int Count => _recordCount;
     /// <summary>The number of native function-pointer signatures in the table.</summary>

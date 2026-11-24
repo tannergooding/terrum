@@ -22,6 +22,36 @@ internal sealed class CoreContractFailureIdentitySelectionTests
     }
 
     [Test]
+    public void DeclarationFailureBindingsRequireCapturedInputsAndUniqueClauseKeys()
+    {
+        var artifact = new TrRmStandardArtifactInput("exact-schema",
+            new byte[] { 1, 2, 3 });
+        var plan = new TrRmConstructorBindingLocation(artifact, 1, 0);
+        var binding = new TrRmPreconditionFailureBinding(artifact, 2, 7,
+            artifact, 2, 7,
+            TrRmPreconditionFailureSource.ExplicitType, plan);
+
+        Assert.That(TrRmDeclarationFailureBindingContract.IsValidShape(
+            [binding], []), Is.True);
+        Assert.That(TrRmDeclarationFailureBindingContract.AreCapturedInputs(
+            [artifact], [binding], []), Is.True);
+
+        var duplicate = binding with { ConstructorPlan = plan with {
+            ConstructorBindingRecordIndex = ushort.MaxValue,
+        } };
+        Assert.That(TrRmDeclarationFailureBindingContract.AreCapturedInputs(
+            [artifact], [binding, duplicate], []), Is.False);
+        Assert.That(TrRmDeclarationFailureBindingContract.AreCapturedInputs(
+            [new TrRmStandardArtifactInput("exact-schema",
+                new byte[] { 1, 2, 3 })], [binding], []), Is.False);
+
+        Assert.That(TrRmDeclarationFailureBindingContract.IsValidShape(
+            default, []), Is.False);
+        Assert.That(TrRmDeclarationFailureBindingContract.IsValidShape(
+            [binding with { MethodDefRow = 0 }], []), Is.False);
+    }
+
+    [Test]
     public void SelectionAllowsOnlyRolesNeededByTheModule()
     {
         var requirementOnly = CreateSelection() with {

@@ -11,6 +11,7 @@ using System.Text;
 using System.Threading;
 using Terrum.CodeAnalysis.Diagnostics;
 using Terrum.CodeAnalysis.Lexing;
+using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
 
@@ -159,6 +160,10 @@ internal sealed partial class Binder
         _coreExceptionIdentitySelections;
     private readonly ImmutableArray<CoreContractFailureIdentitySelection>
         _coreContractFailureIdentitySelections;
+    private readonly ImmutableArray<TrRmPreconditionFailureBinding>
+        _preconditionFailureBindings;
+    private readonly ImmutableArray<TrRmPostconditionConstructionBinding>
+        _postconditionConstructionBindings;
     private readonly CoreContractFailureIdentitySelection?
         _coreContractFailureIdentitySelection;
     private readonly CoreEvaluationFormIdentitySelection?
@@ -356,6 +361,10 @@ internal sealed partial class Binder
             = coreContractFailureIdentitySelections.IsDefault
                 ? reference?.CoreContractFailureIdentitySelections ?? []
                 : coreContractFailureIdentitySelections;
+        _preconditionFailureBindings
+            = reference?.PreconditionFailureBindings ?? [];
+        _postconditionConstructionBindings
+            = reference?.PostconditionConstructionBindings ?? [];
         _coreContractFailureIdentitySelection
             = coreContractFailureIdentitySelection;
         _coreEvaluationFormIdentitySelection
@@ -1352,6 +1361,10 @@ internal sealed partial class Binder
             CoreExceptionIdentitySelections = _coreExceptionIdentitySelections,
             CoreContractFailureIdentitySelections =
                 _coreContractFailureIdentitySelections,
+            PreconditionFailureBindings =
+                _preconditionFailureBindings,
+            PostconditionConstructionBindings =
+                _postconditionConstructionBindings,
             CoreContractFailureIdentitySelection =
                 _coreContractFailureIdentitySelection,
             CoreEvaluationFormIdentitySelection

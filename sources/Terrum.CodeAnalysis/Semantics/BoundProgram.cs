@@ -6,6 +6,7 @@ using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using Terrum.CodeAnalysis.Lexing;
+using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
 
@@ -759,6 +760,12 @@ public sealed record BoundProgram(ImmutableArray<BoundFunction> Functions, int E
 
     internal ImmutableArray<CoreContractFailureIdentitySelection>
         CoreContractFailureIdentitySelections { get; init; } = [];
+
+    internal ImmutableArray<TrRmPreconditionFailureBinding>
+        PreconditionFailureBindings { get; init; } = [];
+
+    internal ImmutableArray<TrRmPostconditionConstructionBinding>
+        PostconditionConstructionBindings { get; init; } = [];
 
     internal CoreContractFailureIdentitySelection?
         CoreContractFailureIdentitySelection { get; init; }

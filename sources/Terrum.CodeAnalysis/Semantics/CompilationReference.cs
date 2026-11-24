@@ -3,6 +3,7 @@
 using System;
 using System.Collections.Immutable;
 using System.Linq;
+using Terrum.CodeAnalysis.Modules;
 
 namespace Terrum.CodeAnalysis.Semantics;
 
@@ -49,7 +50,11 @@ public sealed class CompilationReference
         ImmutableArray<BoundStandardClassDeclaration>
             standardClassDeclarations = default,
         ImmutableArray<BoundSpanTypeDefinition> spanTypes = default,
-        string? foreignNativeInterfaceSchemaIdentity = null)
+        string? foreignNativeInterfaceSchemaIdentity = null,
+        ImmutableArray<TrRmPreconditionFailureBinding>
+            preconditionFailureBindings = default,
+        ImmutableArray<TrRmPostconditionConstructionBinding>
+            postconditionConstructionBindings = default)
     {
         if (foreignNativeInterfaceSchemaIdentity is { } foreignSchema
             && (string.IsNullOrWhiteSpace(foreignSchema)
@@ -335,6 +340,13 @@ public sealed class CompilationReference
                 "The selected Core contract-failure identities are invalid.",
                 nameof(coreContractFailureIdentitySelections));
         }
+        if (!TrRmDeclarationFailureBindingContract.IsValidShape(
+                preconditionFailureBindings,
+                postconditionConstructionBindings))
+        {
+            throw new ArgumentException(
+                "The declaration failure-binding tables are invalid.");
+        }
 
         Structures = structures;
         Functions = functions;
@@ -369,6 +381,11 @@ public sealed class CompilationReference
         CoreContractFailureIdentitySelections
             = coreContractFailureIdentitySelections.IsDefault
                 ? [] : coreContractFailureIdentitySelections;
+        PreconditionFailureBindings = preconditionFailureBindings.IsDefault
+            ? [] : preconditionFailureBindings;
+        PostconditionConstructionBindings
+            = postconditionConstructionBindings.IsDefault
+                ? [] : postconditionConstructionBindings;
         PrivateNominalTypeOrigins = privateNominalTypeOrigins.IsDefault
             ? [] : privateNominalTypeOrigins;
         Classes = classes.IsDefault ? [] : classes;
@@ -568,6 +585,14 @@ public sealed class CompilationReference
     public ImmutableArray<CoreContractFailureIdentitySelection>
         CoreContractFailureIdentitySelections { get; }
 
+    /// <summary>Producer-selected phase-1 constructor bindings retained from Standard inputs.</summary>
+    public ImmutableArray<TrRmPreconditionFailureBinding>
+        PreconditionFailureBindings { get; }
+
+    /// <summary>Producer-selected phase-2 constructor bindings retained from Standard inputs.</summary>
+    public ImmutableArray<TrRmPostconditionConstructionBinding>
+        PostconditionConstructionBindings { get; }
+
     /// <summary>Returns a reference that explicitly selects one checked provider definition as Core Task.</summary>
     public CompilationReference SelectCoreTaskType(BoundGenericNominalTypeIdentity identity)
     {
@@ -599,6 +624,9 @@ public sealed class CompilationReference
                 StaticInitializationCoreRegistration,
             coreContractFailureIdentitySelections:
                 CoreContractFailureIdentitySelections,
+            preconditionFailureBindings: PreconditionFailureBindings,
+            postconditionConstructionBindings:
+                PostconditionConstructionBindings,
             lazyInitializationCoreRegistration:
                 LazyInitializationCoreRegistration,
             nativeOutputCoreRegistration:
@@ -632,6 +660,9 @@ public sealed class CompilationReference
                 StaticInitializationCoreRegistration,
             coreContractFailureIdentitySelections:
                 CoreContractFailureIdentitySelections,
+            preconditionFailureBindings: PreconditionFailureBindings,
+            postconditionConstructionBindings:
+                PostconditionConstructionBindings,
             lazyInitializationCoreRegistration:
                 LazyInitializationCoreRegistration,
             nativeOutputCoreRegistration:
