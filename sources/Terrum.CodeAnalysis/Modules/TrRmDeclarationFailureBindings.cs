@@ -1120,6 +1120,13 @@ internal static class TrRmDeclarationFailureBindingContract
                     requiredMethod);
                 var selectedSignature = classTables.Methods.GetSignature(
                     selectedMethod);
+                var declaringInterfaceTypeSpecRef
+                    = classTables.WitnessMembers
+                        .GetDeclaringInterfaceTypeSpecRef(
+                            matchingMemberRow);
+                var expectedSelectedReceiverTypeSpecRef
+                    = selectedOwnerRef == 0 ? implementingTypeSpecRef
+                        : selectedOwnerRef;
                 var (_, requirementParameterCount)
                     = classTables.Signatures.GetParamRange(
                         requirementSignature);
@@ -1136,6 +1143,14 @@ internal static class TrRmDeclarationFailureBindingContract
                     || (selectedOwnerTypeDef != classTypeDefRow
                         && selectedOwnerTypeDef != interfaceTypeDefRow)
                     || !selectedOwnerMatchesWitness
+                    || !classTables.TypeSpecs.AreEquivalentTypeSpecRefs(
+                        classTables.Signatures.GetReceiverTypeSpec(
+                            requirementSignature),
+                        declaringInterfaceTypeSpecRef)
+                    || !classTables.TypeSpecs.AreEquivalentTypeSpecRefs(
+                        classTables.Signatures.GetReceiverTypeSpec(
+                            selectedSignature),
+                        expectedSelectedReceiverTypeSpecRef)
                     || requirementParameterCount != selectedParameterCount
                     || classTables.Signatures.GetGenericCount(
                         requirementSignature)
