@@ -16,6 +16,17 @@ internal sealed record BoundStandardClassFieldDeclaration(
     internal PrimitiveType Type { get; init; } = PrimitiveType.Void;
 }
 
+internal sealed record BoundStandardClassPropertyDeclaration(
+    uint DefinitionId, uint OwnerDefinitionId, string Name,
+    uint TypeSpecReference, uint Flags, uint GetterMethodDefinitionId,
+    uint SetterMethodDefinitionId, uint InitMethodDefinitionId,
+    uint BackingFieldDefinitionId)
+{
+    internal ImmutableArray<string> ExportKeys { get; init; } = [];
+    internal ImmutableArray<string> SelectedExportKeys { get; init; } = [];
+    internal PrimitiveType Type { get; init; } = PrimitiveType.Void;
+}
+
 internal sealed record BoundStandardClassLayoutVariant(
     uint Row, uint OwnerDefinitionId, uint TargetProfileReference,
     uint TargetProfileId, uint TargetProfileRuleRevision, byte Kind,
@@ -75,6 +86,13 @@ internal sealed record BoundStandardClassTypeView(
         get; init;
     } = [];
 
+    internal ImmutableArray<BoundStandardClassPropertyDeclaration> Properties
+    {
+        get; init;
+    } = [];
+
+    internal bool UsesPropertyInitializedState { get; init; }
+
     internal bool TryGetDeclaredMutability(out bool isMutable)
     {
         if (Provider is not null
@@ -86,6 +104,9 @@ internal sealed record BoundStandardClassTypeView(
                     "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2")
                 || StringComparer.Ordinal.Equals(Provider.SchemaIdentity,
                     "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1")
+                || BoundStandardClassDeclarationContract
+                    .UsesPropertyInitializedStateSchemaIdentity(
+                        Provider.SchemaIdentity)
                 || StandardGenericMethodSchema.IsCM1ClassParameterDefaults(
                     Provider.SchemaIdentity)
                 || StandardGenericMethodSchema.IsClassTypeBindingViews(
@@ -156,6 +177,28 @@ internal static class BoundStandardClassDeclarationContract
         = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-1-parameter-labels-1-receiver-access-1";
     private const string C1M1Construction2L1R1SchemaIdentity
         = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1";
+    private const string C1M1ConstructionL1R1PI1SchemaIdentity
+        = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-1-parameter-labels-1-receiver-access-1-property-initialized-state-1";
+    private const string C1M1Construction2L1R1PI1SchemaIdentity
+        = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-property-initialized-state-1";
+    private const string C1M1ConstructionL1R1PI1EnumClosureSchemaIdentity
+        = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-1-parameter-labels-1-receiver-access-1-property-initialized-state-1-enum-closure-1";
+    private const string C1M1Construction2L1R1PI1EnumClosureSchemaIdentity
+        = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-property-initialized-state-1-enum-closure-1";
+    private const string C1M1ConstructionL1R1PI1ClassLayoutSchemaIdentity
+        = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-1-parameter-labels-1-receiver-access-1-property-initialized-state-1-enum-closure-1-class-instance-layout-1";
+    private const string C1M1Construction2L1R1PI1ClassLayoutSchemaIdentity
+        = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-property-initialized-state-1-enum-closure-1-class-instance-layout-1";
+
+    internal static bool UsesPropertyInitializedStateSchemaIdentity(
+        string? schemaIdentity)
+        => schemaIdentity is C1M1ConstructionL1R1PI1SchemaIdentity
+            or C1M1Construction2L1R1PI1SchemaIdentity
+            or C1M1ConstructionL1R1PI1EnumClosureSchemaIdentity
+            or C1M1Construction2L1R1PI1EnumClosureSchemaIdentity
+            or C1M1ConstructionL1R1PI1ClassLayoutSchemaIdentity
+            or C1M1Construction2L1R1PI1ClassLayoutSchemaIdentity;
+
     internal static bool TryGetSelectedConstruction2ClassDeclaration(
         PrimitiveType type,
         IReadOnlyList<BoundGenericNominalTypeInstance> instances,
@@ -598,7 +641,7 @@ internal static class BoundStandardClassDeclarationContract
             || (view.Identity.DefinitionId >> 24) != 0x13
             || !IsValidNamespace(view.Namespace) || !IsValidText(view.Name)
             || view.Fields.IsDefault || view.Layouts.IsDefault
-            || view.Methods.IsDefault
+            || view.Methods.IsDefault || view.Properties.IsDefault
             || !IsValidSnapshot(view.Provider)
             || !StringComparer.Ordinal.Equals(view.Identity.ModuleIdentity,
                 view.Provider.ModuleIdentity)
@@ -610,6 +653,8 @@ internal static class BoundStandardClassDeclarationContract
                     C1M1ConstructionL1R1SchemaIdentity)
                 && !StringComparer.Ordinal.Equals(view.Provider.SchemaIdentity,
                     C1M1Construction2L1R1SchemaIdentity)
+                && !UsesPropertyInitializedStateSchemaIdentity(
+                    view.Provider.SchemaIdentity)
                 && !StandardGenericMethodSchema
                     .IsCM1ClassParameterDefaults(
                         view.Provider.SchemaIdentity)
@@ -631,6 +676,8 @@ internal static class BoundStandardClassDeclarationContract
                     C1M1ConstructionL1R1SchemaIdentity)
                 || StringComparer.Ordinal.Equals(view.Provider.SchemaIdentity,
                     C1M1Construction2L1R1SchemaIdentity)
+                || UsesPropertyInitializedStateSchemaIdentity(
+                    view.Provider.SchemaIdentity)
                 || StandardGenericMethodSchema
                     .IsCM1ClassParameterDefaults(
                         view.Provider.SchemaIdentity)
@@ -642,7 +689,10 @@ internal static class BoundStandardClassDeclarationContract
                         view.Provider.SchemaIdentity);
         uint allowedFlags = schemaAllowsMutability ? 0x8Fu : 0x0Fu;
         if (kind != 2 || (view.TypeDefFlags & ~allowedFlags) != 0
-            || (view.TypeDefFlags & 3) == 3)
+            || (view.TypeDefFlags & 3) == 3
+            || view.UsesPropertyInitializedState
+                != UsesPropertyInitializedStateSchemaIdentity(
+                    view.Provider.SchemaIdentity))
         {
             return false;
         }
@@ -653,9 +703,23 @@ internal static class BoundStandardClassDeclarationContract
             if (field is null || (field.DefinitionId >> 24) != 0x14
                 || (field.DefinitionId & 0x00FF_FFFF) == 0
                 || field.OwnerDefinitionId != view.Identity.DefinitionId
-                || !IsValidText(field.Name)
+                || (!IsValidText(field.Name)
+                    && !(view.UsesPropertyInitializedState
+                        && (field.Flags & 0x10u) != 0
+                        && field.Name is { Length: 0 }))
                 || !BoundGenericNominalTypeContract.IsTypeSpecReference(
                     field.TypeSpecReference)
+                || (field.Flags & ~(view.UsesPropertyInitializedState
+                    ? 0x1Fu : 0x0Fu)) != 0
+                || (field.Flags & 3u) == 3
+                || (((field.Flags & 0x10u) != 0)
+                    != (view.UsesPropertyInitializedState
+                        && field.Name is { Length: 0 }))
+                || ((field.Flags & 0x10u) != 0
+                    && (!field.ExportKeys.IsEmpty
+                        || !field.SelectedExportKeys.IsEmpty
+                        || (field.Flags & 0x0Bu) != 0
+                        || field.Name is not { Length: 0 }))
                 || field.ExportKeys.IsDefault
                 || !IsUniqueText(field.ExportKeys)
                 || field.SelectedExportKeys.IsDefault
@@ -874,8 +938,11 @@ internal static class BoundStandardClassDeclarationContract
                 foreach (var memberDefinitionId
                     in method.InitializedMemberDefinitionIds)
                 {
-                    if ((memberDefinitionId >> 24) != 0x14
-                        || !fields.ContainsKey(memberDefinitionId)
+                    var memberKind = memberDefinitionId >> 24;
+                    if ((memberKind != 0x14 && memberKind != 0x1E)
+                        || (memberKind == 0x1E
+                            && !view.UsesPropertyInitializedState)
+                        || (memberDefinitionId & 0x00FF_FFFF) == 0
                         || !initializedMembers.Add(memberDefinitionId))
                     {
                         return false;
@@ -917,6 +984,145 @@ internal static class BoundStandardClassDeclarationContract
                     || !AreEquivalentFrozenDefaults(
                         initializerParameter.DefaultValue,
                         projectionParameter.DefaultValue))
+                {
+                    return false;
+                }
+            }
+        }
+
+        var properties = new Dictionary<uint,
+            BoundStandardClassPropertyDeclaration>();
+        var propertyAccessorMethods = new HashSet<uint>();
+        var propertyBackingFields = new HashSet<uint>();
+        var previousPropertyRow = 0u;
+        foreach (var property in view.Properties)
+        {
+            if (property is null
+                || (property.DefinitionId >> 24) != 0x1E
+                || (property.DefinitionId & 0x00FF_FFFF) == 0
+                || property.DefinitionId <= previousPropertyRow
+                || property.OwnerDefinitionId != view.Identity.DefinitionId
+                || !IsValidText(property.Name)
+                || !BoundGenericNominalTypeContract.IsTypeSpecReference(
+                    property.TypeSpecReference)
+                || property.Flags > 2
+                || property.ExportKeys.IsDefault
+                || !IsUniqueText(property.ExportKeys)
+                || property.SelectedExportKeys.IsDefault
+                || !IsUniqueText(property.SelectedExportKeys)
+                || property.SelectedExportKeys.Any(key =>
+                    !property.ExportKeys.Contains(key,
+                        StringComparer.Ordinal))
+                || !methods.TryGetValue(
+                    property.GetterMethodDefinitionId,
+                    out var getter)
+                || (view.UsesPropertyInitializedState
+                    && (getter.ReceiverTypeSpecReference == 0
+                        || getter.GenericParameterCount != 0
+                        || !getter.Parameters.IsEmpty
+                        || !propertyAccessorMethods.Add(
+                            property.GetterMethodDefinitionId)))
+                || (property.SetterMethodDefinitionId != 0
+                    && property.InitMethodDefinitionId != 0)
+                || (!view.UsesPropertyInitializedState
+                    && (property.SetterMethodDefinitionId != 0
+                        || property.InitMethodDefinitionId != 0
+                        || property.BackingFieldDefinitionId != 0))
+                || (property.BackingFieldDefinitionId == 0
+                    ? property.SetterMethodDefinitionId != 0
+                        || property.InitMethodDefinitionId != 0
+                    : !view.UsesPropertyInitializedState
+                        || (property.BackingFieldDefinitionId >> 24)
+                            != 0x14
+                        || !fields.TryGetValue(
+                            property.BackingFieldDefinitionId,
+                            out var backingField)
+                        || (backingField.Flags & 0x10u) == 0
+                        || backingField.Name.Length != 0
+                        || !propertyBackingFields.Add(
+                            property.BackingFieldDefinitionId)
+                        || (property.Type != PrimitiveType.Void
+                            && backingField.Type != PrimitiveType.Void
+                            && property.Type != backingField.Type))
+                || (property.SetterMethodDefinitionId != 0
+                    && (!methods.TryGetValue(
+                            property.SetterMethodDefinitionId,
+                            out var setter)
+                        || !view.UsesPropertyInitializedState
+                        || setter.ReceiverTypeSpecReference == 0
+                        || setter.GenericParameterCount != 0
+                        || setter.Parameters.Length != 1
+                        || setter.ReturnTypeSpecReference
+                            != 0xF200_0000
+                        || setter.ConstructionRole != 0
+                        || !propertyAccessorMethods.Add(
+                            property.SetterMethodDefinitionId)))
+                || (property.InitMethodDefinitionId != 0
+                    && (!methods.TryGetValue(
+                            property.InitMethodDefinitionId,
+                            out var initializer)
+                        || !view.UsesPropertyInitializedState
+                        || initializer.ReceiverTypeSpecReference == 0
+                        || initializer.GenericParameterCount != 0
+                        || initializer.Parameters.Length != 1
+                        || initializer.ReturnTypeSpecReference
+                            != 0xF200_0000
+                        || initializer.ConstructionRole != 3
+                        || initializer.ConstructionPropertyDefinitionId
+                            != property.DefinitionId
+                        || !propertyAccessorMethods.Add(
+                            property.InitMethodDefinitionId)))
+                || !properties.TryAdd(property.DefinitionId, property))
+            {
+                return false;
+            }
+
+            previousPropertyRow = property.DefinitionId;
+        }
+
+        foreach (var field in fields.Values)
+        {
+            if (((field.Flags & 0x10u) != 0)
+                != propertyBackingFields.Contains(field.DefinitionId))
+            {
+                return false;
+            }
+        }
+
+        foreach (var method in methods.Values)
+        {
+            if (method.ConstructionRole == 3
+                && (!properties.TryGetValue(
+                        method.ConstructionPropertyDefinitionId,
+                        out var property)
+                    || property.InitMethodDefinitionId
+                        != method.DefinitionId))
+            {
+                return false;
+            }
+        }
+
+        foreach (var method in methods.Values)
+        {
+            if (method.ConstructionRole != 1)
+            {
+                continue;
+            }
+
+            foreach (var memberDefinitionId
+                in method.InitializedMemberDefinitionIds)
+            {
+                var memberKind = memberDefinitionId >> 24;
+                if (memberKind == 0x14)
+                {
+                    if (!fields.ContainsKey(memberDefinitionId))
+                    {
+                        return false;
+                    }
+                }
+                else if (!properties.TryGetValue(memberDefinitionId,
+                             out var property)
+                    || property.BackingFieldDefinitionId == 0)
                 {
                     return false;
                 }
@@ -988,7 +1194,10 @@ internal static class BoundStandardClassDeclarationContract
                 actual.Namespace)
             || !StringComparer.Ordinal.Equals(expected.Name, actual.Name)
             || expected.TypeDefFlags != actual.TypeDefFlags
+            || expected.UsesPropertyInitializedState
+                != actual.UsesPropertyInitializedState
             || expected.Fields.Length != actual.Fields.Length
+            || expected.Properties.Length != actual.Properties.Length
             || expected.Methods.Length != actual.Methods.Length
             || expected.Layouts.Length != actual.Layouts.Length)
         {
@@ -1004,6 +1213,50 @@ internal static class BoundStandardClassDeclarationContract
                 || expectedField.Flags != actualField.Flags)
             {
                 return false;
+            }
+        }
+
+        if (expected.UsesPropertyInitializedState)
+        {
+            var actualPropertiesByGetterOrdinal
+                = new Dictionary<int, BoundStandardClassPropertyDeclaration>(
+                    actual.Properties.Length);
+            foreach (var actualProperty in actual.Properties)
+            {
+                if (!actualPropertiesByGetterOrdinal.TryAdd(
+                        FindMethodOrdinal(actual,
+                            actualProperty.GetterMethodDefinitionId),
+                        actualProperty))
+                {
+                    return false;
+                }
+            }
+
+            foreach (var expectedProperty in expected.Properties)
+            {
+                var getterOrdinal = FindMethodOrdinal(expected,
+                    expectedProperty.GetterMethodDefinitionId);
+                if (getterOrdinal < 0
+                    || !actualPropertiesByGetterOrdinal.TryGetValue(
+                        getterOrdinal, out var actualProperty)
+                    || !ClassPropertiesMatch(expected, expectedProperty,
+                        actual, actualProperty))
+                {
+                    return false;
+                }
+            }
+        }
+        else
+        {
+            for (var ordinal = 0;
+                ordinal < expected.Properties.Length; ordinal++)
+            {
+                if (!ClassPropertiesMatch(expected,
+                        expected.Properties[ordinal], actual,
+                        actual.Properties[ordinal]))
+                {
+                    return false;
+                }
             }
         }
 
@@ -1025,6 +1278,21 @@ internal static class BoundStandardClassDeclarationContract
                     != actualMethod.InitializedMemberDefinitionIds.Length
                 || (expectedMethod.ConstructionPropertyDefinitionId != 0)
                     != (actualMethod.ConstructionPropertyDefinitionId != 0))
+            {
+                return false;
+            }
+            if (expectedMethod.ConstructionRole == 1
+                && !AreEquivalentInitializedMemberSets(expected,
+                    expectedMethod.InitializedMemberDefinitionIds, actual,
+                    actualMethod.InitializedMemberDefinitionIds))
+            {
+                return false;
+            }
+            if (expectedMethod.ConstructionRole == 3
+                && GetPropertyGetterOrdinal(expected,
+                    expectedMethod.ConstructionPropertyDefinitionId)
+                    != GetPropertyGetterOrdinal(actual,
+                        actualMethod.ConstructionPropertyDefinitionId))
             {
                 return false;
             }
@@ -1065,6 +1333,111 @@ internal static class BoundStandardClassDeclarationContract
         return true;
     }
 
+    private static bool ClassPropertiesMatch(
+        BoundStandardClassTypeView expectedView,
+        BoundStandardClassPropertyDeclaration expected,
+        BoundStandardClassTypeView actualView,
+        BoundStandardClassPropertyDeclaration actual)
+        => StringComparer.Ordinal.Equals(expected.Name, actual.Name)
+            && expected.Flags == actual.Flags
+            && (expected.Type == PrimitiveType.Void
+                || actual.Type == PrimitiveType.Void
+                || expected.Type == actual.Type)
+            && FindMethodOrdinal(expectedView,
+                expected.GetterMethodDefinitionId)
+                == FindMethodOrdinal(actualView,
+                    actual.GetterMethodDefinitionId)
+            && FindMethodOrdinal(expectedView,
+                expected.SetterMethodDefinitionId)
+                == FindMethodOrdinal(actualView,
+                    actual.SetterMethodDefinitionId)
+            && FindMethodOrdinal(expectedView,
+                expected.InitMethodDefinitionId)
+                == FindMethodOrdinal(actualView,
+                    actual.InitMethodDefinitionId)
+            && FindFieldOrdinal(expectedView,
+                expected.BackingFieldDefinitionId)
+                == FindFieldOrdinal(actualView,
+                    actual.BackingFieldDefinitionId)
+            && expected.SelectedExportKeys.All(key =>
+                actual.ExportKeys.Contains(key, StringComparer.Ordinal));
+
+    private static bool AreEquivalentInitializedMemberSets(
+        BoundStandardClassTypeView expectedView,
+        ImmutableArray<uint> expectedMembers,
+        BoundStandardClassTypeView actualView,
+        ImmutableArray<uint> actualMembers)
+    {
+        var expectedOrdinals = new HashSet<(byte Kind, int Ordinal)>();
+        foreach (var memberDefinitionId in expectedMembers)
+        {
+            if (!TryGetInitializedMemberOrdinal(expectedView,
+                    memberDefinitionId, out var kind, out var ordinal)
+                || !expectedOrdinals.Add((kind, ordinal)))
+            {
+                return false;
+            }
+        }
+
+        var actualOrdinals = new HashSet<(byte Kind, int Ordinal)>();
+        foreach (var memberDefinitionId in actualMembers)
+        {
+            if (!TryGetInitializedMemberOrdinal(actualView,
+                    memberDefinitionId, out var kind, out var ordinal)
+                || !actualOrdinals.Add((kind, ordinal)))
+            {
+                return false;
+            }
+        }
+
+        return expectedOrdinals.SetEquals(actualOrdinals);
+    }
+
+    private static bool TryGetInitializedMemberOrdinal(
+        BoundStandardClassTypeView view, uint memberDefinitionId,
+        out byte kind, out int ordinal)
+    {
+        kind = 0;
+        ordinal = -1;
+        if ((memberDefinitionId >> 24) == 0x14)
+        {
+            ordinal = FindFieldOrdinal(view, memberDefinitionId);
+            return ordinal >= 0;
+        }
+
+        if ((memberDefinitionId >> 24) == 0x1E
+            && view.UsesPropertyInitializedState)
+        {
+            var property = view.Properties.SingleOrDefault(candidate =>
+                candidate.DefinitionId == memberDefinitionId);
+            if (property is null)
+            {
+                return false;
+            }
+
+            kind = 1;
+            ordinal = FindMethodOrdinal(view,
+                property.GetterMethodDefinitionId);
+            return ordinal >= 0;
+        }
+
+        return false;
+    }
+
+    private static int GetPropertyGetterOrdinal(
+        BoundStandardClassTypeView view, uint propertyDefinitionId)
+    {
+        if (propertyDefinitionId == 0)
+        {
+            return -1;
+        }
+
+        var property = view.Properties.SingleOrDefault(candidate =>
+            candidate.DefinitionId == propertyDefinitionId);
+        return property is null ? -1
+            : FindMethodOrdinal(view, property.GetterMethodDefinitionId);
+    }
+
     private static bool LayoutFieldsMatch(
         BoundStandardClassLayoutVariant expectedLayout,
         BoundStandardClassTypeView expected,
@@ -1099,6 +1472,25 @@ internal static class BoundStandardClassDeclarationContract
         for (var ordinal = 0; ordinal < view.Fields.Length; ordinal++)
         {
             if (view.Fields[ordinal].DefinitionId == fieldDefinitionId)
+            {
+                return ordinal;
+            }
+        }
+
+        return -1;
+    }
+
+    private static int FindMethodOrdinal(BoundStandardClassTypeView view,
+        uint methodDefinitionId)
+    {
+        if (methodDefinitionId == 0)
+        {
+            return -1;
+        }
+
+        for (var ordinal = 0; ordinal < view.Methods.Length; ordinal++)
+        {
+            if (view.Methods[ordinal].DefinitionId == methodDefinitionId)
             {
                 return ordinal;
             }

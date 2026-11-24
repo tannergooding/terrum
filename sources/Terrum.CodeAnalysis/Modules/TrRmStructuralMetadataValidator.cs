@@ -90,7 +90,9 @@ public static class TrRmStructuralMetadataValidator
             TrRmFixedArrayLayoutTableReader fixedArrayLayouts,
             TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
             TrRmMethodParameterLabelTableReader methodParameterLabels,
-            TrRmMethodDefTableReader methods, TrRmBodyTableReader bodies,
+            TrRmMethodDefTableReader methods,
+            TrRmPropertyDefTableReader properties,
+            TrRmBodyTableReader bodies,
             TrRmContractTableReader contracts,
             TrRmDevelopmentNativeImportTableReader nativeImports,
             TrRmNativeImportTableReader standardNativeImports,
@@ -180,6 +182,7 @@ public static class TrRmStructuralMetadataValidator
             Parameters = parameters;
             MethodParameterLabels = methodParameterLabels;
             Methods = methods;
+            Properties = properties;
             Bodies = bodies;
             Contracts = contracts;
             NativeImports = nativeImports;
@@ -280,6 +283,7 @@ public static class TrRmStructuralMetadataValidator
         internal TrRmParamTableReader Parameters { get; }
         internal TrRmMethodParameterLabelTableReader MethodParameterLabels { get; }
         internal TrRmMethodDefTableReader Methods { get; }
+        internal TrRmPropertyDefTableReader Properties { get; }
         internal TrRmBodyTableReader Bodies { get; }
         internal TrRmContractTableReader Contracts { get; }
         internal TrRmDevelopmentNativeImportTableReader NativeImports { get; }
@@ -2976,7 +2980,7 @@ public static class TrRmStructuralMetadataValidator
             intrinsicRegistrations,
             layouts, layoutFields,
             targetProfiles, fixedArrayLayouts, signatures, parameters,
-            methodParameterLabels, methods, bodies, contracts, nativeImports,
+            methodParameterLabels, methods, properties, bodies, contracts, nativeImports,
             standardNativeImports, nativeExports, nativeCallables,
             nativeFunctionPointerSignatures,
             nativeVTables, imports, exports,

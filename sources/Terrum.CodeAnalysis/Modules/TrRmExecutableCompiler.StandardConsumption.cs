@@ -2251,6 +2251,10 @@ public static partial class TrRmExecutableCompiler
                 Fields = [.. view.Fields.Select(field => field with {
                     Type = RemapConsumerType(field.Type),
                 })],
+                Properties = [.. view.Properties.Select(property =>
+                    property with {
+                        Type = RemapConsumerType(property.Type),
+                    })],
             };
 
         BoundStandardClassDeclaration RemapConsumerClassDeclaration(

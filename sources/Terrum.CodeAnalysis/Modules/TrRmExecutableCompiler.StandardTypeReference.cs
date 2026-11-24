@@ -2494,9 +2494,9 @@ public static partial class TrRmExecutableCompiler
         {
             var decodedStructTypeIdentities
                 = new HashSet<BoundGenericNominalTypeIdentity>();
-            var remainingClassFieldTypeVisits
+            var remainingClassMemberTypeVisits
                 = SemanticVerifier.MaximumAnalysisVisits;
-            var classFieldTypeSpecInstanceIndexes = new Dictionary<(
+            var classMemberTypeSpecInstanceIndexes = new Dictionary<(
                 BoundGenericNominalTypeIdentity Identity,
                 string TypeSpecProviderIdentity,
                 uint TypeSpecReference), int>();
@@ -2516,19 +2516,18 @@ public static partial class TrRmExecutableCompiler
                                 view.Provider.ArtifactSnapshot.AsSpan()));
                 var tables = GetC1M1Tables(artifacts, schemaIdentities,
                     providerModule.ArtifactIndex);
-                var fields = view.Fields.ToBuilder();
-                for (var fieldIndex = 0; fieldIndex < fields.Count;
-                    fieldIndex++)
+
+                PrimitiveType DecodeClassMemberType(
+                    uint typeSpecReference)
                 {
-                    if (--remainingClassFieldTypeVisits < 0)
+                    if (--remainingClassMemberTypeVisits < 0)
                     {
                         throw Unsupported(
-                            "The C1 class/struct FieldDef TypeSpec closure exceeds its traversal limit.");
+                            "The C1 class member TypeSpec closure exceeds its traversal limit.");
                     }
 
-                    var field = fields[fieldIndex];
                     var typeSpec = tables.TypeSpecs.GetTypeSpecRef(
-                        field.TypeSpecReference);
+                        typeSpecReference);
                     if (typeSpec.Qualifiers == 0
                         && (typeSpec.Form is 0x01 or 0x0F)
                         && TrRmConstantSourceValueValidator
@@ -2536,10 +2535,7 @@ public static partial class TrRmExecutableCompiler
                                 out var scalarType)
                         && scalarType != PrimitiveType.Void)
                     {
-                        fields[fieldIndex] = field with {
-                            Type = scalarType,
-                        };
-                        continue;
+                        return scalarType;
                     }
 
                     if (!typeSpec.IsRow
@@ -2547,11 +2543,11 @@ public static partial class TrRmExecutableCompiler
                         || typeSpec.Qualifiers > 1)
                     {
                         throw Unsupported(
-                            "The C1 class TypeDef equality projection supports scalar and nongeneric nominal field types.");
+                            "The C1 class TypeDef equality projection supports scalar and nongeneric nominal member types.");
                     }
 
                     var typeDefRow = tables.TypeSpecs.GetNominalTypeDefRow(
-                        field.TypeSpecReference, tables.TypeDefs,
+                        typeSpecReference, tables.TypeDefs,
                         tables.Imports);
                     var expectedDefinitionId = 0x1300_0000u
                         | checked((uint)typeDefRow);
@@ -2559,20 +2555,20 @@ public static partial class TrRmExecutableCompiler
                     if (nominalKind is not (1 or 2))
                     {
                         throw Unsupported(
-                            "The C1 class TypeDef equality projection supports only class and struct field dependencies.");
+                            "The C1 class TypeDef equality projection supports only class and struct member dependencies.");
                     }
                     if (typeSpec.Form == 0x02
                         && tables.Imports.IsExpectedDefinition(
                             expectedDefinitionId))
                     {
                         throw Invalid(
-                            "A direct class FieldDef TypeSpec cannot name an expected TypeDef stub.");
+                            "A direct class member TypeSpec cannot name an expected TypeDef stub.");
                     }
 
                     int providerArtifactIndex;
                     int providerModuleRow;
                     int actualTypeDefRow;
-                    int typeSpecImportRow = 0;
+                    var typeSpecImportRow = 0;
                     uint actualDefinitionId;
                     if (typeSpec.Form == 0x03)
                     {
@@ -2590,7 +2586,7 @@ public static partial class TrRmExecutableCompiler
                         if (bindings.Length != 1)
                         {
                             throw Invalid(
-                                "A class FieldDef TypeSpec has no exact checked Import binding.");
+                                "A class member TypeSpec has no exact checked Import binding.");
                         }
                         var binding = bindings[0];
 
@@ -2606,7 +2602,7 @@ public static partial class TrRmExecutableCompiler
                                         binding.ProviderTypeDefRow)))
                         {
                             throw Invalid(
-                                "A class FieldDef TypeSpec binding has an invalid provider TypeDef.");
+                                "A class member TypeSpec binding has an invalid provider TypeDef.");
                         }
                     }
                     else
@@ -2667,7 +2663,7 @@ public static partial class TrRmExecutableCompiler
                             || !isMutable))
                     {
                         throw Unsupported(
-                            "A writable class field TypeSpec requires a mutable class provider.");
+                            "A writable class member TypeSpec requires a mutable class provider.");
                     }
                     if (nominalKind == 1
                         && decodedStructTypeIdentities.Add(identity))
@@ -2679,37 +2675,59 @@ public static partial class TrRmExecutableCompiler
                     }
 
                     var key = (identity, view.Provider.ModuleIdentity,
-                        field.TypeSpecReference);
-                    if (!classFieldTypeSpecInstanceIndexes.TryGetValue(key,
+                        typeSpecReference);
+                    if (!classMemberTypeSpecInstanceIndexes.TryGetValue(key,
                             out var instanceIndex))
                     {
                         if (genericNominalTypeInstances.Count
                             >= BoundGenericNominalTypeTypes.MaximumCount)
                         {
                             throw Unsupported(
-                                "The C1 class field nominal instance limit was exceeded.");
+                                "The C1 class member nominal instance limit was exceeded.");
                         }
 
                         instanceIndex = genericNominalTypeInstances.Count;
                         genericNominalTypeInstances.Add(
                             new BoundGenericNominalTypeInstance(identity, [],
                                 typeSpec.Qualifiers,
-                                field.TypeSpecReference,
+                                typeSpecReference,
                                 view.Provider.ModuleIdentity,
                                 typeSpec.Form) {
                                 TypeSpecImportRow = typeSpecImportRow,
                             });
-                        classFieldTypeSpecInstanceIndexes.Add(key,
+                        classMemberTypeSpecInstanceIndexes.Add(key,
                             instanceIndex);
                     }
 
+                    return BoundGenericNominalTypeTypes.Type(instanceIndex);
+                }
+
+                var fields = view.Fields.ToBuilder();
+                for (var fieldIndex = 0; fieldIndex < fields.Count;
+                    fieldIndex++)
+                {
+                    var field = fields[fieldIndex];
                     fields[fieldIndex] = field with {
-                        Type = BoundGenericNominalTypeTypes.Type(
-                            instanceIndex),
+                        Type = DecodeClassMemberType(
+                            field.TypeSpecReference),
                     };
                 }
 
-                return view with { Fields = fields.ToImmutable() };
+                var properties = view.Properties.ToBuilder();
+                for (var propertyIndex = 0;
+                    propertyIndex < properties.Count; propertyIndex++)
+                {
+                    var property = properties[propertyIndex];
+                    properties[propertyIndex] = property with {
+                        Type = DecodeClassMemberType(
+                            property.TypeSpecReference),
+                    };
+                }
+
+                return view with {
+                    Fields = fields.ToImmutable(),
+                    Properties = properties.ToImmutable(),
+                };
             }
 
             for (var declarationIndex = 0;
@@ -3832,6 +3850,69 @@ public static partial class TrRmExecutableCompiler
             });
         }
 
+        var exportKeysByProperty = new Dictionary<uint, List<string>>();
+        foreach (var (definitionId, exportKey) in tables.Exports
+            .GetExportsForModule(provider.ModuleRow))
+        {
+            if ((definitionId >> 24) != 0x1E)
+            {
+                continue;
+            }
+
+            if (!exportKeysByProperty.TryGetValue(definitionId,
+                    out var exportKeys))
+            {
+                exportKeys = [];
+                exportKeysByProperty.Add(definitionId, exportKeys);
+            }
+            exportKeys.Add(exportKey);
+        }
+
+        var properties = ImmutableArray.CreateBuilder<
+            BoundStandardClassPropertyDeclaration>();
+        for (var propertyRow = 1;
+            propertyRow <= tables.Properties.Count; propertyRow++)
+        {
+            if (tables.Properties.GetOwnerType(propertyRow) != typeDefRow)
+            {
+                continue;
+            }
+
+            var definitionId = 0x1E00_0000u
+                | checked((uint)propertyRow);
+            var getterMethodRow
+                = tables.Properties.GetGetterMethod(propertyRow);
+            var setterMethodRow
+                = tables.Properties.GetSetterMethod(propertyRow);
+            var initializerMethodRow
+                = tables.Properties.GetInitMethod(propertyRow);
+            var backingFieldRow
+                = tables.Properties.GetBackingFieldDef(propertyRow);
+            var propertyExportKeys
+                = exportKeysByProperty.TryGetValue(definitionId,
+                    out var exportKeys)
+                    ? exportKeys.ToImmutableArray()
+                    : ImmutableArray<string>.Empty;
+            properties.Add(new BoundStandardClassPropertyDeclaration(
+                definitionId, typeDefId,
+                tables.Properties.GetName(propertyRow),
+                tables.Properties.GetTypeSpecRef(propertyRow),
+                tables.Properties.GetFlags(propertyRow),
+                0x1600_0000u | checked((uint)getterMethodRow),
+                setterMethodRow == 0 ? 0
+                    : 0x1600_0000u
+                        | checked((uint)setterMethodRow),
+                initializerMethodRow == 0 ? 0
+                    : 0x1600_0000u
+                        | checked((uint)initializerMethodRow),
+                backingFieldRow == 0 ? 0
+                    : 0x1400_0000u
+                        | checked((uint)backingFieldRow)) {
+                ExportKeys = propertyExportKeys,
+                SelectedExportKeys = propertyExportKeys,
+            });
+        }
+
         var (layoutStart, layoutCount)
             = tables.TypeDefs.GetLayoutRange(typeDefRow);
         var layouts = ImmutableArray.CreateBuilder<
@@ -4087,6 +4168,9 @@ public static partial class TrRmExecutableCompiler
             tables.TypeDefs.GetFlags(typeDefRow), fields.MoveToImmutable(),
             layouts.MoveToImmutable(), provider) {
             Methods = methods.ToImmutable(),
+            Properties = properties.MoveToImmutable(),
+            UsesPropertyInitializedState
+                = tables.Schema.UsesPropertyInitializedState(),
         };
     }
 

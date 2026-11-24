@@ -22,6 +22,8 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
         = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1";
     private const string C1M1Construction2ClassParameterDefaultsSchemaIdentity
         = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-class-parameter-defaults-1";
+    private const string C1M1Construction2PropertyInitializedStateSchemaIdentity
+        = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-property-initialized-state-1";
 
     [TestCase(
         StandardGenericMethodSchema.C1M1Construction2ClassTypeBindingViews,
@@ -4595,6 +4597,92 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
         Assert.That(importedClass.Expectations[0].ExpectedDeclaration
             .TryGetDeclaredMutability(out var expectedMutability), Is.True);
         Assert.That(expectedMutability, Is.True);
+    }
+
+    [Test]
+    public void CapturesPI1PropertyBackingAndAccessorIdentitiesInClassViews()
+    {
+        var tree = SyntaxTree.Parse("""
+            public class Box {
+                public int32 Value { get; init; }
+                public Box(int32 value) { Value = value; }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var members = classDeclaration.Children.OfType<SyntaxNode>();
+        var propertyDeclaration = members.Single(static node =>
+            node.Kind == SyntaxKind.PropertyDeclaration);
+        var constructorDeclaration = members.Single(static node =>
+            node.Kind == SyntaxKind.ConstructorDeclaration);
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "PI1ClassProvider",
+            C1M1Construction2PropertyInitializedStateSchemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [
+                new TrRmSourceClassExport(program, 0,
+                    classDeclaration.Span, "BoxKey", [
+                        new TrRmSourceClassMemberExport(0,
+                            propertyDeclaration.Span, "Box.Value"),
+                        new TrRmSourceClassMemberExport(0,
+                            constructorDeclaration.Span,
+                            "Box.Initialize"),
+                    ]),
+            ]);
+
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(
+                C1M1Construction2PropertyInitializedStateSchemaIdentity,
+                artifact),
+            "PI1ClassProvider", [], ["BoxKey"]);
+        var view = reference.StandardClassDeclarations.Single(
+            static declaration => declaration.Declaration.Name == "Box")
+            .Declaration;
+
+        Assert.That(view.UsesPropertyInitializedState, Is.True);
+        Assert.That(view.Properties, Has.Length.EqualTo(1));
+        var property = view.Properties[0];
+        Assert.That(property.Name, Is.EqualTo("Value"));
+        Assert.That(property.TypeSpecReference, Is.GreaterThan(0u));
+        Assert.That(property.GetterMethodDefinitionId >> 24,
+            Is.EqualTo(0x16u));
+        Assert.That(property.InitMethodDefinitionId >> 24,
+            Is.EqualTo(0x16u));
+        Assert.That(property.BackingFieldDefinitionId >> 24,
+            Is.EqualTo(0x14u));
+        Assert.That(property.SelectedExportKeys,
+            Is.EqualTo(new[] { "Box.Value" }));
+        Assert.That(view.Methods.Single(method =>
+                method.DefinitionId == property.InitMethodDefinitionId)
+                .ConstructionPropertyDefinitionId,
+            Is.EqualTo(property.DefinitionId));
+        Assert.That(view.Fields.Single(field =>
+                field.DefinitionId == property.BackingFieldDefinitionId)
+                .Name,
+            Is.Empty);
+
+        var declarationIndex
+            = reference.StandardClassDeclarations.IndexOf(
+                reference.StandardClassDeclarations.Single(
+                    declaration => declaration.Declaration.Name == "Box"));
+        var invalidDeclaration
+            = reference.StandardClassDeclarations[declarationIndex] with {
+                Declaration = view with {
+                    Properties = view.Properties.SetItem(0, property with {
+                        BackingFieldDefinitionId = 0,
+                    }),
+                },
+            };
+        Assert.That(BoundStandardClassDeclarationContract.IsValidTable(
+                reference.StandardClassDeclarations.SetItem(
+                    declarationIndex, invalidDeclaration),
+                reference.GenericNominalTypeDefinitions),
+            Is.False);
     }
 
     [Test]

@@ -24220,6 +24220,9 @@ public static partial class TrRmExecutableCompiler
             || left.TypeDefFlags != right.TypeDefFlags
             || !SourceTypeSnapshotsMatch(left.Provider, right.Provider)
             || left.Fields.Length != right.Fields.Length
+            || left.Properties.Length != right.Properties.Length
+            || left.UsesPropertyInitializedState
+                != right.UsesPropertyInitializedState
             || left.Layouts.Length != right.Layouts.Length
             || left.Methods.Length != right.Methods.Length)
         {
@@ -24230,6 +24233,15 @@ public static partial class TrRmExecutableCompiler
         {
             if (!StandardClassFieldsMatch(left.Fields[index],
                     right.Fields[index]))
+            {
+                return false;
+            }
+        }
+
+        for (var index = 0; index < left.Properties.Length; index++)
+        {
+            if (!StandardClassPropertiesMatch(left.Properties[index],
+                    right.Properties[index]))
             {
                 return false;
             }
@@ -24283,6 +24295,28 @@ public static partial class TrRmExecutableCompiler
             && left.Type == right.Type
             && left.ExportKeys.AsSpan().SequenceEqual(
                 right.ExportKeys.AsSpan());
+
+    private static bool StandardClassPropertiesMatch(
+        BoundStandardClassPropertyDeclaration left,
+        BoundStandardClassPropertyDeclaration right)
+        => left.DefinitionId == right.DefinitionId
+            && left.OwnerDefinitionId == right.OwnerDefinitionId
+            && StringComparer.Ordinal.Equals(left.Name, right.Name)
+            && left.TypeSpecReference == right.TypeSpecReference
+            && left.Flags == right.Flags
+            && left.GetterMethodDefinitionId
+                == right.GetterMethodDefinitionId
+            && left.SetterMethodDefinitionId
+                == right.SetterMethodDefinitionId
+            && left.InitMethodDefinitionId
+                == right.InitMethodDefinitionId
+            && left.BackingFieldDefinitionId
+                == right.BackingFieldDefinitionId
+            && left.Type == right.Type
+            && left.ExportKeys.AsSpan().SequenceEqual(
+                right.ExportKeys.AsSpan())
+            && left.SelectedExportKeys.AsSpan().SequenceEqual(
+                right.SelectedExportKeys.AsSpan());
 
     private static bool StandardClassMethodsMatch(
         BoundStandardClassMethodDeclaration left,

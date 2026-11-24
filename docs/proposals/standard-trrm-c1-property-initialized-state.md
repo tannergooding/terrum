@@ -48,6 +48,15 @@ not validation results:
   checks those identities and rejects the node in function Bodies or when an
   init accessor tests another property. Graph production, failure-map
   composition, provider remapping and lowering remain open.
+* [`BoundStandardClassTypeView`](../../sources/Terrum.CodeAnalysis/Semantics/BoundStandardClassDeclarations.cs)
+  now retains PropertyDef identities, selected keys, type references, and
+  getter/setter/init/backing edges. Standard class-view validation and
+  compatibility compare those edges through the corresponding MethodDef and
+  FieldDef ordinals; source-free re-emission still rejects imported PI1
+  backing closure, so provider replacement and remapping are not complete.
+  [`TrRmStandardClassTypeProviderBindingTests`](../../tests/Terrum.CodeAnalysis.Tests/Modules/TrRm/TrRmStandardClassTypeProviderBindingTests.cs)
+  covers the PI1 view and a malformed missing-backing rejection; these tests
+  remain unverified under the active execution hold.
 * [`TrRmStandardClassSourceEmissionTests`](../../tests/Terrum.CodeAnalysis.Tests/Modules/TrRm/TrRmStandardClassSourceEmissionTests.cs)
   covers auto-getter, setter, init-accessor and constructor CallSite producer
   cases, including repeated calls, multiple properties and source-order
