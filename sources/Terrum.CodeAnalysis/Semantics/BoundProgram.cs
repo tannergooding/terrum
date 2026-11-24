@@ -2216,6 +2216,7 @@ public sealed record BoundFieldAssignment(int Variable, int Field, BoundExpressi
     public ImmutableArray<int> NestedFields { get; init; } = [];
 
     internal bool IsUnsafeAuthorized { get; init; }
+    internal bool IsInitializationAuthority { get; init; }
 }
 
 /// <summary>Writes through one statically bound field identity.</summary>

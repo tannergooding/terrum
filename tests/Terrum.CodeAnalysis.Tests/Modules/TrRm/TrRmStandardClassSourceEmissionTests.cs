@@ -397,6 +397,67 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     }
 
     [Test]
+    public void EmitsPI1AutoInitializerAccessorAndRoleThreeLink()
+    {
+        var tree = SyntaxTree.Parse("""
+            public class Box {
+                public int32 Value { get { return field; } init; }
+                public Box(int32 value) { Value = value; }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var members = classDeclaration.Children.OfType<SyntaxNode>();
+        var propertyDeclaration = members.Single(static node =>
+            node.Kind == SyntaxKind.PropertyDeclaration);
+        var constructorDeclaration = members.Single(static node =>
+            node.Kind == SyntaxKind.ConstructorDeclaration);
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "PI1AutoInitBox",
+            C1M1Construction2PropertyInitializedStateSchemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [
+                new TrRmSourceClassExport(program, 0,
+                    classDeclaration.Span, "BoxKey", [
+                        new TrRmSourceClassMemberExport(0,
+                            propertyDeclaration.Span, "Box.Value"),
+                        new TrRmSourceClassMemberExport(0,
+                            constructorDeclaration.Span,
+                            "Box.Initialize"),
+                    ]),
+            ]);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForC1M1Construction2L1R1PropertyInitializedStateDraft(
+                        artifact));
+
+        var initializerMethod = tables.Properties.GetInitMethod(1);
+        Assert.That(initializerMethod, Is.GreaterThan(0));
+        var propertyClause
+            = tables.Contracts.GetConstructionClause(initializerMethod);
+        Assert.That(propertyClause.RoleTag, Is.EqualTo(3));
+        Assert.That(propertyClause.PropertyDefRow, Is.EqualTo(1));
+        var bodyRow = tables.Methods.GetBodyRow(initializerMethod);
+        Assert.That(bodyRow, Is.GreaterThan(0));
+        var body = tables.Bodies.GetRow(bodyRow);
+        Assert.That(body.Length, Is.EqualTo(12));
+        Assert.That(body[0], Is.EqualTo(0x03));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(body[4..]),
+            Is.EqualTo(0x1400_0001u));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(body[8..]),
+            Is.Zero);
+        Assert.That(body[10], Is.EqualTo(1));
+        Assert.That(body[11], Is.Zero);
+    }
+
+    [Test]
     public void BindsC2ModuleFunctionWithClassParameterFromFullReference()
     {
         const string classProviderIdentity = "C2ClassTypeProvider";

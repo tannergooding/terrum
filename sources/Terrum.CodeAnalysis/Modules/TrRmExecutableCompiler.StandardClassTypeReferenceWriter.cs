@@ -1000,10 +1000,12 @@ public static partial class TrRmExecutableCompiler
             if (!emitsConstruction2 || !emitsPropertyInitializedState
                 || member.BackingFieldIndex < 0
                 || member.SetterFunctionIndex >= 0
-                || member.InitializerFunctionIndex >= 0
                 || member.FunctionIndex < 0
                 || (uint)member.FunctionIndex
-                    >= (uint)program.Functions.Length)
+                    >= (uint)program.Functions.Length
+                || (member.InitializerFunctionIndex >= 0
+                    && (uint)member.InitializerFunctionIndex
+                        >= (uint)program.Functions.Length))
             {
                 throw Unsupported(
                     "The bounded PI1 class source route currently requires a selected backed getter-only property.");
@@ -2403,7 +2405,8 @@ public static partial class TrRmExecutableCompiler
                 var constructorDeclarations = new List<(
                     BoundSourceClassPart Part, SyntaxNode Declaration)>();
                 var methodDeclarations = new List<(
-                    BoundSourceClassPart Part, SyntaxNode Declaration)>();
+                    BoundSourceClassPart Part, SyntaxNode Declaration,
+                    int PropertyAccessorFunctionIndex)>();
                 foreach (var part in declaration.Parts)
                 {
                     foreach (var member in part.Declaration.Children
@@ -2433,7 +2436,7 @@ public static partial class TrRmExecutableCompiler
                                     "The bounded Construction-2 source emitter does not yet retain ordinary member parameter defaults.");
                             }
 
-                            methodDeclarations.Add((part, member));
+                            methodDeclarations.Add((part, member, -1));
                             continue;
                         }
 
@@ -2445,14 +2448,34 @@ public static partial class TrRmExecutableCompiler
                                     "Property declarations require the exact PI1 schema.");
                             }
 
-                            methodDeclarations.Add((part, member));
+                            var propertyMembers = propertyMemberExports
+                                .Where(candidate =>
+                                    candidate.ClassIndex == classIndex
+                                    && ReferenceEquals(
+                                        candidate.Member.Declaration,
+                                        member))
+                                .ToArray();
+                            if (propertyMembers.Length != 1)
+                            {
+                                throw Unsupported(
+                                    "A retained property requires its exact source PropertyDef selector.");
+                            }
+
+                            var propertyMember = propertyMembers[0].Member;
+                            methodDeclarations.Add((part, member,
+                                propertyMember.FunctionIndex));
+                            if (propertyMember.InitializerFunctionIndex >= 0)
+                            {
+                                methodDeclarations.Add((part, member,
+                                    propertyMember.InitializerFunctionIndex));
+                            }
                             continue;
                         }
 
                         if (member.Kind != SyntaxKind.ConstructorDeclaration)
                         {
                             throw Unsupported(
-                                "The bounded Construction-2 class source emitter does not yet retain properties or other class member declarations.");
+                                "The bounded Construction-2 class source emitter does not yet retain this class member declaration kind.");
                         }
 
                         if (!schema.UsesClassParameterDefaults()
@@ -2673,7 +2696,8 @@ public static partial class TrRmExecutableCompiler
                             projectionMethodDefRow));
                 }
 
-                foreach (var (methodPart, methodDeclaration)
+                foreach (var (methodPart, methodDeclaration,
+                    propertyAccessorFunctionIndex)
                     in methodDeclarations)
                 {
                     SourceClassMemberExport? propertyMember = null;
@@ -2696,7 +2720,17 @@ public static partial class TrRmExecutableCompiler
                         }
 
                         propertyMember = propertyMembers[0].Member;
-                        methodFunctionIndex = propertyMember.FunctionIndex;
+                        if (propertyAccessorFunctionIndex
+                                != propertyMember.FunctionIndex
+                            && propertyAccessorFunctionIndex
+                                != propertyMember.InitializerFunctionIndex)
+                        {
+                            throw new InvalidDataException(
+                                "A retained property accessor is not part of its captured property.");
+                        }
+
+                        methodFunctionIndex
+                            = propertyAccessorFunctionIndex;
                         methodFunction = program.Functions[
                             methodFunctionIndex];
                     }
@@ -2716,7 +2750,14 @@ public static partial class TrRmExecutableCompiler
                             = methodFunctions[0];
                     }
 
-                    var isPropertyGetter = propertyMember is not null;
+                    var isPropertyGetter = propertyMember is not null
+                        && methodFunction.PropertyAccessorKind
+                            == BoundPropertyAccessorKind.Getter;
+                    var isPropertyInitializer = propertyMember is not null
+                        && methodFunction.PropertyAccessorKind
+                            == BoundPropertyAccessorKind.Initializer;
+                    var isPropertyAccessor
+                        = isPropertyGetter || isPropertyInitializer;
                     var isSupportedNoOpInstanceMethod
                         = !methodFunction.IsStatic
                             && methodFunction.ParameterCount
@@ -2775,15 +2816,30 @@ public static partial class TrRmExecutableCompiler
                             && TryGetC1M1Construction2DirectFieldWrite(
                                 methodFunction,
                                 out directFieldWriteIndex);
-                    if (propertyMember is not null
+                    if (isPropertyGetter
                         && (!isSupportedDirectFieldReadInstanceMethod
                             || directFieldIndex
-                                != propertyMember.BackingFieldIndex
+                                != propertyMember!.BackingFieldIndex
                             || methodFunction.PropertyAccessorKind
                                 != BoundPropertyAccessorKind.Getter))
                     {
                         throw Unsupported(
                             "The bounded PI1 class source route supports only a getter that returns its exact backing field.");
+                    }
+                    var isSupportedPropertyInitializer
+                        = isPropertyInitializer
+                            && propertyMember is
+                                SourceClassMemberExport initializerProperty
+                            && IsC1M1AutoPropertyInitializer(
+                                initializerProperty.Declaration)
+                            && IsSupportedC1M1Construction2PropertyInitializer(
+                                methodFunction,
+                                initializerProperty.BackingFieldIndex);
+                    if (isPropertyInitializer
+                        && !isSupportedPropertyInitializer)
+                    {
+                        throw Unsupported(
+                            "The bounded PI1 class source route supports only an auto init accessor that assigns its exact backing field.");
                     }
                     C1M1Construction2NestedFieldWrite? nestedFieldWrite
                         = !isSupportedDirectFieldWriteInstanceMethod
@@ -2846,6 +2902,7 @@ public static partial class TrRmExecutableCompiler
                             && !isSupportedFieldReferenceBody
                             && nestedFieldRead is null
                             && !isSupportedDirectFieldWriteInstanceMethod
+                            && !isSupportedPropertyInitializer
                             && nestedFieldWrite is null
                             && !isSupportedIdentityForwarder
                             && !isSupportedUnitIdentityForwarder
@@ -2891,7 +2948,7 @@ public static partial class TrRmExecutableCompiler
                         || methodFunction.GenericMethodInstantiation
                             is not null
                         || (methodFunction.PropertyName is not null
-                            && !isPropertyGetter)
+                            && !isPropertyAccessor)
                         || methodFunction.IndexedBody is not null
                         || !methodFunction.CapturedParameters.IsEmpty
                         || !methodFunction.ResultDependencyParameters
@@ -3067,7 +3124,7 @@ public static partial class TrRmExecutableCompiler
                         || methodExports.Count(static member =>
                             member.Kind == SourceClassMemberKind.Property)
                             != (isPropertyGetter ? 1 : 0)
-                        || (isPropertyGetter
+                        || (isPropertyAccessor
                             && methodExportMembers.Length != 0))
                     {
                         throw new InvalidDataException(
@@ -3107,6 +3164,34 @@ public static partial class TrRmExecutableCompiler
                                 methodFunction, nestedFieldRead,
                                 Construction2ValueTypeSpecReference,
                                 contractRows.Count, schema);
+                    }
+                    else if (isSupportedPropertyInitializer)
+                    {
+                        var property = propertyMember
+                            ?? throw new InvalidDataException(
+                                "A PI1 property initializer has no captured PropertyDef.");
+                        if (!fieldDefRowByClassAndIndex.TryGetValue((
+                                classIndex, property.BackingFieldIndex),
+                                out var fieldDefRow))
+                        {
+                            throw new InvalidDataException(
+                                "A PI1 property initializer has no emitted backing FieldDef.");
+                        }
+
+                        var field = program.Classes[classIndex].Fields[
+                            property.BackingFieldIndex];
+                        if (field.Type
+                                != methodFunction.Variables[1].Type
+                            || !TryGetC1M1SourceScalarTypeSpecReference(
+                                field.Type, out _))
+                        {
+                            throw Unsupported(
+                                "The bounded PI1 auto init Body supports only a scalar backing field with the exact value formal type.");
+                        }
+
+                        encodedBody
+                            = EncodeC1M1Construction2FieldWriteBody(
+                                fieldDefRow, 0, sourceUse: 1);
                     }
                     else if (isSupportedDirectFieldWriteInstanceMethod)
                     {
@@ -3240,6 +3325,34 @@ public static partial class TrRmExecutableCompiler
                         contractRows.Add(new TrRmContractRow(
                             0x1600_0000u | checked((uint)methodRow), 1,
                             s_effectPayloads[methodEffectsMask]));
+                        methodContractCount++;
+                    }
+
+                    if (isSupportedPropertyInitializer)
+                    {
+                        var property = propertyMember
+                            ?? throw new InvalidDataException(
+                                "A PI1 property initializer has no captured PropertyDef.");
+                        if (!propertyDefRowByClassAndField.TryGetValue((
+                                classIndex, property.BackingFieldIndex),
+                                out var propertyDefRow))
+                        {
+                            throw new InvalidDataException(
+                                "A PI1 property initializer has no PropertyDef row.");
+                        }
+
+                        var payload = new byte[8];
+                        payload[0] = 3;
+                        BinaryPrimitives.WriteUInt32LittleEndian(
+                            payload.AsSpan(4),
+                            checked((uint)propertyDefRow));
+                        if (methodContractFirst == 0)
+                        {
+                            methodContractFirst = contractRows.Count + 1;
+                        }
+                        contractRows.Add(new TrRmContractRow(
+                            0x1600_0000u | checked((uint)methodRow), 0x0003,
+                            payload));
                         methodContractCount++;
                     }
 
@@ -4267,9 +4380,20 @@ public static partial class TrRmExecutableCompiler
                 = FieldTypeSpecReference(getter.ReturnType);
             var propertyVisibility = getter.IsPrivate ? 0u
                 : getter.IsInternal ? 1u : 2u;
+            var initializerMethodDefRow = 0;
+            if (member.InitializerFunctionIndex >= 0
+                && !methodDefRowByFunctionIndex.TryGetValue(
+                    member.InitializerFunctionIndex,
+                    out initializerMethodDefRow))
+            {
+                throw new InvalidDataException(
+                    "A retained PI1 property has no emitted init MethodDef.");
+            }
+
             propertyRows.Add(new TrRmPropertyDefRow(
                 typeDefRowByClass[classIndex], 0, propertyTypeSpecRef,
                 getterMethodDefRow, propertyVisibility) {
+                InitMethodDefRow = initializerMethodDefRow,
                 BackingFieldDefRow = backingFieldDefRow,
             });
             propertyNames.Add(getter.PropertyName
@@ -10305,6 +10429,67 @@ public static partial class TrRmExecutableCompiler
                 }
             }
         }
+    }
+
+    private static bool IsC1M1AutoPropertyInitializer(
+        SyntaxNode propertyDeclaration)
+    {
+        var initAccessors = propertyDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Where(static child => child.Kind == SyntaxKind.InitAccessor)
+            .ToArray();
+        return initAccessors.Length == 1
+            && !initAccessors[0].Children.OfType<SyntaxNode>().Any(
+                static child => child.Kind is SyntaxKind.Block
+                    or SyntaxKind.ExpressionBody
+                    or SyntaxKind.ExternalBody)
+            && initAccessors[0].Children.LastOrDefault()
+                is SyntaxTokenElement {
+                    Token.Kind: TokenKind.Semicolon,
+                };
+    }
+
+    private static bool IsSupportedC1M1Construction2PropertyInitializer(
+        BoundFunction function, int backingFieldIndex)
+    {
+        if (function.IsStatic
+            || function.PropertyAccessorKind
+                != BoundPropertyAccessorKind.Initializer
+            || function.ReturnType != PrimitiveType.Void
+            || function.ParameterCount != 2
+            || function.Variables.Length != 2
+            || function.Variables[0].IsMutable
+            || function.Variables[1].IsMutable
+            || function.Variables[1].IsOut
+            || function.Variables[1].IsInit
+            || function.Variables[1].IsImplicitRef
+            || function.Variables[1].IsInitializationLocal
+            || !TryGetC1M1SourceScalarTypeSpecReference(
+                function.Variables[1].Type, out _)
+            || !function.Body.RetiredManagedLocals.IsEmpty
+            || function.Body.Statements.Length is not (1 or 2))
+        {
+            return false;
+        }
+
+        if (function.Body.Statements[0]
+                is not BoundFieldAssignment assignment
+            || assignment.Variable != 0
+            || assignment.Field != backingFieldIndex
+            || !assignment.NestedFields.IsEmpty
+            || !assignment.IsInitializationAuthority
+            || assignment.IsUnsafeAuthorized
+            || assignment.Value is not BoundRead value
+            || value.Variable != 1
+            || value.Type != function.Variables[1].Type
+            || (function.Body.Statements.Length == 2
+                && function.Body.Statements[1]
+                    is not BoundReturn { Value: null }))
+        {
+            return false;
+        }
+
+        return true;
     }
 
     private static C1M1Construction2NestedFieldWrite?
