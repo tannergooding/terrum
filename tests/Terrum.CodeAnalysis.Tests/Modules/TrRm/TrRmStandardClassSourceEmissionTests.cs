@@ -336,6 +336,10 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             public class Box {
                 public int32 Value;
                 public Box(int32 value) { Value = value; }
+                public int32 CallHidden(int32 value) {
+                    return Hidden(value);
+                }
+                private int32 Hidden(int32 value) { return value; }
             }
             """);
         var compilation = Compilation.CreateLibrary(tree);
@@ -350,6 +354,10 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             node.Kind == SyntaxKind.FieldDeclaration);
         var constructorDeclaration = classMembers.Single(static node =>
             node.Kind == SyntaxKind.ConstructorDeclaration);
+        var callHiddenDeclaration = classMembers.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "CallHidden"));
         var classArtifact = TrRmExecutableCompiler.EmitStandard(
             program, classProviderIdentity,
             C1M1Construction2SchemaIdentity,
@@ -363,6 +371,8 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                             constructorDeclaration.Span, "Box.Initialize") {
                             ConstructionProjectionExportKey = "Box.Create",
                         },
+                        new TrRmSourceClassMemberExport(0,
+                            callHiddenDeclaration.Span, "Box.CallHidden"),
                     ]),
             ]);
 
@@ -456,6 +466,37 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             Is.EqualTo(1u));
         Assert.That(reemittedTables.Methods.GetBodyRow(helperMethodRow),
             Is.GreaterThan(0));
+        var classProviderModuleRow = Enumerable.Range(1,
+                reemittedTables.Modules.Count)
+            .Single(row => reemittedTables.Modules.GetIdentity(row)
+                == classProviderIdentity);
+        var boxTypeDefRow = Enumerable.Range(1,
+                reemittedTables.TypeDefs.Count)
+            .Single(row => reemittedTables.TypeDefs.GetOwnerModule(row)
+                    == (uint)classProviderModuleRow
+                && reemittedTables.TypeDefs.GetName(row) == "Box");
+        var hiddenMethodRow = Enumerable.Range(1,
+                reemittedTables.Methods.Count)
+            .Single(row => reemittedTables.Methods.GetOwnerType(row)
+                    == (uint)boxTypeDefRow
+                && reemittedTables.Methods.GetName(row) == "Hidden");
+        Assert.That(reemittedTables.Exports.GetExportsForModule(
+                classProviderModuleRow)
+            .Any(export => export.Definition
+                == (0x1600_0000u | checked((uint)hiddenMethodRow))),
+            Is.False);
+        var callHiddenMethodRow = Enumerable.Range(1,
+                reemittedTables.Methods.Count)
+            .Single(row => reemittedTables.Methods.GetOwnerType(row)
+                    == (uint)boxTypeDefRow
+                && reemittedTables.Methods.GetName(row) == "CallHidden");
+        var callHiddenBody = reemittedTables.Bodies.GetRegisterBody(
+            reemittedTables.Methods.GetBodyRow(callHiddenMethodRow),
+            reemittedTables.Contracts.Count);
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                callHiddenBody.MethodMap),
+            Is.EqualTo(0x1600_0000u
+                | checked((uint)hiddenMethodRow)));
         var helperAgainMethodRow = Enumerable.Range(1,
                 reemittedTables.Methods.Count)
             .Single(row => reemittedTables.Methods.GetOwnerType(row) == 0
