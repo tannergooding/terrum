@@ -255,6 +255,29 @@ internal sealed class CoreContractFailureIdentitySelectionTests
                 StringComparison.Ordinal)), Is.True);
     }
 
+    [Test]
+    public void RoleOnlyStandardEmissionRejectsDeclarationFailureClauses()
+    {
+        var selection = CreateSelection() with {
+            PostconditionExceptionClass = null,
+            RequireExceptionSchema = null,
+        };
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public void Validate() require true {}
+            """), new CompilationOptions {
+                CoreContractFailureIdentitySelection = selection,
+            });
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(() => TrRmExecutableCompiler.EmitStandard(
+                compilation.Program!, "sample.consumer",
+                "trrm/1-draft-init-reference-bodies-general-predicate-graphs-"
+                + "generic-method-calls-1-class-mutability-1-construction-2",
+                1, out _),
+            Throws.TypeOf<NotSupportedException>());
+    }
+
     private static CoreContractFailureIdentitySelection CreateSelection()
         => new("sample.consumer",
             new CoreContractFailureDeclarationIdentity("core.contracts",

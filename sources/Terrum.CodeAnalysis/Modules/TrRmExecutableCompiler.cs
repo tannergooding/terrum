@@ -607,6 +607,14 @@ public static partial class TrRmExecutableCompiler
                 "The Core contract-failure identity selections are invalid.",
                 nameof(program));
         }
+        if (!program.PreconditionFailureBindings.IsDefaultOrEmpty
+            || !program.PostconditionConstructionBindings.IsDefaultOrEmpty
+            || program.Functions.Any(static function =>
+                !function.DeclarationContractClauses.IsDefaultOrEmpty))
+        {
+            throw Unsupported(
+                "Role-only Standard emission cannot publish declaration predicates without their phase-specific failure-binding maps.");
+        }
 
         byte[] artifact;
         if (isNoLabelConstruction2)
@@ -1196,6 +1204,12 @@ public static partial class TrRmExecutableCompiler
             sourceEnumDeclarationExports = null)
     {
         ArgumentNullException.ThrowIfNull(program);
+        if (!program.PreconditionFailureBindings.IsDefaultOrEmpty
+            || !program.PostconditionConstructionBindings.IsDefaultOrEmpty)
+        {
+            throw Unsupported(
+                "This Standard emission route does not return declaration failure-binding maps.");
+        }
         if (retainedGenericMethodDefinitions is not null
             && (sourceGenericMethodExports is null
                 || !ReferenceEquals(sourceGenericMethodExports.Program,

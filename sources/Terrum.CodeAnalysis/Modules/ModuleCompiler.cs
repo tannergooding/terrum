@@ -8507,12 +8507,14 @@ public static partial class ModuleCompiler
         BoundProgram program)
     {
         if (program.Functions.Any(static function =>
-            function.DeclarationContractClauses.IsDefault
-                || !function.DeclarationContractClauses.IsEmpty
-                || !function.CheckedOutputStatePredicates.IsDefaultOrEmpty))
+                function.DeclarationContractClauses.IsDefault
+                    || !function.DeclarationContractClauses.IsEmpty
+                    || !function.CheckedOutputStatePredicates.IsDefaultOrEmpty)
+            || !program.PreconditionFailureBindings.IsDefaultOrEmpty
+            || !program.PostconditionConstructionBindings.IsDefaultOrEmpty)
         {
             throw new ModuleContractException(
-                "The private semantic module format does not retain declaration clauses or general OutputState predicates.");
+                "The private semantic module format does not retain declaration clauses, failure bindings, or general OutputState predicates.");
         }
     }
 
