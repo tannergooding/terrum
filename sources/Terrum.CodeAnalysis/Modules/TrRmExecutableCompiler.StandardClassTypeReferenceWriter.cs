@@ -5380,9 +5380,11 @@ public static partial class TrRmExecutableCompiler
                         EmitBlock(nested);
                         break;
                     case BoundLocal local:
+                        byte localSourceRegister;
                         if (local.Initializer is BoundRead read)
                         {
                             AppendHomeLoad(read.Variable);
+                            localSourceRegister = 0;
                         }
                         else if (local.Initializer is BoundConstant constant)
                         {
@@ -5392,6 +5394,7 @@ public static partial class TrRmExecutableCompiler
                             code.Add(1);
                             code.Add((byte)constantIndex);
                             code.Add((byte)(constantIndex >> 8));
+                            localSourceRegister = 1;
                         }
                         else
                         {
@@ -5400,7 +5403,7 @@ public static partial class TrRmExecutableCompiler
                         }
 
                         code.Add(0xD6);
-                        code.Add(0x10);
+                        code.Add((byte)(0x10 | localSourceRegister));
                         code.Add(checked((byte)local.Variable));
                         code.Add(checked((byte)(local.Variable >> 8)));
                         break;

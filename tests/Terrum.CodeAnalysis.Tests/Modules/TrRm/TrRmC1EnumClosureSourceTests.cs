@@ -1749,7 +1749,7 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 Is.EqualTo(new byte[] {
                     0xD5, 0, 1, 0, 0xD6, 0x10, 2, 0,
                     0xD5, 0, 2, 0, 0xD6, 0x10, 3, 0,
-                    0xD4, 1, 0, 0, 0xD6, 0x10, 4, 0,
+                    0xD4, 1, 0, 0, 0xD6, 0x11, 4, 0,
                 }), schemaIdentity);
             Assert.That(initializerBody.ConstantCount, Is.EqualTo(1),
                 schemaIdentity);
@@ -1809,7 +1809,7 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 Is.EqualTo(new byte[] {
                     0xD5, 0, 1, 0, 0xD6, 0x10, 2, 0,
                     0xD5, 0, 2, 0, 0xD6, 0x10, 3, 0,
-                    0xD4, 1, 0, 0, 0xD6, 0x10, 4, 0,
+                    0xD4, 1, 0, 0, 0xD6, 0x11, 4, 0,
                 }), schemaIdentity);
             var reemittedLocalConstant
                 = TrRmConstantSourceValueValidator.MaterializeFrozenScalar(
