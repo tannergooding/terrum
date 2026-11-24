@@ -20,6 +20,8 @@ internal static class TrRmEnumProviderBindingValidator
             || actual.TypeDefs.GetKind(actualType) != 4
             || actual.Imports.IsExpectedDefinition(
                 0x1300_0000u | checked((uint)actualType))
+            || (expected.TypeDefs.GetFlags(expectedType) & 3) != 2
+            || (actual.TypeDefs.GetFlags(actualType) & 3) != 2
             || expected.TypeDefs.GetFlags(expectedType)
                 != actual.TypeDefs.GetFlags(actualType)
             || !StringComparer.Ordinal.Equals(

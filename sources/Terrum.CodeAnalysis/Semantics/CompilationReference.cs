@@ -48,8 +48,18 @@ public sealed class CompilationReference
             coreEvaluationFormSchemaProviders = default,
         ImmutableArray<BoundStandardClassDeclaration>
             standardClassDeclarations = default,
-        ImmutableArray<BoundSpanTypeDefinition> spanTypes = default)
+        ImmutableArray<BoundSpanTypeDefinition> spanTypes = default,
+        string? foreignNativeInterfaceSchemaIdentity = null)
     {
+        if (foreignNativeInterfaceSchemaIdentity is { } foreignSchema
+            && (string.IsNullOrWhiteSpace(foreignSchema)
+                || foreignSchema.Contains('\0', StringComparison.Ordinal)))
+        {
+            throw new ArgumentException(
+                "The selected ForeignNativeInterface schema identity is invalid.",
+                nameof(foreignNativeInterfaceSchemaIdentity));
+        }
+
         if (nativeCoreRegistration is not null && !nativeCoreRegistration.IsValid())
         {
             throw new ArgumentException("The selected Core native registration is invalid.",
@@ -385,6 +395,8 @@ public sealed class CompilationReference
         CoreEvaluationFormSchemaProviders
             = coreEvaluationFormSchemaProviders.IsDefault
                 ? [] : coreEvaluationFormSchemaProviders;
+        ForeignNativeInterfaceSchemaIdentity
+            = foreignNativeInterfaceSchemaIdentity;
     }
 
     private static bool IsValidPrivateClassReference(
@@ -532,6 +544,8 @@ public sealed class CompilationReference
     internal ImmutableArray<CoreEvaluationFormSchemaDeclarations>
         CoreEvaluationFormSchemaProviders { get; }
 
+    internal string? ForeignNativeInterfaceSchemaIdentity { get; }
+
     internal ImmutableArray<BoundInterfaceDefinition> Interfaces { get; }
 
     /// <summary>The exact nominal TypeDefs selected from checked providers.</summary>
@@ -598,6 +612,41 @@ public sealed class CompilationReference
             coreEvaluationFormSchemaProviders:
                 CoreEvaluationFormSchemaProviders,
             standardClassDeclarations: StandardClassDeclarations,
-            spanTypes: SpanTypes);
+            spanTypes: SpanTypes,
+            foreignNativeInterfaceSchemaIdentity:
+                ForeignNativeInterfaceSchemaIdentity);
+    }
+
+    internal CompilationReference WithEnumDefinitions(
+        ImmutableArray<BoundEnumDefinition> enumDefinitions)
+        => new(Structures, Functions, RuntimePolicy, RequiresSourceGrant,
+            InvocationProfileId, NativeFunctionPointerSignatures,
+            NativePointerTypes, NativeCoreRegistration, enumDefinitions,
+            CheckedReferenceTypes, Interfaces,
+            GenericNominalTypeDefinitions, GenericNominalTypeInstances,
+            CoreTaskType, NativeFixedArrayTypes,
+            CoreExceptionIdentitySelections, LayoutCoreRegistration,
+            privateNominalTypeOrigins: PrivateNominalTypeOrigins,
+            classes: Classes, privateClassReferences: PrivateClassReferences,
+            staticInitializationCoreRegistration:
+                StaticInitializationCoreRegistration,
+            coreContractFailureIdentitySelections:
+                CoreContractFailureIdentitySelections,
+            lazyInitializationCoreRegistration:
+                LazyInitializationCoreRegistration,
+            nativeOutputCoreRegistration:
+                NativeOutputCoreRegistration,
+            genericMethodImports: GenericMethodImports,
+            retainedGenericMethodRoots: RetainedGenericMethodRoots,
+            standardQuerySourceAssociation:
+                StandardQuerySourceAssociation,
+            coreEvaluationFormIdentitySelections:
+                CoreEvaluationFormIdentitySelections,
+            coreEvaluationFormSchemaProviders:
+                CoreEvaluationFormSchemaProviders,
+            standardClassDeclarations: StandardClassDeclarations,
+            spanTypes: SpanTypes,
+            foreignNativeInterfaceSchemaIdentity:
+                ForeignNativeInterfaceSchemaIdentity);
     }
 }

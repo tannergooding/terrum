@@ -24,6 +24,8 @@ public static partial class TrRmExecutableCompiler
             ModuleSelections { get; }
         internal Dictionary<string, (int ArtifactIndex, int ModuleRow)>
             Modules { get; } = new(StringComparer.Ordinal);
+        internal (int ArtifactIndex, int ModuleRow)?
+            ForeignNativeInterfaceRootModule { get; set; }
         internal Dictionary<(int ArtifactIndex, int ModuleRow),
             (uint TargetRequirement, uint RuntimePolicy)>
             ModuleRequirements { get; } = [];
@@ -74,6 +76,19 @@ public static partial class TrRmExecutableCompiler
             ForeignNativeInterfacePointerTypes { get; } = [];
         internal List<BoundStruct> ForeignNativeInterfaceStructures
             { get; } = [];
+        internal List<BoundEnumDefinition>
+            ForeignNativeInterfaceEnumDefinitions { get; } = [];
+        internal Dictionary<(int ArtifactIndex, int ModuleRow,
+            int TypeDefRow), int>
+            ForeignNativeInterfaceEnumIndexesByTypeDef { get; } = [];
+        internal Dictionary<(int ArtifactIndex, int ModuleRow,
+            int ImportRow), int>
+            ForeignNativeInterfaceEnumIndexesByImportRow { get; } = [];
+        internal Dictionary<(int ArtifactIndex, int ModuleRow,
+            int TypeDefRow), int>
+            ForeignNativeInterfaceEnumIndexesByActualTypeDef { get; } = [];
+        internal HashSet<(int ArtifactIndex, int ModuleRow)>
+            ForeignNativeInterfaceEnumModulesLoaded { get; } = [];
         internal HashSet<(int ArtifactIndex, int ModuleRow)>
             ForeignNativeInterfaceStructureModulesLoaded { get; } = [];
         internal HashSet<(int ArtifactIndex, int ImportRow)>

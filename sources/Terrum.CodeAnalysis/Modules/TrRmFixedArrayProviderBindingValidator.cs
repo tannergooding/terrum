@@ -194,7 +194,7 @@ internal static class TrRmFixedArrayProviderBindingValidator
     {
         var isEN1ProviderSchema = schemaIdentities.Length != 0
             && TrRmExecutableCompiler
-                .IsSelectedC1EnumClosureSchemaIdentity(
+                .IsSelectedEN1EnumClosureSchemaIdentity(
                     schemaIdentities[0])
             && schemaIdentities.All(schemaIdentity =>
                 StringComparer.Ordinal.Equals(schemaIdentity,
@@ -218,7 +218,7 @@ internal static class TrRmFixedArrayProviderBindingValidator
                     .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsDraft
                 or TrRmArtifactSchema
                     .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidenceDraft)
-            && !(consumer.Schema.UsesC1EnumClosure()
+            && !(consumer.Schema.UsesEN1EnumClosure()
                 && isEN1ProviderSchema)
             || artifacts.Length != schemaIdentities.Length
             || artifacts.Length == 0)
@@ -253,7 +253,7 @@ internal static class TrRmFixedArrayProviderBindingValidator
                     && IsC1M1SchemaIdentity(schemaIdentity))
                 && !(isEN1ProviderSchema
                     && TrRmExecutableCompiler
-                        .IsSelectedC1EnumClosureSchemaIdentity(
+                        .IsSelectedEN1EnumClosureSchemaIdentity(
                             schemaIdentity)))
             {
                 throw new InvalidDataException(
@@ -627,7 +627,7 @@ internal static class TrRmFixedArrayProviderBindingValidator
             {
                 var moduleTables = GetTables(module.ArtifactIndex);
                 if (TrRmExecutableCompiler
-                    .IsSelectedC1EnumClosureSchemaIdentity(
+                    .IsSelectedEN1EnumClosureSchemaIdentity(
                         _schemaIdentities[module.ArtifactIndex]))
                 {
                     var (typeDefStart, typeDefEnd)
@@ -684,7 +684,7 @@ internal static class TrRmFixedArrayProviderBindingValidator
                 var isRootModule = module.ArtifactIndex == 0
                     && module.ModuleRow == rootModuleRow;
                 var isEN1 = TrRmExecutableCompiler
-                    .IsSelectedC1EnumClosureSchemaIdentity(
+                    .IsSelectedEN1EnumClosureSchemaIdentity(
                         _schemaIdentities[module.ArtifactIndex]);
                 for (var importRow = 1;
                     importRow <= moduleTables.Imports.Count; importRow++)
@@ -704,6 +704,17 @@ internal static class TrRmFixedArrayProviderBindingValidator
                     {
                         case 0x13:
                         {
+                            var expectedTypeDefRow = checked((int)(
+                                expectedDefinition & 0x00FF_FFFF));
+                            if (_consumer.Schema
+                                    .UsesForeignNativeInterface()
+                                && moduleTables.TypeDefs.GetKind(
+                                    expectedTypeDefRow) == 3)
+                            {
+                                usedModuleRefs[moduleRefRow] = true;
+                                break;
+                            }
+
                             var resolution = ResolveImport(
                                 module.ArtifactIndex, module.ModuleRow,
                                 moduleTables, importRow);
@@ -739,6 +750,13 @@ internal static class TrRmFixedArrayProviderBindingValidator
                         }
 
                         default:
+                            if (_consumer.Schema
+                                    .UsesForeignNativeInterface()
+                                && (expectedDefinition >> 24) == 0x16)
+                            {
+                                usedModuleRefs[moduleRefRow] = true;
+                                break;
+                            }
                             if (isEN1)
                             {
                                 throw InvalidFieldBinding();
@@ -2953,8 +2971,21 @@ internal static class TrRmFixedArrayProviderBindingValidator
                         != pair.Expected.ModuleRow
                     || actual.TypeDefs.GetOwnerModule(actualType)
                         != pair.Actual.ModuleRow
-                    || !expected.Schema.UsesC1EnumClosure()
-                    || !actual.Schema.UsesC1EnumClosure())
+                    || !expected.Schema.UsesEN1EnumClosure()
+                    || !actual.Schema.UsesEN1EnumClosure()
+                    || (TrRmExecutableCompiler
+                            .IsSelectedForeignNativeInterfaceParameterSurfaceEnumClosureSchemaIdentity(
+                                _schemaIdentities[
+                                    pair.Expected.ArtifactIndex])
+                        && (!TrRmExecutableCompiler
+                                .IsSelectedForeignNativeInterfaceParameterSurfaceEnumClosureSchemaIdentity(
+                                    _schemaIdentities[
+                                        pair.Actual.ArtifactIndex])
+                            || !StringComparer.Ordinal.Equals(
+                                _schemaIdentities[
+                                    pair.Expected.ArtifactIndex],
+                                _schemaIdentities[
+                                    pair.Actual.ArtifactIndex])))
                 {
                     throw InvalidBinding();
                 }

@@ -130,8 +130,22 @@ public static partial class TrRmExecutableCompiler
         TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
         GenericMethodReadContext context, int artifactIndex, int moduleRow)
     {
+        LoadForeignNativeInterfaceEnums(tables, context, artifactIndex,
+            moduleRow);
+        var (enumTypeByTypeDefRow, enumTypeByImportRow)
+            = GetForeignNativeInterfaceEnumTypeMaps(context,
+                artifactIndex, moduleRow);
         var importRows = CreateGenericInterfaceImportRows(tables, moduleRow);
         var usedImportRows = new HashSet<int>();
+        foreach (var import in context
+                     .ForeignNativeInterfaceEnumIndexesByImportRow.Keys)
+        {
+            if (import.ArtifactIndex == artifactIndex
+                && import.ModuleRow == moduleRow)
+            {
+                _ = usedImportRows.Add(import.ImportRow);
+            }
+        }
         var typeExportKeys = new Dictionary<uint, string>();
         var methodExportKeys = new Dictionary<uint, List<string>>();
         foreach (var (definition, exportKey)
@@ -182,7 +196,8 @@ public static partial class TrRmExecutableCompiler
         ReadForeignNativeInterfaceFunctionPointerAnchors(tables, context,
             moduleRow, pointerTypeIndexes, signatureIndexByAnchorMethod,
             signatureIndexByAnchorTypeSpec, structureTypeByTypeDef,
-            includedTypeDefRows);
+            includedTypeDefRows, enumTypeByTypeDefRow,
+            enumTypeByImportRow);
         var foreignInterfaceRowsByOwner
             = new Dictionary<int, int>(tables.ForeignNativeInterfaces.Count);
         for (var foreignInterfaceRow = 1;
@@ -401,7 +416,8 @@ public static partial class TrRmExecutableCompiler
                 runtimePolicy, methodKeys, pointerTypeIndexes,
                 signatureIndexByAnchorMethod,
                 signatureIndexByAnchorTypeSpec, structureTypeByTypeDef,
-                tables.Modules.GetIdentity(moduleRow));
+                tables.Modules.GetIdentity(moduleRow),
+                enumTypeByTypeDefRow, enumTypeByImportRow);
             if (!context.InterfaceDefinitionsByTypeDef.TryAdd(
                     (artifactIndex, moduleRow, typeDef), definition))
             {
@@ -482,6 +498,425 @@ public static partial class TrRmExecutableCompiler
         return exposedDefinitions.ToImmutable();
     }
 
+    private static (
+        Dictionary<int, PrimitiveType> TypeDefs,
+        Dictionary<int, PrimitiveType> Imports)
+        GetForeignNativeInterfaceEnumTypeMaps(
+        GenericMethodReadContext context, int artifactIndex, int moduleRow)
+    {
+        var typeDefs = new Dictionary<int, PrimitiveType>();
+        foreach (var (location, enumIndex) in context
+                     .ForeignNativeInterfaceEnumIndexesByTypeDef)
+        {
+            if (location.ArtifactIndex == artifactIndex
+                && location.ModuleRow == moduleRow)
+            {
+                typeDefs.Add(location.TypeDefRow,
+                    BoundEnumTypes.Type(enumIndex));
+            }
+        }
+
+        var imports = new Dictionary<int, PrimitiveType>();
+        foreach (var (location, enumIndex) in context
+                     .ForeignNativeInterfaceEnumIndexesByImportRow)
+        {
+            if (location.ArtifactIndex == artifactIndex
+                && location.ModuleRow == moduleRow)
+            {
+                imports.Add(location.ImportRow,
+                    BoundEnumTypes.Type(enumIndex));
+            }
+        }
+
+        return (typeDefs, imports);
+    }
+
+    private static void LoadForeignNativeInterfaceEnums(
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+        GenericMethodReadContext context, int artifactIndex, int moduleRow)
+    {
+        var moduleKey = (artifactIndex, moduleRow);
+        if (!context.ForeignNativeInterfaceEnumModulesLoaded.Add(moduleKey))
+        {
+            return;
+        }
+
+        var schemaIdentity = context.SchemaIdentities[artifactIndex];
+        if (!IsSelectedForeignNativeInterfaceParameterSurfaceEnumClosureSchemaIdentity(
+                schemaIdentity))
+        {
+            if (tables.EnumDefs.Count != 0)
+            {
+                throw Unsupported(
+                    "The selected FNI schema does not authorize EN1 enum definitions.");
+            }
+
+            return;
+        }
+
+        var snapshot = CreateA2SourceTypeProviderSnapshot(tables,
+            context.Artifacts[artifactIndex], schemaIdentity, moduleRow);
+        var (typeDefStart, typeDefEnd)
+            = tables.Modules.GetTypeDefRange(moduleRow);
+        foreach (var typeDefRow in Enumerable.Range(typeDefStart,
+                     typeDefEnd - typeDefStart))
+        {
+            if (tables.TypeDefs.GetKind(typeDefRow) != 4)
+            {
+                continue;
+            }
+
+            var definitionId = 0x1300_0000u
+                | checked((uint)typeDefRow);
+            if (!tables.Imports.IsExpectedDefinition(definitionId))
+            {
+                var view = CreateStandardEnumView(tables, snapshot,
+                    typeDefRow);
+                var exportKeys = GetForeignNativeInterfaceEnumExportKeys(
+                    tables, moduleRow, typeDefRow);
+                var selectedRoot
+                    = context.ForeignNativeInterfaceRootModule;
+                var selectedExportKeys
+                    = selectedRoot.HasValue
+                        && selectedRoot.Value.ArtifactIndex == artifactIndex
+                        && selectedRoot.Value.ModuleRow == moduleRow
+                        && (tables.TypeDefs.GetFlags(typeDefRow) & 3) == 2
+                        ? exportKeys
+                        : ImmutableArray<string>.Empty;
+                var enumIndex = GetOrAddForeignNativeInterfaceEnum(
+                    context, (artifactIndex, moduleRow, typeDefRow), view,
+                    [view], [], exportKeys, selectedExportKeys);
+                AddForeignNativeInterfaceEnumTypeDefIndex(context,
+                    (artifactIndex, moduleRow, typeDefRow), enumIndex);
+                continue;
+            }
+
+            var importRow = 0;
+            for (var candidate = 1;
+                candidate <= tables.Imports.Count; candidate++)
+            {
+                if (tables.Imports.GetExpectedDefinitionForImportRow(
+                        candidate) != definitionId)
+                {
+                    continue;
+                }
+
+                var moduleRefRow
+                    = tables.Imports.GetModuleRefForImportRow(candidate);
+                if (tables.ModuleRefs.GetOwnerModule(moduleRefRow)
+                    != moduleRow)
+                {
+                    continue;
+                }
+                if (importRow != 0)
+                {
+                    throw Invalid(
+                        "An FNI enum TypeDef has duplicate Import expectations.");
+                }
+
+                importRow = candidate;
+            }
+
+            if (importRow == 0)
+            {
+                throw Invalid(
+                    "An FNI enum Import does not belong to its owning Module.");
+            }
+
+            var moduleRef = tables.Imports.GetModuleRefForImportRow(
+                importRow);
+            var selected = tables.Imports.GetBindingForImportRow(importRow);
+            if (tables.ModuleRefs.GetRequirements(moduleRef)
+                    != (selected.TargetRequirement, selected.RuntimePolicy)
+                || selected.TargetRequirement
+                    != TrRmModuleTableReader
+                        .WindowsX64NativeTargetRequirement
+                || selected.RuntimePolicy != 0
+                || StringComparer.Ordinal.Equals(
+                    selected.ProducerIdentity,
+                    tables.Modules.GetIdentity(moduleRow))
+                || !context.Modules.TryGetValue(
+                    selected.ProducerIdentity, out var providerSelection)
+                || !IsSelectedForeignNativeInterfaceParameterSurfaceEnumClosureSchemaIdentity(
+                    context.SchemaIdentities[
+                        providerSelection.ArtifactIndex]))
+            {
+                throw Unsupported(
+                    "An FNI enum Import has no exact selected EN1 provider.");
+            }
+
+            var providerTables
+                = context.GetValidatedForeignNativeInterfaceArtifact(
+                    providerSelection.ArtifactIndex);
+            var providerModuleRow = providerSelection.ModuleRow;
+            if (providerTables.Modules.GetRequirements(providerModuleRow)
+                    != (selected.TargetRequirement, selected.RuntimePolicy)
+                || !providerTables.Exports.TryGetDefinitionForKey(
+                    providerModuleRow, selected.ExportKey,
+                    out var providerDefinitionId)
+                || (providerDefinitionId >> 24) != 0x13)
+            {
+                throw Invalid(
+                    "An FNI enum Import does not select an exported provider TypeDef.");
+            }
+
+            var providerTypeDefRow = checked((int)(
+                providerDefinitionId & 0x00FF_FFFF));
+            if (providerTypeDefRow <= 0
+                || providerTables.TypeDefs.GetOwnerModule(
+                    providerTypeDefRow) != providerModuleRow
+                || providerTables.TypeDefs.GetKind(providerTypeDefRow) != 4
+                || providerTables.Imports.IsExpectedDefinition(
+                    providerDefinitionId)
+                || (providerTables.TypeDefs.GetFlags(providerTypeDefRow)
+                    & 3) != 2)
+            {
+                throw Invalid(
+                    "An FNI enum provider ExportKey does not select a public owned enum TypeDef.");
+            }
+
+            TrRmEnumProviderBindingValidator.ValidateEN1EnumSnapshot(
+                tables, typeDefRow, providerTables, providerTypeDefRow);
+            var expectedView = CreateStandardEnumView(tables, snapshot,
+                typeDefRow);
+            var providerSnapshot = CreateA2SourceTypeProviderSnapshot(
+                providerTables,
+                context.Artifacts[providerSelection.ArtifactIndex],
+                context.SchemaIdentities[
+                    providerSelection.ArtifactIndex],
+                providerModuleRow);
+            var actualView = CreateStandardEnumView(providerTables,
+                providerSnapshot, providerTypeDefRow);
+            var expectation = new BoundStandardEnumExpectation(
+                new BoundSourceTypeExpectation(snapshot, importRow,
+                    definitionId, selected.ProducerIdentity,
+                    selected.ExportKey, selected.TargetRequirement,
+                    selected.RuntimePolicy, providerSnapshot,
+                    providerDefinitionId),
+                expectedView);
+            var exportKeysForProvider
+                = GetForeignNativeInterfaceEnumExportKeys(providerTables,
+                    providerModuleRow, providerTypeDefRow);
+            if (!exportKeysForProvider.Contains(selected.ExportKey,
+                    StringComparer.Ordinal))
+            {
+                throw Invalid(
+                    "An FNI enum provider ExportKey is not retained by its owned TypeDef.");
+            }
+
+            var enumIndex = GetOrAddForeignNativeInterfaceEnum(context,
+                (providerSelection.ArtifactIndex, providerModuleRow,
+                    providerTypeDefRow),
+                actualView, [actualView, expectedView], [expectation],
+                exportKeysForProvider, []);
+            AddForeignNativeInterfaceEnumImportIndex(context,
+                (artifactIndex, moduleRow, importRow), enumIndex);
+            AddForeignNativeInterfaceEnumTypeDefIndex(context,
+                (artifactIndex, moduleRow, typeDefRow), enumIndex);
+            AddForeignNativeInterfaceEnumTypeDefIndex(context,
+                (providerSelection.ArtifactIndex, providerModuleRow,
+                    providerTypeDefRow), enumIndex);
+        }
+    }
+
+    private static ImmutableArray<string>
+        GetForeignNativeInterfaceEnumExportKeys(
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+        int moduleRow, int typeDefRow)
+    {
+        var definitionId = 0x1300_0000u
+            | checked((uint)typeDefRow);
+        return [.. tables.Exports.GetExportsForModule(moduleRow)
+            .Where(export => export.Definition == definitionId)
+            .Select(static export => export.ExportKey)
+            .OrderBy(static key => key, StringComparer.Ordinal)];
+    }
+
+    private static int GetOrAddForeignNativeInterfaceEnum(
+        GenericMethodReadContext context,
+        (int ArtifactIndex, int ModuleRow, int TypeDefRow) actualLocation,
+        BoundStandardEnumView declaration,
+        ImmutableArray<BoundStandardEnumView> originalDeclarations,
+        ImmutableArray<BoundStandardEnumExpectation> expectations,
+        ImmutableArray<string> exportKeys,
+        ImmutableArray<string> selectedExportKeys)
+    {
+        if (!context.ForeignNativeInterfaceEnumIndexesByActualTypeDef
+            .TryGetValue(actualLocation, out var enumIndex))
+        {
+            if (context.ForeignNativeInterfaceEnumDefinitions.Count
+                >= BoundEnumTypes.MaximumCount)
+            {
+                throw Unsupported(
+                    "The FNI enum declaration closure exceeds the bound type domain.");
+            }
+
+            var occurrence = new BoundStandardEnumOccurrence(declaration,
+                originalDeclarations, expectations, exportKeys,
+                selectedExportKeys);
+            if (!occurrence.IsValid)
+            {
+                throw Invalid(
+                    "An FNI enum identity or expectation set is invalid.");
+            }
+
+            enumIndex
+                = context.ForeignNativeInterfaceEnumDefinitions.Count;
+            context.ForeignNativeInterfaceEnumDefinitions.Add(
+                CreateStandardEnumDefinition(declaration, occurrence));
+            context.ForeignNativeInterfaceEnumIndexesByActualTypeDef.Add(
+                actualLocation, enumIndex);
+            return enumIndex;
+        }
+
+        var existingDefinition
+            = context.ForeignNativeInterfaceEnumDefinitions[enumIndex];
+        if (existingDefinition.Identity
+                is not BoundEnumDeclarationIdentity.Standard existingIdentity
+            || !BoundStandardEnumDeclarationContract.ContractMatches(
+                existingIdentity.Value.Declaration, declaration)
+            || !existingIdentity.Value.ExportKeys.SequenceEqual(exportKeys,
+                StringComparer.Ordinal))
+        {
+            throw Invalid(
+                "An FNI enum owner has inconsistent checked provider views.");
+        }
+
+        var originals
+            = ImmutableArray.CreateBuilder<BoundStandardEnumView>();
+        originals.AddRange(existingIdentity.Value.OriginalDeclarations);
+        foreach (var original in originalDeclarations)
+        {
+            if (!originals.Any(existing =>
+                    AreSameForeignNativeInterfaceEnumSite(
+                        existing.Site, original.Site)))
+            {
+                originals.Add(original);
+            }
+        }
+
+        var mergedExpectations
+            = ImmutableArray.CreateBuilder<
+                BoundStandardEnumExpectation>();
+        mergedExpectations.AddRange(existingIdentity.Value.Expectations);
+        foreach (var expectation in expectations)
+        {
+            var existing = mergedExpectations.FirstOrDefault(candidate =>
+                candidate.Binding.ImportRow
+                    == expectation.Binding.ImportRow
+                && AreSameForeignNativeInterfaceEnumSnapshot(
+                    candidate.Binding.UsingModule,
+                    expectation.Binding.UsingModule));
+            if (existing is null)
+            {
+                mergedExpectations.Add(expectation);
+            }
+            else if (!SameForeignNativeInterfaceEnumExpectation(
+                    existing, expectation))
+            {
+                throw Invalid(
+                    "An FNI enum Import has divergent retained expectations.");
+            }
+        }
+
+        var mergedSelectedKeys
+            = existingIdentity.Value.SelectedExportKeys
+                .Concat(selectedExportKeys)
+                .Distinct(StringComparer.Ordinal)
+                .ToImmutableArray();
+        var mergedOccurrence = new BoundStandardEnumOccurrence(
+            existingIdentity.Value.Declaration,
+            originals.ToImmutable(), mergedExpectations.ToImmutable(),
+            existingIdentity.Value.ExportKeys, mergedSelectedKeys);
+        if (!mergedOccurrence.IsValid)
+        {
+            throw Invalid(
+                "Merged FNI enum expectations do not retain a valid exact contract.");
+        }
+
+        context.ForeignNativeInterfaceEnumDefinitions[enumIndex]
+            = CreateStandardEnumDefinition(
+                existingIdentity.Value.Declaration, mergedOccurrence);
+        return enumIndex;
+    }
+
+    private static bool SameForeignNativeInterfaceEnumExpectation(
+        BoundStandardEnumExpectation left,
+        BoundStandardEnumExpectation right)
+    {
+        var leftBinding = left.Binding;
+        var rightBinding = right.Binding;
+        return leftBinding.ImportRow == rightBinding.ImportRow
+            && leftBinding.ExpectedDefinitionId
+                == rightBinding.ExpectedDefinitionId
+            && StringComparer.Ordinal.Equals(
+                leftBinding.ProducerIdentity,
+                rightBinding.ProducerIdentity)
+            && StringComparer.Ordinal.Equals(leftBinding.ExportKey,
+                rightBinding.ExportKey)
+            && leftBinding.TargetRequirement
+                == rightBinding.TargetRequirement
+            && leftBinding.RuntimePolicy == rightBinding.RuntimePolicy
+            && leftBinding.ProviderDefinitionId
+                == rightBinding.ProviderDefinitionId
+            && AreSameForeignNativeInterfaceEnumSnapshot(
+                leftBinding.Provider, rightBinding.Provider)
+            && BoundStandardEnumDeclarationContract.ContractMatches(
+                left.ExpectedDeclaration, right.ExpectedDeclaration);
+    }
+
+    private static bool AreSameForeignNativeInterfaceEnumSite(
+        BoundStandardEnumTypeSite left,
+        BoundStandardEnumTypeSite right)
+        => left.DefinitionId == right.DefinitionId
+            && AreSameForeignNativeInterfaceEnumSnapshot(left.Snapshot,
+                right.Snapshot);
+
+    private static bool AreSameForeignNativeInterfaceEnumSnapshot(
+        BoundSourceTypeProviderSnapshot left,
+        BoundSourceTypeProviderSnapshot right)
+        => StringComparer.Ordinal.Equals(left.SchemaIdentity,
+                right.SchemaIdentity)
+            && left.ModuleRow == right.ModuleRow
+            && StringComparer.Ordinal.Equals(left.ModuleIdentity,
+                right.ModuleIdentity)
+            && left.ArtifactSnapshot.AsSpan().SequenceEqual(
+                right.ArtifactSnapshot.AsSpan());
+
+    private static void AddForeignNativeInterfaceEnumTypeDefIndex(
+        GenericMethodReadContext context,
+        (int ArtifactIndex, int ModuleRow, int TypeDefRow) location,
+        int enumIndex)
+    {
+        if (context.ForeignNativeInterfaceEnumIndexesByTypeDef.TryGetValue(
+                location, out var existing)
+            && existing != enumIndex)
+        {
+            throw Invalid(
+                "An FNI enum TypeDef maps to multiple nominal identities.");
+        }
+
+        context.ForeignNativeInterfaceEnumIndexesByTypeDef[location]
+            = enumIndex;
+    }
+
+    private static void AddForeignNativeInterfaceEnumImportIndex(
+        GenericMethodReadContext context,
+        (int ArtifactIndex, int ModuleRow, int ImportRow) location,
+        int enumIndex)
+    {
+        if (context.ForeignNativeInterfaceEnumIndexesByImportRow.TryGetValue(
+                location, out var existing)
+            && existing != enumIndex)
+        {
+            throw Invalid(
+                "An FNI enum Import maps to multiple nominal identities.");
+        }
+
+        context.ForeignNativeInterfaceEnumIndexesByImportRow[location]
+            = enumIndex;
+    }
+
     private static ImmutableArray<BoundStruct>
         LoadForeignNativeInterfaceStructures(
         TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
@@ -529,6 +964,9 @@ public static partial class TrRmExecutableCompiler
             ?? CreateUnmappedSignatureIndexes(tables.Methods.Count);
         var anchorTypeSpecMap = signatureIndexByAnchorTypeSpec
             ?? CreateUnmappedSignatureIndexes(tables.TypeSpecs.Count);
+        var (enumTypeByTypeDefRow, enumTypeByImportRow)
+            = GetForeignNativeInterfaceEnumTypeMaps(context, artifactIndex,
+                moduleRow);
         if (anchorMethodMap.Length != tables.Methods.Count + 1
             || anchorTypeSpecMap.Length != tables.TypeSpecs.Count + 1)
         {
@@ -554,6 +992,7 @@ public static partial class TrRmExecutableCompiler
                     context.ForeignNativeInterfacePointerTypes,
                     anchorMethodMap, anchorTypeSpecMap, structureMap,
                     includedTypeDefRows,
+                    enumTypeByTypeDefRow, enumTypeByImportRow,
                     validateNativePointerTypes: false));
         var structuresWithOrigins = structures.ToBuilder();
         foreach (var typeDefRow in includedTypeDefRows)
@@ -683,7 +1122,9 @@ public static partial class TrRmExecutableCompiler
         if (!NativePointerTypeContract.IsValidTable(
                 [.. context.ForeignNativeInterfacePointerTypes],
                 [.. context.ForeignNativeInterfaceStructures],
-                [.. context.ForeignNativeInterfaceFunctionPointerSignatures]))
+                [.. context.ForeignNativeInterfaceFunctionPointerSignatures],
+                enumDefinitions:
+                    [.. context.ForeignNativeInterfaceEnumDefinitions]))
         {
             throw Invalid(
                 "The selected FNI aggregate contains an invalid pointer or function-pointer type closure.");
@@ -742,6 +1183,8 @@ public static partial class TrRmExecutableCompiler
                     = context.GetValidatedForeignNativeInterfaceArtifact(
                         providerSelection.ArtifactIndex);
                 var providerModuleRow = providerSelection.ModuleRow;
+                LoadForeignNativeInterfaceEnums(providerTables, context,
+                    providerSelection.ArtifactIndex, providerModuleRow);
                 if (providerTables.Modules.GetRequirements(
                         providerModuleRow)
                         != (selected.TargetRequirement,
@@ -1318,6 +1761,8 @@ public static partial class TrRmExecutableCompiler
         var qualifiedName = interfaceNamespace.Length == 0
             ? interfaceName
             : string.Concat(interfaceNamespace, ".", interfaceName);
+        var enumTypeMaps = GetForeignNativeInterfaceEnumTypeMaps(context,
+            artifactIndex, moduleRow);
         var expected = ReadForeignNativeInterfaceDefinition(tables,
             context, interfaceDef, typeDef, foreignInterfaceRow,
             qualifiedName, selectedType.ExportKey,
@@ -1325,7 +1770,8 @@ public static partial class TrRmExecutableCompiler
             methodExportKeys, nativePointerTypeDefinitions,
             signatureIndexByAnchorMethod,
             signatureIndexByAnchorTypeSpec, structureTypeByTypeDef,
-            selectedType.ProducerIdentity);
+            selectedType.ProducerIdentity, enumTypeMaps.TypeDefs,
+            enumTypeMaps.Imports);
         ValidateForeignNativeInterfaceProviderContract(expected,
             providerInterface, providerMembersByKey);
         return providerInterface with {
@@ -1488,6 +1934,10 @@ public static partial class TrRmExecutableCompiler
         int[] signatureIndexByAnchorTypeSpec,
         int[] structureTypeByTypeDef,
         HashSet<int> includedTypeDefRows,
+        IReadOnlyDictionary<int, PrimitiveType>
+            enumTypeByTypeDefRow,
+        IReadOnlyDictionary<int, PrimitiveType>
+            enumTypeByImportRow,
         bool validateNativePointerTypes = true)
     {
         var typeStates = new byte[tables.TypeSpecs.Count + 1];
@@ -1569,13 +2019,21 @@ public static partial class TrRmExecutableCompiler
                 nativePointerTypeDefinitions, signatureIndexByAnchorMethod,
                 structureTypeByTypeDef, imports: tables.Imports,
                 signatureIndexByAnchorTypeSpec:
-                    signatureIndexByAnchorTypeSpec);
+                    signatureIndexByAnchorTypeSpec,
+                nominalEnumTypesByTypeDefRow:
+                    enumTypeByTypeDefRow,
+                nominalEnumTypesByImportRow:
+                    enumTypeByImportRow);
             var resultType = ReadForeignInvocationType(tables.TypeSpecs,
                 tables.Signatures.GetResultTypeSpec(signatureRow),
                 nativePointerTypeDefinitions, signatureIndexByAnchorMethod,
                 structureTypeByTypeDef, imports: tables.Imports,
                 signatureIndexByAnchorTypeSpec:
-                    signatureIndexByAnchorTypeSpec);
+                    signatureIndexByAnchorTypeSpec,
+                nominalEnumTypesByTypeDefRow:
+                    enumTypeByTypeDefRow,
+                nominalEnumTypesByImportRow:
+                    enumTypeByImportRow);
             var predicateContracts
                 = tables.Contracts.GetPredicateGraphContracts(methodRow);
             var selectors
@@ -1677,13 +2135,17 @@ public static partial class TrRmExecutableCompiler
                     .ForeignNativeInterfaceFunctionPointerSignatures
                     .Append(signature).ToImmutableArray();
                 if (!NativeFunctionPointerContract.IsValidTable(
-                        candidateSignatures)
+                        candidateSignatures,
+                        enumDefinitions:
+                            context.ForeignNativeInterfaceEnumDefinitions)
                     || (validateNativePointerTypes
                         && !NativePointerTypeContract.IsValidTable(
                             [.. nativePointerTypeDefinitions],
                             [.. context
                                 .ForeignNativeInterfaceStructures],
-                            candidateSignatures)))
+                            candidateSignatures,
+                            enumDefinitions:
+                                context.ForeignNativeInterfaceEnumDefinitions)))
                 {
                     throw Invalid(
                         "A ForeignNativeInterface function-pointer anchor has an invalid signature.");
@@ -1766,8 +2228,11 @@ public static partial class TrRmExecutableCompiler
 
         if (context.ForeignNativeInterfaceFunctionPointerSignatures.Count
             != 0
-            && !NativeFunctionPointerContract.IsValidTable(context
-                .ForeignNativeInterfaceFunctionPointerSignatures.ToImmutableArray()))
+            && !NativeFunctionPointerContract.IsValidTable(
+                context.ForeignNativeInterfaceFunctionPointerSignatures
+                    .ToImmutableArray(),
+                enumDefinitions:
+                    context.ForeignNativeInterfaceEnumDefinitions))
         {
             throw Invalid(
                 "The selected FNI modules contain an invalid function-pointer signature table.");
@@ -2062,7 +2527,9 @@ public static partial class TrRmExecutableCompiler
         List<NativePointerTypeDefinition> nativePointerTypeDefinitions,
         int[] signatureIndexByAnchorMethod,
         int[] signatureIndexByAnchorTypeSpec,
-        int[] structureTypeByTypeDef, string moduleIdentity)
+        int[] structureTypeByTypeDef, string moduleIdentity,
+        IReadOnlyDictionary<int, PrimitiveType> enumTypeByTypeDefRow,
+        IReadOnlyDictionary<int, PrimitiveType> enumTypeByImportRow)
     {
         var (fieldStart, fieldEnd)
             = tables.TypeDefs.GetFieldRange(typeDef);
@@ -2097,7 +2564,11 @@ public static partial class TrRmExecutableCompiler
                 nativePointerTypeDefinitions, signatureIndexByAnchorMethod,
                 structureTypeByTypeDef, imports: tables.Imports,
                 signatureIndexByAnchorTypeSpec:
-                    signatureIndexByAnchorTypeSpec);
+                    signatureIndexByAnchorTypeSpec,
+                nominalEnumTypesByTypeDefRow:
+                    enumTypeByTypeDefRow,
+                nominalEnumTypesByImportRow:
+                    enumTypeByImportRow);
             var (firstParameter, parameterCount)
                 = tables.Signatures.GetParamRange(signatureRow);
             var parameters = ImmutableArray.CreateBuilder<
@@ -2172,7 +2643,11 @@ public static partial class TrRmExecutableCompiler
                 signatureIndexByAnchorMethod, structureTypeByTypeDef,
                 imports: tables.Imports,
                 signatureIndexByAnchorTypeSpec:
-                    signatureIndexByAnchorTypeSpec);
+                    signatureIndexByAnchorTypeSpec,
+                nominalEnumTypesByTypeDefRow:
+                    enumTypeByTypeDefRow,
+                nominalEnumTypesByImportRow:
+                    enumTypeByImportRow);
             var boundResultType = CreateForeignNativeInterfaceType(
                 tables.TypeSpecs, resultTypeSpec, resultType,
                 nativePointerTypeDefinitions);

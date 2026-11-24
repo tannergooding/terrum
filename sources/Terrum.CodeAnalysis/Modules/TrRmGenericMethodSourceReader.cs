@@ -73,6 +73,7 @@ public static partial class TrRmExecutableCompiler
                     inputIndex);
         var moduleRow = FindGenericMethodModule(tables.Modules,
             moduleIdentity);
+        context.ForeignNativeInterfaceRootModule = (0, moduleRow);
         ValidateGenericMethodModuleImports(tables, context, 0, moduleRow);
         var imports = ImmutableArray.CreateBuilder<
             BoundGenericMethodImport>();
@@ -125,6 +126,8 @@ public static partial class TrRmExecutableCompiler
         return new CompilationReference(foreignNativeStructures, [],
             (BoundRuntimePolicy)runtimePolicy,
             interfaces: interfaces,
+            enumDefinitions:
+                [.. context.ForeignNativeInterfaceEnumDefinitions],
             genericMethodImports: genericMethodImports,
             retainedGenericMethodRoots: genericMethodImports,
             spanTypes: [.. context.SpanTypes],
@@ -142,7 +145,10 @@ public static partial class TrRmExecutableCompiler
             genericNominalTypeDefinitions:
                 context.GenericNominalTypeDefinitions.ToImmutable(),
             genericNominalTypeInstances:
-                context.GenericNominalTypeInstances.ToImmutable());
+                context.GenericNominalTypeInstances.ToImmutable(),
+            foreignNativeInterfaceSchemaIdentity:
+                context.Schema.UsesForeignNativeInterface()
+                    ? context.SchemaIdentity : null);
     }
 
     private static ImmutableArray<BoundInterfaceDefinition>

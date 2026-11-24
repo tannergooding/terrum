@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Linq;
 using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
@@ -51,6 +52,16 @@ internal sealed class TrRmFniEnumClosureTests
                     artifact);
         var tables = TrRmStructuralMetadataValidator
             .ValidateAndGetExecutionTables(index);
+
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(SchemaIdentity, artifact),
+            "EnumProvider", [], ["enum.shade"]);
+        Assert.That(reference.EnumDefinitions.Length, Is.EqualTo(1));
+        Assert.That(reference.EnumDefinitions[0].Identity,
+            Is.TypeOf<BoundEnumDeclarationIdentity.Standard>());
+        Assert.That(((BoundEnumDeclarationIdentity.Standard)
+            reference.EnumDefinitions[0].Identity).Value.SelectedExportKeys,
+            Does.Contain("enum.shade"));
 
         Assert.That(tables.TypeDefs.Count, Is.EqualTo(1));
         Assert.That(tables.EnumDefs.Count, Is.EqualTo(1));
@@ -140,6 +151,18 @@ internal sealed class TrRmFniEnumClosureTests
         var tables = TrRmStructuralMetadataValidator
             .ValidateAndGetExecutionTables(index);
 
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(SchemaIdentity, artifact),
+            "FniEnumProvider", []);
+        Assert.That(reference.EnumDefinitions.Length, Is.EqualTo(1));
+        Assert.That(reference.EnumDefinitions[0].UnderlyingType,
+            Is.EqualTo(PrimitiveType.Int8));
+        Assert.That(reference.EnumDefinitions[0]
+            .BlittableTargetRequirement, Is.EqualTo(1));
+        Assert.That(reference.Interfaces.Single().Members
+            .Single(member => member.Name == "Get")
+            .ResultType.PrimitiveType, Is.EqualTo(BoundEnumTypes.Type(0)));
+
         Assert.That(tables.EnumDefs.Count, Is.EqualTo(1));
         Assert.That(tables.EnumMembers.Count, Is.EqualTo(2));
         Assert.That(tables.ForeignNativeInterfaces.Count, Is.EqualTo(1));
@@ -185,6 +208,198 @@ internal sealed class TrRmFniEnumClosureTests
         Assert.That(featureIds, Does.Contain(
             TrRmFeatureTableReader.MethodParameterLabelsFeatureId));
         Assert.That(enumDefinition.Members.Length, Is.EqualTo(2));
+    }
+
+    [Test]
+    public void ReemitsAndRebindsImportedStandardFniEnumTypes()
+    {
+        var registration = NativeCoreRegistrationTests
+            .CreateRegistration(includeForeignNativeInterface: true);
+        var layoutRegistration
+            = NativeCoreRegistrationTests.CreateLayoutRegistration(
+                registration);
+        var providerTree = SyntaxTree.Parse("""
+            using Terrum.Interop;
+            namespace Demo {
+                [Blittable]
+                public enum Shade : int8 {
+                    Dark = -1,
+                    Light = 1
+                }
+                [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+                [ForeignNativeInterface(VTableByteOffset: uint32(0))]
+                public interface IProbe {
+                    public unsafe Shade Get();
+                }
+            }
+            """);
+        var providerCompilation = Compilation.CreateLibrary(providerTree,
+            new CompilationOptions {
+                NativeCoreRegistration = registration,
+                LayoutCoreRegistration = layoutRegistration,
+            });
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+        var providerProgram = (BoundProgram)providerCompilation.Program!;
+        var providerEnumDeclaration
+            = providerTree.Root.DescendantNodes().Single(node =>
+                node.Kind == SyntaxKind.EnumDeclaration);
+        var providerEnumExport
+            = new TrRmSourceEnumDeclarationExport(providerProgram, 0,
+                providerEnumDeclaration.Span, ["type.shade"],
+                ["shade.dark", "shade.light"]);
+        var providerInterface = providerProgram.Interfaces.Single();
+        var providerTypeExport
+            = new TrRmSourceTypeExport("Demo", "IProbe", "type.probe") {
+                InterfaceMethodExports = [
+                    .. providerInterface.Members.Select(member =>
+                        new TrRmSourceInterfaceMethodExport(
+                            member.SourceInputOrdinal,
+                            member.SourceDeclarationSpan,
+                            $"method.probe.{member.Name}")),
+                ],
+            };
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerProgram, "FniEnumProvider", SchemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [providerTypeExport], [providerEnumExport]);
+        var providerInput = new TrRmStandardArtifactInput(SchemaIdentity,
+            providerArtifact);
+        var providerReference = TrRmExecutableCompiler
+            .CreateStandardReference(providerInput, "FniEnumProvider", []);
+
+        var consumerTree = SyntaxTree.Parse("""
+            using Demo;
+            using Terrum.Interop;
+            namespace Consumer {
+                [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+                [ForeignNativeInterface(VTableByteOffset: uint32(0))]
+                public interface IWrapper {
+                    public unsafe Shade Echo(Shade value);
+                }
+            }
+            """);
+        var consumerCompilation = Compilation.CreateLibrary(consumerTree,
+            providerReference, new CompilationOptions {
+                NativeCoreRegistration = registration,
+                LayoutCoreRegistration = layoutRegistration,
+            });
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumerProgram = (BoundProgram)consumerCompilation.Program!;
+        var consumerInterface = consumerProgram.Interfaces.Single(
+            definition => definition.ModuleImport is null);
+        var consumerTypeExport
+            = new TrRmSourceTypeExport("Consumer", "IWrapper",
+                "type.wrapper") {
+                InterfaceMethodExports = [
+                    .. consumerInterface.Members.Select(member =>
+                        new TrRmSourceInterfaceMethodExport(
+                            member.SourceInputOrdinal,
+                            member.SourceDeclarationSpan,
+                            $"method.wrapper.{member.Name}")),
+                ],
+            };
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            consumerProgram, "FniEnumConsumer", SchemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [consumerTypeExport]);
+        var consumerIndex
+            = TrRmArtifactIndex
+                .ForForeignNativeInterfaceParameterSurfaceEnumClosureDraft(
+                    consumerArtifact);
+        _ = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(consumerIndex);
+
+        var consumerReference = TrRmExecutableCompiler
+            .CreateStandardReference(
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    consumerArtifact),
+                "FniEnumConsumer", [providerInput]);
+        Assert.That(consumerReference.EnumDefinitions.Length,
+            Is.EqualTo(1));
+        Assert.That(consumerReference.EnumDefinitions[0].UnderlyingType,
+            Is.EqualTo(PrimitiveType.Int8));
+        Assert.That(consumerReference.EnumDefinitions[0].Identity,
+            Is.TypeOf<BoundEnumDeclarationIdentity.Standard>());
+        Assert.That(consumerReference.Interfaces.Single(
+                definition => definition.QualifiedName
+                    == "Consumer.IWrapper").Members.Single()
+            .ResultType.PrimitiveType, Is.EqualTo(BoundEnumTypes.Type(0)));
+        var selectedEnumRoot = TrRmExecutableCompiler
+            .CreateStandardReference(providerInput, "FniEnumProvider", [],
+                ["type.shade"]);
+        var composedReference = TrRmExecutableCompiler
+            .CreateStandardReferenceSet([
+                consumerReference, selectedEnumRoot,
+            ]);
+        Assert.That(composedReference.Interfaces.Any(
+            static definition => definition.QualifiedName
+                == "Consumer.IWrapper"), Is.True);
+        Assert.That(((BoundEnumDeclarationIdentity.Standard)
+            composedReference.EnumDefinitions.Single().Identity)
+            .Value.SelectedExportKeys, Does.Contain("type.shade"));
+        Assert.That(((BoundEnumDeclarationIdentity.Standard)
+            composedReference.EnumDefinitions.Single().Identity)
+            .Value.Expectations.Length, Is.EqualTo(1));
+
+        var replacementTree = SyntaxTree.Parse("""
+            using Terrum.Interop;
+            namespace Demo {
+                [Blittable]
+                public enum Shade : int8 {
+                    Dark = -1,
+                    Light = 2
+                }
+                [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+                [ForeignNativeInterface(VTableByteOffset: uint32(0))]
+                public interface IProbe {
+                    public unsafe Shade Get();
+                }
+            }
+            """);
+        var replacementCompilation = Compilation.CreateLibrary(
+            replacementTree, new CompilationOptions {
+                NativeCoreRegistration = registration,
+                LayoutCoreRegistration = layoutRegistration,
+            });
+        Assert.That(replacementCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                replacementCompilation.Diagnostics));
+        var replacementProgram
+            = (BoundProgram)replacementCompilation.Program!;
+        var replacementEnumDeclaration
+            = replacementTree.Root.DescendantNodes().Single(node =>
+                node.Kind == SyntaxKind.EnumDeclaration);
+        var replacementEnumExport
+            = new TrRmSourceEnumDeclarationExport(replacementProgram, 0,
+                replacementEnumDeclaration.Span, ["type.shade"],
+                ["shade.dark", "shade.light"]);
+        var replacementInterface = replacementProgram.Interfaces.Single();
+        var replacementTypeExport
+            = new TrRmSourceTypeExport("Demo", "IProbe", "type.probe") {
+                InterfaceMethodExports = [
+                    .. replacementInterface.Members.Select(member =>
+                        new TrRmSourceInterfaceMethodExport(
+                            member.SourceInputOrdinal,
+                            member.SourceDeclarationSpan,
+                            $"method.probe.{member.Name}")),
+                ],
+            };
+        var replacementArtifact = TrRmExecutableCompiler.EmitStandard(
+            replacementProgram, "FniEnumProvider", SchemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [replacementTypeExport], [replacementEnumExport]);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    consumerArtifact),
+                "FniEnumConsumer", [
+                    new TrRmStandardArtifactInput(SchemaIdentity,
+                        replacementArtifact),
+                ]));
     }
 
     [Test]
@@ -244,6 +459,18 @@ internal sealed class TrRmFniEnumClosureTests
                     artifact);
         var tables = TrRmStructuralMetadataValidator
             .ValidateAndGetExecutionTables(index);
+
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(SchemaIdentity, artifact),
+            "FniEnumPointerProvider", []);
+        Assert.That(reference.EnumDefinitions.Length, Is.EqualTo(1));
+        Assert.That(reference.EnumDefinitions[0].UnderlyingType,
+            Is.EqualTo(PrimitiveType.Int128));
+        Assert.That(BoundEnumTypes.IsType(reference.Interfaces.Single()
+            .Members.Single().Parameters.Single().Type.PrimitiveType),
+            Is.False);
+        Assert.That(reference.NativePointerTypes.Single().PointeeType,
+            Is.EqualTo(BoundEnumTypes.Type(0)));
 
         Assert.That(tables.EnumDefs.Count, Is.EqualTo(1));
         Assert.That(tables.ForeignNativeInterfaces.Count, Is.EqualTo(1));

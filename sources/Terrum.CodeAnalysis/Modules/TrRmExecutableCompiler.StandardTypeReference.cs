@@ -95,6 +95,22 @@ public static partial class TrRmExecutableCompiler
             return CreateLayoutQueriesSourceTypeReference(artifacts,
                 schemaIdentities, moduleIdentity, exportKeys, []);
         }
+        if (IsSelectedForeignNativeInterfaceParameterSurfaceEnumClosureSchemaIdentity(
+                schemaIdentities[0]))
+        {
+            if (schemaIdentities.Skip(1).Any(schemaIdentity =>
+                    !IsSelectedForeignNativeInterfaceParameterSurfaceEnumClosureSchemaIdentity(
+                        schemaIdentity)))
+            {
+                throw Unsupported(
+                    "The FNI enum source-reference projection requires the exact FNI enum-closure selection for every provider.");
+            }
+
+            ValidateForeignNativeInterfaceEnumTypeRootKeys(artifacts,
+                schemaIdentities, moduleIdentity, exportKeys);
+            return CreateC1EnumClosureSourceTypeReference(artifacts,
+                schemaIdentities, moduleIdentity, exportKeys, []);
+        }
         if (IsSelectedC1SchemaIdentity(schemaIdentities[0]))
         {
             if (IsSelectedC1EnumClosureSchemaIdentity(schemaIdentities[0]))
@@ -230,6 +246,22 @@ public static partial class TrRmExecutableCompiler
         }
 
         if (schemaIdentities.Length != 0
+            && schemaIdentities.All(
+                IsSelectedForeignNativeInterfaceParameterSurfaceEnumClosureSchemaIdentity))
+        {
+            if (fieldKeys.Length != 0)
+            {
+                throw Unsupported(
+                    "The FNI enum TypeDef projection does not select FieldDef roots.");
+            }
+
+            ValidateForeignNativeInterfaceEnumTypeRootKeys(artifacts,
+                schemaIdentities, moduleIdentity, typeKeys);
+            return CreateC1EnumClosureSourceTypeReference(artifacts,
+                schemaIdentities, moduleIdentity, typeKeys, []);
+        }
+
+        if (schemaIdentities.Length != 0
             && schemaIdentities.All(static schemaIdentity =>
                 StringComparer.Ordinal.Equals(schemaIdentity,
                     StandardC1M1SchemaIdentity)
@@ -318,7 +350,7 @@ public static partial class TrRmExecutableCompiler
         bool includeModuleFunctions = false,
         bool allowModuleEntryPointForRuntimeLinking = false)
     {
-        var isEN1 = IsSelectedC1EnumClosureSchemaIdentity(
+        var isEN1 = IsSelectedEN1EnumClosureSchemaIdentity(
             schemaIdentities[0]);
         var isCM1 = StandardGenericMethodSchema.IsCM1ClassParameterDefaults(
             schemaIdentities[0]);
@@ -4224,6 +4256,41 @@ public static partial class TrRmExecutableCompiler
         return keys.ToImmutable();
     }
 
+    private static void ValidateForeignNativeInterfaceEnumTypeRootKeys(
+        byte[][] artifacts, string[] schemaIdentities, string moduleIdentity,
+        IReadOnlyList<string> exportKeys)
+    {
+        var moduleValidation = ValidateStandardInputModules(artifacts,
+            schemaIdentities, moduleIdentity, a3LayoutResourceLedger: null);
+        var tables = ValidateForeignInvocationArtifact(
+            CreateForeignInvocationIndex(artifacts[0], schemaIdentities[0]),
+            schemaIdentities[0], null, createA3ResourceLedger: false);
+        foreach (var exportKey in exportKeys)
+        {
+            if (!tables.Exports.TryGetDefinitionForKey(
+                    moduleValidation.RootModuleRow, exportKey,
+                    out var definitionId)
+                || (definitionId >> 24) != 0x13)
+            {
+                throw new ArgumentException(
+                    "An FNI enum root ExportKey does not select a TypeDef.",
+                    nameof(exportKeys));
+            }
+
+            var typeDefRow = checked((int)(
+                definitionId & 0x00FF_FFFF));
+            if (tables.TypeDefs.GetOwnerModule(typeDefRow)
+                    != moduleValidation.RootModuleRow
+                || tables.TypeDefs.GetKind(typeDefRow) != 4
+                || tables.Imports.IsExpectedDefinition(definitionId)
+                || (tables.TypeDefs.GetFlags(typeDefRow) & 3) != 2)
+            {
+                throw Unsupported(
+                    "The FNI enum root projection selects only owned public enum TypeDefs.");
+            }
+        }
+    }
+
     private static CompilationReference CreateC1EnumClosureSourceTypeReference(
         byte[][] artifacts, string[] schemaIdentities, string moduleIdentity,
         string[] selectedExportKeys, string[] selectedFieldExportKeys,
@@ -4405,7 +4472,7 @@ public static partial class TrRmExecutableCompiler
         var rootTables = ValidateForeignInvocationArtifact(
             CreateForeignInvocationIndex(artifacts[0], schemaIdentities[0]),
             schemaIdentities[0], null, createA3ResourceLedger: false);
-        if (!rootTables.Schema.UsesC1EnumClosure())
+        if (!rootTables.Schema.UsesEN1EnumClosure())
         {
             throw Unsupported(
                 "The bounded EN1 source-reference route requires an exact EN1 Module.");
@@ -4514,7 +4581,9 @@ public static partial class TrRmExecutableCompiler
         var enumTypeDefCount = typeDefRows.Count(typeDefRow =>
             rootTables.TypeDefs.GetKind(typeDefRow) == 4);
         if (rootTables.Modules.GetEntryMethod(rootModuleRow) != 0
-            || (methodStart != methodEnd && !allowClassLayoutQueryBody)
+            || (methodStart != methodEnd
+                && !allowClassLayoutQueryBody
+                && !rootTables.Schema.UsesForeignNativeInterface())
             || (typeDefCount == 0
                 && (!allowClassLayoutQueryBody
                     || selectedImportedClassTypeKeys.IsDefaultOrEmpty))
@@ -4526,7 +4595,9 @@ public static partial class TrRmExecutableCompiler
             || enumTypeDefCount > BoundEnumTypes.MaximumCount
             || typeDefRows.Any(typeDefRow =>
                 rootTables.TypeDefs.GetKind(typeDefRow)
-                    is not (1 or 2 or 4)))
+                    is not (1 or 2 or 4)
+                    && !(rootTables.Schema.UsesForeignNativeInterface()
+                        && rootTables.TypeDefs.GetKind(typeDefRow) == 3)))
         {
             throw Unsupported(
                 "The bounded EN1 source-reference route requires an enum and non-generic struct declaration Module within the supported limits.");
@@ -4629,6 +4700,11 @@ public static partial class TrRmExecutableCompiler
                 continue;
             }
             if (expectedKind == 2)
+            {
+                continue;
+            }
+            if (expectedKind == 3
+                && rootTables.Schema.UsesForeignNativeInterface())
             {
                 continue;
             }
@@ -4736,6 +4812,11 @@ public static partial class TrRmExecutableCompiler
                 continue;
             }
             if (rootTables.TypeDefs.GetKind(typeDefRow) == 2)
+            {
+                continue;
+            }
+            if (rootTables.TypeDefs.GetKind(typeDefRow) == 3
+                && rootTables.Schema.UsesForeignNativeInterface())
             {
                 continue;
             }

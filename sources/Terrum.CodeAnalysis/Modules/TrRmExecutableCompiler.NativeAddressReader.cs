@@ -8945,7 +8945,11 @@ public static partial class TrRmExecutableCompiler
         int[] signatureIndexByAnchorMethod, int[] structureTypeByTypeDef,
         IReadOnlyDictionary<int, PrimitiveType>? arrayTypeByTypeSpecRow = null,
         TrRmImportTableReader imports = default,
-        int[]? signatureIndexByAnchorTypeSpec = null)
+        int[]? signatureIndexByAnchorTypeSpec = null,
+        IReadOnlyDictionary<int, PrimitiveType>?
+            nominalEnumTypesByTypeDefRow = null,
+        IReadOnlyDictionary<int, PrimitiveType>?
+            nominalEnumTypesByImportRow = null)
     {
         var signatureRow = methods.GetSignature(methodRow);
         var (first, count) = signatures.GetParamRange(signatureRow);
@@ -8960,7 +8964,11 @@ public static partial class TrRmExecutableCompiler
                 imports,
                 arrayTypeByTypeSpecRow: arrayTypeByTypeSpecRow,
                 signatureIndexByAnchorTypeSpec:
-                    signatureIndexByAnchorTypeSpec);
+                    signatureIndexByAnchorTypeSpec,
+                nominalEnumTypesByTypeDefRow:
+                    nominalEnumTypesByTypeDefRow,
+                nominalEnumTypesByImportRow:
+                    nominalEnumTypesByImportRow);
             var isFixedArray = NativeFixedArrayTypes.IsType(type);
             var isFunctionPointer = signatureIndexByAnchorTypeSpec is not null
                 && NativeFunctionPointerTypes.IsType(type);
@@ -9542,7 +9550,11 @@ public static partial class TrRmExecutableCompiler
         int[] signatureIndexByAnchorMethod, int[] structureTypeByTypeDef,
         TrRmImportTableReader imports = default,
         IReadOnlyDictionary<int, PrimitiveType>? arrayTypeByTypeSpecRow = null,
-        int[]? signatureIndexByAnchorTypeSpec = null)
+        int[]? signatureIndexByAnchorTypeSpec = null,
+        IReadOnlyDictionary<int, PrimitiveType>?
+            nominalEnumTypesByTypeDefRow = null,
+        IReadOnlyDictionary<int, PrimitiveType>?
+            nominalEnumTypesByImportRow = null)
     {
         var reference = typeSpecs.GetTypeSpecRef(typeSpecRef);
         if (reference.IsRow && reference.Form == 0x11
@@ -9561,7 +9573,9 @@ public static partial class TrRmExecutableCompiler
                 pointeeTypeSpecRef, nativePointerTypeDefinitions,
                 signatureIndexByAnchorMethod, structureTypeByTypeDef,
                 imports, arrayTypeByTypeSpecRow,
-                signatureIndexByAnchorTypeSpec);
+                signatureIndexByAnchorTypeSpec,
+                nominalEnumTypesByTypeDefRow,
+                nominalEnumTypesByImportRow);
             var isWritable = (reference.Qualifiers & 1) != 0;
             return GetNativePointerType(nativePointerTypeDefinitions,
                 pointeeType, isWritable);
@@ -9598,7 +9612,11 @@ public static partial class TrRmExecutableCompiler
         }
 
         return FromNativeValueRow(typeSpecs, typeSpecRef,
-            nativePointerTypeDefinitions, structureTypeByTypeDef, imports);
+            nativePointerTypeDefinitions, structureTypeByTypeDef, imports,
+            nominalEnumTypesByTypeDefRow:
+                nominalEnumTypesByTypeDefRow,
+            nominalEnumTypesByImportRow:
+                nominalEnumTypesByImportRow);
     }
 
     private static BoundProgram LoadStandardLayoutQueriesTypeLibrary(

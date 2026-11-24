@@ -35,7 +35,7 @@ public static partial class TrRmExecutableCompiler
         int ModuleRow, string ModuleIdentity, uint GoverningRuleEdition,
         uint TargetRequirement, uint RuntimePolicy);
 
-    /// <summary>Combines independently selected exact Standard type references.</summary>
+    /// <summary>Combines independently selected exact Standard type references, or one FNI Module with selected enum roots.</summary>
     /// <param name="references">Two or more source references created by supported exact Standard reference APIs.
     /// The caller must not modify the list while it is captured.</param>
     /// <returns>A source reference with reconciled actual identities and retained provider views.</returns>
@@ -61,6 +61,17 @@ public static partial class TrRmExecutableCompiler
                 ?? throw new ArgumentException(
                     "A Standard reference set cannot contain null entries.",
                     nameof(references));
+        }
+
+        var foreignNativeInterfaceParents = selectedReferences
+            .Where(static reference => reference.Interfaces.Any(
+                static definition =>
+                    definition.ForeignNativeInterface is not null))
+            .ToArray();
+        if (foreignNativeInterfaceParents.Length != 0)
+        {
+            return ComposeForeignNativeInterfaceEnumRoots(
+                selectedReferences, foreignNativeInterfaceParents);
         }
 
         if (selectedReferences.Any(static reference =>
@@ -688,6 +699,213 @@ public static partial class TrRmExecutableCompiler
                 evaluationFormSelections,
             coreEvaluationFormSchemaProviders:
                 evaluationFormProviders);
+    }
+
+    private static CompilationReference ComposeForeignNativeInterfaceEnumRoots(
+        CompilationReference[] references,
+        CompilationReference[] foreignNativeInterfaceParents)
+    {
+        if (foreignNativeInterfaceParents.Length != 1)
+        {
+            throw Unsupported(
+                "FNI enum composition accepts exactly one parent FNI Module reference.");
+        }
+
+        var parent = foreignNativeInterfaceParents[0];
+        var schemaIdentity
+            = parent.ForeignNativeInterfaceSchemaIdentity;
+        if (!IsSelectedForeignNativeInterfaceParameterSurfaceEnumClosureSchemaIdentity(
+                schemaIdentity)
+            || parent.Interfaces.IsDefaultOrEmpty
+            || parent.Interfaces.Any(static definition =>
+                definition.ForeignNativeInterface is null)
+            || parent.EnumDefinitions.Any(static definition =>
+                definition.Identity
+                    is not BoundEnumDeclarationIdentity.Standard standard
+                || !IsSelectedForeignNativeInterfaceParameterSurfaceEnumClosureSchemaIdentity(
+                    standard.Value.Declaration.Site.Snapshot
+                        .SchemaIdentity)))
+        {
+            throw Unsupported(
+                "FNI enum composition requires one parent selected under the exact FNI enum-closure agreement.");
+        }
+
+        var enumDefinitions
+            = parent.EnumDefinitions.ToBuilder();
+        var selectedRootCount = 0;
+        foreach (var reference in references)
+        {
+            if (ReferenceEquals(reference, parent))
+            {
+                continue;
+            }
+
+            if (!reference.Interfaces.IsEmpty
+                || !reference.Functions.IsEmpty
+                || !reference.Classes.IsEmpty
+                || !reference.StandardClassDeclarations.IsEmpty
+                || !reference.GenericMethodImports.IsEmpty
+                || !reference.RetainedGenericMethodRoots.IsEmpty
+                || !reference.GenericNominalTypeDefinitions.IsEmpty
+                || !reference.GenericNominalTypeInstances.IsEmpty
+                || reference.RuntimePolicy != parent.RuntimePolicy
+                || (reference.ForeignNativeInterfaceSchemaIdentity is
+                        string selectedSchema
+                    && !StringComparer.Ordinal.Equals(selectedSchema,
+                        schemaIdentity)))
+            {
+                throw Unsupported(
+                    "FNI enum composition accepts only matching selected enum TypeDef roots beside its one parent Module.");
+            }
+
+            foreach (var definition in reference.EnumDefinitions)
+            {
+                if (definition.Identity
+                        is not BoundEnumDeclarationIdentity.Standard standard
+                    || standard.Value.SelectedExportKeys.IsDefaultOrEmpty)
+                {
+                    continue;
+                }
+
+                if (!BoundStandardEnumDeclarationContract
+                        .IsValidDefinition(standard.Value, definition)
+                    || !IsSelectedForeignNativeInterfaceParameterSurfaceEnumClosureSchemaIdentity(
+                        standard.Value.Declaration.Site.Snapshot
+                            .SchemaIdentity)
+                    || standard.Value.Declaration.Site.Snapshot
+                        .TargetRequirement
+                        != TrRmModuleTableReader
+                            .WindowsX64NativeTargetRequirement
+                    || standard.Value.Declaration.Site.Snapshot
+                        .RuntimePolicy != (uint)parent.RuntimePolicy
+                    || !definition.IsPublic
+                    || definition.ModuleImport is not null)
+                {
+                    throw Invalid(
+                        "A selected FNI enum root is not an owned public TypeDef under the exact agreement.");
+                }
+
+                selectedRootCount++;
+                var existingIndex = -1;
+                for (var index = 0; index < enumDefinitions.Count;
+                    index++)
+                {
+                    if (enumDefinitions[index].Identity
+                            is BoundEnumDeclarationIdentity.Standard
+                                existingStandard
+                        && AreSameForeignNativeInterfaceEnumSite(
+                            existingStandard.Value.Declaration.Site,
+                            standard.Value.Declaration.Site))
+                    {
+                        existingIndex = index;
+                        break;
+                    }
+                }
+
+                if (existingIndex < 0)
+                {
+                    if (enumDefinitions.Count
+                        >= BoundEnumTypes.MaximumCount)
+                    {
+                        throw Unsupported(
+                            "The composed FNI enum type table exceeds its identity limit.");
+                    }
+
+                    enumDefinitions.Add(definition);
+                    continue;
+                }
+
+                enumDefinitions[existingIndex]
+                    = MergeForeignNativeInterfaceEnumDefinition(
+                        enumDefinitions[existingIndex], definition);
+            }
+        }
+
+        if (selectedRootCount == 0)
+        {
+            throw Unsupported(
+                "FNI enum composition requires at least one selected owned enum root.");
+        }
+
+        return parent.WithEnumDefinitions(enumDefinitions.ToImmutable());
+    }
+
+    private static BoundEnumDefinition
+        MergeForeignNativeInterfaceEnumDefinition(
+        BoundEnumDefinition existing, BoundEnumDefinition selected)
+    {
+        if (existing.Identity
+                is not BoundEnumDeclarationIdentity.Standard existingStandard
+            || selected.Identity
+                is not BoundEnumDeclarationIdentity.Standard selectedStandard
+            || !AreSameForeignNativeInterfaceEnumSite(
+                existingStandard.Value.Declaration.Site,
+                selectedStandard.Value.Declaration.Site)
+            || !BoundStandardEnumDeclarationContract.ContractMatches(
+                existingStandard.Value.Declaration,
+                selectedStandard.Value.Declaration)
+            || !existingStandard.Value.ExportKeys.SequenceEqual(
+                selectedStandard.Value.ExportKeys,
+                StringComparer.Ordinal))
+        {
+            throw Invalid(
+                "Selected FNI enum roots conflict with the parent provider occurrence.");
+        }
+
+        var originals
+            = ImmutableArray.CreateBuilder<BoundStandardEnumView>();
+        originals.AddRange(existingStandard.Value.OriginalDeclarations);
+        foreach (var original in selectedStandard.Value.OriginalDeclarations)
+        {
+            if (!originals.Any(existingView =>
+                    AreSameForeignNativeInterfaceEnumSite(
+                        existingView.Site, original.Site)))
+            {
+                originals.Add(original);
+            }
+        }
+
+        var expectations
+            = ImmutableArray.CreateBuilder<
+                BoundStandardEnumExpectation>();
+        expectations.AddRange(existingStandard.Value.Expectations);
+        foreach (var expectation in selectedStandard.Value.Expectations)
+        {
+            var existingExpectation = expectations.FirstOrDefault(candidate =>
+                candidate.Binding.ImportRow
+                    == expectation.Binding.ImportRow
+                && AreSameForeignNativeInterfaceEnumSnapshot(
+                    candidate.Binding.UsingModule,
+                    expectation.Binding.UsingModule));
+            if (existingExpectation is null)
+            {
+                expectations.Add(expectation);
+            }
+            else if (!SameForeignNativeInterfaceEnumExpectation(
+                    existingExpectation, expectation))
+            {
+                throw Invalid(
+                    "A selected FNI enum root carries a conflicting Import expectation.");
+            }
+        }
+
+        var selectedExportKeys
+            = existingStandard.Value.SelectedExportKeys
+                .Concat(selectedStandard.Value.SelectedExportKeys)
+                .Distinct(StringComparer.Ordinal)
+                .ToImmutableArray();
+        var occurrence = new BoundStandardEnumOccurrence(
+            existingStandard.Value.Declaration, originals.ToImmutable(),
+            expectations.ToImmutable(), existingStandard.Value.ExportKeys,
+            selectedExportKeys);
+        if (!occurrence.IsValid)
+        {
+            throw Invalid(
+                "Merged FNI enum roots do not preserve a valid checked provider occurrence.");
+        }
+
+        return CreateStandardEnumDefinition(
+            existingStandard.Value.Declaration, occurrence);
     }
 
     private static CompilationReference

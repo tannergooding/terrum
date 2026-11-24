@@ -28,6 +28,9 @@ public static partial class TrRmExecutableCompiler
         }
 
         C1EnumClosureSourceEnumExports? sourceEnumExports = null;
+        var sourceEnumCount = program.EnumDefinitions.Count(
+            static definition => definition.Identity
+                is BoundEnumDeclarationIdentity.Source);
         if (program.EnumDefinitions.IsEmpty)
         {
             if (sourceEnumDeclarationExports is { Count: > 0 })
@@ -37,21 +40,33 @@ public static partial class TrRmExecutableCompiler
                     nameof(sourceEnumDeclarationExports));
             }
         }
-        else
+        else if (!schema.UsesEN1EnumClosure()
+            || program.EnumDefinitions.Any(static definition =>
+                definition.Identity is not (
+                    BoundEnumDeclarationIdentity.Source
+                    or BoundEnumDeclarationIdentity.Standard)))
         {
-            if (!schema.UsesEN1EnumClosure()
-                || sourceEnumDeclarationExports is null
-                || program.EnumDefinitions.Any(static definition =>
-                    definition.Identity
-                        is not BoundEnumDeclarationIdentity.Source))
-            {
-                throw Unsupported(
-                    "Combined FNI source emission currently requires source-owned enums under the exact EN1 selector.");
-            }
+            throw Unsupported(
+                "Combined FNI source emission requires the exact EN1 selector and source or selected Standard enum identities.");
+        }
 
+        if (sourceEnumCount != 0)
+        {
+            if (sourceEnumDeclarationExports is null)
+            {
+                throw new ArgumentException(
+                    "Every retained source enum requires an explicit source-anchored mapping.",
+                    nameof(sourceEnumDeclarationExports));
+            }
             sourceEnumExports
                 = C1EnumClosureSourceEnumExports.Capture(program,
                     sourceEnumDeclarationExports);
+        }
+        else if (sourceEnumDeclarationExports is { Count: > 0 })
+        {
+            throw new ArgumentException(
+                "Source enum mappings do not select a source enum in this program.",
+                nameof(sourceEnumDeclarationExports));
         }
 
         if (!schema.UsesForeignNativeInterface()
@@ -262,6 +277,9 @@ public static partial class TrRmExecutableCompiler
             return placeholder;
         }
 
+        var enumEmissions = CreateForeignNativeInterfaceEnumEmissions(
+            program, moduleIdentity, sourceEnumExports, schema,
+            schemaIdentity);
         var frozenScalarValueBuilder
             = schema.UsesForeignNativeInterfaceParameterSurface()
                 ? new TrRmFrozenScalarValueBuilder() : null;
@@ -273,11 +291,12 @@ public static partial class TrRmExecutableCompiler
                 GetMethodMapPlaceholder,
             semanticVerificationProgram: program,
             sourceEnumExports: sourceEnumExports,
-            frozenScalarValueBuilder: frozenScalarValueBuilder);
-        var enumTypeDefRows = sourceEnumExports is null
+            frozenScalarValueBuilder: frozenScalarValueBuilder,
+            foreignNativeInterfaceEnumEmissions: enumEmissions);
+        var enumTypeDefRows = enumEmissions.IsEmpty
             ? ImmutableDictionary<PrimitiveType, int>.Empty
             : GetForeignNativeInterfaceEnumTypeDefRows(callerArtifact,
-                program, schema);
+                program, schema, enumEmissions);
         var sourceMethodExports = SourceGenericMethodExports.Capture(
             program, moduleIdentity, []);
         var artifact = EmitGenericMethodCallsDraftSource(program,
@@ -298,56 +317,271 @@ public static partial class TrRmExecutableCompiler
         return artifact;
     }
 
+    private static ImmutableArray<C1EnumClosureEmission>
+        CreateForeignNativeInterfaceEnumEmissions(BoundProgram program,
+            string moduleIdentity,
+            C1EnumClosureSourceEnumExports? sourceEnumExports,
+            TrRmArtifactSchema schema, string schemaIdentity)
+    {
+        var emissions
+            = ImmutableArray.CreateBuilder<C1EnumClosureEmission>();
+        var sourceExportByIndex = sourceEnumExports is null
+            ? new Dictionary<int, C1EnumClosureSourceEnumExport>()
+            : sourceEnumExports.Exports.ToDictionary(
+                static export => export.EnumIndex);
+        for (var enumIndex = 0;
+            enumIndex < program.EnumDefinitions.Length; enumIndex++)
+        {
+            var definition = program.EnumDefinitions[enumIndex];
+            if (!TrRmConstantSourceValueValidator.TryGetIntegerTypeCode(
+                    definition.UnderlyingType, out var underlyingTypeCode)
+                || !schema.SupportsEnumUnderlyingTypeCode(
+                    underlyingTypeCode))
+            {
+                throw Unsupported(
+                    "The FNI enum has an unsupported underlying integer type.");
+            }
+
+            if (definition.Identity
+                is BoundEnumDeclarationIdentity.Source)
+            {
+                if (!sourceExportByIndex.TryGetValue(enumIndex,
+                        out var sourceExport)
+                    || !ReferenceEquals(sourceExport.Definition, definition)
+                    || sourceExport.MemberDeclarationKeys.IsDefault
+                    || sourceExport.MemberDeclarationKeys.Length
+                        != definition.Members.Length)
+                {
+                    throw Invalid(
+                        "The FNI source enum map does not preserve its checked declaration and members.");
+                }
+
+                var separator = definition.Name.LastIndexOf('.',
+                    StringComparison.Ordinal);
+                var namespaceName = separator < 0
+                    ? string.Empty : definition.Name[..separator];
+                var name = separator < 0
+                    ? definition.Name : definition.Name[(separator + 1)..];
+                var members
+                    = ImmutableArray.CreateBuilder<
+                        C1EnumClosureEmissionMember>(
+                        definition.Members.Length);
+                for (var memberIndex = 0;
+                    memberIndex < definition.Members.Length; memberIndex++)
+                {
+                    var member = definition.Members[memberIndex];
+                    var declarationKey
+                        = sourceExport.MemberDeclarationKeys[memberIndex];
+                    if (!BoundEnumTypes.IsValidModuleDeclarationKey(
+                            declarationKey)
+                        || !BoundEnumTypes.IsValidModuleDeclarationKey(
+                            member.Name)
+                        || !ScalarBits.TryFromIntegerValue(member.Value,
+                            definition.UnderlyingType, out _))
+                    {
+                        throw Invalid(
+                            "An FNI source enum member has invalid identity or value bits.");
+                    }
+
+                    members.Add(new C1EnumClosureEmissionMember(
+                        declarationKey, member.Name, member.Value));
+                }
+
+                var needsWindowsProfile
+                    = definition.BlittableTargetRequirement != 0
+                        || underlyingTypeCode is 0x10 or 0x11;
+                var layouts
+                    = ImmutableArray.CreateBuilder<
+                        C1EnumClosureEmissionLayout>(
+                        needsWindowsProfile ? 2 : 1);
+                layouts.Add(new C1EnumClosureEmissionLayout(0, 0, 0, 0,
+                    0, 0));
+                if (needsWindowsProfile)
+                {
+                    layouts.Add(new C1EnumClosureEmissionLayout(1, 1, 0,
+                        definition.BlittableTargetRequirement == 0
+                            ? (byte)0 : (byte)1, 0, 0));
+                }
+
+                var visibility = definition.IsPublic ? 2u
+                    : sourceExport.Declaration.IsFileLocal ? 0u : 1u;
+                emissions.Add(new C1EnumClosureEmission(enumIndex,
+                    namespaceName, name, 0x10u | visibility,
+                    definition.UnderlyingType,
+                    definition.IsFlags ? 1u : 0u,
+                    layouts.MoveToImmutable(), members.MoveToImmutable(),
+                    sourceExport.ExportKeys, null));
+                continue;
+            }
+
+            if (definition.Identity
+                is not BoundEnumDeclarationIdentity.Standard standard)
+            {
+                throw Unsupported(
+                    "FNI enum publication requires a source declaration or an exact selected EN1 provider identity.");
+            }
+
+            var occurrence = standard.Value;
+            var view = occurrence.Declaration;
+            var provider = view.Site.Snapshot;
+            if (!IsSelectedForeignNativeInterfaceParameterSurfaceEnumClosureSchemaIdentity(
+                    provider.SchemaIdentity)
+                || !StringComparer.Ordinal.Equals(provider.SchemaIdentity,
+                    schemaIdentity)
+                || GetForeignInvocationSchema(provider.SchemaIdentity)
+                    != schema
+                || provider.TargetRequirement
+                    != TrRmModuleTableReader
+                        .WindowsX64NativeTargetRequirement
+                || StringComparer.Ordinal.Equals(
+                    provider.ModuleIdentity, moduleIdentity)
+                || provider.RuntimePolicy != (uint)program.RuntimePolicy)
+            {
+                throw Unsupported(
+                    "A source FNI enum requires an exact selected provider under the FNI enum-closure agreement.");
+            }
+
+            var selectedEdges = new HashSet<(
+                string ProducerIdentity, string ExportKey,
+                uint TargetRequirement, uint RuntimePolicy)>();
+            foreach (var expectation in occurrence.Expectations)
+            {
+                var binding = expectation.Binding;
+                var expected = expectation.ExpectedDeclaration;
+                if (!BoundStandardEnumDeclarationContract.SnapshotsMatch(
+                        binding.UsingModule,
+                        expected.Site.Snapshot)
+                    || binding.ExpectedDefinitionId
+                        != expected.Site.DefinitionId
+                    || !BoundStandardEnumDeclarationContract.SnapshotsMatch(
+                        binding.Provider, provider)
+                    || binding.ProviderDefinitionId != view.Site.DefinitionId
+                    || !BoundStandardEnumDeclarationContract.ContractMatches(
+                        expected, view)
+                    || !StringComparer.Ordinal.Equals(
+                        binding.ProducerIdentity, provider.ModuleIdentity)
+                    || binding.TargetRequirement
+                        != provider.TargetRequirement
+                    || binding.RuntimePolicy != provider.RuntimePolicy
+                    || !BoundEnumTypes.IsValidModuleDeclarationKey(
+                        binding.ExportKey)
+                    || !occurrence.ExportKeys.Contains(binding.ExportKey,
+                        StringComparer.Ordinal))
+                {
+                    throw Invalid(
+                        "A source FNI enum lost its exact provider expectation.");
+                }
+
+                _ = selectedEdges.Add((binding.ProducerIdentity,
+                    binding.ExportKey, binding.TargetRequirement,
+                    binding.RuntimePolicy));
+                emissions.Add(CreateStandardForeignNativeInterfaceEnumEmission(
+                    enumIndex, expected, new C1EnumClosureImport(
+                        binding.ProducerIdentity, binding.ExportKey,
+                        binding.TargetRequirement, binding.RuntimePolicy)));
+            }
+
+            foreach (var exportKey in occurrence.SelectedExportKeys)
+            {
+                var edge = (provider.ModuleIdentity, exportKey,
+                    provider.TargetRequirement, provider.RuntimePolicy);
+                if (!selectedEdges.Add(edge))
+                {
+                    continue;
+                }
+
+                emissions.Add(CreateStandardForeignNativeInterfaceEnumEmission(
+                    enumIndex, view, new C1EnumClosureImport(
+                        provider.ModuleIdentity, exportKey,
+                        provider.TargetRequirement, provider.RuntimePolicy)));
+            }
+
+            if (!selectedEdges.Any())
+            {
+                throw Unsupported(
+                    "A source FNI enum has no retained selected provider Import edge.");
+            }
+        }
+
+        return emissions.MoveToImmutable();
+    }
+
+    private static C1EnumClosureEmission
+        CreateStandardForeignNativeInterfaceEnumEmission(int definitionIndex,
+            BoundStandardEnumView view, C1EnumClosureImport import)
+    {
+        var layouts
+            = ImmutableArray.CreateBuilder<C1EnumClosureEmissionLayout>(
+                view.Layouts.Length);
+        foreach (var layout in view.Layouts)
+        {
+            layouts.Add(new C1EnumClosureEmissionLayout(
+                layout.TargetProfileId,
+                layout.TargetProfileRuleRevision, layout.Kind,
+                layout.Flags, layout.Alignment, layout.Pack));
+        }
+
+        return new C1EnumClosureEmission(definitionIndex, view.Namespace,
+            view.Name, view.TypeDefFlags, view.UnderlyingType,
+            view.EnumFlags, layouts.MoveToImmutable(),
+            [.. view.Members.Select(static member =>
+                new C1EnumClosureEmissionMember(
+                    member.DeclarationKey, member.Name, member.Value))],
+            [], import);
+    }
+
     private static ImmutableDictionary<PrimitiveType, int>
         GetForeignNativeInterfaceEnumTypeDefRows(byte[] artifact,
-            BoundProgram program, TrRmArtifactSchema schema)
+            BoundProgram program, TrRmArtifactSchema schema,
+            ImmutableArray<C1EnumClosureEmission> enumEmissions)
     {
         var tables = TrRmStructuralMetadataValidator
             .ValidateAndGetExecutionTables(new TrRmArtifactIndex(artifact,
                 schema));
-        if (tables.EnumDefs.Count != program.EnumDefinitions.Length
-            || tables.TypeDefs.Count < program.EnumDefinitions.Length)
+        if (tables.EnumDefs.Count != enumEmissions.Length
+            || tables.TypeDefs.Count < enumEmissions.Length)
         {
             throw Invalid(
                 "The F+I caller artifact does not retain its complete enum TypeDef closure.");
         }
 
-        var firstEnumTypeDefRow = tables.TypeDefs.Count
-            - program.EnumDefinitions.Length + 1;
+        var firstEnumTypeDefRow
+            = tables.TypeDefs.Count - enumEmissions.Length + 1;
         var result
             = ImmutableDictionary.CreateBuilder<PrimitiveType, int>();
-        for (var enumIndex = 0;
-            enumIndex < program.EnumDefinitions.Length; enumIndex++)
+        for (var emissionIndex = 0;
+            emissionIndex < enumEmissions.Length; emissionIndex++)
         {
-            var definition = program.EnumDefinitions[enumIndex];
-            var enumRow = enumIndex + 1;
-            var typeDefRow = firstEnumTypeDefRow + enumIndex;
-            var separator = definition.Name.LastIndexOf('.',
-                StringComparison.Ordinal);
-            var namespaceName = separator < 0
-                ? string.Empty : definition.Name[..separator];
-            var name = separator < 0
-                ? definition.Name : definition.Name[(separator + 1)..];
-            if (definition.Identity
-                    is not BoundEnumDeclarationIdentity.Source
+            var emission = enumEmissions[emissionIndex];
+            var enumRow = emissionIndex + 1;
+            var typeDefRow = firstEnumTypeDefRow + emissionIndex;
+            if ((uint)emission.DefinitionIndex
+                    >= (uint)program.EnumDefinitions.Length
                 || tables.EnumDefs.GetOwnerTypeDef(enumRow)
                     != (uint)typeDefRow
                 || tables.TypeDefs.GetKind(typeDefRow) != 4
                 || !StringComparer.Ordinal.Equals(
                     tables.TypeDefs.GetNamespace(typeDefRow),
-                    namespaceName)
+                    emission.Namespace)
                 || !StringComparer.Ordinal.Equals(
-                    tables.TypeDefs.GetName(typeDefRow), name)
+                    tables.TypeDefs.GetName(typeDefRow), emission.Name)
                 || !TrRmConstantSourceValueValidator.TryGetIntegerTypeCode(
-                    definition.UnderlyingType, out var typeCode)
+                    emission.UnderlyingType, out var typeCode)
                 || tables.EnumDefs.GetUnderlyingTypeSpecRef(enumRow)
-                    != (0xF200_0000u | typeCode)
-                || !result.TryAdd(BoundEnumTypes.Type(enumIndex),
-                    typeDefRow))
+                    != (0xF200_0000u | typeCode))
             {
                 throw Invalid(
-                    "The F+I enum TypeDef rows do not preserve the checked source enum order and identity.");
+                    "The F+I enum TypeDef rows do not preserve the checked enum emission order and identity.");
             }
+
+            _ = result.TryAdd(BoundEnumTypes.Type(
+                emission.DefinitionIndex), typeDefRow);
+        }
+
+        if (result.Count != program.EnumDefinitions.Length)
+        {
+            throw Invalid(
+                "The F+I enum TypeDef closure omits a checked enum identity.");
         }
 
         return result.ToImmutable();

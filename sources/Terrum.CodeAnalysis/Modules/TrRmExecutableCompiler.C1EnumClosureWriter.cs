@@ -1938,7 +1938,7 @@ public static partial class TrRmExecutableCompiler
             {
                 var view = occurrence.Declaration;
                 var provider = view.Site.Snapshot;
-                if (!IsSelectedC1EnumClosureSchemaIdentity(
+                if (!IsSelectedEN1EnumClosureSchemaIdentity(
                         provider.SchemaIdentity)
                     || !StringComparer.Ordinal.Equals(
                         provider.SchemaIdentity, schemaIdentity)
@@ -2153,7 +2153,7 @@ public static partial class TrRmExecutableCompiler
                     = ((BoundEnumDeclarationIdentity.Standard)
                         definition.Identity).Value;
                 var snapshot = occurrence.Declaration.Site.Snapshot;
-                if (!IsSelectedC1EnumClosureSchemaIdentity(
+                if (!IsSelectedEN1EnumClosureSchemaIdentity(
                         snapshot.SchemaIdentity)
                     || !StringComparer.Ordinal.Equals(
                         snapshot.SchemaIdentity, schemaIdentity)
