@@ -402,7 +402,8 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         var tree = SyntaxTree.Parse("""
             public class Box {
                 public int32 Value { get { return field; } init; }
-                public Box(int32 value) { Value = value; }
+                public int32 Seed;
+                public Box(int32 seed) { Seed = seed; }
             }
             """);
         var compilation = Compilation.CreateLibrary(tree);
@@ -413,6 +414,8 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             .Single(static node =>
                 node.Kind == SyntaxKind.ClassDeclaration);
         var members = classDeclaration.Children.OfType<SyntaxNode>();
+        var fieldDeclaration = members.Single(static node =>
+            node.Kind == SyntaxKind.FieldDeclaration);
         var propertyDeclaration = members.Single(static node =>
             node.Kind == SyntaxKind.PropertyDeclaration);
         var constructorDeclaration = members.Single(static node =>
@@ -425,6 +428,8 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             [], [], [
                 new TrRmSourceClassExport(program, 0,
                     classDeclaration.Span, "BoxKey", [
+                        new TrRmSourceClassMemberExport(0,
+                            fieldDeclaration.Span, "Box.Seed"),
                         new TrRmSourceClassMemberExport(0,
                             propertyDeclaration.Span, "Box.Value"),
                         new TrRmSourceClassMemberExport(0,
