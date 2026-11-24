@@ -2147,9 +2147,10 @@ internal sealed class TrRmC1EnumClosureSourceTests
                     public int32 Value;
                     public Box(bool first, bool second, int32 left,
                         int32 middle, int32 right) {
+                        int32 copiedLeft = left;
                         if (first) {
                             if (second) {
-                                Value = left;
+                                Value = copiedLeft;
                             } else {
                                 Value = middle;
                             }
@@ -2193,8 +2194,13 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 tables.Contracts.Count);
             Assert.That(initializerBody.BlockCount, Is.EqualTo(7),
                 schemaIdentity);
+            Assert.That(initializerBody.HomeCount, Is.EqualTo(7),
+                schemaIdentity);
+            Assert.That(initializerBody.HomeMap[48], Is.EqualTo(3),
+                schemaIdentity);
             Assert.That(initializerBody.GetBlockCode(0).ToArray(),
                 Is.EqualTo(new byte[] {
+                    0xD5, 0, 3, 0, 0xD6, 0x10, 6, 0,
                     0xD5, 0, 1, 0, 0xE4, 0, 1, 0,
                 }), schemaIdentity);
             Assert.That(initializerBody.GetBlockCode(1).ToArray(),
@@ -2232,6 +2238,8 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 reemittedTables.Methods.GetBodyRow(reemittedInitializerRow),
                 reemittedTables.Contracts.Count);
             Assert.That(reemittedBody.BlockCount, Is.EqualTo(7),
+                schemaIdentity);
+            Assert.That(reemittedBody.HomeMap[48], Is.EqualTo(3),
                 schemaIdentity);
             Assert.That(reemittedBody.GetBlockCode(0).ToArray(),
                 Is.EqualTo(initializerBody.GetBlockCode(0).ToArray()),
