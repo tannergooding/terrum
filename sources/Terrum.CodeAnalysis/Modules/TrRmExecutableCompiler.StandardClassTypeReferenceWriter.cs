@@ -4902,23 +4902,37 @@ public static partial class TrRmExecutableCompiler
                 sourceStructDeclarations,
             TrRmArtifactSchema schema, string schemaIdentity)
     {
-        if (function.Variables.Length != function.ParameterCount
-            || function.Body.Statements.IsDefault)
+        if (function.Variables.Length > ushort.MaxValue + 1
+            || function.Body.Statements.IsDefault
+            || !function.Body.RetiredManagedLocals.IsEmpty)
         {
             throw Unsupported(
-                "The bounded Construction-2 initializer requires a checked body without untracked local storage.");
+                "The bounded Construction-2 initializer requires a checked Body within HomeMap limits and without managed-local retirement.");
         }
 
         var assignments
             = ImmutableArray.CreateBuilder<BoundFieldAssignment>();
         var assignedFields = new HashSet<int>();
+        var localVariables = new HashSet<int>();
+        var nextLocalVariable = function.ParameterCount;
         var returned = false;
         Collect(function.Body);
+        if (nextLocalVariable != function.Variables.Length)
+        {
+            throw Unsupported(
+                "The bounded Construction-2 initializer requires each scalar local to have a checked source declaration.");
+        }
 
         return assignments.ToImmutable();
 
         void Collect(BoundBlock block)
         {
+            if (!block.RetiredManagedLocals.IsEmpty)
+            {
+                throw Unsupported(
+                    "The bounded Construction-2 initializer cannot retire managed locals.");
+            }
+
             foreach (var statement in block.Statements)
             {
                 if (returned)
@@ -4930,6 +4944,41 @@ public static partial class TrRmExecutableCompiler
                 if (statement is BoundBlock nested)
                 {
                     Collect(nested);
+                    continue;
+                }
+
+                if (statement is BoundLocal local)
+                {
+                    if (local.Variable != nextLocalVariable
+                        || (uint)local.Variable
+                            >= (uint)function.Variables.Length
+                        || local.Initializer is not BoundRead initialRead)
+                    {
+                        throw Unsupported(
+                            "A Construction-2 initializer local must be an ordered scalar copy from a value Home.");
+                    }
+
+                    var variable = function.Variables[local.Variable];
+                    if (variable.IsMutable || variable.IsOut || variable.IsInit
+                        || variable.IsImplicitRef
+                        || variable.IsInitializationLocal
+                        || !TryGetC1M1SourceScalarTypeSpecReference(
+                            variable.Type, out _)
+                        || initialRead.Type != variable.Type
+                        || initialRead.Variable < 0
+                        || initialRead.Variable >= local.Variable
+                        || (initialRead.Variable >= function.ParameterCount
+                            && !localVariables.Contains(
+                                initialRead.Variable))
+                        || function.Variables[initialRead.Variable].Type
+                            != variable.Type)
+                    {
+                        throw Unsupported(
+                            "A Construction-2 initializer local must copy an initialized same-typed scalar parameter or earlier local.");
+                    }
+
+                    _ = localVariables.Add(local.Variable);
+                    nextLocalVariable++;
                     continue;
                 }
 
@@ -4954,17 +5003,23 @@ public static partial class TrRmExecutableCompiler
                 var fieldType = @class.Fields[assignment.Field].Type;
                 if (assignment.Value is BoundRead read)
                 {
+                    var isSupportedValueHome
+                        = read.Variable < function.ParameterCount
+                            ? IsC1M1Construction2SourceCopyType(read.Type,
+                                program, schema, schemaIdentity,
+                                sourceStructDeclarations)
+                            : localVariables.Contains(read.Variable)
+                                && TryGetC1M1SourceScalarTypeSpecReference(
+                                    read.Type, out _);
                     if (read.Variable <= 0
-                        || read.Variable >= function.ParameterCount
+                        || read.Variable >= function.Variables.Length
                         || read.Type != fieldType
                         || function.Variables[read.Variable].Type
                             != read.Type
-                        || !IsC1M1Construction2SourceCopyType(read.Type,
-                            program, schema, schemaIdentity,
-                            sourceStructDeclarations))
+                        || !isSupportedValueHome)
                     {
                         throw Unsupported(
-                            "A Construction-2 initializer parameter store must copy a matching checked value formal.");
+                            "A Construction-2 initializer store must copy a matching checked value formal or initialized scalar local.");
                     }
                 }
                 else if (assignment.Value is BoundConstant constant)
@@ -5257,11 +5312,14 @@ public static partial class TrRmExecutableCompiler
             variableIndex < function.Variables.Length; variableIndex++)
         {
             var home = homeMap.AsSpan(variableIndex * 8, 8);
-            home[0] = variableIndex == 0 ? (byte)1 : (byte)2;
+            var homeKind = variableIndex == 0 ? (byte)1
+                : variableIndex < function.ParameterCount ? (byte)2
+                : (byte)3;
+            home[0] = homeKind;
             BinaryPrimitives.WriteUInt16LittleEndian(home[2..],
                 checked((ushort)maps.GetTypeMapIndex(
                     typeTokens[variableIndex])));
-            if (variableIndex != 0)
+            if (homeKind == 2)
             {
                 BinaryPrimitives.WriteUInt16LittleEndian(home[4..],
                     checked((ushort)(variableIndex - 1)));
@@ -5273,7 +5331,68 @@ public static partial class TrRmExecutableCompiler
         };
         var code = new List<byte>();
         var constantRows = new List<TrRmFrozenScalarValueReference>();
-        foreach (var assignment in initializer.FieldAssignments)
+        var emittedReturn = false;
+        EmitBlock(function.Body);
+        if (!emittedReturn)
+        {
+            code.Add(0x18);
+            code.Add(0);
+        }
+
+        var codeBytes = code.ToArray();
+        var constantMap = new byte[checked(constantRows.Count * 8)];
+        for (var index = 0; index < constantRows.Count; index++)
+        {
+            var offset = index * 8;
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                constantMap.AsSpan(offset), constantRows[index].TypeSpecRef);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                constantMap.AsSpan(offset + sizeof(uint)),
+                constantRows[index].ConstantSourceRow);
+        }
+
+        return TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
+            default, default, constantMap,
+            [new TrRmRegisterBodyBlock(0,
+                checked((uint)codeBytes.Length), 0)],
+            records, codeBytes, contractCount: contractCount,
+            schema: schema,
+            generalPredicateGraphsInitializationReferenceBodies
+                : schema.UsesGeneralPredicateGraphs());
+
+        void EmitBlock(BoundBlock block)
+        {
+            foreach (var statement in block.Statements)
+            {
+                switch (statement)
+                {
+                    case BoundBlock nested:
+                        EmitBlock(nested);
+                        break;
+                    case BoundLocal local
+                        when local.Initializer is BoundRead read:
+                        AppendHomeLoad(read.Variable);
+                        code.Add(0xD6);
+                        code.Add(0x10);
+                        code.Add(checked((byte)local.Variable));
+                        code.Add(checked((byte)(local.Variable >> 8)));
+                        break;
+                    case BoundFieldAssignment assignment:
+                        EmitFieldAssignment(assignment);
+                        break;
+                    case BoundReturn { Value: null }:
+                        code.Add(0x18);
+                        code.Add(0);
+                        emittedReturn = true;
+                        break;
+                    default:
+                        throw new InvalidDataException(
+                            "A Construction-2 initializer Body contains an unvalidated statement.");
+                }
+            }
+        }
+
+        void EmitFieldAssignment(BoundFieldAssignment assignment)
         {
             if (!fieldDefRowByClassAndIndex.TryGetValue((
                     initializer.ClassIndex, assignment.Field),
@@ -5328,28 +5447,13 @@ public static partial class TrRmExecutableCompiler
             AppendRecordReference(0xD9, storeRecord);
         }
 
-        code.Add(0x18);
-        code.Add(0);
-        var codeBytes = code.ToArray();
-        var constantMap = new byte[checked(constantRows.Count * 8)];
-        for (var index = 0; index < constantRows.Count; index++)
+        void AppendHomeLoad(int homeIndex)
         {
-            var offset = index * 8;
-            BinaryPrimitives.WriteUInt32LittleEndian(
-                constantMap.AsSpan(offset), constantRows[index].TypeSpecRef);
-            BinaryPrimitives.WriteUInt32LittleEndian(
-                constantMap.AsSpan(offset + sizeof(uint)),
-                constantRows[index].ConstantSourceRow);
+            code.Add(0xD5);
+            code.Add(0);
+            code.Add(checked((byte)homeIndex));
+            code.Add(checked((byte)(homeIndex >> 8)));
         }
-
-        return TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
-            default, default, constantMap,
-            [new TrRmRegisterBodyBlock(0,
-                checked((uint)codeBytes.Length), 0)],
-            records, codeBytes, contractCount: contractCount,
-            schema: schema,
-            generalPredicateGraphsInitializationReferenceBodies
-                : schema.UsesGeneralPredicateGraphs());
 
         int GetConstantMapIndex(BoundConstant constant)
         {

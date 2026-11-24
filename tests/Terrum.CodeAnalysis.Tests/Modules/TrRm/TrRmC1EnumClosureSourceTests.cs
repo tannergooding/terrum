@@ -1690,6 +1690,104 @@ internal sealed class TrRmC1EnumClosureSourceTests
     }
 
     [Test]
+    public void EmitsScalarLocalCopiesInConstructionInitializerBodies()
+    {
+        var tree = SyntaxTree.Parse("""
+            namespace Demo {
+                public class Box {
+                    public int32 Value;
+                    public Box(int32 value) {
+                        int32 first = value;
+                        int32 copy = first;
+                        Value = copy;
+                    }
+                }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classExport = CreateSourceClassExport(program, tree, "Box",
+            "type.box", "constructor.box", (0, "field.box.value"));
+        foreach (var schemaIdentity in s_initializerCopyEvidenceSchemaIdentities)
+        {
+            var artifact = EmitClassArtifact(program, "LocalCopyProvider",
+                schemaIdentity, [classExport]);
+            var tables = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                    artifact, SchemaFor(schemaIdentity)));
+            var boxRow = Enumerable.Range(1, tables.TypeDefs.Count)
+                .Single(row => tables.TypeDefs.GetName(row) == "Box");
+            var initializerMethodRow = Enumerable.Range(1,
+                    tables.Methods.Count)
+                .Single(row => tables.Methods.GetOwnerType(row)
+                        == (uint)boxRow
+                    && tables.Contracts.HasConstructionClause(row)
+                    && tables.Contracts.GetConstructionClause(row).RoleTag
+                        == 1);
+            var initializerBody = tables.Bodies.GetRegisterBody(
+                tables.Methods.GetBodyRow(initializerMethodRow),
+                tables.Contracts.Count);
+            Assert.That(initializerBody.HomeCount, Is.EqualTo(4),
+                schemaIdentity);
+            Assert.That(initializerBody.HomeMap[0], Is.EqualTo(1),
+                schemaIdentity);
+            Assert.That(initializerBody.HomeMap[8], Is.EqualTo(2),
+                schemaIdentity);
+            Assert.That(initializerBody.HomeMap[16], Is.EqualTo(3),
+                schemaIdentity);
+            Assert.That(initializerBody.HomeMap[24], Is.EqualTo(3),
+                schemaIdentity);
+            Assert.That(initializerBody.Code[..16].ToArray(),
+                Is.EqualTo(new byte[] {
+                    0xD5, 0, 1, 0, 0xD6, 0x10, 2, 0,
+                    0xD5, 0, 2, 0, 0xD6, 0x10, 3, 0,
+                }), schemaIdentity);
+
+            var reference = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, artifact),
+                "LocalCopyProvider", [], ["type.box"]);
+            var sourceFreeCompilation = Compilation.CreateLibrary(
+                SyntaxTree.Parse(string.Empty), reference);
+            Assert.That(sourceFreeCompilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine,
+                    sourceFreeCompilation.Diagnostics));
+            var reemitted = TrRmExecutableCompiler.EmitStandard(
+                sourceFreeCompilation.Program!, "LocalCopyProvider",
+                schemaIdentity, 1);
+            var reemittedTables = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                    reemitted, SchemaFor(schemaIdentity)));
+            var reemittedBoxRow = Enumerable.Range(1,
+                    reemittedTables.TypeDefs.Count)
+                .Single(row => reemittedTables.TypeDefs.GetName(row)
+                    == "Box");
+            var reemittedInitializerMethodRow = Enumerable.Range(1,
+                    reemittedTables.Methods.Count)
+                .Single(row => reemittedTables.Methods.GetOwnerType(row)
+                        == (uint)reemittedBoxRow
+                    && reemittedTables.Contracts.HasConstructionClause(row)
+                    && reemittedTables.Contracts.GetConstructionClause(row)
+                        .RoleTag == 1);
+            var reemittedInitializerBody
+                = reemittedTables.Bodies.GetRegisterBody(
+                    reemittedTables.Methods.GetBodyRow(
+                        reemittedInitializerMethodRow),
+                    reemittedTables.Contracts.Count);
+            Assert.That(reemittedInitializerBody.HomeMap[16],
+                Is.EqualTo(3), schemaIdentity);
+            Assert.That(reemittedInitializerBody.HomeMap[24],
+                Is.EqualTo(3), schemaIdentity);
+            Assert.That(reemittedInitializerBody.Code[..16].ToArray(),
+                Is.EqualTo(new byte[] {
+                    0xD5, 0, 1, 0, 0xD6, 0x10, 2, 0,
+                    0xD5, 0, 2, 0, 0xD6, 0x10, 3, 0,
+                }), schemaIdentity);
+        }
+    }
+
+    [Test]
     public void EmitsDeclaredCopyEvidenceForInitializerStructFields()
     {
         var tree = SyntaxTree.Parse("""
