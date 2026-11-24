@@ -9162,6 +9162,11 @@ internal sealed class NativeCoreRegistrationTests
         var schema
             = TrRmArtifactSchema
                 .ForeignNativeInterfaceAggregateOutputConsumptionDraft;
+        Assert.Throws<ArgumentException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(
+                    schemaIdentity.ToUpperInvariant(), providerArtifact),
+                "provider.module", []));
         var providerTables = TrRmStructuralMetadataValidator
             .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
                 providerArtifact, schema));
@@ -9528,8 +9533,52 @@ internal sealed class NativeCoreRegistrationTests
             expectedPointTypeDef), Is.True);
         Assert.That(methodProviderTables.TypeDefs.HasDeclaredCopy(
             expectedCoordinatesTypeDef), Is.True);
+        var ac1Schema
+            = TrRmArtifactSchema
+                .ForeignNativeInterfaceAggregateOutputConsumptionDraft;
+        var ac1WithoutLayoutQueries = RewriteModuleFeature(
+            methodProviderArtifact, ac1Schema, schemaIdentity,
+            TrRmFeatureTableReader.LayoutQueriesFeatureId);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForForeignNativeInterfaceAggregateOutputConsumptionDraft(
+                        ac1WithoutLayoutQueries)));
+        var ac1WithoutRootlessValues = RewriteModuleFeature(
+            methodProviderArtifact, ac1Schema, schemaIdentity,
+            TrRmFeatureTableReader.RootlessNativeValuesFeatureId);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForForeignNativeInterfaceAggregateOutputConsumptionDraft(
+                        ac1WithoutRootlessValues)));
+        var a2Schema
+            = TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft;
+        var a2WithoutRootlessValues = RewriteModuleFeature(
+            typeProviderArtifact, a2Schema, typeProviderSchemaIdentity,
+            TrRmFeatureTableReader.RootlessNativeValuesFeatureId);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+                    TrRmArtifactIndex
+                        .ForForeignInvocationStorageFixedArrayCopyDraft(
+                            a2WithoutRootlessValues)));
         var methodProviderInput = new TrRmStandardArtifactInput(
             schemaIdentity, methodProviderArtifact);
+        var a2WithoutLayoutQueries = RewriteModuleFeature(typeProviderArtifact,
+            a2Schema, typeProviderSchemaIdentity,
+            TrRmFeatureTableReader.LayoutQueriesFeatureId);
+        _ = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyDraft(
+                        a2WithoutLayoutQueries));
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                methodProviderInput, "method.module", [
+                    new TrRmStandardArtifactInput(typeProviderSchemaIdentity,
+                        a2WithoutLayoutQueries),
+                ]));
         var loadedMethodProvider = TrRmExecutableCompiler.LoadStandard(
             methodProviderInput, "method.module", [typeProviderInput]);
         var loadedMethod = loadedMethodProvider.Functions.Single(function =>
@@ -9628,13 +9677,22 @@ internal sealed class NativeCoreRegistrationTests
                 methodInput, "method.module",
                 [missingCopyProviderInput]));
         var changedLayoutProvider = RewriteTypeDefLayoutKind(
-            typeProviderArtifact, pointTypeDef, 2);
+            typeProviderArtifact, a2Schema, typeProviderSchemaIdentity,
+            pointTypeDef, 2);
         Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.CreateStandardReference(methodInput,
                 "method.module", [
                     new TrRmStandardArtifactInput(
                         typeProviderSchemaIdentity, changedLayoutProvider),
                 ]));
+        var unionPointMethodProvider = RewriteTypeDefLayoutKind(
+            methodProviderArtifact, ac1Schema, schemaIdentity,
+            expectedPointTypeDef, 2);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForForeignNativeInterfaceAggregateOutputConsumptionDraft(
+                        unionPointMethodProvider)));
 
         static byte[] AddLayoutQueriesFeature(byte[] artifact)
         {
@@ -9676,18 +9734,22 @@ internal sealed class NativeCoreRegistrationTests
         }
 
         static byte[] RewriteTypeDefLayoutKind(byte[] artifact,
+            TrRmArtifactSchema schema, string standardSchemaIdentity,
             int typeDefRow, byte layoutKind)
         {
-            var schema
-                = TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft;
-            var index = TrRmArtifactIndex.ForForeignInvocationStorageFixedArrayCopyDraft(
-                artifact);
+            var index = new TrRmArtifactIndex(artifact, schema, null,
+                standardSchemaIdentity: standardSchemaIdentity);
             Assert.That(index.TryGetSection(0x0015, out var layoutSection,
                 out _), Is.True);
             var layoutBytes = layoutSection.ToArray();
-            var tables = TrRmStructuralMetadataValidator
-                .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
-                    index);
+            var tables = schema
+                    == TrRmArtifactSchema
+                        .ForeignNativeInterfaceAggregateOutputConsumptionDraft
+                ? TrRmStructuralMetadataValidator
+                    .ValidateAndGetExecutionTables(index)
+                : TrRmStructuralMetadataValidator
+                    .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+                        index);
             var layoutRow = tables.Layouts.GetLayoutForProfile(typeDefRow,
                 TrRmTargetProfileTableReader.WindowsX64NativeProfileId,
                 TrRmTargetProfileTableReader
@@ -9705,7 +9767,62 @@ internal sealed class NativeCoreRegistrationTests
                     kind == 0x0015 ? layoutBytes : bytes.ToArray());
             }
 
-            return TrRmArtifactWriter.Encode(sections, schema);
+            return TrRmArtifactWriter.Encode(sections, schema,
+                standardSchemaIdentity: standardSchemaIdentity);
+        }
+
+        static byte[] RewriteModuleFeature(byte[] artifact,
+            TrRmArtifactSchema schema, string standardSchemaIdentity,
+            uint removedFeatureId)
+        {
+            var index = new TrRmArtifactIndex(artifact, schema, null,
+                standardSchemaIdentity: standardSchemaIdentity);
+            Assert.That(index.TryGetSection(0x0001, out var moduleSection,
+                out var moduleCount), Is.True);
+            Assert.That(moduleCount, Is.EqualTo(1));
+            Assert.That(index.TryGetSection(0x0004, out var featureSection,
+                out var featureCount), Is.True);
+            var featureReader = new TrRmFeatureTableReader(featureSection,
+                featureCount, schema);
+            var featureRows = new TrRmFeatureRow[featureCount];
+            for (var row = 1; row <= featureCount; row++)
+            {
+                featureRows[row - 1] = featureReader.GetFeature(row);
+            }
+
+            var features = featureRows
+                .Where(feature => feature.FeatureId != removedFeatureId)
+                .ToArray();
+            Assert.That(features.Length, Is.EqualTo(featureCount - 1));
+
+            var moduleBytes = moduleSection.ToArray();
+            Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                moduleBytes.AsSpan(24)), Is.EqualTo(1u));
+            Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                moduleBytes.AsSpan(28)), Is.EqualTo((uint)featureCount));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                moduleBytes.AsSpan(28),
+                checked((uint)features.Length));
+            var featureBytes = TrRmFeatureTableWriter.Encode(features, schema);
+            var sections = new TrRmSection[index.SectionCount];
+            for (var sectionIndex = 0;
+                sectionIndex < index.SectionCount;
+                sectionIndex++)
+            {
+                index.GetSection(sectionIndex, out var kind, out var flags,
+                    out var bytes, out var count);
+                sections[sectionIndex] = new TrRmSection(kind, flags,
+                    kind == 0x0004 ? checked((uint)features.Length)
+                        : checked((uint)count),
+                    kind switch {
+                        0x0001 => moduleBytes,
+                        0x0004 => featureBytes,
+                        _ => bytes.ToArray(),
+                    });
+            }
+
+            return TrRmArtifactWriter.Encode(sections, schema,
+                standardSchemaIdentity: standardSchemaIdentity);
         }
     }
 
