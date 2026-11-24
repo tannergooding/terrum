@@ -940,6 +940,203 @@ internal static class TrRmDeclarationFailureBindingContract
             throw new InvalidDataException(
                 "The ConstructorBinding exception class differs from the originating Module's selected Core role.");
         }
+
+        ValidateExceptionClassWitness(facts, inputs,
+            exceptionInterfaceBindings, originModuleIdentity,
+            planInputIndex, tables, exceptionType,
+            exceptionTypeDefRow);
+    }
+
+    private static void ValidateExceptionClassWitness(
+        InputFacts[] facts,
+        IReadOnlyList<TrRmStandardArtifactInput> inputs,
+        ImmutableArray<TrRmExceptionInterfaceBinding> exceptionBindings,
+        string originModuleIdentity, int planInputIndex,
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables
+            planTables,
+        TrRmTypeSpecRefInfo exceptionType, int exceptionTypeDefRow)
+    {
+        var exceptionBinding = exceptionBindings.FirstOrDefault(binding =>
+            StringComparer.Ordinal.Equals(binding.UsingModuleIdentity,
+                originModuleIdentity));
+        if (exceptionBinding is null)
+        {
+            throw new InvalidDataException(
+                "The originating Module has no selected IException interface anchor.");
+        }
+
+        var classProviderIdentity = exceptionType.Form == 0x03
+            ? planTables.Imports.GetBindingForImportRow(
+                planTables.TypeSpecs.GetImportRow(exceptionType.Value))
+                .ProducerIdentity
+            : planTables.Modules.GetIdentity(
+                planTables.TypeDefs.GetOwnerModule(exceptionTypeDefRow));
+        var classProvider = FindModule(facts, classProviderIdentity);
+        var classTables = ReadExecutionTables(inputs[classProvider.InputIndex]);
+        var classTypeDefRow = exceptionType.Form == 0x02
+            ? exceptionTypeDefRow
+            : ResolveClassTypeDef(classTables, classProvider.ModuleRow,
+                planTables.Imports.GetBindingForImportRow(
+                    planTables.TypeSpecs.GetImportRow(exceptionType.Value))
+                    .ExportKey);
+        if (classTables.TypeDefs.GetKind(classTypeDefRow) != 2
+            || classTables.TypeDefs.GetGenericRange(classTypeDefRow).Count
+                != 0)
+        {
+            throw new InvalidDataException(
+                "The selected exception provider does not publish the expected concrete nongeneric class TypeDef.");
+        }
+
+        var witnessCount = 0;
+        for (var witnessRow = 1;
+            witnessRow <= classTables.InterfaceWitnesses.Count;
+            witnessRow++)
+        {
+            var implementingTypeSpecRef
+                = classTables.InterfaceWitnesses
+                    .GetImplementingTypeSpecRef(witnessRow);
+            var implementingTypeDefRow
+                = classTables.TypeSpecs.GetNominalTypeDefRow(
+                    implementingTypeSpecRef, classTables.TypeDefs,
+                    classTables.Imports);
+            if (implementingTypeDefRow != classTypeDefRow)
+            {
+                continue;
+            }
+
+            var interfaceTypeSpecRef
+                = classTables.InterfaceWitnesses
+                    .GetInterfaceTypeSpecRef(witnessRow);
+            var interfaceType = classTables.TypeSpecs.GetTypeSpecRef(
+                interfaceTypeSpecRef);
+            if (!interfaceType.IsRow || interfaceType.Form != 0x05
+                || interfaceType.Qualifiers != 0
+                || classTables.TypeSpecs.GetConstructedArgumentCount(
+                    interfaceType.Row) != 1)
+            {
+                continue;
+            }
+
+            var interfaceRow
+                = classTables.TypeSpecs.GetRow(interfaceType.Row);
+            var nominalInterfaceTypeSpecRef
+                = BinaryPrimitives.ReadUInt32LittleEndian(
+                    interfaceRow[2..]);
+            var selfTypeSpecRef
+                = classTables.TypeSpecs.GetConstructedArgument(
+                    interfaceType.Row, 0);
+            var selfType = classTables.TypeSpecs.GetTypeSpecRef(
+                selfTypeSpecRef);
+            if (!selfType.IsRow
+                || selfType.Form is not (0x02 or 0x03)
+                || selfType.Qualifiers != 0
+                || classTables.TypeSpecs.GetNominalTypeDefRow(
+                    selfTypeSpecRef, classTables.TypeDefs,
+                    classTables.Imports) != classTypeDefRow
+                || !MatchesSelectedInterface(classTables,
+                    nominalInterfaceTypeSpecRef, exceptionBinding))
+            {
+                continue;
+            }
+
+            witnessCount++;
+        }
+
+        if (witnessCount != 1)
+        {
+            throw new InvalidDataException(
+                "The selected exception class does not have exactly one self-typed Core IException witness.");
+        }
+    }
+
+    private static (int InputIndex, int ModuleRow) FindModule(
+        InputFacts[] facts, string moduleIdentity)
+    {
+        for (var inputIndex = 0; inputIndex < facts.Length; inputIndex++)
+        {
+            for (var moduleRow = 1;
+                moduleRow < facts[inputIndex].ModuleIdentities.Length;
+                moduleRow++)
+            {
+                if (StringComparer.Ordinal.Equals(
+                        facts[inputIndex].ModuleIdentities[moduleRow],
+                        moduleIdentity))
+                {
+                    return (inputIndex, moduleRow);
+                }
+            }
+        }
+
+        throw new InvalidDataException(
+            "A selected exception provider Module is absent from the captured input set.");
+    }
+
+    private static int ResolveClassTypeDef(
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+        int providerModuleRow, string exportKey)
+    {
+        if (!tables.Exports.TryGetDefinitionForKey(providerModuleRow,
+                exportKey, out var definitionId)
+            || (definitionId >> 24) != 0x13)
+        {
+            throw new InvalidDataException(
+                "The selected exception class ExportKey is not a public TypeDef.");
+        }
+
+        return GetTypeDefRow(definitionId);
+    }
+
+    private static bool MatchesSelectedInterface(
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+        uint interfaceTypeSpecRef,
+        TrRmExceptionInterfaceBinding binding)
+    {
+        var interfaceType = tables.TypeSpecs.GetTypeSpecRef(
+            interfaceTypeSpecRef);
+        if (!interfaceType.IsRow
+            || interfaceType.Form is not (0x02 or 0x03)
+            || interfaceType.Qualifiers != 0)
+        {
+            return false;
+        }
+
+        var typeDefRow = tables.TypeSpecs.GetNominalTypeDefRow(
+            interfaceTypeSpecRef, tables.TypeDefs, tables.Imports);
+        if (tables.TypeDefs.GetKind(typeDefRow) != 3)
+        {
+            return false;
+        }
+
+        if (interfaceType.Form == 0x03)
+        {
+            var import = tables.Imports.GetBindingForImportRow(
+                tables.TypeSpecs.GetImportRow(interfaceTypeSpecRef));
+            return StringComparer.Ordinal.Equals(
+                    import.ProducerIdentity, binding.ProviderIdentity)
+                && StringComparer.Ordinal.Equals(import.ExportKey,
+                    binding.ExportKey);
+        }
+
+        var ownerModule = tables.TypeDefs.GetOwnerModule(typeDefRow);
+        var expectedDefinitionId = 0x1300_0000u
+            | checked((uint)typeDefRow);
+        return StringComparer.Ordinal.Equals(
+                tables.Modules.GetIdentity(ownerModule),
+                binding.ProviderIdentity)
+            && tables.Exports.TryGetDefinitionForKey(ownerModule,
+                binding.ExportKey, out var definitionId)
+            && definitionId == expectedDefinitionId;
+    }
+
+    private static TrRmStructuralMetadataValidator.ValidatedExecutionTables
+        ReadExecutionTables(TrRmStandardArtifactInput input)
+    {
+        var schema = TrRmExecutableCompiler.GetForeignInvocationSchema(
+            input.SchemaIdentity);
+        return TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                input.Artifact.ToArray(), schema,
+                standardSchemaIdentity: input.SchemaIdentity));
     }
 
     private static bool MatchesSelectedClass(
