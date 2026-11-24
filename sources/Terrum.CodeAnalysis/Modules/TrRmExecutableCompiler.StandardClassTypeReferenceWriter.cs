@@ -5105,52 +5105,54 @@ public static partial class TrRmExecutableCompiler
         ImmutableArray<BoundFieldAssignment>
             CollectConditionalFieldAssignments(BoundIf branch)
         {
-            if (function.Variables.Length != function.ParameterCount
-                || branch.Else is not BoundStatement elseBranch
-                || !IsC1M1Construction2InitializerCondition(
-                    branch.Condition, function)
-                || !branch.GenericUniquePropertyWhenTrue.IsEmpty
-                || !branch.GenericUniquePropertyWhenFalse.IsEmpty
-                || branch.GenericUniquePropertyKnownResult is not null)
+            if (function.Variables.Length != function.ParameterCount)
             {
                 throw Unsupported(
-                    "A Construction-2 conditional initializer requires one side-effect-free Boolean value formal and no locals.");
+                    "A Construction-2 conditional initializer requires value-formal Homes without locals.");
             }
 
-            var trueAssignments = CollectArm(branch.Then);
-            var falseAssignments = CollectArm(elseBranch);
-            if (trueAssignments.Length != falseAssignments.Length)
+            var paths
+                = new List<ImmutableArray<BoundFieldAssignment>>();
+            var remainingVisits = SemanticVerifier.MaximumAnalysisVisits;
+            CollectConditionalPath(branch, paths, depth: 0);
+            if (paths.Count == 0)
             {
-                throw Unsupported(
-                    "Both Construction-2 initializer branches must initialize the same ordered fields.");
+                throw new InvalidDataException(
+                    "A Construction-2 conditional initializer has no normal path.");
             }
 
-            for (var index = 0; index < trueAssignments.Length; index++)
+            var firstPath = paths[0];
+            foreach (var path in paths.Skip(1))
             {
-                if (trueAssignments[index].Field
-                    != falseAssignments[index].Field)
+                if (path.Length != firstPath.Length)
                 {
                     throw Unsupported(
-                        "Both Construction-2 initializer branches must initialize the same ordered fields.");
+                        "Every Construction-2 initializer path must initialize the same ordered fields.");
+                }
+
+                for (var index = 0; index < firstPath.Length; index++)
+                {
+                    if (path[index].Field != firstPath[index].Field)
+                    {
+                        throw Unsupported(
+                            "Every Construction-2 initializer path must initialize the same ordered fields.");
+                    }
                 }
             }
 
-            return trueAssignments;
+            return firstPath;
 
-            ImmutableArray<BoundFieldAssignment> CollectArm(
-                BoundStatement arm)
+            void CollectConditionalPath(BoundStatement statement,
+                List<ImmutableArray<BoundFieldAssignment>> results,
+                int depth)
             {
-                var result = ImmutableArray.CreateBuilder<
-                    BoundFieldAssignment>();
-                var fields = new HashSet<int>();
-                CollectArmStatements(arm, result, fields);
-                return result.ToImmutable();
-            }
+                if (++depth > SemanticVerifier.MaximumDepth
+                    || --remainingVisits < 0)
+                {
+                    throw Unsupported(
+                        "A Construction-2 conditional initializer exceeds its checked depth or visit limit.");
+                }
 
-            void CollectArmStatements(BoundStatement statement,
-                ImmutableArray<BoundFieldAssignment>.Builder result,
-                HashSet<int> fields)
-            {
                 if (statement is BoundBlock block)
                 {
                     if (!block.RetiredManagedLocals.IsEmpty)
@@ -5159,21 +5161,70 @@ public static partial class TrRmExecutableCompiler
                             "A Construction-2 conditional initializer cannot retire managed locals.");
                     }
 
-                    foreach (var nestedStatement in block.Statements)
+                    if (block.Statements.Length == 1)
                     {
-                        CollectArmStatements(nestedStatement, result, fields);
+                        CollectConditionalPath(block.Statements[0], results,
+                            checked(depth + 1));
+                        return;
                     }
 
+                    var fields = new HashSet<int>();
+                    var assignments
+                        = ImmutableArray.CreateBuilder<
+                            BoundFieldAssignment>(block.Statements.Length);
+                    foreach (var nestedStatement in block.Statements)
+                    {
+                        if (nestedStatement
+                            is not BoundFieldAssignment assignment)
+                        {
+                            throw Unsupported(
+                                "A Construction-2 conditional leaf supports only direct field stores.");
+                        }
+
+                        AddFieldAssignment(assignment, fields,
+                            localVariables, assignments);
+                    }
+
+                    results.Add(assignments.ToImmutable());
                     return;
                 }
 
-                if (statement is not BoundFieldAssignment assignment)
+                if (statement is BoundIf nestedBranch)
                 {
-                    throw Unsupported(
-                        "A Construction-2 conditional initializer branch supports only direct field stores.");
+                    if (nestedBranch.Else is not BoundStatement elseBranch
+                        || !IsC1M1Construction2InitializerCondition(
+                            nestedBranch.Condition, function)
+                        || !nestedBranch.GenericUniquePropertyWhenTrue
+                            .IsEmpty
+                        || !nestedBranch.GenericUniquePropertyWhenFalse
+                            .IsEmpty
+                        || nestedBranch.GenericUniquePropertyKnownResult
+                            is not null)
+                    {
+                        throw Unsupported(
+                            "A Construction-2 conditional initializer requires side-effect-free conditions with both branches.");
+                    }
+
+                    CollectConditionalPath(nestedBranch.Then, results,
+                        checked(depth + 1));
+                    CollectConditionalPath(elseBranch, results,
+                        checked(depth + 1));
+                    return;
                 }
 
-                AddFieldAssignment(assignment, fields, localVariables, result);
+                if (statement is BoundFieldAssignment fieldAssignment)
+                {
+                    var fields = new HashSet<int>();
+                    var assignments
+                        = ImmutableArray.CreateBuilder<BoundFieldAssignment>(1);
+                    AddFieldAssignment(fieldAssignment, fields,
+                        localVariables, assignments);
+                    results.Add(assignments.MoveToImmutable());
+                    return;
+                }
+
+                throw Unsupported(
+                    "A Construction-2 conditional leaf supports only direct field stores.");
             }
         }
     }
@@ -5798,7 +5849,7 @@ public static partial class TrRmExecutableCompiler
     {
         var function = initializer.Function;
         if (function.Variables.Length != function.ParameterCount
-            || conditional.Else is not BoundStatement elseBranch
+            || conditional.Else is null
             || !IsC1M1Construction2InitializerCondition(
                 conditional.Condition, function))
         {
@@ -5806,34 +5857,10 @@ public static partial class TrRmExecutableCompiler
                 "A Construction-2 conditional initializer differs from its checked input and branch contract.");
         }
 
-        var trueAssignments = CollectArm(conditional.Then);
-        var falseAssignments = CollectArm(elseBranch);
-        if (trueAssignments.Length != initializer.FieldAssignments.Length
-            || falseAssignments.Length != initializer.FieldAssignments.Length)
-        {
-            throw new InvalidDataException(
-                "A Construction-2 conditional initializer differs from its checked field set.");
-        }
-
-        for (var index = 0; index < initializer.FieldAssignments.Length;
-            index++)
-        {
-            var field = initializer.FieldAssignments[index].Field;
-            if (trueAssignments[index].Field != field
-                || falseAssignments[index].Field != field)
-            {
-                throw new InvalidDataException(
-                    "A Construction-2 conditional initializer changes its ordered field set.");
-            }
-        }
-
         var typeTokens = function.Variables
             .Select(variable => CreateStandardBodyTypeMapToken(
                 typeSpecReferenceFor(variable.Type)))
-            .Concat(trueAssignments.Select(assignment =>
-                CreateStandardBodyTypeMapToken(
-                    typeSpecReferenceFor(assignment.Value.Type))))
-            .Concat(falseAssignments.Select(assignment =>
+            .Concat(initializer.FieldAssignments.Select(assignment =>
                 CreateStandardBodyTypeMapToken(
                     typeSpecReferenceFor(assignment.Value.Type))))
             .ToArray();
@@ -5859,16 +5886,25 @@ public static partial class TrRmExecutableCompiler
         var records = new List<ReadOnlyMemory<byte>> {
             new(new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 }),
         };
-        var edgeRecordIndex = AddRecord(
-            TrRmRegisterBodyRecordWriter.EncodeConditionalEdge(1, 2));
-        var conditionCode = EncodeCondition(conditional.Condition,
-            checked((ushort)edgeRecordIndex));
-        var codeBlocks = new[] {
-            conditionCode,
-            EmitArm(trueAssignments),
-            EmitArm(falseAssignments),
-        };
-        var blocks = new List<TrRmRegisterBodyBlock>(codeBlocks.Length);
+        var codeBlocks = new List<byte[]> { [] };
+        var pathAssignments
+            = new List<ImmutableArray<BoundFieldAssignment>>();
+        var remainingVisits = SemanticVerifier.MaximumAnalysisVisits;
+        CollectConditionalPaths(conditional, pathAssignments, depth: 0);
+        if (pathAssignments.Count == 0
+            || pathAssignments.Any(path =>
+                path.Length != initializer.FieldAssignments.Length
+                || !path.Select(static assignment => assignment.Field)
+                    .SequenceEqual(initializer.FieldAssignments.Select(
+                        static assignment => assignment.Field))))
+        {
+            throw new InvalidDataException(
+                "A Construction-2 conditional Body differs from its checked field-initiation paths.");
+        }
+
+        var emissionVisits = SemanticVerifier.MaximumAnalysisVisits;
+        EmitConditionalBlock(0, conditional, depth: 0);
+        var blocks = new List<TrRmRegisterBodyBlock>(codeBlocks.Count);
         var code = new List<byte>();
         foreach (var blockCode in codeBlocks)
         {
@@ -5950,18 +5986,160 @@ public static partial class TrRmExecutableCompiler
             return conditionCode.ToArray();
         }
 
+        void CollectConditionalPaths(
+            BoundStatement statement,
+            List<ImmutableArray<BoundFieldAssignment>> paths, int depth)
+        {
+            if (depth > SemanticVerifier.MaximumDepth
+                || --remainingVisits < 0)
+            {
+                throw Unsupported(
+                    "A Construction-2 conditional initializer exceeds its checked depth or visit limit.");
+            }
+
+            while (statement is BoundBlock block)
+            {
+                if (!block.RetiredManagedLocals.IsEmpty)
+                {
+                    throw new InvalidDataException(
+                        "A Construction-2 conditional initializer branch has managed-local retirement.");
+                }
+
+                if (block.Statements.Length != 1)
+                {
+                    paths.Add(CollectArm(block));
+                    return;
+                }
+
+                statement = block.Statements[0];
+                if (++depth > SemanticVerifier.MaximumDepth)
+                {
+                    throw Unsupported(
+                        "A Construction-2 conditional initializer exceeds its checked nesting limit.");
+                }
+            }
+
+            if (statement is BoundIf nestedBranch)
+            {
+                if (nestedBranch.Else is not BoundStatement elseArm
+                    || !IsC1M1Construction2InitializerCondition(
+                        nestedBranch.Condition, function)
+                    || !nestedBranch.GenericUniquePropertyWhenTrue.IsEmpty
+                    || !nestedBranch.GenericUniquePropertyWhenFalse.IsEmpty
+                    || nestedBranch.GenericUniquePropertyKnownResult
+                        is not null)
+                {
+                    throw new InvalidDataException(
+                        "A Construction-2 conditional initializer branch differs from its checked branch contract.");
+                }
+
+                CollectConditionalPaths(nestedBranch.Then, paths,
+                    checked(depth + 1));
+                CollectConditionalPaths(elseArm, paths,
+                    checked(depth + 1));
+                return;
+            }
+
+            paths.Add(CollectArm(statement));
+        }
+
+        void EmitConditionalBlock(int blockIndex,
+            BoundStatement statement, int depth)
+        {
+            if (depth > SemanticVerifier.MaximumDepth
+                || --emissionVisits < 0)
+            {
+                throw Unsupported(
+                    "A Construction-2 conditional initializer exceeds its checked emission limit.");
+            }
+
+            while (statement is BoundBlock block)
+            {
+                if (!block.RetiredManagedLocals.IsEmpty)
+                {
+                    throw new InvalidDataException(
+                        "A Construction-2 conditional initializer branch has managed-local retirement.");
+                }
+
+                if (block.Statements.Length != 1)
+                {
+                    codeBlocks[blockIndex] = EmitArm(CollectArm(block));
+                    return;
+                }
+
+                statement = block.Statements[0];
+                if (++depth > SemanticVerifier.MaximumDepth)
+                {
+                    throw Unsupported(
+                        "A Construction-2 conditional initializer exceeds its checked emission depth.");
+                }
+            }
+
+            if (statement is BoundIf nestedBranch)
+            {
+                if (nestedBranch.Else is not BoundStatement elseArm
+                    || !IsC1M1Construction2InitializerCondition(
+                        nestedBranch.Condition, function)
+                    || !nestedBranch.GenericUniquePropertyWhenTrue.IsEmpty
+                    || !nestedBranch.GenericUniquePropertyWhenFalse.IsEmpty
+                    || nestedBranch.GenericUniquePropertyKnownResult
+                        is not null)
+                {
+                    throw new InvalidDataException(
+                        "A Construction-2 conditional initializer branch differs from its checked branch contract.");
+                }
+
+                var trueBlock = AddBlock();
+                var falseBlock = AddBlock();
+                var edgeRecordIndex = AddRecord(
+                    TrRmRegisterBodyRecordWriter.EncodeConditionalEdge(
+                        checked((ushort)trueBlock),
+                        checked((ushort)falseBlock)));
+                codeBlocks[blockIndex] = EncodeCondition(
+                    nestedBranch.Condition,
+                    checked((ushort)edgeRecordIndex));
+                EmitConditionalBlock(trueBlock, nestedBranch.Then,
+                    checked(depth + 1));
+                EmitConditionalBlock(falseBlock, elseArm,
+                    checked(depth + 1));
+                return;
+            }
+
+            codeBlocks[blockIndex] = EmitArm(CollectArm(statement));
+        }
+
+        int AddBlock()
+        {
+            if (codeBlocks.Count > ushort.MaxValue)
+            {
+                throw Unsupported(
+                    "A Construction-2 conditional initializer exceeds the Block index limit.");
+            }
+
+            var block = codeBlocks.Count;
+            codeBlocks.Add([]);
+            return block;
+        }
+
         ImmutableArray<BoundFieldAssignment> CollectArm(
             BoundStatement arm)
         {
             var assignments
                 = ImmutableArray.CreateBuilder<BoundFieldAssignment>();
-            CollectArmStatements(arm, assignments);
+            CollectArmStatements(arm, assignments, []);
             return assignments.ToImmutable();
         }
 
         void CollectArmStatements(BoundStatement statement,
-            ImmutableArray<BoundFieldAssignment>.Builder assignments)
+            ImmutableArray<BoundFieldAssignment>.Builder assignments,
+            HashSet<int> fields)
         {
+            if (--remainingVisits < 0)
+            {
+                throw Unsupported(
+                    "A Construction-2 conditional initializer exceeds its checked field-visit limit.");
+            }
+
             if (statement is BoundBlock block)
             {
                 if (!block.RetiredManagedLocals.IsEmpty)
@@ -5972,7 +6150,7 @@ public static partial class TrRmExecutableCompiler
 
                 foreach (var nested in block.Statements)
                 {
-                    CollectArmStatements(nested, assignments);
+                    CollectArmStatements(nested, assignments, fields);
                 }
 
                 return;
@@ -5984,12 +6162,34 @@ public static partial class TrRmExecutableCompiler
                     "A Construction-2 conditional initializer branch contains an unsupported statement.");
             }
 
+            if (!fields.Add(assignment.Field))
+            {
+                throw new InvalidDataException(
+                    "A Construction-2 conditional initializer branch assigns one field more than once.");
+            }
+
             assignments.Add(assignment);
         }
 
         byte[] EmitArm(
             ImmutableArray<BoundFieldAssignment> assignments)
         {
+            if (assignments.Length != initializer.FieldAssignments.Length)
+            {
+                throw new InvalidDataException(
+                    "A Construction-2 conditional initializer path differs from its checked field set.");
+            }
+
+            for (var index = 0; index < assignments.Length; index++)
+            {
+                if (assignments[index].Field
+                    != initializer.FieldAssignments[index].Field)
+                {
+                    throw new InvalidDataException(
+                        "A Construction-2 conditional initializer path changes its checked field order.");
+                }
+            }
+
             var armCode = new List<byte>();
             foreach (var assignment in assignments)
             {
