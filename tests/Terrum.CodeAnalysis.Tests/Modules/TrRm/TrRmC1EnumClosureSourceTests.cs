@@ -2208,6 +2208,39 @@ internal sealed class TrRmC1EnumClosureSourceTests
     }
 
     [Test]
+    public void RejectsConditionalConstructorStoresWithDifferentFieldSets()
+    {
+        var tree = SyntaxTree.Parse("""
+            namespace Demo {
+                public class Box {
+                    public int32 Value;
+                    public int32 Other;
+                    public Box(bool assignValue, int32 value) {
+                        if (assignValue) {
+                            Value = value;
+                        } else {
+                            Other = value;
+                        }
+                    }
+                }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classExport = CreateSourceClassExport(program, tree, "Box",
+            "type.box", "constructor.box", (0, "field.box.value"),
+            (1, "field.box.other"));
+        var exception = Assert.Throws<NotSupportedException>(() =>
+            EmitClassArtifact(program, "MismatchedInitializerProvider",
+                s_initializerCopyEvidenceSchemaIdentities[0],
+                [classExport]));
+        Assert.That(exception!.Message,
+            Does.Contain("same ordered fields"));
+    }
+
+    [Test]
     public void EmitsDeclaredCopyEvidenceForInitializerStructFields()
     {
         var tree = SyntaxTree.Parse("""
