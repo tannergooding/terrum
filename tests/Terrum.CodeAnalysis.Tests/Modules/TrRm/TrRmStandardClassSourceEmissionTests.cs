@@ -8418,6 +8418,12 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 }
                 public void Forward() { Ping(); }
                 public int32 ForwardAnswer() { return Answer(42); }
+                internal int32 LocalAnswer(int32 value) {
+                    return Answer(value);
+                }
+                public int32 ForwardThroughLocal(int32 value) {
+                    return LocalAnswer(value);
+                }
             }
             """);
         var forwarderCompilation = Compilation.CreateLibrary(forwarderTree,
@@ -8487,6 +8493,36 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         Assert.That(forwarderTables.FrozenValueNodes.GetScalarPayload(
                 forwardAnswerValueNodeRow, forwarderTables.Blobs).ToArray(),
             Is.EqualTo(new byte[] { 42, 0, 0, 0 }));
+        var localAnswerMethodRow = Enumerable.Range(
+                1, forwarderTables.Methods.Count)
+            .Single(row =>
+                forwarderTables.Methods.GetName(row) == "LocalAnswer");
+        Assert.That(forwarderTables.Exports.TryGetDefinitionForKey(1,
+            "LocalAnswer", out _), Is.False);
+        var localAnswerBody = forwarderTables.Bodies.GetRegisterBody(
+            forwarderTables.Methods.GetBodyRow(localAnswerMethodRow),
+            forwarderTables.Contracts.Count);
+        Assert.That(localAnswerBody.MethodMap.Length, Is.EqualTo(sizeof(uint)));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                localAnswerBody.MethodMap),
+            Is.EqualTo(0x1600_0000u
+                | checked((uint)answerExpectedMethodRow)));
+        Assert.That(forwarderTables.Exports.TryGetDefinitionForKey(1,
+            "ForwardThroughLocal", out var forwardThroughLocalDefinition),
+            Is.True);
+        var forwardThroughLocalMethodRow = checked((int)(
+            forwardThroughLocalDefinition & 0x00FF_FFFF));
+        var forwardThroughLocalBody
+            = forwarderTables.Bodies.GetRegisterBody(
+                forwarderTables.Methods.GetBodyRow(
+                    forwardThroughLocalMethodRow),
+                forwarderTables.Contracts.Count);
+        Assert.That(forwardThroughLocalBody.MethodMap.Length,
+            Is.EqualTo(sizeof(uint)));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                forwardThroughLocalBody.MethodMap),
+            Is.EqualTo(0x1600_0000u
+                | checked((uint)localAnswerMethodRow)));
 
         var forwarderReference
             = TrRmExecutableCompiler.CreateStandardReference(
@@ -8559,10 +8595,44 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         Assert.That(reemittedTables.FrozenValueNodes.GetScalarPayload(
                 reemittedAnswerValueNodeRow, reemittedTables.Blobs).ToArray(),
             Is.EqualTo(new byte[] { 42, 0, 0, 0 }));
+        var reemittedLocalAnswerRow = Enumerable.Range(
+                1, reemittedTables.Methods.Count)
+            .Single(row =>
+                reemittedTables.Methods.GetName(row) == "LocalAnswer");
+        Assert.That(reemittedTables.Exports.TryGetDefinitionForKey(1,
+            "LocalAnswer", out _), Is.False);
+        var reemittedLocalAnswerBody = reemittedTables.Bodies
+            .GetRegisterBody(reemittedTables.Methods.GetBodyRow(
+                reemittedLocalAnswerRow), reemittedTables.Contracts.Count);
+        Assert.That(reemittedLocalAnswerBody.MethodMap.Length,
+            Is.EqualTo(sizeof(uint)));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                reemittedLocalAnswerBody.MethodMap),
+            Is.EqualTo(0x1600_0000u
+                | checked((uint)reemittedAnswerMethodRow)));
+        Assert.That(reemittedTables.Exports.TryGetDefinitionForKey(1,
+            "ForwardThroughLocal",
+            out var reemittedForwardThroughLocalDefinition), Is.True);
+        var reemittedForwardThroughLocalRow = checked((int)(
+            reemittedForwardThroughLocalDefinition & 0x00FF_FFFF));
+        var reemittedForwardThroughLocalBody
+            = reemittedTables.Bodies.GetRegisterBody(
+                reemittedTables.Methods.GetBodyRow(
+                    reemittedForwardThroughLocalRow),
+                reemittedTables.Contracts.Count);
+        Assert.That(reemittedForwardThroughLocalBody.MethodMap.Length,
+            Is.EqualTo(sizeof(uint)));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                reemittedForwardThroughLocalBody.MethodMap),
+            Is.EqualTo(0x1600_0000u
+                | checked((uint)reemittedLocalAnswerRow)));
 
         var downstream = Compilation.CreateLibrary(SyntaxTree.Parse("""
             public void InvokeForward() { Forward(); }
             public int32 InvokeForwardAnswer() { return ForwardAnswer(); }
+            public int32 InvokeForwardThroughLocal(int32 value) {
+                return ForwardThroughLocal(value);
+            }
             """), TrRmExecutableCompiler.CreateStandardReference(
                 new TrRmStandardArtifactInput(providerSchema, reemitted),
                 "UnitFunctionForwarderReemitted", [providerInput]));
