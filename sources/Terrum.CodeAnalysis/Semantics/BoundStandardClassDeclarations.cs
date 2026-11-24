@@ -333,6 +333,7 @@ internal static class BoundStandardClassDeclarationContract
                 return false;
             }
             totalRows += declaration.Declaration.Fields.Length
+                + declaration.Declaration.Properties.Length
                 + declaration.Declaration.Layouts.Length
                 + declaration.Declaration.Methods.Length
                 + declaration.Expectations.Length;
@@ -390,6 +391,7 @@ internal static class BoundStandardClassDeclarationContract
                 }
 
                 totalRows += expectation.ExpectedDeclaration.Fields.Length
+                    + expectation.ExpectedDeclaration.Properties.Length
                     + expectation.ExpectedDeclaration.Layouts.Length
                     + expectation.ExpectedDeclaration.Methods.Length
                     + expectation.FieldExpectations.Length

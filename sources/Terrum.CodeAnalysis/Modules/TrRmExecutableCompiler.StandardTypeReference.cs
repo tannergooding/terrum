@@ -4168,7 +4168,7 @@ public static partial class TrRmExecutableCompiler
             tables.TypeDefs.GetFlags(typeDefRow), fields.MoveToImmutable(),
             layouts.MoveToImmutable(), provider) {
             Methods = methods.ToImmutable(),
-            Properties = properties.MoveToImmutable(),
+            Properties = properties.ToImmutable(),
             UsesPropertyInitializedState
                 = tables.Schema.UsesPropertyInitializedState(),
         };
