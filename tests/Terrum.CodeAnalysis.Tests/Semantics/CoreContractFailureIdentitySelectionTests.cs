@@ -129,6 +129,31 @@ internal sealed class CoreContractFailureIdentitySelectionTests
     }
 
     [Test]
+    public void FailureConstructionPlanRequiresZeroFormalBindingRecord()
+    {
+        var emptyBinding = new byte[20];
+        emptyBinding[0] = 0x0B;
+        Assert.That(
+            TrRmDeclarationFailureBindingContract
+                .IsZeroFormalConstructorBindingRecord(emptyBinding),
+            Is.True);
+
+        var formalBinding = (byte[])emptyBinding.Clone();
+        formalBinding[12] = 1;
+        Assert.That(
+            TrRmDeclarationFailureBindingContract
+                .IsZeroFormalConstructorBindingRecord(formalBinding),
+            Is.False);
+
+        var wrongKind = (byte[])emptyBinding.Clone();
+        wrongKind[0] = 0x0A;
+        Assert.That(
+            TrRmDeclarationFailureBindingContract
+                .IsZeroFormalConstructorBindingRecord(wrongKind),
+            Is.False);
+    }
+
+    [Test]
     public void SelectionAllowsOnlyRolesNeededByTheModule()
     {
         var requirementOnly = CreateSelection() with {

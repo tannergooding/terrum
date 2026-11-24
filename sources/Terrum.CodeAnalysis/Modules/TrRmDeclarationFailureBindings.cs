@@ -119,6 +119,13 @@ internal static class TrRmDeclarationFailureBindingContract
         return true;
     }
 
+    internal static bool IsZeroFormalConstructorBindingRecord(
+        ReadOnlySpan<byte> record)
+        => record.Length == 20 && record[0] == 0x0B
+            && BinaryPrimitives.ReadUInt32LittleEndian(record[8..]) == 0
+            && BinaryPrimitives.ReadUInt32LittleEndian(record[12..]) == 0
+            && BinaryPrimitives.ReadUInt32LittleEndian(record[16..]) == 0;
+
     internal static (
         ImmutableArray<TrRmStandardArtifactInput> Inputs,
         ImmutableArray<TrRmPreconditionFailureBinding> Preconditions,
@@ -734,10 +741,7 @@ internal static class TrRmDeclarationFailureBindingContract
         }
 
         var record = body.GetRecord(recordIndex);
-        if (record.Length != 20 || record[0] != 0x0B
-            || BinaryPrimitives.ReadUInt32LittleEndian(record[8..]) != 0
-            || BinaryPrimitives.ReadUInt32LittleEndian(record[12..]) != 0
-            || BinaryPrimitives.ReadUInt32LittleEndian(record[16..]) != 0)
+        if (!IsZeroFormalConstructorBindingRecord(record))
         {
             throw new InvalidDataException(
                 "A declaration failure-binding plan requires the assigned zero-formal ConstructorBinding record 0B.");
