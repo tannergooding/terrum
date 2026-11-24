@@ -38,8 +38,9 @@ not validation results:
 * [`TrRmExecutableCompiler.StandardClassTypeReferenceWriter`](../../sources/Terrum.CodeAnalysis/Modules/TrRmExecutableCompiler.StandardClassTypeReferenceWriter.cs)
   emits selected public scalar properties with field-reading explicit or
   auto getters, direct mutable setters to the exact mutable backing field,
-  and auto init accessors. Other setter/init bodies and broader class
-  closure remain unsupported.
+  and auto or simple authored init accessors with one direct scalar FieldWrite
+  to the exact backing field. Other setter/init Body shapes, init contracts
+  and broader class closure remain unsupported.
 * [`TrRmStandardClassSourceEmissionTests`](../../tests/Terrum.CodeAnalysis.Tests/Modules/TrRm/TrRmStandardClassSourceEmissionTests.cs)
   now has focused auto-getter and setter producer cases. They remain
   unverified under the active execution hold.

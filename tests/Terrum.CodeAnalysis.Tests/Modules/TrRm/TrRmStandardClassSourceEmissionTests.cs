@@ -546,6 +546,66 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     }
 
     [Test]
+    public void EmitsPI1AuthoredInitializerWritingBackingField()
+    {
+        var tree = SyntaxTree.Parse("""
+            public class Box {
+                public int32 Value {
+                    get { return field; }
+                    init { field = value; }
+                }
+                public Box(int32 value) { Value = value; }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var members = classDeclaration.Children.OfType<SyntaxNode>();
+        var propertyDeclaration = members.Single(static node =>
+            node.Kind == SyntaxKind.PropertyDeclaration);
+        var constructorDeclaration = members.Single(static node =>
+            node.Kind == SyntaxKind.ConstructorDeclaration);
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "PI1AuthoredInitBox",
+            C1M1Construction2PropertyInitializedStateSchemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [
+                new TrRmSourceClassExport(program, 0,
+                    classDeclaration.Span, "BoxKey", [
+                        new TrRmSourceClassMemberExport(0,
+                            propertyDeclaration.Span, "Box.Value"),
+                        new TrRmSourceClassMemberExport(0,
+                            constructorDeclaration.Span,
+                            "Box.Initialize") {
+                            ConstructionProjectionExportKey = "Box.Create",
+                        },
+                    ]),
+            ]);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForC1M1Construction2L1R1PropertyInitializedStateDraft(
+                        artifact));
+
+        var initializerMethod = tables.Properties.GetInitMethod(1);
+        Assert.That(initializerMethod, Is.GreaterThan(0));
+        Assert.That(tables.Contracts.GetConstructionClause(
+                initializerMethod).RoleTag,
+            Is.EqualTo(3));
+        var initializerBodyRow
+            = tables.Methods.GetBodyRow(initializerMethod);
+        Assert.That(initializerBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(initializerBodyRow,
+            tables.Contracts.Count);
+        tables.ValidateRegisterBodyMapsForMethod(initializerMethod);
+    }
+
+    [Test]
     public void EmitsPI1AutoInitializerAccessorAndRoleThreeLink()
     {
         var tree = SyntaxTree.Parse("""

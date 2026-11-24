@@ -2893,8 +2893,6 @@ public static partial class TrRmExecutableCompiler
                         = isPropertyInitializer
                             && propertyMember is
                                 SourceClassMemberExport initializerProperty
-                            && IsC1M1AutoPropertyInitializer(
-                                initializerProperty.Declaration)
                             && IsSupportedC1M1Construction2PropertyInitializer(
                                 methodFunction,
                                 initializerProperty.BackingFieldIndex);
@@ -2902,7 +2900,7 @@ public static partial class TrRmExecutableCompiler
                         && !isSupportedPropertyInitializer)
                     {
                         throw Unsupported(
-                            "The bounded PI1 class source route supports only an auto init accessor that assigns its exact backing field.");
+                            "The bounded PI1 class source route supports only an init accessor that directly assigns its exact backing field from the value parameter.");
                     }
                     var isSupportedPropertySetter
                         = isPropertySetter
@@ -10749,24 +10747,6 @@ public static partial class TrRmExecutableCompiler
                 }
             }
         }
-    }
-
-    private static bool IsC1M1AutoPropertyInitializer(
-        SyntaxNode propertyDeclaration)
-    {
-        var initAccessors = propertyDeclaration.Children
-            .OfType<SyntaxNode>()
-            .Where(static child => child.Kind == SyntaxKind.InitAccessor)
-            .ToArray();
-        return initAccessors.Length == 1
-            && !initAccessors[0].Children.OfType<SyntaxNode>().Any(
-                static child => child.Kind is SyntaxKind.Block
-                    or SyntaxKind.ExpressionBody
-                    or SyntaxKind.ExternalBody)
-            && initAccessors[0].Children.LastOrDefault()
-                is SyntaxTokenElement {
-                    Token.Kind: TokenKind.Semicolon,
-                };
     }
 
     private static bool IsSupportedC1M1Construction2PropertyInitializer(

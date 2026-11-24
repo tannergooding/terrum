@@ -2237,14 +2237,14 @@ routes remain unverified under the active hold. The
 separate Construction-2 PI1 source producer now emits selected public
 scalar explicit-field-backed properties with a field-reading getter, either
 explicit or auto, and either no mutator, a mutable setter whose Body directly
-writes that same backing FieldDef, or an auto init accessor. It emits hidden
-PropertyBacking FieldDefs, constructor role-1 PropertyDef identities,
-role-3 auto-init FieldWrite Body links, and a role-1 constructor CallSite with
-a source-use-5 receiver and direct scalar value Home. Producer regressions
-are authored but unverified. Other setter Body shapes, authored init
-accessors, private/unselected property closure, source-free binding/remapping,
-provider replacement, PropertyInitialized production, role-3 lifecycle and
-runtime remain open.
+writes that same backing FieldDef, or an init accessor whose single scalar
+FieldWrite targets that backing field. It emits hidden PropertyBacking
+FieldDefs, constructor role-1 PropertyDef identities, role-3 FieldWrite Body
+links, and a role-1 constructor CallSite with a source-use-5 receiver and
+direct scalar value Home. Producer regressions are authored but unverified.
+Other setter/init Body shapes and init contracts, private/unselected property
+closure, source-free binding/remapping, provider replacement,
+PropertyInitialized production, role-3 lifecycle and runtime remain open.
 Type-only class reference composition now reconciles imported class-handle
 FieldDefs with selected direct provider roots across Modules, preserving exact
 provider expectations and remapping class TypeSpec/TypeDef Import rows by root
