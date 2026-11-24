@@ -127,6 +127,7 @@ internal sealed partial class Binder
         _bindingStaticConstructorIdentity;
     private int _bindingStaticFieldInitializerIndex = -1;
     private int _bindingPropertyBackingFieldIndex = -1;
+    private int _bindingPropertyGetterFunctionIndex = -1;
     private BoundPropertyAccessorKind _bindingPropertyAccessorKind;
     private string? _bindingPropertyName;
     private string? _currentStruct;
@@ -3685,6 +3686,8 @@ internal sealed partial class Binder
         _bindingStaticFieldInitializerIndex = -1;
         _bindingPropertyBackingFieldIndex
             = instancePropertyBackingFieldIndex;
+        _bindingPropertyGetterFunctionIndex
+            = signature.PropertyGetterFunctionIndex;
         _bindingPropertyAccessorKind = signature.PropertyAccessorKind;
         _bindingPropertyName = signature.PropertyName;
         _constructor = signature.IsConstructor || signature.IsClassConstructor;
@@ -3812,6 +3815,7 @@ internal sealed partial class Binder
             _bindingStaticConstructorIdentity = null;
             _bindingStaticFieldInitializerIndex = -1;
             _bindingPropertyBackingFieldIndex = -1;
+            _bindingPropertyGetterFunctionIndex = -1;
             _bindingPropertyAccessorKind = BoundPropertyAccessorKind.None;
             _bindingPropertyName = null;
         }
@@ -3925,6 +3929,10 @@ internal sealed partial class Binder
                     + signature.StructName,
             PropertyName = signature.PropertyName,
             PropertyAccessorKind = signature.PropertyAccessorKind,
+            PropertyGetterFunctionIndex
+                = signature.PropertyGetterFunctionIndex,
+            PropertyBackingFieldIndex
+                = instancePropertyBackingFieldIndex,
             CapturedParameters = signature.CapturedParameters,
             ReturnsForwardedBacking = signature.ReturnsForwardedBacking,
             ResultDependencyParameters = signature.ResultDependencyParameters,
@@ -11559,6 +11567,8 @@ internal sealed partial class Binder
             PropertyAccessorKind = property
                 ? BoundPropertyAccessorKind.Getter
                 : BoundPropertyAccessorKind.None,
+            PropertyGetterFunctionIndex = property
+                ? _signatures.Count : -1,
             IsAutoPropertyAccessor = property && isAutoGetter,
             IsConstEval = externalFunction?.IsConstEval
                 ?? isConstEval,
@@ -18921,6 +18931,12 @@ internal sealed partial class Binder
                         new BoundRead(initializedDestination,
                             descriptorType, node.Span), node.Span);
                 }
+                else if (TryBindPropertyInitializedTest(
+                    initializedSourceNode, node.Span,
+                    out var propertyInitializedTest))
+                {
+                    expression = propertyInitializedTest;
+                }
                 else
                 {
                     var initializedSource = BindExpression(initializedSourceNode, null);
@@ -22117,6 +22133,95 @@ internal sealed partial class Binder
             && !_signatures[getter].IsStatic && _signatures[getter].PropertyName == name;
     }
 
+    private bool TryBindPropertyInitializedTest(SyntaxNode source,
+        TextSpan span, out BoundExpression expression)
+    {
+        expression = new BoundConstant(0, PrimitiveType.Bool, span);
+        if (_bindingContractPhase is null
+            || !_hasReceiver || _variables.IsEmpty
+            || (!_constructor
+                && _bindingPropertyAccessorKind
+                    != BoundPropertyAccessorKind.Initializer))
+        {
+            return false;
+        }
+
+        string propertyName;
+        if (source.Kind == SyntaxKind.NameExpression
+            && source.Children.Length == 1
+            && source.Children[0]
+                is SyntaxTokenElement propertyToken)
+        {
+            propertyName = propertyToken.Token.Name;
+            if (TryFindVariable(propertyName, out _))
+            {
+                return false;
+            }
+        }
+        else if (source.Kind == SyntaxKind.MemberAccessExpression
+            && source.Children.Length == 3
+            && source.Children[0] is SyntaxNode receiver
+            && receiver.Kind == SyntaxKind.NameExpression
+            && receiver.Children.Length == 1
+            && receiver.Children[0] is SyntaxTokenElement {
+                Token.Name: "this",
+            }
+            && source.Children[2]
+                is SyntaxTokenElement memberToken)
+        {
+            propertyName = memberToken.Token.Name;
+        }
+        else
+        {
+            return false;
+        }
+
+        var receiverType = _variables[0].Type;
+        if (!IsClass(receiverType)
+            || !TryFindGetter(receiverType, propertyName,
+                out var getterFunctionIndex))
+        {
+            return false;
+        }
+
+        var backingFieldIndex = FindClassPropertyBackingField(
+            receiverType, propertyName);
+        if (backingFieldIndex < 0
+            || (uint)getterFunctionIndex >= (uint)_signatures.Count)
+        {
+            return false;
+        }
+
+        var getter = _signatures[getterFunctionIndex];
+        var backingField = GetField(receiverType, backingFieldIndex);
+        if (getter.PropertyAccessorKind
+                != BoundPropertyAccessorKind.Getter
+            || getter.PropertyGetterFunctionIndex
+                != getterFunctionIndex
+            || getter.ReturnType != backingField.Type
+            || !StringComparer.Ordinal.Equals(
+                backingField.BackingPropertyName, propertyName))
+        {
+            return false;
+        }
+
+        if (_bindingPropertyAccessorKind
+                == BoundPropertyAccessorKind.Initializer
+            && (getterFunctionIndex
+                    != _bindingPropertyGetterFunctionIndex
+                || backingFieldIndex != _bindingPropertyBackingFieldIndex))
+        {
+            Report("TRM3008",
+                "A property init accessor can test only its own backing state.",
+                span);
+            return true;
+        }
+
+        expression = new BoundPropertyInitialized(0,
+            getterFunctionIndex, backingFieldIndex, span);
+        return true;
+    }
+
     private bool TryFindIndexerSetter(PrimitiveType type, out int setter)
     {
         var owner = IsClass(type)
@@ -23984,6 +24089,7 @@ internal sealed partial class Binder
         internal string? PropertyName { get; init; }
         internal BoundPropertyAccessorKind PropertyAccessorKind
             { get; init; }
+        internal int PropertyGetterFunctionIndex { get; init; } = -1;
         internal bool IsCleanup { get; init; }
         internal bool RequiresUnsafeCaller { get; init; }
         internal bool IsOperator { get; init; }

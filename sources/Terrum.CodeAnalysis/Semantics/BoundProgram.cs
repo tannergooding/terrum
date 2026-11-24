@@ -1909,6 +1909,8 @@ public sealed record BoundFunction(string Name, PrimitiveType ReturnType, Immuta
     public string? PropertyName { get; init; }
 
     internal BoundPropertyAccessorKind PropertyAccessorKind { get; init; }
+    internal int PropertyGetterFunctionIndex { get; init; } = -1;
+    internal int PropertyBackingFieldIndex { get; init; } = -1;
 
     /// <summary>Whether this method consumes its unique receiver during lexical cleanup.</summary>
     public bool IsCleanup { get; init; }
@@ -3228,6 +3230,11 @@ public sealed record BoundIsSome(BoundExpression Value, int Variable, TextSpan S
 
 /// <summary>Tests whether a named local or parameter currently contains an initialized value.</summary>
 public sealed record BoundIsInitialized(int Variable, TextSpan Span) : BoundExpression(PrimitiveType.Bool, Span);
+
+/// <summary>Tests complete backing state for an exact property without invoking its getter.</summary>
+public sealed record BoundPropertyInitialized(
+    int ReceiverVariable, int GetterFunctionIndex, int BackingFieldIndex,
+    TextSpan Span) : BoundExpression(PrimitiveType.Bool, Span);
 
 /// <summary>Tests the uniqueness property of one generic method type formal.</summary>
 public sealed record BoundGenericTypePropertyTest(int FormalOrdinal,

@@ -6,6 +6,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Threading.Tasks;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Diagnostics;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
@@ -61,6 +62,120 @@ internal sealed class GetterPropertyTests
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
             Functions = program.Functions.SetItem(index, getter with { PropertyName = "Other" }),
         }))!;
+    }
+
+    [Test]
+    public void BindsPropertyInitializedTestsToCapturedBackingIdentity()
+    {
+        var source = """
+            public class Failure {
+                public Failure() {}
+            }
+            public class Box {
+                public int32 Value {
+                    get { return field; }
+                    init require<Failure> Value is init {
+                        field = value;
+                    }
+                }
+                public Box(int32 value)
+                    require<Failure> this.Value is init
+                {
+                    Value = value;
+                }
+            }
+            """;
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var getterIndex = global::System.Linq.Enumerable.Range(
+                0, program.Functions.Length)
+            .Single(index => program.Functions[index].PropertyAccessorKind
+                    == BoundPropertyAccessorKind.Getter
+                && program.Functions[index].PropertyName == "Value"
+                && program.Functions[index].DeclaringStruct == "Box");
+        var getter = program.Functions[getterIndex];
+        var initializer = global::System.Linq.Enumerable.Single(
+            program.Functions, function =>
+                function.PropertyAccessorKind
+                    == BoundPropertyAccessorKind.Initializer
+                && function.DeclaringStruct == "Box");
+        var constructor = global::System.Linq.Enumerable.Single(
+            program.Functions, function =>
+                function.IsClassConstructor
+                && function.DeclaringStruct == "Box");
+        var initializerTest
+            = (BoundPropertyInitialized)global::System.Linq.Enumerable
+                .Single(initializer.DeclarationContractClauses)
+                .Predicate;
+        var constructorTest
+            = (BoundPropertyInitialized)global::System.Linq.Enumerable
+                .Single(constructor.DeclarationContractClauses)
+                .Predicate;
+
+        Assert.That(getter.PropertyGetterFunctionIndex,
+            Is.EqualTo(getterIndex));
+        Assert.That(initializer.PropertyGetterFunctionIndex,
+            Is.EqualTo(getterIndex));
+        Assert.That(initializer.PropertyBackingFieldIndex,
+            Is.EqualTo(getter.PropertyBackingFieldIndex));
+        Assert.That(initializerTest.ReceiverVariable, Is.Zero);
+        Assert.That(initializerTest.GetterFunctionIndex,
+            Is.EqualTo(getterIndex));
+        Assert.That(initializerTest.BackingFieldIndex,
+            Is.EqualTo(getter.PropertyBackingFieldIndex));
+        Assert.That(constructorTest.ReceiverVariable, Is.Zero);
+        Assert.That(constructorTest.GetterFunctionIndex,
+            Is.EqualTo(getterIndex));
+        Assert.That(constructorTest.BackingFieldIndex,
+            Is.EqualTo(getter.PropertyBackingFieldIndex));
+
+        var invalidClause
+            = constructor.DeclarationContractClauses[0] with {
+                Predicate = constructorTest with {
+                    BackingFieldIndex
+                        = constructorTest.BackingFieldIndex + 1,
+                },
+            };
+        var constructorIndex = program.Functions.IndexOf(constructor);
+        Assert.That(() => SemanticVerifier.Verify(program with {
+            Functions = program.Functions.SetItem(constructorIndex,
+                constructor with {
+                    DeclarationContractClauses =
+                        constructor.DeclarationContractClauses.SetItem(0,
+                            invalidClause),
+                }),
+        }), Throws.ArgumentException);
+    }
+
+    [Test]
+    public void RejectsPropertyInitializedTestForAnotherInitAccessorProperty()
+    {
+        var source = """
+            public class Failure {
+                public Failure() {}
+            }
+            public class Box {
+                public int32 Value {
+                    get { return field; }
+                    init require<Failure> Other is init {
+                        field = value;
+                    }
+                }
+                public int32 Other { get; init; }
+                public Box(int32 value) {
+                    Value = value;
+                    Other = value;
+                }
+            }
+            """;
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Diagnostics,
+            Has.Some.Matches<Diagnostic>(diagnostic =>
+                diagnostic.Code == "TRM3008"));
     }
 
     [Test]

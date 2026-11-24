@@ -41,9 +41,21 @@ not validation results:
   and auto or simple authored init accessors with one direct scalar FieldWrite
   to the exact backing field. Other setter/init Body shapes, init contracts
   and broader class closure remain unsupported.
+* [`Binder`](../../sources/Terrum.CodeAnalysis/Semantics/Binder.cs) binds
+  phase-1/2 `Q is init` and `this.Q is init` predicates in class constructors
+  and matching init accessors to a `BoundPropertyInitialized` carrying the
+  exact getter, backing FieldDef and receiver slot. The mandatory verifier
+  checks those identities and rejects the node in function Bodies or when an
+  init accessor tests another property. Graph production, failure-map
+  composition, provider remapping and lowering remain open.
 * [`TrRmStandardClassSourceEmissionTests`](../../tests/Terrum.CodeAnalysis.Tests/Modules/TrRm/TrRmStandardClassSourceEmissionTests.cs)
-  now has focused auto-getter and setter producer cases. They remain
-  unverified under the active execution hold.
+  covers auto-getter, setter, init-accessor and constructor CallSite producer
+  cases, including repeated calls, multiple properties and source-order
+  interleaving with direct scalar FieldWrites. The focused
+  [`GetterPropertyTests`](../../tests/Terrum.CodeAnalysis.Tests/Semantics/GetterPropertyTests.cs)
+  also exercise property-state binding, verifier identity rejection and
+  cross-property init-accessor rejection. These tests remain unverified under
+  the active execution hold.
 
 **Recommend PI1:** one explicit PropertyDef-to-implicit-FieldDef relation,
 explicit accessor roles, and a bounded initialization-accessor state contract.

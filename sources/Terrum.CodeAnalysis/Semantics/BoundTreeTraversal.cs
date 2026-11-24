@@ -990,6 +990,9 @@ internal static class BoundTreeTraversal
             BoundIsInitialized test => test with {
                 Variable = Variable(test.Variable),
             },
+            BoundPropertyInitialized test => test with {
+                ReceiverVariable = Variable(test.ReceiverVariable),
+            },
             BoundIsVariablePattern test => test with {
                 Variable = Variable(test.Variable),
             },

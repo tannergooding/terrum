@@ -2196,6 +2196,14 @@ public static partial class SemanticVerifier
                         throw InvalidEffect(read.Span, "Ownership");
                     }
                     break;
+                case BoundPropertyInitialized propertyInitialized:
+                    if (!IsValidPropertyInitializedTest(
+                        propertyInitialized, function, program))
+                    {
+                        throw InvalidEffect(propertyInitialized.Span,
+                            "Initialization");
+                    }
+                    break;
                 case BoundOutArgument output when IsManagedLifetimeValue(program, output.Type):
                     if (output.DeclaresVariable)
                     {
@@ -2359,6 +2367,7 @@ public static partial class SemanticVerifier
                     Expression(pointerWrite.Value, scope, depth + 1);
                     break;
                 case BoundIsInitialized:
+                case BoundPropertyInitialized:
                 case BoundGenericTypePropertyTest:
                     break;
                 case BoundIsSome pattern:
@@ -3135,6 +3144,7 @@ public static partial class SemanticVerifier
                     Expression(pathWrite.Value, depth + 1, acquiringRoot);
                     break;
                 case BoundIsInitialized:
+                case BoundPropertyInitialized:
                 case BoundGenericTypePropertyTest:
                     break;
                 case BoundIsSome pattern:
@@ -19714,6 +19724,14 @@ public static partial class SemanticVerifier
                         "CheckedReference");
                 }
                 break;
+            case BoundPropertyInitialized propertyInitialized:
+                if (!IsValidPropertyInitializedTest(propertyInitialized,
+                    function, program))
+                {
+                    throw InvalidEffect(propertyInitialized.Span,
+                        "Initialization");
+                }
+                break;
             case BoundReferenceInitializationTest initializationTest:
                 if (!CheckedReferenceTypeContract.IsValidType(
                         initializationTest.Descriptor.Type,
@@ -22923,6 +22941,7 @@ public static partial class SemanticVerifier
                 or BoundReferenceTypeTestPattern
                 or BoundIsSome or BoundIsVariablePattern
                 or BoundIsInitialized
+                or BoundPropertyInitialized
                 or BoundReferenceInitializationTest
                 or BoundBinary {
                     Operator: TokenKind.AmpersandAmpersand
@@ -25390,10 +25409,15 @@ public static partial class SemanticVerifier
             return false;
         }
         var bodyContainsReturnValue = false;
+        var bodyContainsPropertyInitialized = false;
         if (!BoundTreeTraversal.VisitExpressions(function.Body,
-                expression => bodyContainsReturnValue
-                    |= expression is BoundContractReturnValue)
-            || bodyContainsReturnValue)
+                expression => {
+                    bodyContainsReturnValue
+                        |= expression is BoundContractReturnValue;
+                    bodyContainsPropertyInitialized
+                        |= expression is BoundPropertyInitialized;
+                })
+            || bodyContainsReturnValue || bodyContainsPropertyInitialized)
         {
             return false;
         }
@@ -25416,6 +25440,7 @@ public static partial class SemanticVerifier
             var invalidReturnValue = false;
             var invalidStaticFieldRead = false;
             var invalidPatternComposition = false;
+            var invalidPropertyInitializedTest = false;
             if (!BoundTreeTraversal.VisitExpressionTree(clause.Predicate,
                     expression => {
                         if (expression is BoundUnary unary
@@ -25451,6 +25476,17 @@ public static partial class SemanticVerifier
                         {
                             invalidReturnValue = true;
                         }
+                        if (expression is BoundPropertyInitialized
+                                propertyInitialized
+                            && (clause.Phase is not (
+                                    BoundDeclarationContractPhase.Precondition
+                                    or BoundDeclarationContractPhase
+                                        .NormalPostcondition)
+                                || !IsValidPropertyInitializedTest(
+                                    propertyInitialized, function, program)))
+                        {
+                            invalidPropertyInitializedTest = true;
+                        }
                         if (expression is BoundStaticFieldRead staticFieldRead
                             && ((uint)staticFieldRead.Field
                                     >= (uint)program.StaticFields.Length
@@ -25483,7 +25519,8 @@ public static partial class SemanticVerifier
                         }
                     })
                 || invalidReturnValue || invalidStaticFieldRead
-                || invalidPatternComposition)
+                || invalidPatternComposition
+                || invalidPropertyInitializedTest)
             {
                 return false;
             }
@@ -25538,6 +25575,71 @@ public static partial class SemanticVerifier
         }
 
         return true;
+    }
+
+    private static bool IsValidPropertyInitializedTest(
+        BoundPropertyInitialized propertyTest, BoundFunction function,
+        BoundProgram program)
+    {
+        if (propertyTest.Type != PrimitiveType.Bool
+            || propertyTest.ReceiverVariable != 0
+            || propertyTest.GetterFunctionIndex < 0
+            || propertyTest.GetterFunctionIndex
+                >= program.Functions.Length
+            || function.IsStatic || function.Variables.IsEmpty
+            || (!function.IsClassConstructor
+                && function.PropertyAccessorKind
+                    != BoundPropertyAccessorKind.Initializer))
+        {
+            return false;
+        }
+
+        var receiverType = function.Variables[0].Type;
+        if (!ManagedClassTypes.IsClass(receiverType)
+            || ManagedClassTypes.IsOptional(receiverType))
+        {
+            return false;
+        }
+
+        var classIndex = ManagedClassTypes.ClassIndex(receiverType);
+        if ((uint)classIndex >= (uint)program.Classes.Length
+            || propertyTest.BackingFieldIndex < 0
+            || propertyTest.BackingFieldIndex
+                >= program.Classes[classIndex].Fields.Length)
+        {
+            return false;
+        }
+
+        var getter = program.Functions[
+            propertyTest.GetterFunctionIndex];
+        var backingField = program.Classes[classIndex].Fields[
+            propertyTest.BackingFieldIndex];
+        return getter.PropertyAccessorKind
+                == BoundPropertyAccessorKind.Getter
+            && getter.PropertyGetterFunctionIndex
+                == propertyTest.GetterFunctionIndex
+            && getter.PropertyBackingFieldIndex
+                == propertyTest.BackingFieldIndex
+            && getter.PropertyName is not null
+            && !getter.IsStatic
+            && getter.ParameterCount == 1
+            && !getter.Variables.IsEmpty
+            && ManagedClassTypes.IsClass(getter.Variables[0].Type)
+            && ManagedClassTypes.ClassIndex(
+                getter.Variables[0].Type) == classIndex
+            && getter.ReturnType == backingField.Type
+            && getter.DeclaringStruct == function.DeclaringStruct
+            && backingField.IsPrivate
+            && !backingField.IsInternal
+            && StringComparer.Ordinal.Equals(
+                backingField.BackingPropertyName, getter.PropertyName)
+            && (function.PropertyAccessorKind
+                    != BoundPropertyAccessorKind.Initializer
+                || (function.PropertyGetterFunctionIndex
+                        == propertyTest.GetterFunctionIndex
+                    && function.PropertyBackingFieldIndex
+                        == propertyTest.BackingFieldIndex
+                    && function.PropertyName == getter.PropertyName));
     }
 
     private static bool IsValidPatternComposition(BoundUnary unary)
@@ -38384,6 +38486,7 @@ public static partial class SemanticVerifier
     {
         if (expression is BoundContractReturnValue
             or BoundIsInitialized
+            or BoundPropertyInitialized
             or BoundPrivatePlaceIsInitialized {
                 Place: BoundPrivateLocalPlace,
             }
@@ -38648,6 +38751,7 @@ public static partial class SemanticVerifier
                 VacateNestedOutputs(pathWrite.Value, state, ref remaining);
                 break;
             case BoundIsInitialized:
+            case BoundPropertyInitialized:
                 break;
             case BoundReferenceInitializationTest referenceTest:
                 foreach (var nested in referenceTest.NestedExpressions)
@@ -38828,7 +38932,8 @@ public static partial class SemanticVerifier
                 FlowFacts(pointerWrite.Address, flowFacts, ref remaining),
                 pointerWrite.Value, flowFacts, ref remaining),
             BoundIsSome test => (byte)(OutcomeEffectFact | FlowFacts(test.Value, flowFacts, ref remaining)),
-            BoundIsVariablePattern or BoundIsInitialized => AllFlowFacts,
+            BoundIsVariablePattern or BoundIsInitialized
+                or BoundPropertyInitialized => AllFlowFacts,
             BoundWildcardPattern => 0,
             BoundGenericTypePropertyTest => 0,
             BoundOutArgument or BoundMove or BoundFieldMove => OutcomeEffectFact,
