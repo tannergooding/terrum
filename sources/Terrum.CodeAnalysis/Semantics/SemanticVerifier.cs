@@ -401,7 +401,8 @@ public static partial class SemanticVerifier
         {
             throw InvalidEffect(default, "NativeFunctionPointer");
         }
-        if (!BoundEnumTypes.IsValidTable(program.EnumDefinitions))
+        if (!BoundEnumTypes.IsValidTable(program.EnumDefinitions)
+            || !BoundEnumTypes.HasValidCoreStandardProviderBindings(program))
         {
             throw Invalid();
         }
@@ -35059,6 +35060,8 @@ public static partial class SemanticVerifier
                 || reference.ExpectedSnapshot.EnumDefinitions.IsDefault
                 || !BoundEnumTypes.IsValidTable(
                     reference.ExpectedSnapshot.EnumDefinitions)
+                || !BoundEnumTypes.HasValidCoreStandardProviderBindings(
+                    reference.ExpectedSnapshot)
                 || reference.ExpectedNativePointerMapping.IsDefault
                 || reference.ExpectedNativePointerMapping.Length
                     != reference.ExpectedSnapshot.NativePointerTypes.Length

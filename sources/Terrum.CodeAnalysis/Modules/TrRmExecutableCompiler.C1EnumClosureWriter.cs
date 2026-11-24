@@ -725,7 +725,19 @@ public static partial class TrRmExecutableCompiler
             || program.EnumDefinitions.Any(static definition =>
                 definition.Identity is not
                     (BoundEnumDeclarationIdentity.Source
-                    or BoundEnumDeclarationIdentity.Standard))
+                    or BoundEnumDeclarationIdentity.Standard
+                    or BoundEnumDeclarationIdentity.Core))
+            || !BoundEnumTypes.HasValidCoreStandardProviderBindings(program)
+            || program.EnumDefinitions.Any(definition =>
+                definition.Identity is BoundEnumDeclarationIdentity.Core
+                && (definition.CoreStandardProviderBinding is not
+                        BoundCoreEnumStandardProviderBinding binding
+                    || !StringComparer.Ordinal.Equals(schemaIdentity,
+                        BoundCoreEnumStandardProviderBindingContract
+                            .SchemaIdentity)
+                    || !StringComparer.Ordinal.Equals(
+                        binding.ModuleBindings.UsingModuleIdentity,
+                        moduleIdentity)))
             || (sourceEnumExports is null
                 && program.EnumDefinitions.Any(static definition =>
                     definition.Identity
@@ -1934,7 +1946,8 @@ public static partial class TrRmExecutableCompiler
             }
 
             void AddFreshStandardEnumImports(int definitionIndex,
-                BoundStandardEnumOccurrence occurrence)
+                BoundStandardEnumOccurrence occurrence,
+                string? requiredExportKey = null)
             {
                 var view = occurrence.Declaration;
                 var provider = view.Site.Snapshot;
@@ -2010,6 +2023,20 @@ public static partial class TrRmExecutableCompiler
                             provider.RuntimePolicy)));
                 }
 
+                if (requiredExportKey is string coreExportKey)
+                {
+                    var edge = (provider.ModuleIdentity, coreExportKey,
+                        provider.TargetRequirement, provider.RuntimePolicy);
+                    if (selectedEdges.Add(edge))
+                    {
+                        emittedEnums.Add(CreateStandardEmission(
+                            definitionIndex, view, [],
+                            new C1EnumClosureImport(provider.ModuleIdentity,
+                                coreExportKey, provider.TargetRequirement,
+                                provider.RuntimePolicy)));
+                    }
+                }
+
                 if (selectedEdges.Count == 0)
                 {
                     throw Unsupported(
@@ -2026,6 +2053,21 @@ public static partial class TrRmExecutableCompiler
                 {
                     AddFreshStandardEnumImports(enumIndex,
                         standard.Value);
+                    continue;
+                }
+                if (definition.Identity
+                        is BoundEnumDeclarationIdentity.Core
+                    && definition.CoreStandardProviderBinding is
+                        BoundCoreEnumStandardProviderBinding coreBinding
+                    && BoundCoreEnumStandardProviderBindingContract.IsValid(
+                        definition, coreBinding)
+                    && StringComparer.Ordinal.Equals(
+                        coreBinding.ModuleBindings.UsingModuleIdentity,
+                        moduleIdentity))
+                {
+                    AddFreshStandardEnumImports(enumIndex,
+                        coreBinding.StandardOccurrence,
+                        coreBinding.CoreDeclaration.Identity.ExportKey);
                     continue;
                 }
 

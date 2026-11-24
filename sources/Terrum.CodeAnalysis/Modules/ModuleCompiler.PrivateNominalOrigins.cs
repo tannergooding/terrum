@@ -825,6 +825,27 @@ public static partial class ModuleCompiler
                             throw new ModuleContractException(
                                 "Repeated Core enum identities have conflicting declarations.");
                         }
+                        var existingProviderBinding
+                            = existing.Definition
+                                .CoreStandardProviderBinding;
+                        var incomingProviderBinding
+                            = definition.CoreStandardProviderBinding;
+                        if (existingProviderBinding is not null
+                            && incomingProviderBinding is not null
+                            && !BoundCoreEnumStandardProviderBindingContract
+                                .AreSameProvider(existingProviderBinding,
+                                    incomingProviderBinding))
+                        {
+                            throw new ModuleContractException(
+                                "Repeated Core enum identities have conflicting EN1 provider bindings.");
+                        }
+                        if (existingProviderBinding is null
+                            && incomingProviderBinding is not null)
+                        {
+                            definitions[existing.Index] = definition;
+                            coreIdentities[coreIdentity] = (
+                                definition, existing.Index);
+                        }
                         mapping.Add(existing.Index);
                         continue;
                     }

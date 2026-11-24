@@ -57,6 +57,205 @@ internal sealed class BoundStandardEnumOccurrence(
     internal bool IsValid => _isValid;
 }
 
+internal sealed record BoundCoreEnumStandardProviderBinding(
+    CoreProviderModuleBindings ModuleBindings,
+    CoreProviderModuleOrigin ProviderOrigin,
+    CoreEnumDefinition CoreDeclaration,
+    BoundStandardEnumOccurrence StandardOccurrence);
+
+internal static class BoundCoreEnumStandardProviderBindingContract
+{
+    internal const string SchemaIdentity
+        = "trrm/1-draft-foreign-native-interface-parameter-surface-1-enum-closure-1";
+
+    internal static bool TryCreate(CoreEnumDefinition coreDeclaration,
+        BoundStandardEnumOccurrence standardOccurrence,
+        CoreProviderModuleBindings moduleBindings,
+        out BoundCoreEnumStandardProviderBinding? binding)
+    {
+        ArgumentNullException.ThrowIfNull(coreDeclaration);
+        ArgumentNullException.ThrowIfNull(standardOccurrence);
+        ArgumentNullException.ThrowIfNull(moduleBindings);
+        binding = null;
+        if (!moduleBindings.IsValid() || !standardOccurrence.IsValid)
+        {
+            return false;
+        }
+
+        var providers = moduleBindings.Providers.Where(provider =>
+            StringComparer.Ordinal.Equals(provider.ModuleIdentity,
+                coreDeclaration.Identity.ProviderIdentity)).ToArray();
+        if (providers.Length != 1)
+        {
+            return false;
+        }
+
+        var candidate = new BoundCoreEnumStandardProviderBinding(
+            moduleBindings, providers[0], coreDeclaration,
+            standardOccurrence);
+        var definition = BoundEnumDefinition.FromCore(coreDeclaration)
+            with { CoreStandardProviderBinding = candidate };
+        if (!IsValid(definition, candidate))
+        {
+            return false;
+        }
+
+        binding = candidate;
+        return true;
+    }
+
+    internal static bool IsValid(BoundEnumDefinition definition)
+        => definition.CoreStandardProviderBinding is
+            BoundCoreEnumStandardProviderBinding binding
+            && IsValid(definition, binding);
+
+    internal static bool IsValid(BoundEnumDefinition definition,
+        BoundCoreEnumStandardProviderBinding binding)
+    {
+        if (binding.ModuleBindings is not CoreProviderModuleBindings
+                moduleBindings
+            || binding.CoreDeclaration is not CoreEnumDefinition core
+            || binding.StandardOccurrence is not {
+                IsValid: true,
+                Declaration: { Site: { Snapshot: not null } }
+            } occurrence)
+        {
+            return false;
+        }
+
+        var view = occurrence.Declaration;
+        var snapshot = view.Site.Snapshot;
+        var origin = binding.ProviderOrigin;
+        if (definition.Identity
+                is not BoundEnumDeclarationIdentity.Core coreIdentity
+            || coreIdentity.Value != core.Identity
+            || core.Identity.Kind != CoreDeclarationKind.EnumType
+            || core.GenericArity != 0 || !core.IsPublic || !core.IsPrimary
+            || !core.Identity.IsValid
+            || !moduleBindings.IsValid()
+            || !IsSelectedProviderOrigin(moduleBindings, origin,
+                core.Identity.ProviderIdentity)
+            || !moduleBindings.ContainsDeclaration(core)
+            || !occurrence.ExportKeys.Contains(core.Identity.ExportKey,
+                StringComparer.Ordinal)
+            || !StringComparer.Ordinal.Equals(
+                origin.ModuleIdentity, core.Identity.ProviderIdentity)
+            || !StringComparer.Ordinal.Equals(origin.Schema.Identity,
+                SchemaIdentity)
+            || origin.Schema.Revision != 1
+            || !StringComparer.Ordinal.Equals(snapshot.SchemaIdentity,
+                SchemaIdentity)
+            || !StringComparer.Ordinal.Equals(snapshot.ModuleIdentity,
+                origin.ModuleIdentity)
+            || origin.GoverningSemanticEdition
+                != snapshot.GoverningRuleEdition
+            || origin.TargetRequirement != snapshot.TargetRequirement
+            || origin.RuntimePolicy != snapshot.RuntimePolicy
+            || origin.ModuleIdentity
+                == moduleBindings.UsingModuleIdentity
+            || !BoundEnumTypes.AreEquivalent(definition,
+                BoundEnumDefinition.FromCore(core))
+            || !MatchesStandardDeclaration(core, view))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    internal static bool AreSameProvider(
+        BoundCoreEnumStandardProviderBinding left,
+        BoundCoreEnumStandardProviderBinding right)
+    {
+        var leftDefinition = BoundEnumDefinition.FromCore(
+            left.CoreDeclaration) with {
+                CoreStandardProviderBinding = left,
+            };
+        var rightDefinition = BoundEnumDefinition.FromCore(
+            right.CoreDeclaration) with {
+                CoreStandardProviderBinding = right,
+            };
+        var leftOccurrence = left.StandardOccurrence;
+        var rightOccurrence = right.StandardOccurrence;
+        return IsValid(leftDefinition, left)
+            && IsValid(rightDefinition, right)
+            && left.CoreDeclaration.Identity
+                == right.CoreDeclaration.Identity
+            && BoundEnumTypes.AreEquivalent(
+                BoundEnumDefinition.FromCore(left.CoreDeclaration),
+                BoundEnumDefinition.FromCore(right.CoreDeclaration))
+            && left.ProviderOrigin == right.ProviderOrigin
+            && BoundStandardEnumDeclarationContract.GetSiteIdentity(
+                leftOccurrence.Declaration.Site)
+                == BoundStandardEnumDeclarationContract.GetSiteIdentity(
+                    rightOccurrence.Declaration.Site)
+            && BoundStandardEnumDeclarationContract.ContractMatches(
+                leftOccurrence.Declaration,
+                rightOccurrence.Declaration)
+            && left.ModuleBindings.ContainsDeclaration(
+                left.CoreDeclaration)
+            && right.ModuleBindings.ContainsDeclaration(
+                right.CoreDeclaration);
+    }
+
+    private static bool IsSelectedProviderOrigin(
+        CoreProviderModuleBindings moduleBindings,
+        CoreProviderModuleOrigin providerOrigin, string moduleIdentity)
+    {
+        var providers = moduleBindings.Providers.Where(provider =>
+            StringComparer.Ordinal.Equals(provider.ModuleIdentity,
+                moduleIdentity)).ToArray();
+        return providers.Length == 1 && providers[0] == providerOrigin;
+    }
+
+    private static bool MatchesStandardDeclaration(
+        CoreEnumDefinition core, BoundStandardEnumView view)
+    {
+        if (!core.IsPublic || !core.IsPrimary || core.GenericArity != 0
+            || !BoundStandardEnumDeclarationContract.IsPublic(
+                view.TypeDefFlags)
+            || !StringComparer.Ordinal.Equals(core.QualifiedName,
+                BoundStandardEnumDeclarationContract.GetQualifiedName(view))
+            || core.UnderlyingType != view.UnderlyingType
+            || core.IsFlags != (view.EnumFlags == 1)
+            || core.BlittableTargetRequirement
+                != BoundStandardEnumDeclarationContract
+                    .GetBlittableTargetRequirement(view.Layouts)
+            || core.Members.IsDefault
+            || core.Members.Length != view.Members.Length)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < core.Members.Length; index++)
+        {
+            var coreMember = core.Members[index];
+            var standardMember = view.Members[index];
+            if (coreMember is null
+                || !coreMember.Identity.IsValid
+                || coreMember.Identity.Kind
+                    != CoreDeclarationKind.EnumMember
+                || coreMember.Identity.ProviderIdentity
+                    != core.Identity.ProviderIdentity
+                || coreMember.DeclaringEnum != core.Identity
+                || !coreMember.IsPublic
+                || !BoundEnumTypes.IsValidModuleDeclarationKey(
+                    coreMember.DeclarationKey)
+                || !StringComparer.Ordinal.Equals(coreMember.Name,
+                    standardMember.Name)
+                || coreMember.Value != standardMember.Value
+                || !StringComparer.Ordinal.Equals(
+                    coreMember.DeclarationKey,
+                    standardMember.DeclarationKey))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+}
+
 internal static class BoundStandardEnumDeclarationContract
 {
     private const uint WindowsX64NativeProfileId = 1;
@@ -76,7 +275,7 @@ internal static class BoundStandardEnumDeclarationContract
         "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-enum-closure-1-initializer-copy-evidence-1",
         "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-1-parameter-labels-1-receiver-access-1-enum-closure-1-class-instance-layout-1-initializer-copy-evidence-1",
         "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-enum-closure-1-class-instance-layout-1-initializer-copy-evidence-1",
-        "trrm/1-draft-foreign-native-interface-parameter-surface-1-enum-closure-1",
+        BoundCoreEnumStandardProviderBindingContract.SchemaIdentity,
     ];
 
     internal static bool IsSelectedSchemaIdentity(string? schemaIdentity)
@@ -469,14 +668,14 @@ internal static class BoundStandardEnumDeclarationContract
             && unique.Add(key));
     }
 
-    private static bool IsPublic(uint typeDefFlags)
+    internal static bool IsPublic(uint typeDefFlags)
         => (typeDefFlags & 3) == 2;
 
-    private static string GetQualifiedName(BoundStandardEnumView view)
+    internal static string GetQualifiedName(BoundStandardEnumView view)
         => view.Namespace.Length == 0
             ? view.Name : $"{view.Namespace}.{view.Name}";
 
-    private static int GetBlittableTargetRequirement(
+    internal static int GetBlittableTargetRequirement(
         ImmutableArray<BoundStandardEnumLayoutVariant> layouts)
         => layouts.Any(static layout => (layout.Flags & 1) != 0)
             ? checked((int)WindowsX64TargetRequirement) : 0;

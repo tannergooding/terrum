@@ -466,7 +466,11 @@ internal static class ForeignNativeInterfaceContract
                 return false;
             }
 
-            if (definition.BlittableTargetRequirement
+            if ((definition.Identity
+                    is BoundEnumDeclarationIdentity.Core
+                    && !BoundCoreEnumStandardProviderBindingContract
+                        .IsValid(definition))
+                || definition.BlittableTargetRequirement
                     != FixedLayoutStorage.WindowsX64TargetRequirement
                 || definition.UnderlyingType is not (
                     PrimitiveType.Int8 or PrimitiveType.Int16
@@ -597,6 +601,10 @@ internal static class ForeignNativeInterfaceContract
                 return BoundEnumTypes.IsValidType(current, enumDefinitions)
                     && enumDefinitions[index]
                         is BoundEnumDefinition definition
+                    && (definition.Identity
+                            is not BoundEnumDeclarationIdentity.Core
+                        || BoundCoreEnumStandardProviderBindingContract
+                            .IsValid(definition))
                     && definition.BlittableTargetRequirement
                         == FixedLayoutStorage.WindowsX64TargetRequirement;
             }

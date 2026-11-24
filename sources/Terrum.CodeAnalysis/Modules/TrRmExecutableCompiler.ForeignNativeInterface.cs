@@ -44,10 +44,23 @@ public static partial class TrRmExecutableCompiler
             || program.EnumDefinitions.Any(static definition =>
                 definition.Identity is not (
                     BoundEnumDeclarationIdentity.Source
-                    or BoundEnumDeclarationIdentity.Standard)))
+                    or BoundEnumDeclarationIdentity.Standard
+                    or BoundEnumDeclarationIdentity.Core)))
         {
             throw Unsupported(
-                "Combined FNI source emission requires the exact EN1 selector and source or selected Standard enum identities.");
+                "Combined FNI source emission requires the exact EN1 selector and source, Standard or bound Core enum identities.");
+        }
+        if (!BoundEnumTypes.HasValidCoreStandardProviderBindings(program)
+            || program.EnumDefinitions.Any(definition =>
+                definition.Identity is BoundEnumDeclarationIdentity.Core
+                && (definition.CoreStandardProviderBinding is not
+                        BoundCoreEnumStandardProviderBinding binding
+                    || !StringComparer.Ordinal.Equals(
+                        binding.ModuleBindings.UsingModuleIdentity,
+                        moduleIdentity)))
+        {
+            throw Unsupported(
+                "FNI Core enums require the exact using-Module binding to an owned EN1 provider declaration.");
         }
 
         if (sourceEnumCount != 0)
@@ -414,14 +427,32 @@ public static partial class TrRmExecutableCompiler
                 continue;
             }
 
+            BoundStandardEnumOccurrence occurrence;
+            BoundCoreEnumStandardProviderBinding? coreBinding = null;
             if (definition.Identity
-                is not BoundEnumDeclarationIdentity.Standard standard)
+                is BoundEnumDeclarationIdentity.Standard standard)
+            {
+                occurrence = standard.Value;
+            }
+            else if (definition.Identity
+                    is BoundEnumDeclarationIdentity.Core
+                && definition.CoreStandardProviderBinding is
+                    BoundCoreEnumStandardProviderBinding selectedCoreBinding
+                && BoundCoreEnumStandardProviderBindingContract.IsValid(
+                    definition, selectedCoreBinding)
+                && StringComparer.Ordinal.Equals(
+                    selectedCoreBinding.ModuleBindings
+                        .UsingModuleIdentity, moduleIdentity))
+            {
+                occurrence = selectedCoreBinding.StandardOccurrence;
+                coreBinding = selectedCoreBinding;
+            }
+            else
             {
                 throw Unsupported(
                     "FNI enum publication requires a source declaration or an exact selected EN1 provider identity.");
             }
 
-            var occurrence = standard.Value;
             var view = occurrence.Declaration;
             var provider = view.Site.Snapshot;
             if (!IsSelectedForeignNativeInterfaceParameterSurfaceEnumClosureSchemaIdentity(
@@ -494,6 +525,21 @@ public static partial class TrRmExecutableCompiler
                     enumIndex, view, new C1EnumClosureImport(
                         provider.ModuleIdentity, exportKey,
                         provider.TargetRequirement, provider.RuntimePolicy)));
+            }
+            if (coreBinding is not null)
+            {
+                var exportKey = coreBinding.CoreDeclaration.Identity.ExportKey;
+                var edge = (provider.ModuleIdentity, exportKey,
+                    provider.TargetRequirement, provider.RuntimePolicy);
+                if (selectedEdges.Add(edge))
+                {
+                    emissions.Add(
+                        CreateStandardForeignNativeInterfaceEnumEmission(
+                            enumIndex, view, new C1EnumClosureImport(
+                                provider.ModuleIdentity, exportKey,
+                                provider.TargetRequirement,
+                                provider.RuntimePolicy)));
+                }
             }
 
             if (!selectedEdges.Any())
@@ -630,6 +676,13 @@ public static partial class TrRmExecutableCompiler
                 "Source enum mappings do not select a source enum in this program.",
                 nameof(sourceEnumDeclarationExports));
         }
+        else if (program.EnumDefinitions.Any(static definition =>
+                     definition.Identity
+                         is BoundEnumDeclarationIdentity.Core))
+        {
+            capturedSourceEnums
+                = C1EnumClosureSourceEnumExports.Capture(program, []);
+        }
 
         return EmitC1EnumClosureDeclarationLibrary(program, moduleIdentity,
             schemaIdentity, moduleTargetRequirement, schema, null, null, null,
@@ -724,7 +777,11 @@ public static partial class TrRmExecutableCompiler
 
                 var enumDefinition
                     = program.EnumDefinitions[BoundEnumTypes.Index(type)];
-                if (enumDefinition.BlittableTargetRequirement
+                if ((enumDefinition.Identity
+                        is BoundEnumDeclarationIdentity.Core
+                    && !BoundCoreEnumStandardProviderBindingContract
+                        .IsValid(enumDefinition))
+                    || enumDefinition.BlittableTargetRequirement
                     != FixedLayoutStorage.WindowsX64TargetRequirement)
                 {
                     throw Unsupported(

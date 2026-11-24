@@ -181,6 +181,8 @@ internal sealed record BoundEnumDefinition(
 {
     internal int BlittableTargetRequirement { get; init; }
     internal BoundModuleImport? ModuleImport { get; init; }
+    internal BoundCoreEnumStandardProviderBinding?
+        CoreStandardProviderBinding { get; init; }
 
     internal static BoundEnumDefinition FromCore(CoreEnumDefinition definition) =>
         new(new BoundEnumDeclarationIdentity.Core(definition.Identity),
@@ -502,7 +504,12 @@ internal static class BoundEnumTypes
                             && (import.ProducerIdentity
                                     != core.ProviderIdentity
                                 || import.ExportKey != core.ExportKey))
-                        || !coreNames.Add(definition.Name)))
+                        || !coreNames.Add(definition.Name)
+                        || (definition.CoreStandardProviderBinding is not null
+                            && !BoundCoreEnumStandardProviderBindingContract
+                                .IsValid(definition))))
+                || (definition.CoreStandardProviderBinding is not null
+                    && coreIdentity is null)
                 || (definition.Identity
                     is BoundEnumDeclarationIdentity.Private privateIdentity
                     && !IsValidPrivateOrigin(definitionIndex, definition,
@@ -679,6 +686,48 @@ internal static class BoundEnumTypes
                 : (BigInteger.One << width) - BigInteger.One;
             return value >= minimum && value <= maximum;
         }
+    }
+
+    internal static bool HasValidCoreStandardProviderBindings(
+        BoundProgram program)
+    {
+        var selectedBindings = program.NativeCoreRegistration?.ModuleBindings
+            ?? program.LayoutCoreRegistration?.ModuleBindings
+            ?? program.StaticInitializationCoreRegistration?.ModuleBindings
+            ?? program.LazyInitializationCoreRegistration?.ModuleBindings
+            ?? program.NativeOutputCoreRegistration?.ModuleBindings;
+        if (selectedBindings is null)
+        {
+            return program.EnumDefinitions.All(definition =>
+                definition.CoreStandardProviderBinding is null
+                || BoundCoreEnumStandardProviderBindingContract
+                    .IsValid(definition));
+        }
+
+        return (program.NativeCoreRegistration is null
+                    || ReferenceEquals(selectedBindings,
+                        program.NativeCoreRegistration.ModuleBindings))
+            && (program.LayoutCoreRegistration is null
+                || ReferenceEquals(selectedBindings,
+                    program.LayoutCoreRegistration.ModuleBindings))
+            && (program.StaticInitializationCoreRegistration is null
+                || ReferenceEquals(selectedBindings,
+                    program.StaticInitializationCoreRegistration
+                        .ModuleBindings))
+            && (program.LazyInitializationCoreRegistration is null
+                || ReferenceEquals(selectedBindings,
+                    program.LazyInitializationCoreRegistration
+                        .ModuleBindings))
+            && (program.NativeOutputCoreRegistration is null
+                || ReferenceEquals(selectedBindings,
+                    program.NativeOutputCoreRegistration.ModuleBindings))
+            && program.EnumDefinitions.All(definition =>
+                definition.CoreStandardProviderBinding is null
+                || (ReferenceEquals(
+                        definition.CoreStandardProviderBinding
+                            .ModuleBindings, selectedBindings)
+                    && BoundCoreEnumStandardProviderBindingContract
+                        .IsValid(definition)));
     }
 
     internal static bool UsesAny(BoundProgram program)

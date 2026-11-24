@@ -380,6 +380,26 @@ internal sealed partial class Binder
             }
             if (BoundEnumTypes.AreEquivalent(_enumDefinitions[index], definition))
             {
+                var existingProviderBinding
+                    = _enumDefinitions[index]
+                        .CoreStandardProviderBinding;
+                var incomingProviderBinding
+                    = definition.CoreStandardProviderBinding;
+                if (existingProviderBinding is not null
+                    && incomingProviderBinding is not null
+                    && !ReferenceEquals(existingProviderBinding,
+                        incomingProviderBinding))
+                {
+                    Report("TRM3005",
+                        $"The Core enum '{definition.Name}' has multiple selected EN1 provider occurrences.",
+                        _trees[0].Root.Span);
+                    return false;
+                }
+                if (existingProviderBinding is null
+                    && incomingProviderBinding is not null)
+                {
+                    _enumDefinitions[index] = definition;
+                }
                 return true;
             }
 
@@ -410,6 +430,116 @@ internal sealed partial class Binder
         }
         _enumDefinitions.Add(definition);
         return true;
+    }
+
+    private BoundEnumDefinition BindCoreEnumStandardProvider(
+        BoundEnumDefinition definition)
+    {
+        if (definition.Identity
+            is not BoundEnumDeclarationIdentity.Standard standard)
+        {
+            return definition;
+        }
+
+        var coreDefinitions = GetRegisteredCoreEnumDefinitions();
+        var candidates = coreDefinitions.Where(core =>
+            StringComparer.Ordinal.Equals(
+                core.Identity.ProviderIdentity,
+                standard.Value.Declaration.Site.Snapshot.ModuleIdentity)
+            && standard.Value.ExportKeys.Contains(core.Identity.ExportKey,
+                StringComparer.Ordinal)).ToArray();
+        if (candidates.Length == 0)
+        {
+            return definition;
+        }
+
+        var bindings = GetCoreProviderModuleBindings();
+        if (candidates.Length == 1 && bindings is not null
+            && BoundCoreEnumStandardProviderBindingContract.TryCreate(
+                candidates[0], standard.Value, bindings,
+                out var providerBinding)
+            && providerBinding is not null)
+        {
+            return BoundEnumDefinition.FromCore(candidates[0]) with {
+                CoreStandardProviderBinding = providerBinding,
+            };
+        }
+
+        Report("TRM3005",
+            $"The selected Core enum '{definition.Name}' does not match an exact owned EN1 provider declaration.",
+            _trees[0].Root.Span);
+        return definition;
+    }
+
+    private ImmutableArray<CoreEnumDefinition>
+        GetRegisteredCoreEnumDefinitions()
+    {
+        var definitions
+            = ImmutableArray.CreateBuilder<CoreEnumDefinition>();
+        var identities = new HashSet<CoreDeclarationIdentity>();
+
+        void Add(CoreEnumDefinition definition)
+        {
+            if (identities.Add(definition.Identity))
+            {
+                definitions.Add(definition);
+            }
+        }
+
+        if (_nativeCoreRegistration is NativeCoreRegistrationSet native)
+        {
+            foreach (var definition in native.EnumDefinitions)
+            {
+                Add(definition);
+            }
+        }
+        if (_layoutCoreRegistration is LayoutCoreRegistrationSet layout)
+        {
+            Add(layout.LayoutKinds);
+        }
+        if (_staticInitializationCoreRegistration is
+                StaticInitializationCoreRegistrationSet staticInitialization)
+        {
+            Add(staticInitialization.TriggerEnum);
+        }
+        if (_nativeOutputCoreRegistration is
+                NativeOutputCoreRegistrationSet nativeOutput)
+        {
+            Add(nativeOutput.OutputConditions);
+        }
+
+        return definitions.ToImmutable();
+    }
+
+    private CoreProviderModuleBindings? GetCoreProviderModuleBindings()
+    {
+        CoreProviderModuleBindings? selected
+            = _nativeCoreRegistration?.ModuleBindings
+                ?? _layoutCoreRegistration?.ModuleBindings
+                ?? _staticInitializationCoreRegistration?.ModuleBindings
+                ?? _lazyInitializationCoreRegistration?.ModuleBindings
+                ?? _nativeOutputCoreRegistration?.ModuleBindings;
+        if (selected is null)
+        {
+            return null;
+        }
+
+        return (_nativeCoreRegistration is null
+                || ReferenceEquals(selected,
+                    _nativeCoreRegistration.ModuleBindings))
+            && (_layoutCoreRegistration is null
+                || ReferenceEquals(selected,
+                    _layoutCoreRegistration.ModuleBindings))
+            && (_staticInitializationCoreRegistration is null
+                || ReferenceEquals(selected,
+                    _staticInitializationCoreRegistration.ModuleBindings))
+            && (_lazyInitializationCoreRegistration is null
+                || ReferenceEquals(selected,
+                    _lazyInitializationCoreRegistration.ModuleBindings))
+            && (_nativeOutputCoreRegistration is null
+                || ReferenceEquals(selected,
+                    _nativeOutputCoreRegistration.ModuleBindings))
+            ? selected : null;
     }
 
     private ImmutableArray<BoundEnumDefinition> GetProgramEnumDefinitions()
@@ -627,7 +757,8 @@ internal sealed partial class Binder
             ImportPrivateClassReferences();
             foreach (var definition in _reference.EnumDefinitions)
             {
-                _ = AddBoundEnumDefinition(definition);
+                _ = AddBoundEnumDefinition(
+                    BindCoreEnumStandardProvider(definition));
             }
             if (_nativeCoreRegistration is NativeCoreRegistrationSet nativeCoreRegistration)
             {
