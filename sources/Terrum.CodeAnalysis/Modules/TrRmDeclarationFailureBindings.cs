@@ -119,6 +119,84 @@ internal static class TrRmDeclarationFailureBindingContract
         return true;
     }
 
+    internal static (
+        ImmutableArray<TrRmStandardArtifactInput> Inputs,
+        ImmutableArray<TrRmPreconditionFailureBinding> Preconditions,
+        ImmutableArray<TrRmPostconditionConstructionBinding> Postconditions)
+        SnapshotCapturedInputs(
+            TrRmStandardArtifactInput input,
+            IReadOnlyList<TrRmStandardArtifactInput> providers,
+            ImmutableArray<TrRmPreconditionFailureBinding> preconditions,
+            ImmutableArray<TrRmPostconditionConstructionBinding>
+                postconditions)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ArgumentNullException.ThrowIfNull(providers);
+        var capturedInputs = new TrRmStandardArtifactInput[
+            providers.Count + 1];
+        capturedInputs[0] = input;
+        for (var index = 0; index < providers.Count; index++)
+        {
+            capturedInputs[index + 1] = providers[index]
+                ?? throw new ArgumentNullException(
+                    $"{nameof(providers)}[{index}]");
+        }
+
+        if (!AreCapturedInputs(capturedInputs, preconditions,
+                postconditions))
+        {
+            throw new ArgumentException(
+                "The declaration failure-binding maps must reference unique captured inputs.");
+        }
+
+        var snapshots = new TrRmStandardArtifactInput[capturedInputs.Length];
+        for (var index = 0; index < snapshots.Length; index++)
+        {
+            snapshots[index] = new TrRmStandardArtifactInput(
+                capturedInputs[index].SchemaIdentity,
+                capturedInputs[index].Artifact.ToArray());
+        }
+
+        var preconditionSnapshots
+            = ImmutableArray.CreateBuilder<
+                TrRmPreconditionFailureBinding>(preconditions.Length);
+        foreach (var binding in preconditions)
+        {
+            preconditionSnapshots.Add(binding with {
+                ClauseArtifact = snapshots[FindReference(capturedInputs,
+                    binding.ClauseArtifact)],
+                OriginArtifact = snapshots[FindReference(capturedInputs,
+                    binding.OriginArtifact)],
+                ConstructorPlan = binding.ConstructorPlan with {
+                    Artifact = snapshots[FindReference(capturedInputs,
+                        binding.ConstructorPlan.Artifact)],
+                },
+            });
+        }
+
+        var postconditionSnapshots
+            = ImmutableArray.CreateBuilder<
+                TrRmPostconditionConstructionBinding>(
+                postconditions.Length);
+        foreach (var binding in postconditions)
+        {
+            postconditionSnapshots.Add(binding with {
+                ClauseArtifact = snapshots[FindReference(capturedInputs,
+                    binding.ClauseArtifact)],
+                OriginArtifact = snapshots[FindReference(capturedInputs,
+                    binding.OriginArtifact)],
+                ConstructorPlan = binding.ConstructorPlan with {
+                    Artifact = snapshots[FindReference(capturedInputs,
+                        binding.ConstructorPlan.Artifact)],
+                },
+            });
+        }
+
+        return (snapshots.ToImmutableArray(),
+            preconditionSnapshots.MoveToImmutable(),
+            postconditionSnapshots.MoveToImmutable());
+    }
+
     internal static void ValidateForStandardInputs(
         TrRmStandardArtifactInput input,
         IReadOnlyList<TrRmStandardArtifactInput> providers,

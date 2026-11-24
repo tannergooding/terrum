@@ -98,6 +98,37 @@ internal sealed class CoreContractFailureIdentitySelectionTests
     }
 
     [Test]
+    public void StandardFailureMapSnapshotsRetainExactInputAssociations()
+    {
+        var bytes = new byte[] { 1, 2, 3 };
+        var input = new TrRmStandardArtifactInput("captured-schema",
+            bytes);
+        var plan = new TrRmConstructorBindingLocation(input, 1, 0);
+        var binding = new TrRmPreconditionFailureBinding(input, 1, 0,
+            input, 1, 0, TrRmPreconditionFailureSource.ExplicitType,
+            plan);
+
+        var snapshot
+            = TrRmDeclarationFailureBindingContract.SnapshotCapturedInputs(
+                input, [], [binding], []);
+
+        Assert.That(ReferenceEquals(snapshot.Inputs[0], input), Is.False);
+        Assert.That(ReferenceEquals(
+                snapshot.Preconditions[0].ClauseArtifact,
+                snapshot.Inputs[0]), Is.True);
+        Assert.That(ReferenceEquals(
+                snapshot.Preconditions[0].OriginArtifact,
+                snapshot.Inputs[0]), Is.True);
+        Assert.That(ReferenceEquals(
+                snapshot.Preconditions[0].ConstructorPlan.Artifact,
+                snapshot.Inputs[0]), Is.True);
+
+        bytes[0] = 9;
+        Assert.That(snapshot.Inputs[0].Artifact.Span[0],
+            Is.EqualTo((byte)1));
+    }
+
+    [Test]
     public void SelectionAllowsOnlyRolesNeededByTheModule()
     {
         var requirementOnly = CreateSelection() with {
