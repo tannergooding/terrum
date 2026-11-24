@@ -8410,7 +8410,22 @@ internal sealed class NativeCoreRegistrationTests
     {
         var program = CreatePointerOutputConsumerProgram(
             pointerOutputOuterCall: true,
-            sideEffectingSuccessArgument: true);
+            successNestedCallCount: 1);
+        var function = program.Functions.Single(
+            static function => function.Name == "InvokePointer");
+        Assert.That(function.ReturnType, Is.EqualTo(PrimitiveType.Int32));
+        var image = NativeEmitter.EmitLibrary(program, ["InvokePointer"],
+            NativeRuntimePolicy.FailFast);
+        Assert.That(image[..2], Is.EqualTo(new byte[] {
+            (byte)'M', (byte)'Z',
+        }));
+    }
+
+    [Test]
+    public void StandardForeignNativeInterfacePointerOutputFeedsOuterCallWithMultipleSideEffectsUnderPs1()
+    {
+        var program = CreatePointerOutputConsumerProgram(
+            pointerOutputOuterCall: true, successNestedCallCount: 2);
         var function = program.Functions.Single(
             static function => function.Name == "InvokePointer");
         Assert.That(function.ReturnType, Is.EqualTo(PrimitiveType.Int32));
@@ -8523,20 +8538,25 @@ internal sealed class NativeCoreRegistrationTests
         bool multipleOutputs = false,
         bool pointerOutputOuterCall = false,
         bool pointerOutputAsReceiver = false,
-        bool sideEffectingSuccessArgument = false)
+        int successNestedCallCount = 0)
     {
         var usesOuterCall = pointerOutputOuterCall || pointerOutputAsReceiver
-            || sideEffectingSuccessArgument;
+            || successNestedCallCount != 0;
+        if (successNestedCallCount is < 0 or > 2)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(successNestedCallCount));
+        }
         if (usesOuterCall && functionPointerOutput)
         {
             throw new InvalidOperationException(
                 "The pointer-output outer-call shapes require a raw pointer output.");
         }
-        if (sideEffectingSuccessArgument
+        if (successNestedCallCount != 0
             && (multipleOutputs || pointerOutputAsReceiver))
         {
             throw new InvalidOperationException(
-                "The side-effecting success argument requires one direct pointer output.");
+                "The side-effecting success arguments require one direct pointer output.");
         }
 
         const string schemaIdentity
@@ -8584,30 +8604,41 @@ internal sealed class NativeCoreRegistrationTests
             : string.Empty;
         var tagSourceType = floatInputConversion ? "float64" : "int32";
         var tagExpression = floatInputConversion ? "int32(tag)" : "tag";
-        var nestedSuccessInterfaceMethod = sideEffectingSuccessArgument
-            ? "public unsafe int32 GetStatus(ptr<int32> source, int32 tag);"
-            : string.Empty;
+        var nestedSuccessInterfaceMethods = successNestedCallCount switch {
+            0 => string.Empty,
+            1 => "public unsafe int32 GetStatus(ptr<int32> source, int32 tag);",
+            2 => """
+                public unsafe int32 GetMode(ptr<int32> source, int32 tag);
+                public unsafe int32 GetStatus(ptr<int32> source, int32 tag);
+                """,
+            _ => throw new InvalidOperationException(
+                "The success nested-call count is outside its supported test range."),
+        };
         var outerCallInterfaceMethod = !usesOuterCall
             ? string.Empty
             : pointerOutputAsReceiver
                 ? multipleOutputs
                     ? "public unsafe int32 Observe(int32 statusValue);"
                     : "public unsafe int32 Observe();"
-                : sideEffectingSuccessArgument
-                    ? "public unsafe int32 Observe(ptr<int32> value, int32 tag);"
-                    : multipleOutputs
-                        ? "public unsafe int32 Observe(ptr<int32> value, int32 statusValue);"
-                        : "public unsafe int32 Observe(ptr<int32> value);";
+                : successNestedCallCount == 2
+                    ? "public unsafe int32 Observe(ptr<int32> value, int32 status, int32 mode);"
+                    : successNestedCallCount == 1
+                        ? "public unsafe int32 Observe(ptr<int32> value, int32 tag);"
+                        : multipleOutputs
+                            ? "public unsafe int32 Observe(ptr<int32> value, int32 statusValue);"
+                            : "public unsafe int32 Observe(ptr<int32> value);";
         var successReturn = usesOuterCall
             ? pointerOutputAsReceiver
                 ? multipleOutputs
                     ? "return IPointerProbe.Observe(value, statusValue: statusValue);"
                     : "return IPointerProbe.Observe(value);"
-                : sideEffectingSuccessArgument
-                    ? "return IPointerProbe.Observe(receiver, value, tag: IPointerProbe.GetStatus(receiver, tag: tag, source: source));"
-                    : multipleOutputs
-                        ? "return IPointerProbe.Observe(receiver, statusValue: statusValue, value: value);"
-                        : "return IPointerProbe.Observe(receiver, value);"
+                : successNestedCallCount == 2
+                    ? "return IPointerProbe.Observe(receiver, mode: IPointerProbe.GetMode(receiver, tag: tag, source: source), status: IPointerProbe.GetStatus(receiver, tag: tag, source: source), value: value);"
+                    : successNestedCallCount == 1
+                        ? "return IPointerProbe.Observe(receiver, tag: IPointerProbe.GetStatus(receiver, tag: tag, source: source), value: value);"
+                        : multipleOutputs
+                            ? "return IPointerProbe.Observe(receiver, statusValue: statusValue, value: value);"
+                            : "return IPointerProbe.Observe(receiver, value);"
             : "return value;";
         var providerSource = $$"""
             using Terrum.Interop;
@@ -8622,7 +8653,7 @@ internal sealed class NativeCoreRegistrationTests
                     {{outputParameterDependencies}}
                     write ptr<{{outputValueType}}> value);
                 {{outerCallInterfaceMethod}}
-                {{nestedSuccessInterfaceMethod}}
+                {{nestedSuccessInterfaceMethods}}
             }
             """;
         var consumerSource = $$"""
@@ -8740,8 +8771,7 @@ internal sealed class NativeCoreRegistrationTests
         if (usesOuterCall)
         {
             var successCode = body.GetBlockCode(1);
-            var successCallSiteCount
-                = sideEffectingSuccessArgument ? 2 : 1;
+            var successCallSiteCount = successNestedCallCount + 1;
             Assert.That(successCode.Length,
                 Is.EqualTo((successCallSiteCount * 2) + 2));
             for (var callIndex = 0;
@@ -8750,9 +8780,11 @@ internal sealed class NativeCoreRegistrationTests
                 Assert.That(successCode[callIndex * 2],
                     Is.EqualTo((byte)0x90));
             }
-            if (sideEffectingSuccessArgument)
+            for (var callIndex = 0;
+                callIndex < successCallSiteCount - 1; callIndex++)
             {
-                Assert.That(successCode[1], Is.LessThan(successCode[3]));
+                Assert.That(successCode[(callIndex * 2) + 1],
+                    Is.LessThan(successCode[(callIndex * 2) + 3]));
             }
             Assert.That(successCode[^2..].ToArray(),
                 Is.EqualTo(new byte[] { 0x17, 0 }));
@@ -8835,7 +8867,7 @@ internal sealed class NativeCoreRegistrationTests
                 Is.EqualTo(PrimitiveType.Int32));
             AssertPointerOutputOuterCall(loadedFunction,
                 pointerOutputAsReceiver, multipleOutputs,
-                sideEffectingSuccessArgument);
+                successNestedCallCount);
         }
         else
         {
@@ -8874,7 +8906,7 @@ internal sealed class NativeCoreRegistrationTests
                 Is.EqualTo(PrimitiveType.Int32));
             AssertPointerOutputOuterCall(reloadedFunction,
                 pointerOutputAsReceiver, multipleOutputs,
-                sideEffectingSuccessArgument);
+                successNestedCallCount);
         }
         else
         {
@@ -8965,7 +8997,7 @@ internal sealed class NativeCoreRegistrationTests
 
         static void AssertPointerOutputOuterCall(BoundFunction candidate,
             bool outputAsReceiver, bool multipleOutputs,
-            bool sideEffectingArgument)
+            int nestedCallCount)
         {
             BoundCall? observeCall = null;
             _ = BoundTreeTraversal.VisitExpressions(candidate.Body,
@@ -9004,34 +9036,53 @@ internal sealed class NativeCoreRegistrationTests
             }
             else
             {
+                var expectedArgumentCount = nestedCallCount > 0
+                    ? nestedCallCount + 1
+                    : multipleOutputs ? 2 : 1;
                 Assert.That(selectedCall.Arguments,
-                    Has.Length.EqualTo(
-                        multipleOutputs || sideEffectingArgument ? 2 : 1));
-                Assert.That(selectedCall.Arguments[0],
+                    Has.Length.EqualTo(expectedArgumentCount));
+                var outputArgumentIndex = nestedCallCount;
+                Assert.That(selectedCall.Arguments[outputArgumentIndex],
                     Is.TypeOf<BoundRead>());
-                var outputRead = (BoundRead)selectedCall.Arguments[0];
+                var outputRead = (BoundRead)selectedCall.Arguments[
+                    outputArgumentIndex];
                 Assert.That(outputRead.Variable,
                     Is.EqualTo(candidate.ParameterCount
                         + (multipleOutputs ? 1 : 0)));
                 Assert.That(NativePointerTypes.IsType(outputRead.Type),
                     Is.True);
                 Assert.That(((BoundRead)receiver).Variable, Is.Zero);
-                if (multipleOutputs || sideEffectingArgument)
+                Assert.That(selectedCall.ParameterIndex(outputArgumentIndex),
+                    Is.Zero);
+                if (nestedCallCount > 0)
                 {
-                    Assert.That(selectedCall.ParameterIndex(0), Is.Zero);
-                    Assert.That(selectedCall.ParameterIndex(1),
-                        Is.EqualTo(1));
-                    if (sideEffectingArgument)
+                    var expectedNestedNames = nestedCallCount switch {
+                        1 => new[] { "GetStatus" },
+                        2 => new[] { "GetMode", "GetStatus" },
+                        _ => throw new AssertionException(
+                            "Unexpected nested FNI call count."),
+                    };
+                    var expectedNestedFormals = nestedCallCount switch {
+                        1 => new[] { 1 },
+                        2 => new[] { 2, 1 },
+                        _ => throw new AssertionException(
+                            "Unexpected nested FNI call count."),
+                    };
+                    for (var nestedIndex = 0;
+                        nestedIndex < nestedCallCount; nestedIndex++)
                     {
-                        Assert.That(selectedCall.Arguments[1],
+                        Assert.That(selectedCall.ParameterIndex(nestedIndex),
+                            Is.EqualTo(expectedNestedFormals[nestedIndex]));
+                        Assert.That(selectedCall.Arguments[nestedIndex],
                             Is.TypeOf<BoundUnsafeExpression>());
                         BoundCall? nestedCall = null;
-                        _ = BoundTreeTraversal.VisitExpressions(candidate.Body,
+                        _ = BoundTreeTraversal.VisitExpressions(
+                            selectedCall.Arguments[nestedIndex],
                             expression =>
                             {
                                 if (expression is BoundCall call
                                     && call.ForeignInterfaceCall?.Member.Name
-                                        == "GetStatus")
+                                        == expectedNestedNames[nestedIndex])
                                 {
                                     nestedCall = call;
                                 }
@@ -9039,7 +9090,7 @@ internal sealed class NativeCoreRegistrationTests
                         Assert.That(nestedCall, Is.Not.Null);
                         var selectedNestedCall = nestedCall
                             ?? throw new AssertionException(
-                                "Expected the FNI GetStatus call.");
+                                "Expected the nested FNI call.");
                         Assert.That(selectedNestedCall.Arguments,
                             Has.Length.EqualTo(2));
                         Assert.That(selectedNestedCall.ParameterIndex(0),
@@ -9055,13 +9106,15 @@ internal sealed class NativeCoreRegistrationTests
                         Assert.That(((BoundRead)selectedNestedCall.Arguments[1])
                             .Variable, Is.EqualTo(2));
                     }
-                    else
-                    {
-                        Assert.That(selectedCall.Arguments[1],
-                            Is.TypeOf<BoundRead>());
-                        Assert.That(((BoundRead)selectedCall.Arguments[1])
-                            .Variable, Is.EqualTo(candidate.ParameterCount));
-                    }
+                }
+                else if (multipleOutputs)
+                {
+                    Assert.That(selectedCall.ParameterIndex(1),
+                        Is.EqualTo(1));
+                    Assert.That(selectedCall.Arguments[1],
+                        Is.TypeOf<BoundRead>());
+                    Assert.That(((BoundRead)selectedCall.Arguments[1])
+                        .Variable, Is.EqualTo(candidate.ParameterCount));
                 }
             }
         }

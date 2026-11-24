@@ -1387,7 +1387,7 @@ public static partial class TrRmExecutableCompiler
                 out var conditionalSuccessOnTrue))
         {
             return EncodeForeignInterfaceConditionalOutputCallBody(
-                function, program, conditionalCall, null, null, [],
+                function, program, conditionalCall, null, [], [],
                 [conditionalOutputVariable],
                 conditionalOutputVariable, conditionalStatusVariable, -1,
                 conditionalSuccessOnTrue, typeSpecRowFor,
@@ -1405,12 +1405,12 @@ public static partial class TrRmExecutableCompiler
                 out var fallbackOutputVariable, out var fallbackStatusVariable,
                 out var fallbackVariable, out var fallbackSuccessOnTrue,
                 out var fallbackSuccessCall,
-                out var fallbackSuccessNestedCall))
+                out var fallbackSuccessNestedCalls))
         {
             return EncodeForeignInterfaceConditionalOutputCallBody(
                 function, program, conditionalFallbackCall,
                 fallbackSuccessCall,
-                fallbackSuccessNestedCall,
+                fallbackSuccessNestedCalls,
                 conditionalPreludeCalls,
                 conditionalOutputVariables,
                 fallbackOutputVariable, fallbackStatusVariable,
@@ -1812,7 +1812,8 @@ public static partial class TrRmExecutableCompiler
         out ImmutableArray<int> outputVariables,
         out int outputVariable, out int statusVariable,
         out int fallbackVariable, out bool successOnTrue,
-        out BoundCall? successCall, out BoundCall? successNestedCall)
+        out BoundCall? successCall,
+        out ImmutableArray<BoundCall> successNestedCalls)
     {
         call = null!;
         preludeCalls = [];
@@ -1822,7 +1823,7 @@ public static partial class TrRmExecutableCompiler
         fallbackVariable = -1;
         successOnTrue = false;
         successCall = null;
-        successNestedCall = null;
+        successNestedCalls = [];
         if (function.IsExternal || function.ParameterCount < 3
             || function.Variables.Length < function.ParameterCount + 2
             || function.DoesNotReturn
@@ -2241,7 +2242,7 @@ public static partial class TrRmExecutableCompiler
             if (!successOnTrue
                 || !TryGetOutputConsumerVariable(successCallCandidate,
                     outputVariablesLocal,
-                    out successOutputVariable, out successNestedCall))
+                    out successOutputVariable, out successNestedCalls))
             {
                 return false;
             }
@@ -2270,7 +2271,7 @@ public static partial class TrRmExecutableCompiler
             return false;
         }
         if (preludeCallBuilder.Count + nestedInputCalls.Count
-                + (successNestedCall is null ? 0 : 1) + 2 > 13)
+                + successNestedCalls.Length + 2 > 13)
         {
             return false;
         }
@@ -2285,10 +2286,13 @@ public static partial class TrRmExecutableCompiler
 
         bool TryGetOutputConsumerVariable(BoundCall consumerCall,
             ImmutableArray<int> reservedOutputVariables,
-            out int consumedOutputVariable, out BoundCall? nestedInputCall)
+            out int consumedOutputVariable,
+            out ImmutableArray<BoundCall> nestedInputCalls)
         {
             consumedOutputVariable = -1;
-            nestedInputCall = null;
+            nestedInputCalls = [];
+            var nestedInputCallBuilder
+                = ImmutableArray.CreateBuilder<BoundCall>();
             var reservedOutputHomes = reservedOutputVariables.ToHashSet();
             if (consumerCall.Function
                     != BoundCall.ForeignInterfaceFunction
@@ -2380,13 +2384,14 @@ public static partial class TrRmExecutableCompiler
                 else if (GetNestedForeignInterfaceCall(
                         consumerCall.Arguments[argumentIndex])
                     is BoundCall candidate
-                    && nestedInputCall is null
                     && candidate.Type
                         == consumerTarget.Variables[formal].Type
+                    && !nestedInputCallBuilder.Any(nested =>
+                        ReferenceEquals(nested, candidate))
                     && IsValidNestedInputCall(candidate,
                         consumerTarget.Variables[formal].Type))
                 {
-                    nestedInputCall = candidate;
+                    nestedInputCallBuilder.Add(candidate);
                 }
                 else
                 {
@@ -2415,6 +2420,7 @@ public static partial class TrRmExecutableCompiler
                 consumedOutputHomes.Contains(outputHome)
                 && IsForeignNativeInterfacePointerValueType(
                     function.Variables[outputHome].Type));
+            nestedInputCalls = nestedInputCallBuilder.ToImmutable();
             return true;
 
             bool IsValidNestedInputCall(BoundCall nestedCall,
@@ -6193,7 +6199,8 @@ public static partial class TrRmExecutableCompiler
 
     private static byte[] EncodeForeignInterfaceConditionalOutputCallBody(
         BoundFunction function, BoundProgram program, BoundCall call,
-        BoundCall? successCall, BoundCall? successNestedCall,
+        BoundCall? successCall,
+        ImmutableArray<BoundCall> successNestedCalls,
         ImmutableArray<BoundCall> preludeCalls,
         ImmutableArray<int> outputVariables,
         int outputVariable, int statusVariable, int fallbackVariable,
@@ -6437,11 +6444,19 @@ public static partial class TrRmExecutableCompiler
         }
 
         methodMapTokens.Add(methodMapToken);
-        uint successCallMethodMapToken = 0;
-        uint successNestedMethodMapToken = 0;
-        TrRmRegisterBodyCallInput[]? successNestedInputs = null;
-        if (successNestedCall is not null)
+        var successCallMethodMapToken = 0u;
+        var successNestedMethodMapTokens
+            = new List<uint>(successNestedCalls.Length);
+        var successNestedInputs
+            = new List<TrRmRegisterBodyCallInput[]>(
+                successNestedCalls.Length);
+        var successNestedRegisterByCall
+            = new Dictionary<BoundCall, byte>(
+                ReferenceEqualityComparer.Instance);
+        for (var nestedIndex = 0;
+            nestedIndex < successNestedCalls.Length; nestedIndex++)
         {
+            var successNestedCall = successNestedCalls[nestedIndex];
             var nestedForeignCall = successNestedCall.ForeignInterfaceCall
                 ?? throw Invalid(
                     "A Standard F+I conditional-output success argument has no InterfaceMethod identity.");
@@ -6469,9 +6484,9 @@ public static partial class TrRmExecutableCompiler
                     $"Function '{function.Name}' has a side-effecting success input outside the scalar no-output FNI subset.");
             }
 
-            successNestedInputs = new TrRmRegisterBodyCallInput[
+            var successInputs = new TrRmRegisterBodyCallInput[
                 nestedTarget.ParameterCount + 1];
-            successNestedInputs[0]
+            successInputs[0]
                 = new TrRmRegisterBodyCallInput(2, 1, 0);
             var nestedArgumentsByFormal
                 = new BoundRead?[nestedTarget.ParameterCount];
@@ -6507,15 +6522,24 @@ public static partial class TrRmExecutableCompiler
                 var argument = nestedArgumentsByFormal[formal]
                     ?? throw Invalid(
                         "A Standard F+I conditional-output nested success call omits a formal input.");
-                successNestedInputs[formal + 1]
+                successInputs[formal + 1]
                     = new TrRmRegisterBodyCallInput(2, 1,
                         checked((ushort)argument.Variable));
             }
 
-            successNestedMethodMapToken
-                = methodMapTokenForForeignInterface(
+            var nestedMethodMapToken = methodMapTokenForForeignInterface(
                     nestedForeignCall.Member);
-            methodMapTokens.Add(successNestedMethodMapToken);
+            var resultRegister = checked((byte)(nestedIndex + 1));
+            if (!successNestedRegisterByCall.TryAdd(successNestedCall,
+                    resultRegister))
+            {
+                throw Invalid(
+                    "A Standard F+I conditional-output nested success call is repeated.");
+            }
+
+            successNestedMethodMapTokens.Add(nestedMethodMapToken);
+            successNestedInputs.Add(successInputs);
+            methodMapTokens.Add(nestedMethodMapToken);
         }
 
         if (successCall is not null)
@@ -6546,7 +6570,7 @@ public static partial class TrRmExecutableCompiler
                 || !IsForeignNativeInterfacePointerValueType(
                     function.Variables[outputVariable].Type)
                 || preludeCalls.Length + nestedCalls.Count + 2
-                    + (successNestedCall is null ? 0 : 1) > 13)
+                    + successNestedCalls.Length > 13)
             {
                 throw Unsupported(
                     $"Function '{function.Name}' has a conditional F+I success call outside the direct-Home no-output subset.");
@@ -6556,7 +6580,8 @@ public static partial class TrRmExecutableCompiler
                 = new BoundExpression?[successTarget.ParameterCount];
             var consumedOutputHomes = new HashSet<int>();
             var hasPointerOutputUse = false;
-            var successNestedUseCount = 0;
+            var successNestedUses
+                = new HashSet<BoundCall>(ReferenceEqualityComparer.Instance);
             if (outputVariables.Contains(successReceiver.Variable))
             {
                 _ = consumedOutputHomes.Add(successReceiver.Variable);
@@ -6614,15 +6639,16 @@ public static partial class TrRmExecutableCompiler
                             "A Standard F+I conditional-output success call reads a non-parameter Home.");
                     }
                 }
-                else if (successNestedCall is not null
-                    && GetNestedForeignInterfaceCall(argument)
+                else if (GetNestedForeignInterfaceCall(argument)
                         is BoundCall nestedArgument
-                    && ReferenceEquals(nestedArgument, successNestedCall)
+                    && successNestedRegisterByCall.ContainsKey(
+                        nestedArgument)
                     && nestedArgument.Type
                         == successTarget.Variables[formal].Type
-                    && successNestedUseCount == 0)
+                    && successNestedUses.Add(nestedArgument))
                 {
-                    successNestedUseCount++;
+                    successArgumentsByFormal[formal] = argument;
+                    continue;
                 }
                 else
                 {
@@ -6637,8 +6663,7 @@ public static partial class TrRmExecutableCompiler
                     static argument => argument is null)
                 || consumedOutputHomes.Count == 0
                 || !hasPointerOutputUse
-                || successNestedUseCount
-                    != (successNestedCall is null ? 0 : 1)
+                || successNestedUses.Count != successNestedCalls.Length
                 || !consumedOutputHomes.All(outputHome =>
                     outputVariables.Contains(outputHome))
                 || !consumedOutputHomes.Contains(outputVariable))
@@ -6832,14 +6857,18 @@ public static partial class TrRmExecutableCompiler
         var callSite = TrRmRegisterBodyRecordWriter.EncodeCallSite(1, 1,
             maps.GetMethodMapIndex(methodMapToken), 0, inputs, [],
             schema: schema);
-        var successNestedCallSite = successNestedCall is null
-            ? null
-            : TrRmRegisterBodyRecordWriter.EncodeCallSite(1, 1,
-                maps.GetMethodMapIndex(successNestedMethodMapToken), 1,
-                successNestedInputs
-                    ?? throw Invalid(
-                        "A Standard F+I conditional-output nested success call has no input map."),
-                [], schema: schema);
+        var successNestedCallSites
+            = new List<byte[]>(successNestedInputs.Count);
+        for (var nestedIndex = 0;
+            nestedIndex < successNestedInputs.Count; nestedIndex++)
+        {
+            successNestedCallSites.Add(
+                TrRmRegisterBodyRecordWriter.EncodeCallSite(1, 1,
+                    maps.GetMethodMapIndex(
+                        successNestedMethodMapTokens[nestedIndex]),
+                    checked((ushort)(nestedIndex + 1)),
+                    successNestedInputs[nestedIndex], [], schema: schema));
+        }
         var successCallSite = successCall is null
             ? null
             : TrRmRegisterBodyRecordWriter.EncodeCallSite(1, 1,
@@ -6939,12 +6968,13 @@ public static partial class TrRmExecutableCompiler
         records.Add(TrRmRegisterBodyRecordWriter.EncodeConditionalEdge(
             checked((ushort)(successOnTrue ? 1 : 2)),
             checked((ushort)(successOnTrue ? 2 : 1))));
-        ushort? successNestedCallSiteRecordIndex = null;
-        if (successNestedCallSite is not null)
+        var successNestedCallSiteRecordIndices
+            = new List<ushort>(successNestedCallSites.Count);
+        foreach (var nestedCallSite in successNestedCallSites)
         {
-            successNestedCallSiteRecordIndex
-                = checked((ushort)records.Count);
-            records.Add(new(successNestedCallSite));
+            successNestedCallSiteRecordIndices.Add(
+                checked((ushort)records.Count));
+            records.Add(new(nestedCallSite));
         }
         ushort? successCallSiteRecordIndex = null;
         if (successCallSite is not null)
@@ -7011,8 +7041,11 @@ public static partial class TrRmExecutableCompiler
         entryCode.Add((byte)edgeRecordIndex);
         entryCode.Add((byte)(edgeRecordIndex >> 8));
 
-        var successCodeBuilder = new List<byte>(6);
-        if (successNestedCallSiteRecordIndex is ushort nestedRecordIndex)
+        var successCodeBuilder = new List<byte>(
+            (successNestedCallSites.Count * 2)
+            + (successCallSite is null ? 4 : 2) + 2);
+        foreach (var nestedRecordIndex
+            in successNestedCallSiteRecordIndices)
         {
             successCodeBuilder.Add(0x90);
             successCodeBuilder.Add(checked((byte)nestedRecordIndex));
@@ -7105,13 +7138,14 @@ public static partial class TrRmExecutableCompiler
                         = new TrRmRegisterBodyCallInput(2, 1,
                             checked((ushort)read.Variable));
                 }
-                else if (successNestedCall is not null
-                    && GetNestedForeignInterfaceCall(argument)
+                else if (GetNestedForeignInterfaceCall(argument)
                         is BoundCall nestedArgument
-                    && ReferenceEquals(nestedArgument, successNestedCall))
+                    && successNestedRegisterByCall.TryGetValue(
+                        nestedArgument, out var nestedRegister))
                 {
                     successInputs[formal + 1]
-                        = new TrRmRegisterBodyCallInput(1, 1, 1);
+                        = new TrRmRegisterBodyCallInput(1, 1,
+                            nestedRegister);
                 }
                 else
                 {
@@ -12905,7 +12939,7 @@ public static partial class TrRmExecutableCompiler
                 != (callSiteInvocationCount + outputCount
                     + 3 + successCallSiteCount)
             || callSiteInvocationCount > 13
-            || successCallSiteCount > 2
+            || successCallSiteCount > 12
             || (hasSuccessCall
                 && callSiteInvocationCount + 1 + successCallSiteCount > 13)
             || (!hasCallSiteInputs && !hasSuccessCall
@@ -12989,7 +13023,7 @@ public static partial class TrRmExecutableCompiler
             || entryCode[callOffset + 18] != 0xE4
             || entryCode[callOffset + 19] != 0
             || (hasSuccessCall
-                ? successCallSiteCount is < 1 or > 2
+                ? successCallSiteCount is < 1 or > 12
                     || successCode.Length
                         != (successCallSiteCount * 2) + 2
                     || successCode[^2] != 0x17
@@ -13091,10 +13125,11 @@ public static partial class TrRmExecutableCompiler
         var successCallSiteRecordIndex = successCallSiteCount == 0
             ? -1
             : successCallSiteRecordIndices[^1];
-        var successNestedCallSiteRecordIndex
-            = successCallSiteCount == 2
-                ? successCallSiteRecordIndices[0]
-                : -1;
+        var successNestedCallSiteRecordIndices
+            = new ushort[Math.Max(0, successCallSiteCount - 1)];
+        Array.Copy(successCallSiteRecordIndices,
+            successNestedCallSiteRecordIndices,
+            successNestedCallSiteRecordIndices.Length);
         if ((hasSuccessCall
                 && successCallSiteRecordIndex + 1 != body.RecordCount)
             || (!hasSuccessCall
@@ -14620,114 +14655,126 @@ public static partial class TrRmExecutableCompiler
                 ArgumentParameterIndices
                     = argumentParameterIndices.MoveToImmutable(),
             };
-        BoundCall? successNestedCall = null;
-        if (successNestedCallSiteRecordIndex >= 0)
+        var successNestedCallBuilder
+            = ImmutableArray.CreateBuilder<BoundCall>(
+                successNestedCallSiteRecordIndices.Length);
+        for (var nestedCallIndex = 0;
+            nestedCallIndex < successNestedCallSiteRecordIndices.Length;
+            nestedCallIndex++)
         {
-            var nestedRecord = body.GetRecord(
-                successNestedCallSiteRecordIndex);
-            if (nestedRecord.Length < 4)
+            var successNestedRecord = body.GetRecord(
+                successNestedCallSiteRecordIndices[nestedCallIndex]);
+            if (successNestedRecord.Length < 4)
             {
                 throw Invalid(
                     "The Standard F+I conditional-output nested success CallSite is truncated.");
             }
 
-            var nestedPayload = nestedRecord[4..];
-            if (nestedRecord[0] != 0x02
-                || nestedPayload.Length < 20
-                || nestedPayload[0] != 1
-                || nestedPayload[1] != 1
+            var successNestedPayload = successNestedRecord[4..];
+            if (successNestedRecord[0] != 0x02
+                || successNestedPayload.Length < 20
+                || successNestedPayload[0] != 1
+                || successNestedPayload[1] != 1
                 || BinaryPrimitives.ReadUInt16LittleEndian(
-                    nestedPayload[2..]) != 0
+                    successNestedPayload[2..]) != 0
                 || BinaryPrimitives.ReadUInt16LittleEndian(
-                    nestedPayload[6..]) != 1
+                    successNestedPayload[6..])
+                    != nestedCallIndex + 1
                 || BinaryPrimitives.ReadUInt32LittleEndian(
-                    nestedPayload[12..]) != 0)
+                    successNestedPayload[12..]) != 0)
             {
                 throw Invalid(
                     "The Standard F+I conditional-output nested success CallSite is malformed.");
             }
 
-            var nestedMethodMapIndex
+            var successNestedMethodMapIndex
                 = BinaryPrimitives.ReadUInt16LittleEndian(
-                    nestedPayload[4..]);
-            if (nestedMethodMapIndex >= body.MethodCount)
+                    successNestedPayload[4..]);
+            if (successNestedMethodMapIndex >= body.MethodCount)
             {
                 throw Invalid(
                     "The Standard F+I conditional-output nested success CallSite has an invalid MethodMap index.");
             }
 
-            var nestedMethodToken = BinaryPrimitives
+            var successNestedMethodToken = BinaryPrimitives
                 .ReadUInt32LittleEndian(body.MethodMap[
-                    (nestedMethodMapIndex * sizeof(uint))..]);
-            var nestedTokenKind
-                = checked((byte)(nestedMethodToken >> 24));
-            var nestedTokenRow = checked((int)(
-                nestedMethodToken & 0x00FF_FFFF));
-            var nestedMethodRow = nestedTokenKind switch {
-                0x16 => nestedTokenRow,
-                0x1C when nestedTokenRow > 0
-                    && nestedTokenRow <= imports.Count
+                    (successNestedMethodMapIndex * sizeof(uint))..]);
+            var successNestedTokenKind
+                = checked((byte)(successNestedMethodToken >> 24));
+            var successNestedTokenRow = checked((int)(
+                successNestedMethodToken & 0x00FF_FFFF));
+            var successNestedMethodRow = successNestedTokenKind switch {
+                0x16 => successNestedTokenRow,
+                0x1C when successNestedTokenRow > 0
+                    && successNestedTokenRow <= imports.Count
                     && (imports.GetExpectedDefinitionForImportRow(
-                        nestedTokenRow) >> 24) == 0x16
+                        successNestedTokenRow) >> 24) == 0x16
                     => checked((int)(imports
                         .GetExpectedDefinitionForImportRow(
-                            nestedTokenRow) & 0x00FF_FFFF)),
+                            successNestedTokenRow) & 0x00FF_FFFF)),
                 _ => 0,
             };
-            if (nestedMethodRow == 0
+            if (successNestedMethodRow == 0
                 || foreignInterfaceBodyTargets is null
                 || !foreignInterfaceBodyTargets.TryGetValue(
-                    nestedMethodRow, out var nestedForeignTarget))
+                    successNestedMethodRow,
+                    out var successNestedForeignTarget))
             {
                 throw Invalid(
                     "The Standard F+I conditional-output nested success CallSite has no selected InterfaceMethod target.");
             }
 
-            var nestedMember = nestedForeignTarget.Member;
-            var nestedResultType = nestedMember.ResultType.PrimitiveType;
-            if (nestedMember.ResultType.Kind
+            var successNestedMember = successNestedForeignTarget.Member;
+            var successNestedResultType
+                = successNestedMember.ResultType.PrimitiveType;
+            if (successNestedMember.ResultType.Kind
                     != BoundInterfaceTypeKind.Primitive
-                || !DirectNativeImportContract.IsScalar(nestedResultType)
-                || nestedMember.DoesNotReturn
-                || !nestedMember.NativeOutputContracts.IsEmpty
-                || nestedMember.NativeCallableConvention is not
-                    NativeCallingConvention nestedConvention
-                || nestedForeignTarget.Definition.ForeignNativeInterface
-                    is not BoundForeignNativeInterfaceLayout nestedLayout
+                || !DirectNativeImportContract.IsScalar(
+                    successNestedResultType)
+                || successNestedMember.DoesNotReturn
+                || !successNestedMember.NativeOutputContracts.IsEmpty
+                || successNestedMember.NativeCallableConvention is not
+                    NativeCallingConvention successNestedConvention
+                || successNestedForeignTarget.Definition
+                    .ForeignNativeInterface is not
+                        BoundForeignNativeInterfaceLayout
+                            successNestedLayout
                 || BinaryPrimitives.ReadUInt32LittleEndian(
-                    nestedPayload[8..])
-                    != (uint)(nestedMember.Parameters.Length + 1)
-                || nestedPayload.Length
-                    != 20 + (nestedMember.Parameters.Length * 4))
+                    successNestedPayload[8..])
+                    != (uint)(successNestedMember.Parameters.Length + 1)
+                || successNestedPayload.Length
+                    != 20 + (successNestedMember.Parameters.Length * 4))
             {
                 throw Invalid(
                     "The Standard F+I conditional-output nested success target is outside the scalar no-output direct-Home subset.");
             }
 
-            var nestedReceiverInput = nestedPayload[16..];
-            if (nestedReceiverInput[0] != 2
-                || nestedReceiverInput[1] != 1
+            var successNestedReceiverInput = successNestedPayload[16..];
+            if (successNestedReceiverInput[0] != 2
+                || successNestedReceiverInput[1] != 1
                 || BinaryPrimitives.ReadUInt16LittleEndian(
-                    nestedReceiverInput[2..]) != 0)
+                    successNestedReceiverInput[2..]) != 0)
             {
                 throw Invalid(
                     "The Standard F+I conditional-output nested success CallSite has no direct receiver Home.");
             }
 
-            var nestedArguments
+            var successNestedArguments
                 = ImmutableArray.CreateBuilder<BoundExpression>(
-                    nestedMember.Parameters.Length);
-            var nestedParameterIndices
+                    successNestedMember.Parameters.Length);
+            var successNestedParameterIndices
                 = ImmutableArray.CreateBuilder<int>(
-                    nestedMember.Parameters.Length);
-            var nestedInputOffset = 20;
+                    successNestedMember.Parameters.Length);
+            var successNestedInputOffset = 20;
             for (var nestedFormal = 0;
-                nestedFormal < nestedMember.Parameters.Length;
+                nestedFormal < successNestedMember.Parameters.Length;
                 nestedFormal++)
             {
-                var parameter = nestedMember.Parameters[nestedFormal];
+                var parameter
+                    = successNestedMember.Parameters[nestedFormal];
                 var formalType = parameter.Type.PrimitiveType;
-                var input = nestedPayload.Slice(nestedInputOffset, 4);
+                var input = successNestedPayload.Slice(
+                    successNestedInputOffset, 4);
                 var homeIndex = BinaryPrimitives
                     .ReadUInt16LittleEndian(input[2..]);
                 if (parameter.Type.Kind
@@ -14751,54 +14798,63 @@ public static partial class TrRmExecutableCompiler
                 }
 
                 _ = inputHomeVariables.Add(homeIndex);
-                nestedArguments.Add(new BoundRead(
+                successNestedArguments.Add(new BoundRead(
                     homeVariables[homeIndex], formalType, default));
-                nestedParameterIndices.Add(nestedFormal);
-                nestedInputOffset += 4;
+                successNestedParameterIndices.Add(nestedFormal);
+                successNestedInputOffset += 4;
             }
 
-            var nestedDeclarationKey = nestedMember.DeclarationKey;
-            if (nestedTokenKind == 0x1C)
+            var successNestedDeclarationKey
+                = successNestedMember.DeclarationKey;
+            if (successNestedTokenKind == 0x1C)
             {
-                nestedDeclarationKey = imports
-                    .GetBindingForImportRow(nestedTokenRow).ExportKey;
-                if (!StringComparer.Ordinal.Equals(nestedDeclarationKey,
-                        nestedMember.DeclarationKey)
-                    && !nestedMember.AdditionalDeclarationKeys.Contains(
-                        nestedDeclarationKey, StringComparer.Ordinal))
+                successNestedDeclarationKey = imports
+                    .GetBindingForImportRow(
+                        successNestedTokenRow).ExportKey;
+                if (!StringComparer.Ordinal.Equals(
+                        successNestedDeclarationKey,
+                        successNestedMember.DeclarationKey)
+                    && !successNestedMember.AdditionalDeclarationKeys
+                        .Contains(successNestedDeclarationKey,
+                            StringComparer.Ordinal))
                 {
                     throw Invalid(
                         "A Standard F+I conditional-output nested success Import does not select one of the exact member ExportKeys.");
                 }
             }
 
-            var nestedDeclaringInterface = new BoundInterfaceType(
-                BoundInterfaceTypeKind.Nominal, PrimitiveType.Void,
-                nestedForeignTarget.Definition.QualifiedName, -1, [],
-                false, false, false, false) {
-                ModuleImport
-                    = nestedForeignTarget.Definition.ModuleImport,
-            };
-            var nestedIdentity = new BoundInterfaceMemberIdentity(
-                nestedDeclaringInterface,
-                nestedForeignTarget.MemberOrdinal,
-                nestedDeclarationKey);
-            successNestedCall = new BoundCall(
+            var successNestedDeclaringInterface
+                = new BoundInterfaceType(
+                    BoundInterfaceTypeKind.Nominal, PrimitiveType.Void,
+                    successNestedForeignTarget.Definition.QualifiedName, -1,
+                    [], false, false, false, false) {
+                    ModuleImport
+                        = successNestedForeignTarget.Definition.ModuleImport,
+                };
+            var successNestedIdentity
+                = new BoundInterfaceMemberIdentity(
+                    successNestedDeclaringInterface,
+                    successNestedForeignTarget.MemberOrdinal,
+                    successNestedDeclarationKey);
+            successNestedCallBuilder.Add(new BoundCall(
                 BoundCall.ForeignInterfaceFunction,
-                nestedArguments.MoveToImmutable(), nestedResultType,
-                default) {
+                successNestedArguments.MoveToImmutable(),
+                successNestedResultType, default) {
                 IsUnsafeAuthorized = true,
                 ForeignInterfaceCall = new BoundForeignNativeInterfaceCall(
                     new BoundRead(homeVariables[0],
                         PrimitiveType.NativeRawPointer, default),
-                    nestedIdentity, nestedLayout.VTableByteOffset,
-                    nestedConvention, nestedMember.RequiresMutableReceiver,
-                    nestedMember.DoesNotReturn,
-                    nestedMember.NativeOutputContracts),
+                    successNestedIdentity,
+                    successNestedLayout.VTableByteOffset,
+                    successNestedConvention,
+                    successNestedMember.RequiresMutableReceiver,
+                    successNestedMember.DoesNotReturn,
+                    successNestedMember.NativeOutputContracts),
                 ArgumentParameterIndices
-                    = nestedParameterIndices.MoveToImmutable(),
-            };
+                    = successNestedParameterIndices.MoveToImmutable(),
+            });
         }
+        var successNestedCalls = successNestedCallBuilder.MoveToImmutable();
 
         BoundCall? successCall = null;
         if (hasSuccessCall)
@@ -14901,16 +14957,15 @@ public static partial class TrRmExecutableCompiler
                     "The Standard F+I conditional-output success CallSite has no direct raw-pointer receiver Home.");
             }
 
-            var successArguments
-                = ImmutableArray.CreateBuilder<BoundExpression>(
-                    successMember.Parameters.Length);
-            var successParameterIndices
-                = ImmutableArray.CreateBuilder<int>(
-                    successMember.Parameters.Length);
+            var successArgumentsByFormal
+                = new BoundExpression?[successMember.Parameters.Length];
+            var successArgumentRegisterByFormal
+                = new int[successMember.Parameters.Length];
+            Array.Fill(successArgumentRegisterByFormal, -1);
             var successInputOffset = 20;
             var consumedOutputHomes = new HashSet<int>();
             var hasPointerOutputUse = false;
-            var successNestedUseCount = 0;
+            var successNestedRegisters = new HashSet<ushort>();
             if (reservedOutputHomes.Contains(successReceiverHome))
             {
                 _ = consumedOutputHomes.Add(successReceiverHome);
@@ -14940,13 +14995,16 @@ public static partial class TrRmExecutableCompiler
                 }
 
                 if (selectorKind == 1 && sourceUse == 1
-                    && homeIndex == 1 && successNestedCall is not null
-                    && successNestedCall.Type == formalType
-                    && successNestedUseCount == 0)
+                    && homeIndex > 0
+                    && homeIndex <= successNestedCalls.Length
+                    && successNestedCalls[homeIndex - 1].Type
+                        == formalType
+                    && successNestedRegisters.Add(homeIndex))
                 {
-                    successArguments.Add(new BoundUnsafeExpression(
-                        successNestedCall, default));
-                    successNestedUseCount++;
+                    successArgumentsByFormal[formal]
+                        = new BoundUnsafeExpression(
+                            successNestedCalls[homeIndex - 1], default);
+                    successArgumentRegisterByFormal[formal] = homeIndex;
                 }
                 else if (selectorKind == 2 && sourceUse == 1
                     && homeIndex < body.HomeCount
@@ -14980,8 +15038,8 @@ public static partial class TrRmExecutableCompiler
                             "A Standard F+I conditional-output success input reads a non-parameter Home.");
                     }
 
-                    successArguments.Add(new BoundRead(
-                        homeVariables[homeIndex], formalType, default));
+                    successArgumentsByFormal[formal] = new BoundRead(
+                        homeVariables[homeIndex], formalType, default);
                 }
                 else
                 {
@@ -14989,7 +15047,6 @@ public static partial class TrRmExecutableCompiler
                         "A Standard F+I conditional-output success input does not match its Home or nested-call register.");
                 }
 
-                successParameterIndices.Add(formal);
                 successInputOffset += 4;
             }
 
@@ -14999,11 +15056,31 @@ public static partial class TrRmExecutableCompiler
                     "A Standard F+I conditional-output success call does not consume a pointer-valued output Home.");
             }
 
-            if (successNestedUseCount
-                != (successNestedCall is null ? 0 : 1))
+            if (successNestedRegisters.Count != successNestedCalls.Length)
             {
                 throw Invalid(
-                    "The Standard F+I conditional-output success call does not consume its ordered nested result.");
+                    "The Standard F+I conditional-output success call does not consume every ordered nested result.");
+            }
+
+            var successArguments
+                = ImmutableArray.CreateBuilder<BoundExpression>(
+                    successMember.Parameters.Length);
+            var successParameterIndices
+                = ImmutableArray.CreateBuilder<int>(
+                    successMember.Parameters.Length);
+            var orderedSuccessFormals
+                = Enumerable.Range(0, successMember.Parameters.Length)
+                    .OrderBy(formal =>
+                        successArgumentRegisterByFormal[formal] >= 0
+                            ? successArgumentRegisterByFormal[formal]
+                            : int.MaxValue)
+                    .ThenBy(static formal => formal);
+            foreach (var formal in orderedSuccessFormals)
+            {
+                successArguments.Add(successArgumentsByFormal[formal]
+                    ?? throw Invalid(
+                        "A Standard F+I conditional-output success CallSite omits a formal input."));
+                successParameterIndices.Add(formal);
             }
 
             var successDeclarationKey = successMember.DeclarationKey;
