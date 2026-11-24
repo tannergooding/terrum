@@ -313,6 +313,16 @@ internal sealed class TrRmFniEnumClosureTests
     }
 
     [Test]
+    public void RejectsFniEnumSectionsUnderThePredecessorParameterSurfaceSchema()
+    {
+        var artifact = CreateFniCoreEnumProvider().Input.Artifact.ToArray();
+
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmArtifactIndex
+                .ForForeignNativeInterfaceParameterSurfaceDraft(artifact));
+    }
+
+    [Test]
     public void EmitsSourceOwnedEnumFniSignaturesBesideStandardNativeImports()
     {
         var tree = SyntaxTree.Parse("""
