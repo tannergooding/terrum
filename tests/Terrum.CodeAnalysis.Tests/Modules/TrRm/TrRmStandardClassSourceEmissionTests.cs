@@ -681,6 +681,82 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     }
 
     [Test]
+    public void PreservesFieldAndPropertyInitSourceOrder()
+    {
+        var tree = SyntaxTree.Parse("""
+            public class Box {
+                public int32 Other;
+                public int32 Value { get { return field; } init; }
+                public Box(int32 other, int32 value) {
+                    Other = other;
+                    Value = value;
+                }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var members = classDeclaration.Children.OfType<SyntaxNode>();
+        var fieldDeclaration = members.Single(static node =>
+            node.Kind == SyntaxKind.FieldDeclaration);
+        var propertyDeclaration = members.Single(static node =>
+            node.Kind == SyntaxKind.PropertyDeclaration);
+        var constructorDeclaration = members.Single(static node =>
+            node.Kind == SyntaxKind.ConstructorDeclaration);
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "PI1MixedInitializerBox",
+            C1M1Construction2PropertyInitializedStateSchemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [
+                new TrRmSourceClassExport(program, 0,
+                    classDeclaration.Span, "BoxKey", [
+                        new TrRmSourceClassMemberExport(0,
+                            fieldDeclaration.Span, "Box.Other"),
+                        new TrRmSourceClassMemberExport(0,
+                            propertyDeclaration.Span, "Box.Value"),
+                        new TrRmSourceClassMemberExport(0,
+                            constructorDeclaration.Span,
+                            "Box.Initialize") {
+                            ConstructionProjectionExportKey = "Box.Create",
+                        },
+                    ]),
+            ]);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForC1M1Construction2L1R1PropertyInitializedStateDraft(
+                        artifact));
+        var initializerRow = Enumerable.Range(1, tables.Methods.Count)
+            .Single(row => tables.Methods.GetOwnerType(row) == 1
+                && tables.Contracts.HasConstructionClause(row)
+                && tables.Contracts.GetConstructionClause(row).RoleTag == 1);
+        Assert.That(tables.Contracts.GetConstructionClause(initializerRow)
+                .InitializedMemberDefIds,
+            Is.EqualTo(new[] { 0x1400_0001u, 0x1E00_0001u }));
+
+        var initializerBody = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(initializerRow),
+            tables.Contracts.Count);
+        Assert.That(initializerBody.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD8, 0, 1, 0, 0xD9, 0, 2, 0,
+                0xE0, 0, 3, 0, 0x18, 0,
+            }));
+        var propertyCall = initializerBody.GetRecord(3)[4..];
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+                propertyCall.Slice(22)),
+            Is.EqualTo(2));
+        tables.ValidateRegisterBodyMapsForMethod(initializerRow);
+        tables.ValidateRegisterBodyMapsForMethod(
+            tables.Properties.GetInitMethod(1));
+    }
+
+    [Test]
     public void EmitsPI1AutoInitializerAccessorAndRoleThreeLink()
     {
         var tree = SyntaxTree.Parse("""

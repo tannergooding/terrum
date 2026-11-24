@@ -66,8 +66,9 @@ These are inspected-source facts, not validation results:
   checks would therefore still be incorrect.
 * The Construction-2 PI1 source producer emits source-ordered repeated
   role-3 CallSites from a role-1 constructor Body, using direct immutable
-  scalar parameter Homes. It does not yet compose those calls with direct
-  field stores or preserve the full dynamic property-state frame.
+  scalar parameter Homes; it can interleave them with direct scalar FieldWrites
+  while preserving source order. Constants, locals, conditional field-store
+  paths and the full dynamic property-state frame remain open.
 * [`TrRmContractTableReader.ReadConstructionClause`](../../sources/Terrum.CodeAnalysis/Modules/TrRmContractTableReader.cs)
   has provisional role-3 Q linkage. It does not supply these CallSite,
   caller-entry or lifecycle rules.
