@@ -332,6 +332,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         const string classProviderIdentity = "C2ClassTypeProvider";
         const string moduleIdentity = "C2ClassFunctionProvider";
         var tree = SyntaxTree.Parse("""
+            public int32 Transform(int32 value) { return value; }
             public class Box {
                 public int32 Value;
                 public Box(int32 value) { Value = value; }
@@ -365,17 +366,27 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                     ]),
             ]);
 
+        var classProviderInput = new TrRmStandardArtifactInput(
+            C1M1Construction2SchemaIdentity, classArtifact);
         var classReference
             = TrRmExecutableCompiler.CreateStandardReference(
-                new TrRmStandardArtifactInput(
-                    C1M1Construction2SchemaIdentity, classArtifact),
-                classProviderIdentity, []);
+                classProviderInput, classProviderIdentity, []);
+        Assert.That(classReference.Functions.Select(
+                static function => function.Name),
+            Does.Contain("Transform"));
         var functionCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse(
                 """
                 public void Consume(Box value, int32 count) {}
-                internal void Helper(Box value) {}
-                internal void HelperAgain(Box value) { Helper(value); }
+                public int32 Invoke(Box value, int32 count) {
+                    return HelperAgain(value, count);
+                }
+                internal int32 Helper(Box value, int32 count) {
+                    return Transform(count);
+                }
+                internal int32 HelperAgain(Box value, int32 count) {
+                    return Helper(value, count);
+                }
                 """),
             classReference);
         Assert.That(functionCompilation.HasErrors, Is.False,
@@ -395,6 +406,8 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             Does.Contain("Box"));
         Assert.That(reference.Functions.Select(static function => function.Name),
             Does.Contain("Consume"));
+        Assert.That(reference.Functions.Select(static function => function.Name),
+            Does.Contain("Invoke"));
 
         var downstream = Compilation.CreateLibrary(SyntaxTree.Parse("""
             public void Forward(Box value, int32 count) {
@@ -454,6 +467,21 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
                 helperAgainBody.MethodMap),
             Is.EqualTo(0x1600_0000u | checked((uint)helperMethodRow)));
+        var transformImportRow = Enumerable.Range(1,
+                reemittedTables.Imports.Count)
+            .Single(row => reemittedTables.Imports
+                .GetBindingForImportRow(row).ExportKey == "Transform");
+        var transformImport = BinaryPrimitives.ReadUInt32LittleEndian(
+            reemittedTables.Bodies.GetRegisterBody(
+                reemittedTables.Methods.GetBodyRow(helperMethodRow),
+                reemittedTables.Contracts.Count).MethodMap);
+        Assert.That(transformImport,
+            Is.EqualTo(0x1C00_0000u
+                | checked((uint)transformImportRow)));
+        Assert.That(reemittedTables.ModuleRefs.GetProducerIdentity(
+                reemittedTables.Imports.GetModuleRefForImportRow(
+                    transformImportRow)),
+            Is.EqualTo(classProviderIdentity));
 
         var reemittedReference
             = TrRmExecutableCompiler.CreateStandardReference(
