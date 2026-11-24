@@ -10683,12 +10683,6 @@ internal sealed partial class Binder
                 Report("TRM3001", "An indexer cannot be static.",
                     declaration.Span);
             }
-            if (isAutoGetter && !isStatic)
-            {
-                Report("TRM3001",
-                    "Instance auto-property backing storage requires the selected construction backing support.",
-                    declaration.Span);
-            }
             if (getter is not null)
             {
                 foreach (var child in getter.Children)

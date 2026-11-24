@@ -397,6 +397,59 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     }
 
     [Test]
+    public void EmitsPI1AutoGetterBackingProperty()
+    {
+        var tree = SyntaxTree.Parse("""
+            public class Box {
+                public int32 Value { get; }
+                public Box(int32 value) { Value = value; }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var members = classDeclaration.Children.OfType<SyntaxNode>();
+        var propertyDeclaration = members.Single(static node =>
+            node.Kind == SyntaxKind.PropertyDeclaration);
+        var constructorDeclaration = members.Single(static node =>
+            node.Kind == SyntaxKind.ConstructorDeclaration);
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "PI1AutoGetterBox",
+            C1M1Construction2PropertyInitializedStateSchemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [
+                new TrRmSourceClassExport(program, 0,
+                    classDeclaration.Span, "BoxKey", [
+                        new TrRmSourceClassMemberExport(0,
+                            propertyDeclaration.Span, "Box.Value"),
+                        new TrRmSourceClassMemberExport(0,
+                            constructorDeclaration.Span,
+                            "Box.Initialize"),
+                    ]),
+            ]);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForC1M1Construction2L1R1PropertyInitializedStateDraft(
+                        artifact));
+
+        var getterMethod = tables.Properties.GetGetterMethod(1);
+        Assert.That(tables.Fields.IsPropertyBackingField(
+                tables.Properties.GetBackingFieldDef(1)),
+            Is.True);
+        var getterBodyRow = tables.Methods.GetBodyRow(getterMethod);
+        Assert.That(getterBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(getterBodyRow,
+            tables.Contracts.Count);
+        tables.ValidateRegisterBodyMapsForMethod(getterMethod);
+    }
+
+    [Test]
     public void EmitsPI1MutableAutoSetterAndBackingWriteAuthority()
     {
         var tree = SyntaxTree.Parse("""

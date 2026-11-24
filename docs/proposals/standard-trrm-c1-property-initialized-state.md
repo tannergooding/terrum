@@ -21,30 +21,28 @@ leads to the following distinct owners:
 | [Ordinary class receivers](standard-trrm-c1-instance-call-receivers.md#proposed-exact-mapping), [R1](standard-trrm-method-receiver-access.md#initialization-is-not-mutable-receiving) | Ordinary get/set access is a live receiver borrow. Initialization authority is phase-owned, not readonly access, `write C`, or R1's writable-receiver bit. |
 | [IO1](standard-trrm-c1-indexer-parameter-default-ownership.md#proposed-propertydef-successor) | Proposes explicit set/init links for **indexers**, but selects no named-property backing or initialization-completion contract. Its init link explicitly supplies no backing guarantee. |
 
-Inspected code agrees with that boundary. These are source observations, not
-test results:
+The exact PI1 implementation is now partial. These are source observations,
+not validation results:
 
 * [`TrRmContractTableReader.ReadConstructionClause`](../../sources/Terrum.CodeAnalysis/Modules/TrRmContractTableReader.cs)
-  checks a role-1 PropertyDef's owner, then throws `NotSupportedException`
-  requiring an initialized-place/accessor contract.
+  accepts role-1 PropertyDef guarantees only under PI1 and requires their
+  checked backing relation; it also validates role-3 PropertyDef linkage.
+  Other schemas still reject PropertyDef construction guarantees.
 * [`TrRmPropertyDefTableReader`](../../sources/Terrum.CodeAnalysis/Modules/TrRmPropertyDefTableReader.cs)
-  consumes exactly five words; [`TrRmDefinitionResolver`](../../sources/Terrum.CodeAnalysis/Modules/TrRmDefinitionResolver.cs)
-  resolves a property's implementation through its getter Body alone.
-* [`Binder`](../../sources/Terrum.CodeAnalysis/Semantics/Binder.cs) has checked
-  by-value getter identities/effects but diagnoses instance auto backing;
-  [`Binder.ManagedClasses`](../../sources/Terrum.CodeAnalysis/Semantics/Binder.ManagedClasses.cs)
-  builds instance storage from field declarations, not implicit property fields.
-  The construction source routes in
-  [`TrRmExecutableCompiler`](../../sources/Terrum.CodeAnalysis/Modules/TrRmExecutableCompiler.cs)
-  still refuse class/member closure.
-* [`TrRmConstructionClauseTests`](../../tests/Terrum.CodeAnalysis.Tests/Modules/TrRm/TrRmConstructionClauseTests.cs)
-  exercises FieldDef guarantees, not successful PropertyDef guarantees.
-  [`TrRmPropertyDefTableReaderTests`](../../tests/Terrum.CodeAnalysis.Tests/Modules/TrRm/TrRmPropertyDefTableReaderTests.cs)
-  checks getter ownership/results; [`GetterPropertyTests`](../../tests/Terrum.CodeAnalysis.Tests/Semantics/GetterPropertyTests.cs)
-  exercises ordinary getters. The current
-  [test project](../../tests/Terrum.CodeAnalysis.Tests/Terrum.CodeAnalysis.Tests.csproj)
-  does not exclude these fixtures. Neither these fixtures nor the
-  [implementation summary](../implementation.md) establishes the missing codec.
+  selects the 20-byte baseline or 32-byte PI1 row by exact schema and checks
+  setter/init/backing references. This is not complete provider binding,
+  replacement or source-free property closure.
+* [`Binder.ManagedClasses`](../../sources/Terrum.CodeAnalysis/Semantics/Binder.ManagedClasses.cs)
+  creates compiler-owned backing fields for auto and `field`-backed
+  properties. `Binder` no longer rejects instance auto getters.
+* [`TrRmExecutableCompiler.StandardClassTypeReferenceWriter`](../../sources/Terrum.CodeAnalysis/Modules/TrRmExecutableCompiler.StandardClassTypeReferenceWriter.cs)
+  emits selected public scalar properties with field-reading explicit or
+  auto getters, direct mutable setters to the exact mutable backing field,
+  and auto init accessors. Other setter/init bodies and broader class
+  closure remain unsupported.
+* [`TrRmStandardClassSourceEmissionTests`](../../tests/Terrum.CodeAnalysis.Tests/Modules/TrRm/TrRmStandardClassSourceEmissionTests.cs)
+  now has focused auto-getter and setter producer cases. They remain
+  unverified under the active execution hold.
 
 **Recommend PI1:** one explicit PropertyDef-to-implicit-FieldDef relation,
 explicit accessor roles, and a bounded initialization-accessor state contract.

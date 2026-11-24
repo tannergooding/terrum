@@ -56,14 +56,14 @@ These are inspected-source facts, not validation results:
   checks record framing and selector domains; those checks alone do not
   establish a receiver's construction authority.
 * [`TrRmRegisterBodyMapValidator`](../../sources/Terrum.CodeAnalysis/Modules/TrRmRegisterBodyMapValidator.cs)
-  currently refuses role-3 targets in `ValidateCallSiteEffects` and
-  `ValidateCallSiteHomeTypes`. `ValidateConstructionReceiverInput` admits
-  only P→its I through role-4 Home/5; `ValidateConstructionContextHome`
-  likewise restricts context Homes to P.
-* Its lifecycle worklist treats a role-4 Home/5 call as constructor
-  completion without distinguishing I from M. Simply removing the role-3
-  refusals would therefore be incorrect. Ordinary class receiver checking
-  instead uses borrow 3/4, class qualifications and R1 flag bit 2.
+  now has a PI1-specific `ValidatePropertyInitializerReceiverInput` path for
+  role-1/role-3 MethodMap calls using receiver Home/source-use 5; ordinary
+  instance calls remain under R1's borrow 3/4 and writable-receiver checks.
+* Its lifecycle worklist moves a role-4 context from active to I-completed
+  after a normal role-1 call and admits role-3 calls only in the completed
+  phase. It does not yet retain the full per-property state frame or all
+  role-1/role-3 receiver alternatives across CFG joins. Removing the remaining
+  checks would therefore still be incorrect.
 * [`TrRmContractTableReader.ReadConstructionClause`](../../sources/Terrum.CodeAnalysis/Modules/TrRmContractTableReader.cs)
   has provisional role-3 Q linkage. It does not supply these CallSite,
   caller-entry or lifecycle rules.

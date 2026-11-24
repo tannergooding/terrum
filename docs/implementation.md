@@ -2235,13 +2235,13 @@ TypeSpec/provider identities. Nested structs preserve unknown class ownership
 and are rejected by Copy-sensitive verification. These class and struct
 routes remain unverified under the active hold. The
 separate Construction-2 PI1 source producer now emits selected public
-scalar explicit-field-backed properties with a direct field-reading getter
-and either no mutator, a mutable setter whose Body directly writes that same
-backing FieldDef, or an auto init accessor. It emits hidden PropertyBacking
-FieldDefs, constructor role-1 PropertyDef identities, role-3 auto-init
-FieldWrite Body links, and a role-1 constructor CallSite with a source-use-5
-receiver and direct scalar value Home. Producer regressions are authored but
-unverified. Auto getter backing, other setter Body shapes, authored init
+scalar explicit-field-backed properties with a field-reading getter, either
+explicit or auto, and either no mutator, a mutable setter whose Body directly
+writes that same backing FieldDef, or an auto init accessor. It emits hidden
+PropertyBacking FieldDefs, constructor role-1 PropertyDef identities,
+role-3 auto-init FieldWrite Body links, and a role-1 constructor CallSite with
+a source-use-5 receiver and direct scalar value Home. Producer regressions
+are authored but unverified. Other setter Body shapes, authored init
 accessors, private/unselected property closure, source-free binding/remapping,
 provider replacement, PropertyInitialized production, role-3 lifecycle and
 runtime remain open.
