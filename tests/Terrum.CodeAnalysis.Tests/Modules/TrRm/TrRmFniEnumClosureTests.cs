@@ -1,9 +1,11 @@
 using System;
+using System.Buffers.Binary;
 using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
 using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
+using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Tests.Semantics;
@@ -323,7 +325,7 @@ internal sealed class TrRmFniEnumClosureTests
                 [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
                 [ForeignNativeInterface(VTableByteOffset: uint32(0))]
                 public interface IProbe {
-                    public unsafe Shade Get();
+                    public unsafe Shade Echo(Shade value);
                     public unsafe void Set(Shade value);
                 }
                 [NativeImport("fixture.dll", "ReadValue")]
@@ -388,7 +390,7 @@ internal sealed class TrRmFniEnumClosureTests
         Assert.That(reference.EnumDefinitions[shadeEnumIndex]
             .BlittableTargetRequirement, Is.EqualTo(1));
         Assert.That(reference.Interfaces.Single().Members
-            .Single(member => member.Name == "Get")
+            .Single(member => member.Name == "Echo")
             .ResultType.PrimitiveType,
             Is.EqualTo(BoundEnumTypes.Type(shadeEnumIndex)));
 
@@ -403,18 +405,18 @@ internal sealed class TrRmFniEnumClosureTests
         Assert.That(nativeImportCount, Is.EqualTo(1));
         Assert.That(index.TryGetSection(0x0066, out _, out var surfaceCount),
             Is.True);
-        Assert.That(surfaceCount, Is.EqualTo(1));
+        Assert.That(surfaceCount, Is.EqualTo(2));
 
         var shadeEnumRow = Enumerable.Range(1, tables.EnumDefs.Count)
             .Single(row => tables.TypeDefs.GetName(checked((int)
                 tables.EnumDefs.GetOwnerTypeDef(row))) == "Shade");
         var enumTypeDefRow = checked((int)
             tables.EnumDefs.GetOwnerTypeDef(shadeEnumRow));
-        var getMethod = Enumerable.Range(1, tables.Methods.Count)
-            .Single(row => tables.Methods.GetName(row) == "Get");
-        var getSignature = tables.Methods.GetSignature(getMethod);
+        var echoMethod = Enumerable.Range(1, tables.Methods.Count)
+            .Single(row => tables.Methods.GetName(row) == "Echo");
+        var echoSignature = tables.Methods.GetSignature(echoMethod);
         var resultType = tables.TypeSpecs.GetTypeSpecRef(
-            tables.Signatures.GetResultTypeSpec(getSignature));
+            tables.Signatures.GetResultTypeSpec(echoSignature));
         Assert.That(resultType.Form, Is.EqualTo(0x02));
         Assert.That(resultType.Row, Is.EqualTo(enumTypeDefRow));
 
@@ -440,6 +442,319 @@ internal sealed class TrRmFniEnumClosureTests
         Assert.That(featureIds, Does.Contain(
             TrRmFeatureTableReader.MethodParameterLabelsFeatureId));
         Assert.That(enumDefinition.Members.Length, Is.EqualTo(2));
+
+    }
+
+    [Test]
+    public void RoundTripsNestedEnumConstantThroughFniBodyAndNativeLowering()
+    {
+        var coreProvider = CreateFniCoreEnumProvider();
+        var (registration, layoutRegistration)
+            = CreateFniCoreRegistrations("FniEnumBodyProvider");
+        var tree = SyntaxTree.Parse("""
+            using Terrum.Interop;
+            namespace Demo {
+                [Blittable]
+                public enum Shade : int8 {
+                    Negative = -1,
+                    Positive = 1
+                }
+                [Blittable]
+                public enum Tint : uint16 {
+                    Green = 5
+                }
+                [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+                [ForeignNativeInterface(VTableByteOffset: uint32(0))]
+                public interface IProbe {
+                    public unsafe Shade GetShade(Tint value);
+                    public unsafe Shade Echo(Shade value);
+                    public unsafe NativeCallingConvention EchoConvention(
+                        NativeCallingConvention value);
+                }
+                Shade Invoke(ptr<void> receiver) {
+                    unsafe {
+                        return IProbe.Echo(receiver,
+                            IProbe.GetShade(receiver, Tint.Green));
+                    }
+                }
+                Shade InvokeDirect(ptr<void> receiver) {
+                    unsafe { return IProbe.Echo(receiver, Shade.Positive); }
+                }
+                Shade InvokeStaged(ptr<void> receiver) {
+                    Shade staged = Shade.Negative;
+                    unsafe { return IProbe.Echo(receiver, staged); }
+                }
+                NativeCallingConvention InvokeCore(
+                    ptr<void> receiver) {
+                    unsafe {
+                        return IProbe.EchoConvention(receiver,
+                            NativeCallingConvention.Cdecl);
+                    }
+                }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree,
+            coreProvider.Reference, new CompilationOptions {
+                NativeCoreRegistration = registration,
+                LayoutCoreRegistration = layoutRegistration,
+            });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = (BoundProgram)compilation.Program!;
+        TrRmSourceEnumDeclarationExport SourceEnumExport(
+            string qualifiedName, string exportKey)
+        {
+            var definition = program.EnumDefinitions.Single(item =>
+                item.Name == qualifiedName
+                && item.Identity is BoundEnumDeclarationIdentity.Source);
+            var source = (BoundEnumDeclarationIdentity.Source)
+                definition.Identity;
+            var primary = source.Value.Parts.Single(
+                static part => part.IsPrimary);
+            return new TrRmSourceEnumDeclarationExport(program,
+                primary.SourceInputOrdinal, primary.Declaration.Span,
+                [exportKey], [.. definition.Members.Select(member =>
+                    $"{exportKey}.{member.Name.ToLowerInvariant()}")]);
+        }
+
+        var interfaceDefinition = program.Interfaces.Single();
+        var interfaceExport = new TrRmSourceTypeExport("Demo", "IProbe",
+            "type.probe") {
+            InterfaceMethodExports = [
+                .. interfaceDefinition.Members.Select(member =>
+                    new TrRmSourceInterfaceMethodExport(
+                        member.SourceInputOrdinal,
+                        member.SourceDeclarationSpan,
+                        $"method.probe.{member.Name}")),
+            ],
+        };
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "FniEnumBodyProvider", SchemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [interfaceExport], [
+                SourceEnumExport("Demo.Shade", "type.shade"),
+                SourceEnumExport("Demo.Tint", "type.tint"),
+            ]);
+        var index
+            = TrRmArtifactIndex
+                .ForForeignNativeInterfaceParameterSurfaceEnumClosureDraft(
+                    artifact);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(index);
+        Assert.That(tables.EnumDefs.Count, Is.EqualTo(6));
+        Assert.That(tables.EnumMembers.Count, Is.EqualTo(15));
+        var shadeTypeDef = Enumerable.Range(1, tables.TypeDefs.Count)
+            .Single(row => tables.TypeDefs.GetName(row) == "Shade");
+        var tintTypeDef = Enumerable.Range(1, tables.TypeDefs.Count)
+            .Single(row => tables.TypeDefs.GetName(row) == "Tint");
+        int FindTypeSpecRow(int typeDefRow)
+            => Enumerable.Range(1, tables.TypeSpecs.Count).Single(row => {
+                var type = tables.TypeSpecs.GetTypeSpecRef(
+                    checked((uint)row));
+                return type.Form == 0x02 && type.Row == typeDefRow;
+            });
+
+        var shadeTypeSpecRow = FindTypeSpecRow(shadeTypeDef);
+        var tintTypeSpecRow = FindTypeSpecRow(tintTypeDef);
+        bool HasSimpleName(string name, string simpleName)
+            => name == simpleName
+                || name.EndsWith("." + simpleName,
+                    StringComparison.Ordinal);
+        var invokeRow = Enumerable.Range(1, tables.Methods.Count)
+            .Single(row => HasSimpleName(tables.Methods.GetName(row),
+                "Invoke"));
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(invokeRow), tables.Contracts.Count);
+        bool HasEnumTypeSpec(TrRmRegisterBodyReader candidateBody,
+            int typeSpecRow)
+        {
+            var token = 0x1100_0000u | checked((uint)typeSpecRow);
+            for (var index = 0; index < candidateBody.TypeCount; index++)
+            {
+                if (BinaryPrimitives.ReadUInt32LittleEndian(
+                        candidateBody.TypeMap.Slice(index * sizeof(uint)))
+                    == token)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        Assert.That(HasEnumTypeSpec(body, shadeTypeSpecRow), Is.True);
+        Assert.That(HasEnumTypeSpec(body, tintTypeSpecRow), Is.True);
+        Assert.That(body.ConstantCount, Is.EqualTo(1));
+        var constantTypeSpec = BinaryPrimitives.ReadUInt32LittleEndian(
+            body.ConstantMap);
+        var constantType = tables.TypeSpecs.GetTypeSpecRef(
+            constantTypeSpec);
+        Assert.That(constantType.Form, Is.EqualTo(0x02));
+        Assert.That(constantType.Row, Is.EqualTo(tintTypeDef));
+        foreach (var functionName in new[] {
+            "InvokeDirect", "InvokeStaged",
+        })
+        {
+            var functionRow = Enumerable.Range(1, tables.Methods.Count)
+                .Single(row => HasSimpleName(
+                    tables.Methods.GetName(row), functionName));
+            var functionBody = tables.Bodies.GetRegisterBody(
+                tables.Methods.GetBodyRow(functionRow),
+                tables.Contracts.Count);
+            Assert.That(functionBody.ConstantCount, Is.EqualTo(1));
+            Assert.That(HasEnumTypeSpec(functionBody, shadeTypeSpecRow),
+                Is.True);
+        }
+
+        var input = new TrRmStandardArtifactInput(SchemaIdentity, artifact);
+        var loaded = TrRmExecutableCompiler.LoadStandard(input,
+            "FniEnumBodyProvider", [coreProvider.Input]);
+        var loadedShadeIndex = Enumerable.Range(0,
+                loaded.EnumDefinitions.Length)
+            .Single(enumIndex => loaded.EnumDefinitions[enumIndex].Name
+                == "Demo.Shade");
+        var loadedTintIndex = Enumerable.Range(0,
+                loaded.EnumDefinitions.Length)
+            .Single(enumIndex => loaded.EnumDefinitions[enumIndex].Name
+                == "Demo.Tint");
+        var loadedCoreEnumIndex = Enumerable.Range(0,
+                loaded.EnumDefinitions.Length)
+            .Single(enumIndex => loaded.EnumDefinitions[enumIndex].Name
+                == "Terrum.Interop.NativeCallingConvention");
+        BoundCall? FindCall(string functionName, string memberName)
+        {
+            BoundCall? result = null;
+            var function = loaded.Functions.Single(item =>
+                HasSimpleName(item.Name, functionName));
+            _ = BoundTreeTraversal.VisitExpressions(function.Body,
+                expression =>
+                {
+                    if (expression is BoundCall {
+                            ForeignInterfaceCall:
+                                BoundForeignInterfaceCall foreignCall,
+                        } call && foreignCall.Member.Name == memberName)
+                    {
+                        result = call;
+                    }
+                });
+            return result;
+        }
+
+        var outerCall = FindCall("Invoke", "Echo");
+        var nestedCall = FindCall("Invoke", "GetShade");
+        Assert.That(outerCall, Is.Not.Null);
+        Assert.That(nestedCall, Is.Not.Null);
+        Assert.That(outerCall!.Type,
+            Is.EqualTo(BoundEnumTypes.Type(loadedShadeIndex)));
+        Assert.That(outerCall.Arguments.Single(),
+            Is.TypeOf<BoundCall>());
+        var nestedConstant = (BoundConstant)nestedCall!.Arguments.Single();
+        Assert.That(nestedConstant.Type,
+            Is.EqualTo(BoundEnumTypes.Type(loadedTintIndex)));
+        Assert.That(nestedConstant.RepresentationType,
+            Is.EqualTo(PrimitiveType.UInt16));
+        var directCall = FindCall("InvokeDirect", "Echo");
+        var directConstant = (BoundConstant)directCall!.Arguments.Single();
+        Assert.That(directConstant.Type,
+            Is.EqualTo(BoundEnumTypes.Type(loadedShadeIndex)));
+        Assert.That(directConstant.RepresentationType,
+            Is.EqualTo(PrimitiveType.Int8));
+        var stagedCall = FindCall("InvokeStaged", "Echo");
+        Assert.That(stagedCall!.Arguments.Single(), Is.TypeOf<BoundRead>());
+        Assert.That(stagedCall.Arguments.Single().Type,
+            Is.EqualTo(BoundEnumTypes.Type(loadedShadeIndex)));
+        var coreCall = FindCall("InvokeCore", "EchoConvention");
+        Assert.That(coreCall!.Type,
+            Is.EqualTo(BoundEnumTypes.Type(loadedCoreEnumIndex)));
+        var coreConstant = (BoundConstant)coreCall.Arguments.Single();
+        Assert.That(coreConstant.Type,
+            Is.EqualTo(BoundEnumTypes.Type(loadedCoreEnumIndex)));
+        Assert.That(coreConstant.RepresentationType,
+            Is.EqualTo(PrimitiveType.Int32));
+        var nativeFunctionNames = loaded.Functions.Where(function =>
+            HasSimpleName(function.Name, "Invoke")
+            || HasSimpleName(function.Name, "InvokeDirect")
+            || HasSimpleName(function.Name, "InvokeStaged")
+            || HasSimpleName(function.Name, "InvokeCore"))
+            .Select(static function => function.Name).ToArray();
+        Assert.That(nativeFunctionNames.Length, Is.EqualTo(4));
+        Assert.That(NativeEmitter.EmitLibrary(loaded,
+            nativeFunctionNames,
+            NativeRuntimePolicy.FailFast), Is.Not.Empty);
+    }
+
+    [Test]
+    public void RejectsEnumDefaultsOnFniParameters()
+    {
+        var coreProvider = CreateFniCoreEnumProvider();
+        var (registration, layoutRegistration)
+            = CreateFniCoreRegistrations("FniEnumDefault");
+        var tree = SyntaxTree.Parse("""
+            using Terrum.Interop;
+            namespace Demo {
+                [Blittable]
+                public enum Shade : int8 {
+                    Dark = -1,
+                    Light = 1
+                }
+                [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+                [ForeignNativeInterface(VTableByteOffset: uint32(0))]
+                public interface IProbe {
+                    public unsafe Shade Echo(
+                        Shade value = Shade.Light);
+                }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree,
+            coreProvider.Reference, new CompilationOptions {
+                NativeCoreRegistration = registration,
+                LayoutCoreRegistration = layoutRegistration,
+            });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = (BoundProgram)compilation.Program!;
+        var enumDeclaration = tree.Root.DescendantNodes().Single(node =>
+            node.Kind == SyntaxKind.EnumDeclaration);
+        var enumExport = new TrRmSourceEnumDeclarationExport(program, 0,
+            enumDeclaration.Span, ["type.shade"],
+            ["shade.dark", "shade.light"]);
+        var member = program.Interfaces.Single().Members.Single();
+        var interfaceExport = new TrRmSourceTypeExport("Demo", "IProbe",
+            "type.probe") {
+            InterfaceMethodExports = [
+                new TrRmSourceInterfaceMethodExport(
+                    member.SourceInputOrdinal, member.SourceDeclarationSpan,
+                    "method.probe.Echo"),
+            ],
+        };
+        Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.EmitStandard(program,
+                "FniEnumDefault", SchemaIdentity,
+                TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+                [interfaceExport], [enumExport]));
+    }
+
+    [TestCase("value + Shade.Light", "int8")]
+    [TestCase("value == Shade.Light", "bool")]
+    public void RejectsUnselectedEnumOperators(string expression,
+        string returnType)
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse($$"""
+            [Blittable]
+            public enum Shade : int8 {
+                Dark = -1,
+                Light = 1
+            }
+
+            {{returnType}} Test(Shade value) {
+                return {{expression}};
+            }
+            """));
+
+        Assert.That(compilation.HasErrors, Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
     }
 
     [Test]
@@ -459,7 +774,7 @@ internal sealed class TrRmFniEnumClosureTests
                 [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
                 [ForeignNativeInterface(VTableByteOffset: uint32(0))]
                 public interface IProbe {
-                    public unsafe Shade Get();
+                    public unsafe Shade Echo(Shade value);
                 }
             }
             """);
@@ -510,6 +825,9 @@ internal sealed class TrRmFniEnumClosureTests
                 public interface IWrapper {
                     public unsafe Shade Echo(Shade value);
                 }
+            }
+            Shade Invoke(ptr<void> receiver) {
+                unsafe { return IProbe.Echo(receiver, Shade.Light); }
             }
             """);
         var (consumerRegistration, consumerLayoutRegistration)
@@ -568,6 +886,38 @@ internal sealed class TrRmFniEnumClosureTests
                     == "Consumer.IWrapper").Members.Single()
             .ResultType.PrimitiveType,
             Is.EqualTo(BoundEnumTypes.Type(consumerShadeEnumIndex)));
+        var loadedConsumer = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(SchemaIdentity,
+                consumerArtifact),
+            "FniEnumConsumer", [providerInput, coreProvider.Input]);
+        var loadedShadeIndex = Enumerable.Range(0,
+                loadedConsumer.EnumDefinitions.Length)
+            .Single(index => loadedConsumer.EnumDefinitions[index].Name
+                == "Demo.Shade");
+        var loadedInvoke = loadedConsumer.Functions.Single(
+            static function => function.Name == "Invoke");
+        BoundCall? loadedEcho = null;
+        _ = BoundTreeTraversal.VisitExpressions(loadedInvoke.Body,
+            expression =>
+            {
+                if (expression is BoundCall {
+                        ForeignInterfaceCall:
+                            BoundForeignInterfaceCall foreignCall,
+                    } call && foreignCall.Member.Name == "Echo")
+                {
+                    loadedEcho = call;
+                }
+            });
+        Assert.That(loadedEcho, Is.Not.Null);
+        Assert.That(loadedEcho!.Type,
+            Is.EqualTo(BoundEnumTypes.Type(loadedShadeIndex)));
+        var loadedValue = (BoundConstant)loadedEcho.Arguments.Single();
+        Assert.That(loadedValue.Type,
+            Is.EqualTo(BoundEnumTypes.Type(loadedShadeIndex)));
+        Assert.That(loadedValue.RepresentationType,
+            Is.EqualTo(PrimitiveType.Int8));
+        Assert.That(NativeEmitter.EmitLibrary(loadedConsumer, ["Invoke"],
+            NativeRuntimePolicy.FailFast), Is.Not.Empty);
         var selectedEnumRoot = TrRmExecutableCompiler
             .CreateStandardReference(providerInput, "FniEnumProvider",
                 [coreProvider.Input], ["type.shade"]);
@@ -598,7 +948,7 @@ internal sealed class TrRmFniEnumClosureTests
                 [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
                 [ForeignNativeInterface(VTableByteOffset: uint32(0))]
                 public interface IProbe {
-                    public unsafe Shade Get();
+                    public unsafe Shade Echo(Shade value);
                 }
             }
             """);

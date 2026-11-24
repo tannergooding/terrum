@@ -2970,11 +2970,49 @@ public static partial class TrRmExecutableCompiler
         var typeTokens = function.Variables.Select(variable =>
             GetStandardBodyTypeMapToken(variable.Type, typeSpecRowFor))
             .ToList();
+        var pending = new Stack<(BoundExpression Expression, int Depth)>();
         foreach (var expression in expressions)
         {
+            if (expression.Type is not (PrimitiveType.Void
+                or PrimitiveType.TypeIdentity))
+            {
+                typeTokens.Add(GetStandardBodyTypeMapToken(expression.Type,
+                    typeSpecRowFor));
+            }
             CollectForeignInterfaceScalarInputConversionTypes(expression,
                 type => typeTokens.Add(
                     GetStandardBodyTypeMapToken(type, typeSpecRowFor)));
+            pending.Push((expression, 0));
+        }
+
+        var remaining = SemanticVerifier.MaximumAnalysisVisits;
+        while (pending.TryPop(out var item))
+        {
+            if (item.Depth > SemanticVerifier.MaximumDepth
+                || --remaining < 0
+                || !item.Expression.HasValidNestedExpressions)
+            {
+                throw Unsupported(
+                    $"Function '{function.Name}' has an invalid or oversized F+I input expression.");
+            }
+
+            var children = item.Expression.NestedExpressions;
+            if (children.IsDefault)
+            {
+                throw Unsupported(
+                    $"Function '{function.Name}' has an uninitialized F+I input expression.");
+            }
+
+            foreach (var child in children)
+            {
+                if (child.Type is not (PrimitiveType.Void
+                    or PrimitiveType.TypeIdentity))
+                {
+                    typeTokens.Add(GetStandardBodyTypeMapToken(child.Type,
+                        typeSpecRowFor));
+                }
+                pending.Push((child, item.Depth + 1));
+            }
         }
 
         return [.. typeTokens];
@@ -3468,8 +3506,8 @@ public static partial class TrRmExecutableCompiler
             {
                 if (local.Initializer is BoundConstant constant
                     && constant.Type == local.Initializer.Type
-                    && constant.RepresentationType == constant.Type
-                    && constant.Bits.IsCanonicalFor(constant.Type))
+                    && IsSupportedForeignNativeInterfaceConstant(
+                        constant, local.Initializer.Type, program, schema))
                 {
                     _ = stagedLocalInitializerConstants.Add(
                         (constant.Type, constant.Bits));
@@ -5928,7 +5966,8 @@ public static partial class TrRmExecutableCompiler
             GetStandardBodyTypeMapToken(variable.Type, typeSpecRowFor))
             .ToArray();
         var typeTokens = GetStandardForeignInterfaceBodyTypeTokens(function,
-            call.Arguments, typeSpecRowFor);
+            preludeCalls.Cast<BoundExpression>().Concat(call.Arguments),
+            typeSpecRowFor);
         var bodyConstantMapValues
             = new List<TrRmFrozenScalarValueReference>();
         var bodyConstantMapIndexByValue
@@ -8623,6 +8662,126 @@ public static partial class TrRmExecutableCompiler
         return CreateStandardBodyTypeMapToken(typeSpecRef);
     }
 
+    private static (Dictionary<int, PrimitiveType> TypeDefs,
+        Dictionary<int, PrimitiveType> Imports)
+        CreateForeignInterfaceBodyEnumTypeMaps(
+            ImmutableArray<BoundEnumDefinition> enumDefinitions,
+            BoundSourceTypeProviderSnapshot rootSnapshot)
+    {
+        var typeDefTypes = new Dictionary<int, PrimitiveType>();
+        var importTypes = new Dictionary<int, PrimitiveType>();
+        if (enumDefinitions.IsDefault)
+        {
+            throw Invalid(
+                "The FNI Body enum table is uninitialized.");
+        }
+
+        for (var enumIndex = 0;
+            enumIndex < enumDefinitions.Length; enumIndex++)
+        {
+            var definition = enumDefinitions[enumIndex];
+            BoundStandardEnumOccurrence occurrence;
+            if (definition.Identity
+                is BoundEnumDeclarationIdentity.Standard standard)
+            {
+                occurrence = standard.Value;
+            }
+            else if (definition.Identity
+                    is BoundEnumDeclarationIdentity.Core
+                && definition.CoreStandardProviderBinding is
+                    BoundCoreEnumStandardProviderBinding coreBinding)
+            {
+                if (!BoundCoreEnumStandardProviderBindingContract.IsValid(
+                        definition, coreBinding))
+                {
+                    throw Invalid(
+                        "An FNI Body Core enum has an invalid selected Standard provider binding.");
+                }
+
+                occurrence = coreBinding.StandardOccurrence;
+            }
+            else
+            {
+                continue;
+            }
+
+            var enumType = BoundEnumTypes.Type(enumIndex);
+            var declaration = occurrence.Declaration;
+            if (SameForeignInterfaceBodyProviderSnapshot(
+                    declaration.Site.Snapshot, rootSnapshot))
+            {
+                AddTypeDef(declaration.Site.DefinitionId, enumType);
+            }
+
+            foreach (var expectation in occurrence.Expectations)
+            {
+                var binding = expectation.Binding;
+                if (!SameForeignInterfaceBodyProviderSnapshot(
+                        binding.UsingModule, rootSnapshot))
+                {
+                    continue;
+                }
+
+                AddTypeDef(binding.ExpectedDefinitionId, enumType);
+                AddImport(binding.ImportRow, enumType);
+            }
+        }
+
+        return (typeDefTypes, importTypes);
+
+        static bool SameForeignInterfaceBodyProviderSnapshot(
+            BoundSourceTypeProviderSnapshot left,
+            BoundSourceTypeProviderSnapshot right)
+            => StringComparer.Ordinal.Equals(left.SchemaIdentity,
+                    right.SchemaIdentity)
+                && left.ModuleRow == right.ModuleRow
+                && StringComparer.Ordinal.Equals(left.ModuleIdentity,
+                    right.ModuleIdentity)
+                && left.GoverningRuleEdition
+                    == right.GoverningRuleEdition
+                && left.TargetRequirement == right.TargetRequirement
+                && left.RuntimePolicy == right.RuntimePolicy
+                && left.ArtifactSnapshot.AsSpan().SequenceEqual(
+                    right.ArtifactSnapshot.AsSpan())
+                && left.Features.AsSpan().SequenceEqual(
+                    right.Features.AsSpan())
+                && left.TargetProfiles.AsSpan().SequenceEqual(
+                    right.TargetProfiles.AsSpan());
+
+        void AddTypeDef(uint definitionId, PrimitiveType enumType)
+        {
+            if ((definitionId >> 24) != 0x13
+                || (definitionId & 0x00FF_FFFF) == 0)
+            {
+                throw Invalid(
+                    "An FNI Body enum view has an invalid TypeDef identity.");
+            }
+
+            var typeDefRow = checked((int)(definitionId & 0x00FF_FFFF));
+            if (typeDefTypes.TryGetValue(typeDefRow, out var existing)
+                && existing != enumType)
+            {
+                throw Invalid(
+                    "An FNI Body TypeDef maps to multiple nominal enums.");
+            }
+
+            typeDefTypes[typeDefRow] = enumType;
+        }
+
+        void AddImport(int importRow, PrimitiveType enumType)
+        {
+            if (importRow <= 0
+                || (importTypes.TryGetValue(importRow, out var existing)
+                    && existing != enumType))
+            {
+                throw Invalid(
+                    "An FNI Body Import maps to multiple nominal enums.");
+            }
+
+            importTypes[importRow] = enumType;
+        }
+    }
+
     private static PrimitiveType GetStandardInitializationBodyType(
         TrRmRegisterBodyReader body, ushort index,
         TrRmTypeSpecTableReader typeSpecs, TrRmImportTableReader imports,
@@ -8632,7 +8791,11 @@ public static partial class TrRmExecutableCompiler
         Dictionary<CheckedReferenceTypeDefinition, int>
             checkedReferenceTypeIndexes,
         IReadOnlyDictionary<uint, PrimitiveType>?
-            nominalClassTypesByTypeSpecReference = null)
+            nominalClassTypesByTypeSpecReference = null,
+        IReadOnlyDictionary<int, PrimitiveType>?
+            nominalEnumTypesByTypeDefRow = null,
+        IReadOnlyDictionary<int, PrimitiveType>?
+            nominalEnumTypesByImportRow = null)
     {
         if (index >= body.TypeCount)
         {
@@ -8645,7 +8808,11 @@ public static partial class TrRmExecutableCompiler
             NormalizeStandardRegisteredQueryTypeSpecRef(typeSpecRef),
             nativePointerTypes, structureTypeByTypeDef, imports,
             checkedReferenceTypes, checkedReferenceTypeIndexes,
-            nominalClassTypesByTypeSpecReference);
+            nominalClassTypesByTypeSpecReference,
+            nominalEnumTypesByTypeDefRow:
+                nominalEnumTypesByTypeDefRow,
+            nominalEnumTypesByImportRow:
+                nominalEnumTypesByImportRow);
     }
 
     private static BoundFieldRead DecodeStandardInitializationFieldPath(
@@ -8663,13 +8830,21 @@ public static partial class TrRmExecutableCompiler
         Dictionary<CheckedReferenceTypeDefinition, int>
             checkedReferenceTypeIndexes,
         IReadOnlyDictionary<uint, PrimitiveType>?
-            nominalClassTypesByTypeSpecReference = null)
+            nominalClassTypesByTypeSpecReference = null,
+        IReadOnlyDictionary<int, PrimitiveType>?
+            nominalEnumTypesByTypeDefRow = null,
+        IReadOnlyDictionary<int, PrimitiveType>?
+            nominalEnumTypesByImportRow = null)
     {
         var rootTypeSpecRef = fieldPaths.GetRootTypeSpecRef(fieldPathRow);
         var resolvedRootType = FromNativeValueRow(typeSpecs,
             rootTypeSpecRef, nativePointerTypes, structureTypeByTypeDef,
             imports, checkedReferenceTypes, checkedReferenceTypeIndexes,
-            nominalClassTypesByTypeSpecReference);
+            nominalClassTypesByTypeSpecReference,
+            nominalEnumTypesByTypeDefRow:
+                nominalEnumTypesByTypeDefRow,
+            nominalEnumTypesByImportRow:
+                nominalEnumTypesByImportRow);
         if (resolvedRootType != rootType)
         {
             throw Invalid(
@@ -8739,7 +8914,11 @@ public static partial class TrRmExecutableCompiler
                 fieldTypeSpecRef, nativePointerTypes,
                 structureTypeByTypeDef, imports, checkedReferenceTypes,
                 checkedReferenceTypeIndexes,
-                nominalClassTypesByTypeSpecReference);
+                nominalClassTypesByTypeSpecReference,
+                nominalEnumTypesByTypeDefRow:
+                    nominalEnumTypesByTypeDefRow,
+                nominalEnumTypesByImportRow:
+                    nominalEnumTypesByImportRow);
             if (ordinal + 1 == fieldCount)
             {
                 if (fieldType != expectedLeafType)
@@ -8853,6 +9032,10 @@ public static partial class TrRmExecutableCompiler
             ImmutableArray<BoundConstant> scalarConstants = default,
             IReadOnlyDictionary<uint, PrimitiveType>?
                 nominalClassTypesByTypeSpecReference = null,
+            IReadOnlyDictionary<int, PrimitiveType>?
+                nominalEnumTypesByTypeDefRow = null,
+            IReadOnlyDictionary<int, PrimitiveType>?
+                nominalEnumTypesByImportRow = null,
             IReadOnlyDictionary<int, ForeignNativeInterfaceBodyTarget>?
                 foreignInterfaceBodyTargets = null)
     {
@@ -8898,6 +9081,16 @@ public static partial class TrRmExecutableCompiler
         var homeTypeMapIndexes = new ushort[body.HomeCount];
         Array.Fill(homeVariables, -1);
         var parameterHomes = new bool[function.ParameterCount];
+
+        PrimitiveType GetBodyTypeMapType(ushort typeMapIndex)
+            => GetStandardInitializationBodyType(body, typeMapIndex,
+                typeSpecs, imports, nativePointerTypes,
+                structureTypeByTypeDef, checkedReferenceTypes,
+                checkedReferenceTypeIndexes,
+                nominalClassTypesByTypeSpecReference,
+                nominalEnumTypesByTypeDefRow,
+                nominalEnumTypesByImportRow);
+
         for (var homeIndex = 0; homeIndex < body.HomeCount; homeIndex++)
         {
             var entry = body.HomeMap.Slice(homeIndex * 8, 8);
@@ -8907,11 +9100,7 @@ public static partial class TrRmExecutableCompiler
                 entry[2..]);
             var formalOrdinal = BinaryPrimitives.ReadUInt16LittleEndian(
                 entry[4..]);
-            var homeType = GetStandardInitializationBodyType(body,
-                typeMapIndex, typeSpecs, imports, nativePointerTypes,
-                structureTypeByTypeDef, checkedReferenceTypes,
-                checkedReferenceTypeIndexes,
-                nominalClassTypesByTypeSpecReference);
+            var homeType = GetBodyTypeMapType(typeMapIndex);
             homeRoles[homeIndex] = role;
             homeTypes[homeIndex] = homeType;
             homeTypeMapIndexes[homeIndex] = typeMapIndex;
@@ -8958,6 +9147,8 @@ public static partial class TrRmExecutableCompiler
                     nativePointerTypes, structureTypeByTypeDef,
                     checkedReferenceTypes, checkedReferenceTypeIndexes,
                     nominalClassTypesByTypeSpecReference,
+                    nominalEnumTypesByTypeDefRow,
+                    nominalEnumTypesByImportRow,
                     homeVariables, homeRoles, homeTypes,
                     scalarConstants, foreignInterfaceBodyTargets);
             }
@@ -9885,12 +10076,8 @@ public static partial class TrRmExecutableCompiler
 
                         variable = homeVariables[baseHomeIndex];
                         var fieldOrdinal = fieldRow - firstField;
-                        referentType = GetStandardInitializationBodyType(body,
-                            referentTypeMapIndex, typeSpecs, imports,
-                            nativePointerTypes, structureTypeByTypeDef,
-                            checkedReferenceTypes,
-                            checkedReferenceTypeIndexes,
-                            nominalClassTypesByTypeSpecReference);
+                        referentType = GetBodyTypeMapType(
+                            referentTypeMapIndex);
                         outputPlace = new BoundFieldRead(
                             new BoundRead(variable, homeTypes[baseHomeIndex],
                                 default),
@@ -9908,12 +10095,8 @@ public static partial class TrRmExecutableCompiler
                     {
                         var baseHomeIndex = baseIndex;
                         variable = homeVariables[baseHomeIndex];
-                        referentType = GetStandardInitializationBodyType(
-                            body, referentTypeMapIndex, typeSpecs, imports,
-                            nativePointerTypes, structureTypeByTypeDef,
-                            checkedReferenceTypes,
-                            checkedReferenceTypeIndexes,
-                            nominalClassTypesByTypeSpecReference);
+                        referentType = GetBodyTypeMapType(
+                            referentTypeMapIndex);
                         outputPlace = DecodeStandardInitializationFieldPath(
                             checked((int)targetRef), variable,
                             homeTypes[baseHomeIndex], referentType,
@@ -9921,7 +10104,10 @@ public static partial class TrRmExecutableCompiler
                             typeDefs, fields, fieldPaths, typeSpecs, imports,
                             nativePointerTypes, structureTypeByTypeDef,
                             checkedReferenceTypes,
-                            checkedReferenceTypeIndexes);
+                            checkedReferenceTypeIndexes,
+                            nominalClassTypesByTypeSpecReference,
+                            nominalEnumTypesByTypeDefRow,
+                            nominalEnumTypesByImportRow);
                     }
                     else
                     {
@@ -11061,12 +11247,8 @@ public static partial class TrRmExecutableCompiler
                             "A Standard native pointer-load conversion has an invalid source.");
                     }
 
-                    var destinationType = GetStandardInitializationBodyType(
-                        body, checked((ushort)typeMapIndex), typeSpecs,
-                        imports, nativePointerTypes,
-                        structureTypeByTypeDef, checkedReferenceTypes,
-                        checkedReferenceTypeIndexes,
-                        nominalClassTypesByTypeSpecReference);
+                    var destinationType = GetBodyTypeMapType(
+                        checked((ushort)typeMapIndex));
                     var conversion = new BoundCast(value, destinationType,
                         default);
                     if (!SemanticVerifier.IsTotalConversion(value.Type,
@@ -11107,12 +11289,7 @@ public static partial class TrRmExecutableCompiler
                             "A Standard numeric conversion has an invalid source or destination.");
                     }
 
-                    var destinationType = GetStandardInitializationBodyType(
-                        body, typeMapIndex, typeSpecs, imports,
-                        nativePointerTypes, structureTypeByTypeDef,
-                        checkedReferenceTypes,
-                        checkedReferenceTypeIndexes,
-                        nominalClassTypesByTypeSpecReference);
+                    var destinationType = GetBodyTypeMapType(typeMapIndex);
                     if (!body.Schema.UsesForeignNativeInterface()
                         || !SemanticVerifier
                             .IsSupportedCheckedNumericConversion(
@@ -11173,12 +11350,7 @@ public static partial class TrRmExecutableCompiler
                         }
 
                         var variable = homeVariables[baseHomeIndex];
-                        var fieldType = GetStandardInitializationBodyType(
-                            body, typeMapIndex, typeSpecs, imports,
-                            nativePointerTypes, structureTypeByTypeDef,
-                            checkedReferenceTypes,
-                            checkedReferenceTypeIndexes,
-                            nominalClassTypesByTypeSpecReference);
+                        var fieldType = GetBodyTypeMapType(typeMapIndex);
                         valueByRegister[register]
                             = DecodeStandardInitializationFieldPath(
                                 checked((int)fieldRowValue), variable,
@@ -11189,7 +11361,9 @@ public static partial class TrRmExecutableCompiler
                                 structureTypeByTypeDef,
                                 checkedReferenceTypes,
                                 checkedReferenceTypeIndexes,
-                                nominalClassTypesByTypeSpecReference);
+                                nominalClassTypesByTypeSpecReference,
+                                nominalEnumTypesByTypeDefRow,
+                                nominalEnumTypesByImportRow);
                         break;
                     }
                     if (record[0] != 0x04
@@ -11225,11 +11399,7 @@ public static partial class TrRmExecutableCompiler
                     }
 
                     var variable = homeVariables[baseHomeIndex];
-                    var fieldType = GetStandardInitializationBodyType(body,
-                        typeMapIndex, typeSpecs, imports, nativePointerTypes,
-                        structureTypeByTypeDef, checkedReferenceTypes,
-                        checkedReferenceTypeIndexes,
-                        nominalClassTypesByTypeSpecReference);
+                    var fieldType = GetBodyTypeMapType(typeMapIndex);
                     valueByRegister[register] = new BoundFieldRead(
                         new BoundRead(variable, homeTypes[baseHomeIndex],
                             default),
@@ -12087,12 +12257,25 @@ public static partial class TrRmExecutableCompiler
                 checkedReferenceTypeIndexes,
             IReadOnlyDictionary<uint, PrimitiveType>?
                 nominalClassTypesByTypeSpecReference,
+            IReadOnlyDictionary<int, PrimitiveType>?
+                nominalEnumTypesByTypeDefRow,
+            IReadOnlyDictionary<int, PrimitiveType>?
+                nominalEnumTypesByImportRow,
             int[] homeVariables,
             byte[] homeRoles, PrimitiveType[] homeTypes,
             ImmutableArray<BoundConstant> scalarConstants,
             IReadOnlyDictionary<int, ForeignNativeInterfaceBodyTarget>?
                 foreignInterfaceBodyTargets)
     {
+        PrimitiveType GetBodyTypeMapType(ushort typeMapIndex)
+            => GetStandardInitializationBodyType(body, typeMapIndex,
+                typeSpecs, imports, nativePointerTypes,
+                structureTypeByTypeDef, checkedReferenceTypes,
+                checkedReferenceTypeIndexes,
+                nominalClassTypesByTypeSpecReference,
+                nominalEnumTypesByTypeDefRow,
+                nominalEnumTypesByImportRow);
+
         var hasFallback = function.ParameterCount >= 3;
         var outputVariableStart = function.ParameterCount;
         var outputCount = variables.Count - function.ParameterCount - 1;
@@ -13406,11 +13589,7 @@ public static partial class TrRmExecutableCompiler
                         "The Standard F+I checked numeric conversion overwrites a non-expression register.");
                 }
 
-                var destinationType = GetStandardInitializationBodyType(
-                    body, typeMapIndex, typeSpecs, imports,
-                    nativePointerTypes, structureTypeByTypeDef,
-                    checkedReferenceTypes, checkedReferenceTypeIndexes,
-                    nominalClassTypesByTypeSpecReference);
+                var destinationType = GetBodyTypeMapType(typeMapIndex);
                 var conversion = new BoundCast(sourceExpression,
                     destinationType, default);
                 if (!IsForeignInterfaceCheckedNumericConversion(conversion))
@@ -13452,11 +13631,7 @@ public static partial class TrRmExecutableCompiler
                 }
 
                 var source = registerInputs[destinationRegister];
-                var destinationType = GetStandardInitializationBodyType(
-                    body, sourceRegister, typeSpecs, imports,
-                    nativePointerTypes, structureTypeByTypeDef,
-                    checkedReferenceTypes, checkedReferenceTypeIndexes,
-                    nominalClassTypesByTypeSpecReference);
+                var destinationType = GetBodyTypeMapType(sourceRegister);
                 var conversion = new BoundCast(source, destinationType,
                     default);
                 if (!TryGetGeneralPredicateConversion(conversion, out _, out _))

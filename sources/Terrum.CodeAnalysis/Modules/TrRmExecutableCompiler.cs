@@ -8590,6 +8590,23 @@ public static partial class TrRmExecutableCompiler
                 }
             }
         }
+        var foreignInterfaceBodyEnumTypeMaps = (
+            TypeDefs: new Dictionary<int, PrimitiveType>(),
+            Imports: new Dictionary<int, PrimitiveType>());
+        if (schema.UsesForeignNativeInterface()
+            && schema.UsesEN1EnumClosure()
+            && standardSchemaIdentity is string enumClosureSchemaIdentity
+            && standardClassQueryProgram is not null)
+        {
+            var rootSnapshot = CreateA2SourceTypeProviderSnapshot(
+                validatedTables, artifact.ToArray(),
+                enumClosureSchemaIdentity, selectedModuleRow);
+            foreignInterfaceBodyEnumTypeMaps
+                = CreateForeignInterfaceBodyEnumTypeMaps(
+                    standardClassQueryProgram.EnumDefinitions,
+                    rootSnapshot);
+        }
+
         var foreignInterfaceBodyTargets
             = schema.UsesForeignNativeInterface()
                 ? standardClassQueryProgram is null
@@ -9835,8 +9852,23 @@ public static partial class TrRmExecutableCompiler
                                 BinaryPrimitives.ReadUInt32LittleEndian(
                                     registerBody.ConstantMap.Slice(
                                         constantOffset + sizeof(uint))));
-                            constants.Add(
-                                TrRmConstantSourceValueValidator
+                            var constant = registerBody.Schema
+                                .UsesEN1EnumClosure()
+                                ? TrRmConstantSourceValueValidator
+                                    .MaterializeFrozenScalar(
+                                        constantSourceRow,
+                                        typeSpecReference,
+                                        selectedModuleRow,
+                                        targetRequirement,
+                                        validatedTables.ConstantSources,
+                                        validatedTables.FrozenValueNodes,
+                                        validatedTables.Blobs,
+                                        validatedTables.TypeSpecs,
+                                        validatedTables.Features,
+                                        validatedTables.Modules, typeDefs,
+                                        validatedTables.EnumDefs, imports,
+                                        validatedTables.A3LayoutResourceLedger)
+                                : TrRmConstantSourceValueValidator
                                     .MaterializeFrozenScalar(
                                         constantSourceRow,
                                         typeSpecReference,
@@ -9848,7 +9880,8 @@ public static partial class TrRmExecutableCompiler
                                         validatedTables.TypeSpecs,
                                         validatedTables.Features,
                                         validatedTables.Modules,
-                                        validatedTables.A3LayoutResourceLedger));
+                                        validatedTables.A3LayoutResourceLedger);
+                            constants.Add(constant);
                         }
 
                         scalarConstants = constants.MoveToImmutable();
@@ -9894,6 +9927,12 @@ public static partial class TrRmExecutableCompiler
                                 scalarConstants: scalarConstants,
                                 nominalClassTypesByTypeSpecReference:
                                     nominalClassTypesByTypeSpecReference,
+                                nominalEnumTypesByTypeDefRow:
+                                    foreignInterfaceBodyEnumTypeMaps
+                                        .TypeDefs,
+                                nominalEnumTypesByImportRow:
+                                    foreignInterfaceBodyEnumTypeMaps
+                                        .Imports,
                                 foreignInterfaceBodyTargets:
                                     foreignInterfaceBodyTargets);
                     }

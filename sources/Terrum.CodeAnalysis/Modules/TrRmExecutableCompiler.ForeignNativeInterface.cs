@@ -121,6 +121,17 @@ public static partial class TrRmExecutableCompiler
                 "The F+I library must contain only ForeignNativeInterface declarations and their selected local Blittable aggregate closure.");
         }
 
+        if (schema.UsesEN1EnumClosure()
+            && localInterfaces.Any(static definition =>
+                definition.Members.Any(static member =>
+                    member.Parameters.Any(static parameter =>
+                        parameter.DefaultValue is BoundConstant value
+                        && BoundEnumTypes.IsType(value.Type)))))
+        {
+            throw Unsupported(
+                "The F+I enum-closure profile does not admit enum parameter defaults.");
+        }
+
         var localInterfaceNames = localInterfaces.Select(
                 static definition => definition.QualifiedName)
             .ToHashSet(StringComparer.Ordinal);
