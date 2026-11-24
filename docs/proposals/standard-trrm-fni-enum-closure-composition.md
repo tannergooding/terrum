@@ -5,6 +5,9 @@ missing-contract workflow, pending later review.** This selects a candidate
 agreement, not normative adoption, implementation support or qualification.
 Existing specifications and proposal agreements remain unchanged. No build,
 test, JIT/AOT or external-process inspection accompanies this decision.
+The [section-coexistence clarification](standard-trrm-fni-enum-section-coexistence.md)
+completes this same candidate's `NativeImport`/`ConstantSource` allocation;
+read both proposals as one unapproved revision-1 agreement.
 
 ## Finding and recommendation
 
