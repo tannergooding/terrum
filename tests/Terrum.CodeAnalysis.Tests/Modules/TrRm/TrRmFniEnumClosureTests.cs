@@ -736,6 +736,57 @@ internal sealed class TrRmFniEnumClosureTests
                 [interfaceExport], [enumExport]));
     }
 
+    [Test]
+    public void RejectsMalformedFniEnumRowsBeforeBinding()
+    {
+        var artifact = CreateFniCoreEnumProvider().Input.Artifact.ToArray();
+
+        byte[] CorruptSectionUInt32(ushort sectionKind, int fieldOffset,
+            uint value)
+        {
+            var sectionCount = checked((int)
+                BinaryPrimitives.ReadUInt32LittleEndian(
+                    artifact.AsSpan(12, sizeof(uint))));
+            for (var sectionIndex = 0; sectionIndex < sectionCount;
+                sectionIndex++)
+            {
+                var directoryOffset = 32 + sectionIndex * 16;
+                var currentKind = BinaryPrimitives.ReadUInt16LittleEndian(
+                    artifact.AsSpan(directoryOffset, sizeof(ushort)));
+                if (currentKind != sectionKind)
+                {
+                    continue;
+                }
+
+                var sectionOffset = checked((int)
+                    BinaryPrimitives.ReadUInt32LittleEndian(
+                        artifact.AsSpan(directoryOffset + 8,
+                            sizeof(uint))));
+                var corrupted = artifact.ToArray();
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    corrupted.AsSpan(sectionOffset + fieldOffset,
+                        sizeof(uint)), value);
+                return corrupted;
+            }
+
+            throw new InvalidOperationException(
+                $"The FNI enum artifact has no section 0x{sectionKind:X4}.");
+        }
+
+        foreach (var malformedArtifact in new[] {
+            CorruptSectionUInt32(0x0053, 0, uint.MaxValue),
+            CorruptSectionUInt32(0x0054, 16, uint.MaxValue),
+        })
+        {
+            Assert.Throws<InvalidDataException>(() =>
+                TrRmStructuralMetadataValidator
+                    .ValidateAndGetExecutionTables(
+                        TrRmArtifactIndex
+                            .ForForeignNativeInterfaceParameterSurfaceEnumClosureDraft(
+                                malformedArtifact)));
+        }
+    }
+
     [TestCase("value + Shade.Light", "int8")]
     [TestCase("value == Shade.Light", "bool")]
     public void RejectsUnselectedEnumOperators(string expression,
