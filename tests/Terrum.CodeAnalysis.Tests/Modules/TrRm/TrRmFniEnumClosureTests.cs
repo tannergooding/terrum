@@ -918,6 +918,44 @@ internal sealed class TrRmFniEnumClosureTests
             Is.EqualTo(PrimitiveType.Int8));
         Assert.That(NativeEmitter.EmitLibrary(loadedConsumer, ["Invoke"],
             NativeRuntimePolicy.FailFast), Is.Not.Empty);
+        var consumerInput = new TrRmStandardArtifactInput(SchemaIdentity,
+            consumerArtifact);
+        var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(
+            loadedConsumer, "FniEnumConsumerReemitted", SchemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var reloadedConsumer = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(SchemaIdentity,
+                reemittedArtifact),
+            "FniEnumConsumerReemitted",
+            [consumerInput, providerInput, coreProvider.Input]);
+        var reloadedInvoke = reloadedConsumer.Functions.Single(
+            static function => function.Name == "Invoke");
+        BoundCall? reloadedEcho = null;
+        _ = BoundTreeTraversal.VisitExpressions(reloadedInvoke.Body,
+            expression =>
+            {
+                if (expression is BoundCall {
+                        ForeignInterfaceCall:
+                            BoundForeignInterfaceCall foreignCall,
+                    } call && foreignCall.Member.Name == "Echo")
+                {
+                    reloadedEcho = call;
+                }
+            });
+        Assert.That(reloadedEcho, Is.Not.Null);
+        var reloadedShadeIndex = Enumerable.Range(0,
+                reloadedConsumer.EnumDefinitions.Length)
+            .Single(index => reloadedConsumer.EnumDefinitions[index].Name
+                == "Demo.Shade");
+        var reloadedValue = (BoundConstant)reloadedEcho!.Arguments.Single();
+        Assert.That(reloadedEcho.Type,
+            Is.EqualTo(BoundEnumTypes.Type(reloadedShadeIndex)));
+        Assert.That(reloadedValue.Type,
+            Is.EqualTo(BoundEnumTypes.Type(reloadedShadeIndex)));
+        Assert.That(reloadedValue.RepresentationType,
+            Is.EqualTo(PrimitiveType.Int8));
+        Assert.That(NativeEmitter.EmitLibrary(reloadedConsumer, ["Invoke"],
+            NativeRuntimePolicy.FailFast), Is.Not.Empty);
         var selectedEnumRoot = TrRmExecutableCompiler
             .CreateStandardReference(providerInput, "FniEnumProvider",
                 [coreProvider.Input], ["type.shade"]);
