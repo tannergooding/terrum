@@ -8400,6 +8400,23 @@ internal sealed class NativeCoreRegistrationTests
     }
 
     [Test]
+    public async Task StandardForeignNativeInterfacePointerOutputOuterCallExecutesOnWindowsX64()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+
+        var program = CreatePointerOutputConsumerProgram(
+            pointerOutputOuterCall: true);
+        var image = NativeEmitter.EmitLibrary(program, ["InvokePointer"],
+            NativeRuntimePolicy.FailFast);
+        Assert.That(image[..2], Is.EqualTo(new byte[] {
+            (byte)'M', (byte)'Z',
+        }));
+        await AssertPointerOutputOuterCallAsync(image, "InvokePointer", 0)
+            .ConfigureAwait(true);
+    }
+
+    [Test]
     public void StandardForeignNativeInterfacePointerOutputCanBeOuterCallReceiverUnderPs1()
     {
         var program = CreatePointerOutputConsumerProgram(
