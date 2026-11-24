@@ -816,6 +816,78 @@ internal sealed class TrRmFniEnumClosureTests
             .CreateStandardReference(providerInput, "FniEnumProvider",
                 [coreProvider.Input]);
 
+        byte[] CreateShiftedProviderArtifact()
+        {
+            var shiftedTree = SyntaxTree.Parse("""
+                using Terrum.Interop;
+                namespace Demo {
+                    [Blittable]
+                    public enum Before : int8 {
+                        Zero = 0
+                    }
+                    [Blittable]
+                    public enum Shade : int8 {
+                        Dark = -1,
+                        Light = 1
+                    }
+                    [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+                    [ForeignNativeInterface(VTableByteOffset: uint32(0))]
+                    public interface IProbe {
+                        public unsafe Shade Echo(Shade value);
+                    }
+                }
+                """);
+            var shiftedCompilation = Compilation.CreateLibrary(shiftedTree,
+                coreProvider.Reference,
+                new CompilationOptions {
+                    NativeCoreRegistration = registration,
+                    LayoutCoreRegistration = layoutRegistration,
+                });
+            Assert.That(shiftedCompilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine,
+                    shiftedCompilation.Diagnostics));
+            var shiftedProgram
+                = (BoundProgram)shiftedCompilation.Program!;
+            TrRmSourceEnumDeclarationExport EnumExport(
+                string qualifiedName, string exportKey,
+                string[] memberKeys)
+            {
+                var definition = shiftedProgram.EnumDefinitions.Single(
+                    item => item.Name == qualifiedName
+                        && item.Identity
+                            is BoundEnumDeclarationIdentity.Source);
+                var source = (BoundEnumDeclarationIdentity.Source)
+                    definition.Identity;
+                var primary = source.Value.Parts.Single(
+                    static part => part.IsPrimary);
+                return new TrRmSourceEnumDeclarationExport(shiftedProgram,
+                    primary.SourceInputOrdinal,
+                    primary.Declaration.Span, [exportKey], memberKeys);
+            }
+
+            var shiftedInterface = shiftedProgram.Interfaces.Single();
+            var shiftedTypeExport
+                = new TrRmSourceTypeExport("Demo", "IProbe",
+                    "type.probe") {
+                    InterfaceMethodExports = [
+                        .. shiftedInterface.Members.Select(member =>
+                            new TrRmSourceInterfaceMethodExport(
+                                member.SourceInputOrdinal,
+                                member.SourceDeclarationSpan,
+                                $"method.probe.{member.Name}")),
+                    ],
+                };
+            return TrRmExecutableCompiler.EmitStandard(shiftedProgram,
+                "FniEnumProvider", SchemaIdentity,
+                TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+                [shiftedTypeExport], [
+                    EnumExport("Demo.Before", "type.before",
+                        ["before.zero"]),
+                    EnumExport("Demo.Shade", "type.shade",
+                        ["shade.dark", "shade.light"]),
+                ]);
+        }
+
         var consumerTree = SyntaxTree.Parse("""
             using Demo;
             using Terrum.Interop;
@@ -858,6 +930,8 @@ internal sealed class TrRmFniEnumClosureTests
             consumerProgram, "FniEnumConsumer", SchemaIdentity,
             TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
             [consumerTypeExport]);
+        var consumerInput = new TrRmStandardArtifactInput(SchemaIdentity,
+            consumerArtifact);
         var consumerIndex
             = TrRmArtifactIndex
                 .ForForeignNativeInterfaceParameterSurfaceEnumClosureDraft(
@@ -918,16 +992,41 @@ internal sealed class TrRmFniEnumClosureTests
             Is.EqualTo(PrimitiveType.Int8));
         Assert.That(NativeEmitter.EmitLibrary(loadedConsumer, ["Invoke"],
             NativeRuntimePolicy.FailFast), Is.Not.Empty);
-        var consumerInput = new TrRmStandardArtifactInput(SchemaIdentity,
-            consumerArtifact);
+        var shiftedProviderArtifact = CreateShiftedProviderArtifact();
+        var shiftedProviderInput = new TrRmStandardArtifactInput(
+            SchemaIdentity, shiftedProviderArtifact);
+        var originalProviderTables
+            = TrRmStructuralMetadataValidator
+                .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
+                    providerArtifact,
+                    TrRmArtifactSchema
+                        .ForeignNativeInterfaceParameterSurfaceEnumClosureDraft));
+        var shiftedProviderTables
+            = TrRmStructuralMetadataValidator
+                .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
+                    shiftedProviderArtifact,
+                    TrRmArtifactSchema
+                        .ForeignNativeInterfaceParameterSurfaceEnumClosureDraft));
+        var originalShadeTypeDef = Enumerable.Range(1,
+                originalProviderTables.TypeDefs.Count)
+            .Single(row => originalProviderTables.TypeDefs.GetName(row)
+                == "Shade");
+        var shiftedShadeTypeDef = Enumerable.Range(1,
+                shiftedProviderTables.TypeDefs.Count)
+            .Single(row => shiftedProviderTables.TypeDefs.GetName(row)
+                == "Shade");
+        Assert.That(shiftedShadeTypeDef, Is.Not.EqualTo(originalShadeTypeDef));
+        var shiftedLoadedConsumer = TrRmExecutableCompiler.LoadStandard(
+            consumerInput, "FniEnumConsumer",
+            [shiftedProviderInput, coreProvider.Input]);
         var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(
-            loadedConsumer, "FniEnumConsumerReemitted", SchemaIdentity,
+            shiftedLoadedConsumer, "FniEnumConsumerReemitted", SchemaIdentity,
             TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
         var reloadedConsumer = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(SchemaIdentity,
                 reemittedArtifact),
             "FniEnumConsumerReemitted",
-            [consumerInput, providerInput, coreProvider.Input]);
+            [consumerInput, shiftedProviderInput, coreProvider.Input]);
         var reloadedInvoke = reloadedConsumer.Functions.Single(
             static function => function.Name == "Invoke");
         BoundCall? reloadedEcho = null;
