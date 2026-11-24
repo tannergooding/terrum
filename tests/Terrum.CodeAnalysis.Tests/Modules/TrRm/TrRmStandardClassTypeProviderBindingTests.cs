@@ -4648,6 +4648,7 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
         Assert.That(view.Properties, Has.Length.EqualTo(1));
         var property = view.Properties[0];
         Assert.That(property.Name, Is.EqualTo("Value"));
+        Assert.That(property.Type, Is.EqualTo(PrimitiveType.Int32));
         Assert.That(property.TypeSpecReference, Is.GreaterThan(0u));
         Assert.That(property.GetterMethodDefinitionId >> 24,
             Is.EqualTo(0x16u));

@@ -3840,13 +3840,24 @@ public static partial class TrRmExecutableCompiler
         {
             var definitionId = 0x1400_0000u
                 | checked((uint)fieldRow);
+            var fieldTypeSpecReference
+                = tables.Fields.GetTypeSpecRef(fieldRow);
+            var fieldTypeSpec
+                = tables.TypeSpecs.GetTypeSpecRef(fieldTypeSpecReference);
+            var fieldType = fieldTypeSpec.Qualifiers == 0
+                && (fieldTypeSpec.Form is 0x01 or 0x0F)
+                && TrRmConstantSourceValueValidator.TryGetBoundScalarType(
+                    fieldTypeSpec.TypeCode, out var scalarFieldType)
+                && scalarFieldType != PrimitiveType.Void
+                    ? scalarFieldType : PrimitiveType.Void;
             fields.Add(new BoundStandardClassFieldDeclaration(
                 definitionId, typeDefId,
                 tables.Fields.GetName(fieldRow),
                 tables.Fields.GetFlags(fieldRow),
-                tables.Fields.GetTypeSpecRef(fieldRow)) {
+                fieldTypeSpecReference) {
                 ExportKeys = exportKeysByField.TryGetValue(definitionId,
                     out var exportKeys) ? [.. exportKeys] : [],
+                Type = fieldType,
             });
         }
 
@@ -3888,6 +3899,17 @@ public static partial class TrRmExecutableCompiler
                 = tables.Properties.GetInitMethod(propertyRow);
             var backingFieldRow
                 = tables.Properties.GetBackingFieldDef(propertyRow);
+            var propertyTypeSpecReference
+                = tables.Properties.GetTypeSpecRef(propertyRow);
+            var propertyTypeSpec
+                = tables.TypeSpecs.GetTypeSpecRef(
+                    propertyTypeSpecReference);
+            var propertyType = propertyTypeSpec.Qualifiers == 0
+                && (propertyTypeSpec.Form is 0x01 or 0x0F)
+                && TrRmConstantSourceValueValidator.TryGetBoundScalarType(
+                    propertyTypeSpec.TypeCode, out var scalarPropertyType)
+                && scalarPropertyType != PrimitiveType.Void
+                    ? scalarPropertyType : PrimitiveType.Void;
             var propertyExportKeys
                 = exportKeysByProperty.TryGetValue(definitionId,
                     out var exportKeys)
@@ -3896,7 +3918,7 @@ public static partial class TrRmExecutableCompiler
             properties.Add(new BoundStandardClassPropertyDeclaration(
                 definitionId, typeDefId,
                 tables.Properties.GetName(propertyRow),
-                tables.Properties.GetTypeSpecRef(propertyRow),
+                propertyTypeSpecReference,
                 tables.Properties.GetFlags(propertyRow),
                 0x1600_0000u | checked((uint)getterMethodRow),
                 setterMethodRow == 0 ? 0
@@ -3910,6 +3932,7 @@ public static partial class TrRmExecutableCompiler
                         | checked((uint)backingFieldRow)) {
                 ExportKeys = propertyExportKeys,
                 SelectedExportKeys = propertyExportKeys,
+                Type = propertyType,
             });
         }
 
