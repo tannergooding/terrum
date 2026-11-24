@@ -38,6 +38,8 @@ internal sealed class CoreContractFailureIdentitySelectionTests
         var reference = new CompilationReference([], [],
             BoundRuntimePolicy.FailFast,
             exceptionInterfaceBindings: [binding]);
+        Assert.That(reference.WithEnumDefinitions([]).ExceptionInterfaceBindings,
+            Is.EqualTo([binding]));
         var consumer = Compilation.Create(SyntaxTree.Parse(
             "int32 Main() { return 0; }"), reference);
         Assert.That(consumer.HasErrors, Is.False,
