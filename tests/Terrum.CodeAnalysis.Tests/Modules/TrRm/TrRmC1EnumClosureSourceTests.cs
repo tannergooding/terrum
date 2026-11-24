@@ -5702,6 +5702,41 @@ internal sealed class TrRmC1EnumClosureSourceTests
         var payloadArtifact = TrRmExecutableCompiler.EmitStandard(
             (BoundProgram)payloadCompilation.Program!, payloadModuleIdentity,
             schemaIdentity, targetRequirement, [payloadExport], [], [], []);
+        var payloadTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                payloadArtifact, SchemaFor(schemaIdentity)));
+        var payloadProviderTypeDefRow = Enumerable.Range(
+                1, payloadTables.TypeDefs.Count)
+            .Single(row =>
+                payloadTables.TypeDefs.GetName(row) == "Payload");
+        var payloadProviderFields = payloadTables.TypeDefs.GetFieldRange(
+            payloadProviderTypeDefRow);
+        var payloadProviderHandleField = Enumerable.Range(
+                payloadProviderFields.Start,
+                payloadProviderFields.End - payloadProviderFields.Start)
+            .Single(row => payloadTables.Fields.GetName(row) == "Handle");
+        var importedHandleType = payloadTables.TypeSpecs.GetTypeSpecRef(
+            payloadTables.Fields.GetTypeSpecRef(
+                payloadProviderHandleField));
+        Assert.That(importedHandleType.Form, Is.EqualTo((byte)0x03));
+        var payloadProviderChildImportRow = Enumerable.Range(
+                1, payloadTables.Imports.Count)
+            .Single(row =>
+                payloadTables.Imports.GetBindingForImportRow(row)
+                    .ExportKey == "type.child");
+        var payloadProviderChildModuleRef
+            = payloadTables.Imports.GetModuleRefForImportRow(
+                payloadProviderChildImportRow);
+        Assert.That(payloadTables.Modules.GetIdentity(
+                payloadTables.ModuleRefs.GetOwnerModule(
+                    payloadProviderChildModuleRef)),
+            Is.EqualTo(payloadModuleIdentity));
+        Assert.That(payloadTables.ModuleRefs.GetProducerIdentity(
+                payloadProviderChildModuleRef),
+            Is.EqualTo(childModuleIdentity));
+        Assert.That(payloadTables.Imports.GetExpectedDefinitionForImportRow(
+                payloadProviderChildImportRow) >> 24,
+            Is.EqualTo(0x13u));
         var payloadInput = new TrRmStandardArtifactInput(schemaIdentity,
             payloadArtifact);
         var payloadReference
