@@ -5746,6 +5746,9 @@ internal sealed class TrRmC1EnumClosureSourceTests
         Assert.That(payloadTables.Imports.GetExpectedDefinitionForImportRow(
                 payloadProviderChildImportRow) >> 24,
             Is.EqualTo(0x13u));
+        Assert.That(payloadTables.TypeSpecs
+                .GetTypeSpecRef(importedPointeeTypeSpecRef).Row,
+            Is.EqualTo(checked((uint)payloadProviderChildImportRow)));
         var payloadInput = new TrRmStandardArtifactInput(schemaIdentity,
             payloadArtifact);
         var payloadReference
