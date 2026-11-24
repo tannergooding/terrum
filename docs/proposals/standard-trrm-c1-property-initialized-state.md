@@ -53,9 +53,9 @@ not validation results:
   cases, including repeated calls, multiple properties and source-order
   interleaving with direct scalar FieldWrites. The focused
   [`GetterPropertyTests`](../../tests/Terrum.CodeAnalysis.Tests/Semantics/GetterPropertyTests.cs)
-  also exercise property-state binding, verifier identity rejection and
-  cross-property init-accessor rejection. These tests remain unverified under
-  the active execution hold.
+  also exercise property-state binding, variable remapping, verifier identity
+  rejection, Body-placement rejection and cross-property init-accessor
+  rejection. These tests remain unverified under the active execution hold.
 
 **Recommend PI1:** one explicit PropertyDef-to-implicit-FieldDef relation,
 explicit accessor roles, and a bounded initialization-accessor state contract.

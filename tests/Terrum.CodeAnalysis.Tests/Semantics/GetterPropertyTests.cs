@@ -131,6 +131,17 @@ internal sealed class GetterPropertyTests
         Assert.That(constructorTest.BackingFieldIndex,
             Is.EqualTo(getter.PropertyBackingFieldIndex));
 
+        var remappedConstructor = BoundTreeTraversal.RewriteVariables(
+            constructor, constructor.Variables,
+            static variable => variable + 1);
+        var remappedTest = (BoundPropertyInitialized)
+            remappedConstructor.DeclarationContractClauses[0].Predicate;
+        Assert.That(remappedTest.ReceiverVariable, Is.EqualTo(1));
+        Assert.That(remappedTest.GetterFunctionIndex,
+            Is.EqualTo(getterIndex));
+        Assert.That(remappedTest.BackingFieldIndex,
+            Is.EqualTo(getter.PropertyBackingFieldIndex));
+
         var invalidClause
             = constructor.DeclarationContractClauses[0] with {
                 Predicate = constructorTest with {
@@ -145,6 +156,16 @@ internal sealed class GetterPropertyTests
                     DeclarationContractClauses =
                         constructor.DeclarationContractClauses.SetItem(0,
                             invalidClause),
+                }),
+        }), Throws.ArgumentException);
+        Assert.That(() => SemanticVerifier.Verify(program with {
+            Functions = program.Functions.SetItem(constructorIndex,
+                constructor with {
+                    Body = constructor.Body with {
+                        Statements = constructor.Body.Statements.Insert(0,
+                            new BoundRequire(constructorTest,
+                                constructorTest.Span)),
+                    },
                 }),
         }), Throws.ArgumentException);
     }
