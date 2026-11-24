@@ -346,6 +346,17 @@ internal sealed class TrRmTypeSpecTableReaderTests
     }
 
     [Test]
+    public void ReadsTheImportRowFromAnImportedTypeSpec()
+    {
+        var section = Rows([0x03, 0, 2, 0, 0, 0]);
+        var reader = new TrRmTypeSpecTableReader(section, 1, 1, 2, 0);
+
+        Assert.That(reader.GetImportRow(1), Is.EqualTo(2));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            reader.GetImportRow(0xF2000008));
+    }
+
+    [Test]
     public void ValidatesTypeSpecRefNamespacesAndEquivalentInlineTypes()
     {
         var section = Rows([0x01, 0, 0x08], [0x01, 0, 0x8B, 0x08]);
