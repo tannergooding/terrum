@@ -1299,6 +1299,77 @@ public static partial class TrRmExecutableCompiler
             };
     }
 
+    private static bool IsSupportedForeignNativeInterfaceValueType(
+        PrimitiveType type, BoundProgram program,
+        TrRmArtifactSchema schema)
+        => BoundEnumTypes.IsType(type)
+            ? schema.UsesEN1EnumClosure()
+                && BoundEnumTypes.IsValidType(type,
+                    program.EnumDefinitions)
+            : DirectNativeImportContract.IsScalar(type);
+
+    private static bool IsSupportedForeignNativeInterfaceConstant(
+        BoundConstant constant, PrimitiveType expectedType,
+        BoundProgram program, TrRmArtifactSchema schema)
+    {
+        if (constant.Type != expectedType)
+        {
+            return false;
+        }
+
+        if (BoundEnumTypes.IsType(constant.Type))
+        {
+            if (!schema.UsesEN1EnumClosure()
+                || !BoundEnumTypes.IsValidType(constant.Type,
+                    program.EnumDefinitions))
+            {
+                return false;
+            }
+
+            var underlyingType = program.EnumDefinitions[
+                BoundEnumTypes.Index(constant.Type)].UnderlyingType;
+            return constant.RepresentationType == underlyingType
+                && constant.Bits.IsCanonicalFor(underlyingType);
+        }
+
+        return IsSupportedForeignNativeInterfaceValueType(constant.Type,
+                program, schema)
+            && constant.RepresentationType == constant.Type
+            && constant.Bits.IsCanonicalFor(constant.Type);
+    }
+
+    private static TrRmFrozenScalarValueReference
+        AddForeignNativeInterfaceConstantMapValue(
+        BoundConstant constant, BoundProgram program,
+        Func<PrimitiveType, int> typeSpecRowFor,
+        TrRmFrozenScalarValueBuilder scalarValues,
+        TrRmArtifactSchema schema)
+    {
+        if (!IsSupportedForeignNativeInterfaceConstant(constant,
+                constant.Type, program, schema))
+        {
+            throw Unsupported(
+                "A Standard F+I ConstantMap value has no supported exact type and representation.");
+        }
+
+        if (BoundEnumTypes.IsType(constant.Type))
+        {
+            var underlyingType = program.EnumDefinitions[
+                BoundEnumTypes.Index(constant.Type)].UnderlyingType;
+            var typeSpecRef = checked((uint)typeSpecRowFor(constant.Type));
+            if (typeSpecRef is 0 or > 0x00FF_FFFF)
+            {
+                throw Unsupported(
+                    "A Standard F+I enum ConstantMap value has no complete TypeSpec reference.");
+            }
+
+            return scalarValues.AddEN1EnumMember(constant, typeSpecRef,
+                underlyingType, schema);
+        }
+
+        return scalarValues.Add(constant);
+    }
+
     private static byte[] EncodeStandardInitializationReferenceBody(
         BoundFunction function, BoundProgram program,
         Func<PrimitiveType, int> typeSpecRowFor,
@@ -1869,7 +1940,8 @@ public static partial class TrRmExecutableCompiler
                     || function.Variables[read.Variable].Type != read.Type
                     || function.Variables[read.Variable].IsOut
                     || function.Variables[read.Variable].IsInit
-                    || !(DirectNativeImportContract.IsScalar(read.Type)
+                    || !(IsSupportedForeignNativeInterfaceValueType(
+                            read.Type, program, schema)
                         || read.Type == PrimitiveType.NativeRawPointer))
                 {
                     return false;
@@ -2054,10 +2126,9 @@ public static partial class TrRmExecutableCompiler
                 _ = inputHomeVariables.Add(read.Variable);
             }
             else if (argument is BoundConstant constant
-                && DirectNativeImportContract.IsScalar(constant.Type)
                 && constant.Type == target.Variables[formal].Type
-                && constant.RepresentationType == constant.Type
-                && constant.Bits.IsCanonicalFor(constant.Type))
+                && IsSupportedForeignNativeInterfaceConstant(constant,
+                    target.Variables[formal].Type, program, schema))
             {
                 constantInputs.Add((constant.Type, constant.Bits));
                 if (constantInputs.Count + nestedInputCalls.Count
@@ -2176,8 +2247,8 @@ public static partial class TrRmExecutableCompiler
                 || !ForeignNativeInterfaceContract.TryCreateCallTarget(
                     nestedForeignCall, program, out var nestedTarget)
                 || nestedTarget.ReturnType != expectedType
-                || !DirectNativeImportContract.IsScalar(
-                    nestedTarget.ReturnType)
+                || !IsSupportedForeignNativeInterfaceValueType(
+                    nestedTarget.ReturnType, program, schema)
                 || !nestedTarget.NativeOutputContracts.IsEmpty
                 || nestedTarget.ParameterCount
                     != nestedCall.Arguments.Length
@@ -2206,8 +2277,9 @@ public static partial class TrRmExecutableCompiler
                 var argument = nestedCall.Arguments[argumentIndex];
                 if ((uint)formal >= (uint)nestedTarget.ParameterCount
                     || seenNestedParameters[formal]
-                    || !(DirectNativeImportContract.IsScalar(
-                            nestedTarget.Variables[formal].Type)
+                    || !(IsSupportedForeignNativeInterfaceValueType(
+                            nestedTarget.Variables[formal].Type,
+                            program, schema)
                         || nestedTarget.Variables[formal].Type
                             == PrimitiveType.NativeRawPointer))
                 {
@@ -2233,13 +2305,9 @@ public static partial class TrRmExecutableCompiler
                     }
                 }
                 else if (argument is BoundConstant nestedConstant
-                    && DirectNativeImportContract.IsScalar(
-                        nestedConstant.Type)
                     && nestedConstant.Type == formalType
-                    && nestedConstant.RepresentationType
-                        == nestedConstant.Type
-                    && nestedConstant.Bits.IsCanonicalFor(
-                        nestedConstant.Type))
+                    && IsSupportedForeignNativeInterfaceConstant(
+                        nestedConstant, formalType, program, schema))
                 {
                     constantInputs.Add((nestedConstant.Type,
                         nestedConstant.Bits));
@@ -4036,10 +4104,9 @@ public static partial class TrRmExecutableCompiler
                     }
                 }
                 else if (argument is BoundConstant constant
-                    && DirectNativeImportContract.IsScalar(constant.Type)
                     && constant.Type == formalType
-                    && constant.RepresentationType == constant.Type
-                    && constant.Bits.IsCanonicalFor(constant.Type))
+                    && IsSupportedForeignNativeInterfaceConstant(constant,
+                        formalType, program, schema))
                 {
                     constantInputs.Add((constant.Type, constant.Bits));
                     if (constantInputs.Count
@@ -4151,8 +4218,8 @@ public static partial class TrRmExecutableCompiler
                     || variable.IsImplicitRef
                     || variable.IsImplicitReferenceTemporary
                     || variable.IsInitializationLocal
-                    || !(DirectNativeImportContract.IsScalar(
-                            variable.Type)
+                    || !(IsSupportedForeignNativeInterfaceValueType(
+                            variable.Type, program, schema)
                         || variable.Type
                             == PrimitiveType.NativeRawPointer)))
             {
@@ -4354,10 +4421,9 @@ public static partial class TrRmExecutableCompiler
                     }
                 }
                 else if (argument is BoundConstant constant
-                    && DirectNativeImportContract.IsScalar(constant.Type)
                     && constant.Type == formalType
-                    && constant.RepresentationType == constant.Type
-                    && constant.Bits.IsCanonicalFor(constant.Type))
+                    && IsSupportedForeignNativeInterfaceConstant(constant,
+                        formalType, program, schema))
                 {
                     constantInputs.Add((constant.Type, constant.Bits));
                     if (constantInputs.Count
@@ -4805,9 +4871,8 @@ public static partial class TrRmExecutableCompiler
 
             if (expression is BoundConstant constant
                 && constant.Type == expectedType
-                && DirectNativeImportContract.IsScalar(constant.Type)
-                && constant.RepresentationType == constant.Type
-                && constant.Bits.IsCanonicalFor(constant.Type))
+                && IsSupportedForeignNativeInterfaceConstant(constant,
+                    expectedType, program, schema))
             {
                 return new TrRmRegisterBodyCallInput(1, 1,
                     GetConstantRegister(constant));
@@ -5060,7 +5125,8 @@ public static partial class TrRmExecutableCompiler
                 || !call.ImportedGenericMethodTypeArguments.IsDefaultOrEmpty
                 || (uint)call.Function >= (uint)program.Functions.Length
                 || call.Arguments.IsDefault
-                || !DirectNativeImportContract.IsScalar(call.Type))
+                || !IsSupportedForeignNativeInterfaceValueType(call.Type,
+                    program, schema))
             {
                 return null;
             }
@@ -5089,8 +5155,8 @@ public static partial class TrRmExecutableCompiler
                     || variable.IsImplicitRef
                     || variable.IsImplicitReferenceTemporary
                     || variable.IsInitializationLocal
-                    || !(DirectNativeImportContract.IsScalar(
-                            variable.Type)
+                    || !(IsSupportedForeignNativeInterfaceValueType(
+                            variable.Type, program, schema)
                         || variable.Type
                             == PrimitiveType.NativeRawPointer
                         || NativePointerTypes.IsType(variable.Type))))
@@ -5125,10 +5191,8 @@ public static partial class TrRmExecutableCompiler
                     }
                 }
                 else if (argument is not BoundConstant constant
-                    || !DirectNativeImportContract.IsScalar(constant.Type)
-                    || constant.Type != formalType
-                    || constant.RepresentationType != constant.Type
-                    || !constant.Bits.IsCanonicalFor(constant.Type))
+                    || !IsSupportedForeignNativeInterfaceConstant(constant,
+                        formalType, program, schema))
                 {
                     if (GetNestedForeignInterfaceCall(argument)
                             is not BoundCall nestedInputCall
@@ -5148,14 +5212,6 @@ public static partial class TrRmExecutableCompiler
 
         ushort GetConstantMapIndex(BoundConstant constant)
         {
-            if (!DirectNativeImportContract.IsScalar(constant.Type)
-                || constant.RepresentationType != constant.Type
-                || !constant.Bits.IsCanonicalFor(constant.Type))
-            {
-                throw Unsupported(
-                    $"Function '{function.Name}' has an F+I call sequence constant outside the typed scalar ConstantMap subset.");
-            }
-
             var key = (constant.Type, constant.Bits);
             if (bodyConstantMapIndexByValue.TryGetValue(key,
                     out var existingIndex))
@@ -5163,7 +5219,9 @@ public static partial class TrRmExecutableCompiler
                 return existingIndex;
             }
 
-            var valueReference = scalarValues.Add(constant);
+            var valueReference
+                = AddForeignNativeInterfaceConstantMapValue(constant,
+                    program, typeSpecRowFor, scalarValues, schema);
             var index = checked((ushort)bodyConstantMapValues.Count);
             bodyConstantMapValues.Add(valueReference);
             bodyConstantMapIndexByValue.Add(key, index);
@@ -5595,9 +5653,8 @@ public static partial class TrRmExecutableCompiler
             }
             else if (argumentsByFormal[formal] is BoundConstant constant
                 && constant.Type == target.Variables[formal].Type
-                && DirectNativeImportContract.IsScalar(constant.Type)
-                && constant.RepresentationType == constant.Type
-                && constant.Bits.IsCanonicalFor(constant.Type)
+                && IsSupportedForeignNativeInterfaceConstant(constant,
+                    target.Variables[formal].Type, program, schema)
                 && constantRegisterByValue.TryGetValue(
                     (constant.Type, constant.Bits), out var constantRegister))
             {
@@ -5723,14 +5780,6 @@ public static partial class TrRmExecutableCompiler
 
         ushort GetConstantMapIndex(BoundConstant constant)
         {
-            if (!DirectNativeImportContract.IsScalar(constant.Type)
-                || constant.RepresentationType != constant.Type
-                || !constant.Bits.IsCanonicalFor(constant.Type))
-            {
-                throw Unsupported(
-                    $"Function '{function.Name}' has a direct F+I constant outside the typed scalar ConstantMap subset.");
-            }
-
             var key = (constant.Type, constant.Bits);
             if (bodyConstantMapIndexByValue.TryGetValue(key,
                     out var existingIndex))
@@ -5744,7 +5793,9 @@ public static partial class TrRmExecutableCompiler
                     "The Standard F+I caller Body ConstantMap exceeds its index domain.");
             }
 
-            var valueReference = scalarValues.Add(constant);
+            var valueReference
+                = AddForeignNativeInterfaceConstantMapValue(constant,
+                    program, typeSpecRowFor, scalarValues, schema);
             var index = checked((ushort)bodyConstantMapValues.Count);
             bodyConstantMapValues.Add(valueReference);
             bodyConstantMapIndexByValue.Add(key, index);
@@ -5824,9 +5875,8 @@ public static partial class TrRmExecutableCompiler
 
             if (expression is BoundConstant constant
                 && constant.Type == expectedType
-                && DirectNativeImportContract.IsScalar(constant.Type)
-                && constant.RepresentationType == constant.Type
-                && constant.Bits.IsCanonicalFor(constant.Type))
+                && IsSupportedForeignNativeInterfaceConstant(constant,
+                    expectedType, program, schema))
             {
                 return new TrRmRegisterBodyCallInput(1, 1,
                     GetConstantRegister(constant));
@@ -6203,7 +6253,8 @@ public static partial class TrRmExecutableCompiler
             else if (call.Arguments[sourceArgument]
                     is BoundConstant constant
                 && constant.Type == target.Variables[formal].Type
-                && DirectNativeImportContract.IsScalar(constant.Type))
+                && IsSupportedForeignNativeInterfaceConstant(constant,
+                    target.Variables[formal].Type, program, schema))
             {
                 inputs[formal + 1] = new TrRmRegisterBodyCallInput(1, 1,
                     GetConstantRegister(constant));
@@ -6455,9 +6506,8 @@ public static partial class TrRmExecutableCompiler
         {
             if (expression is BoundConstant constant
                 && constant.Type == expectedType
-                && DirectNativeImportContract.IsScalar(constant.Type)
-                && constant.RepresentationType == constant.Type
-                && constant.Bits.IsCanonicalFor(constant.Type))
+                && IsSupportedForeignNativeInterfaceConstant(constant,
+                    expectedType, program, schema))
             {
                 return new TrRmRegisterBodyCallInput(1, 1,
                     GetConstantRegister(constant));
@@ -6495,7 +6545,9 @@ public static partial class TrRmExecutableCompiler
                     "The Standard F+I conditional-output Body ConstantMap exceeds its index domain.");
             }
 
-            var valueReference = scalarValues.Add(constant);
+            var valueReference
+                = AddForeignNativeInterfaceConstantMapValue(constant,
+                    program, typeSpecRowFor, scalarValues, schema);
             var index = checked((ushort)bodyConstantMapValues.Count);
             bodyConstantMapValues.Add(valueReference);
             bodyConstantMapIndexByValue.Add(key, index);

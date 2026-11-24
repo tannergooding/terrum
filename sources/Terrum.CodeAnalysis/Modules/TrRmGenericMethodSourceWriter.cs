@@ -72,7 +72,9 @@ public static partial class TrRmExecutableCompiler
         ImmutableArray<int> foreignNativeInterfaceStructureIndexes =
             default,
         IReadOnlyDictionary<BoundInterfaceMemberIdentity, uint>?
-            foreignInterfaceMethodMapTokenPlaceholders = null)
+            foreignInterfaceMethodMapTokenPlaceholders = null,
+        IReadOnlyDictionary<PrimitiveType, int>?
+            foreignNativeInterfaceEnumTypeDefRows = null)
     {
         if (program.GenericMethodDefinitions.IsDefault)
         {
@@ -269,7 +271,8 @@ public static partial class TrRmExecutableCompiler
                 out exportedInterfaceTypeSpecRows,
                 out exportedInterfaceMethodDefRows,
                 out exportedInterfaceAssociatedTypeDefRows,
-                foreignNativeInterfaceStructureIndexes);
+                foreignNativeInterfaceStructureIndexes,
+                foreignNativeInterfaceEnumTypeDefRows);
         }
         if (emissionRows.Count != 0
             || !sourceClassMethodGenericPlans.IsEmpty
@@ -5573,7 +5576,9 @@ public static partial class TrRmExecutableCompiler
             string DeclarationKey), uint>
             exportedInterfaceAssociatedTypeDefRows,
         ImmutableArray<int> foreignNativeInterfaceStructureIndexes =
-            default)
+            default,
+        IReadOnlyDictionary<PrimitiveType, int>?
+            foreignNativeInterfaceEnumTypeDefRows = null)
     {
         exportedInterfaceTypeSpecRows = [];
         exportedInterfaceMethodDefRows = [];
@@ -5731,6 +5736,35 @@ public static partial class TrRmExecutableCompiler
                 GetCount(sections, 0x0004), schema,
                 structureTypeDefRows);
         }
+        int ForeignNativeInterfaceTypeSpecRow(PrimitiveType type)
+        {
+            if (BoundEnumTypes.IsType(type))
+            {
+                if (foreignNativeInterfaceEnumTypeDefRows is null
+                    || !foreignNativeInterfaceEnumTypeDefRows.TryGetValue(
+                        type, out var typeDefRow))
+                {
+                    throw Unsupported(
+                        "A ForeignNativeInterface enum type has no exact EN1 TypeDef mapping.");
+                }
+
+                return TypeDefTypeSpecRow(typeSpecRows,
+                    typeDefTypeSpecRows, typeDefRow);
+            }
+
+            if (PrimitiveTypeFacts.IsBuiltInScalar(type))
+            {
+                return checked((int)GetBuiltInTypeSpecRef(type,
+                    builtInTypeSpecRows, typeSpecRows));
+            }
+
+            return NativeValueTypeRow(type, nativeRawPointerTypeRow,
+                nativeFunctionPointerTypeRows, typeSpecRows,
+                nativePointerTypeRows, program.NativePointerTypes,
+                structureTypeDefRows, typeDefTypeSpecRows,
+                ForeignNativeInterfaceTypeSpecRow);
+        }
+
         var foreignFunctionPointerSignatureIndexes
             = foreignNativeInterface
                 ? GetForeignNativeFunctionPointerSignatureIndexes(
@@ -5782,8 +5816,7 @@ public static partial class TrRmExecutableCompiler
                 typeSpecRows, nativePointerTypeRows,
                 program.NativePointerTypes, structureTypeDefRows,
                 typeDefTypeSpecRows,
-                primitive => checked((int)GetBuiltInTypeSpecRef(primitive,
-                    builtInTypeSpecRows, typeSpecRows)));
+                ForeignNativeInterfaceTypeSpecRow);
             return checked((uint)row);
         }
 
@@ -6217,13 +6250,8 @@ public static partial class TrRmExecutableCompiler
                 type => type == PrimitiveType.Void
                     ? GetBuiltInTypeSpecRef(PrimitiveType.Void,
                         builtInTypeSpecRows, typeSpecRows)
-                    : checked((uint)NativeValueTypeRow(type,
-                        nativeRawPointerTypeRow,
-                        nativeFunctionPointerTypeRows, typeSpecRows,
-                        nativePointerTypeRows, program.NativePointerTypes,
-                        structureTypeDefRows, typeDefTypeSpecRows,
-                        primitive => checked((int)GetBuiltInTypeSpecRef(
-                            primitive, builtInTypeSpecRows, typeSpecRows)))),
+                    : checked((uint)
+                        ForeignNativeInterfaceTypeSpecRow(type)),
                 methodCount, signatureCount, parameterCount,
                 contractCount, ref emittedMethods, ref emittedSignatures,
                 ref emittedParameters, names, methodBytes, signatureBytes,
@@ -7976,9 +8004,11 @@ public static partial class TrRmExecutableCompiler
                 || !definition.Constraints.IsEmpty
                 || definition.Members.IsDefaultOrEmpty
                 || !ForeignNativeInterfaceContract.IsValidTable(
-                    [definition], program.NativePointerTypes,
+                    [definition], program.Structures,
+                    program.NativePointerTypes,
                     program.NativeFunctionPointerSignatures,
-                    program.NativeCoreRegistration)
+                    program.NativeCoreRegistration,
+                    program.EnumDefinitions)
                 || !NativeOutputContractValidator.IsValidInterfaceTable(
                     [definition], program.Structures,
                     program.NativePointerTypes,

@@ -999,9 +999,11 @@ public static partial class ModuleCompiler
         if (!BoundInterfaceContract.IsValidTable(reconstructed,
                 static _ => true)
             || !ForeignNativeInterfaceContract.IsValidTable(reconstructed,
+                module.Structures,
                 module.NativePointerTypes,
                 module.NativeFunctionPointerSignatures,
-                nativeCoreRegistration: null)
+                nativeCoreRegistration: null,
+                enumDefinitions: module.EnumDefinitions)
             || !NativeOutputContractValidator.IsValidInterfaceTable(
                 reconstructed, module.Structures,
                 module.NativePointerTypes,

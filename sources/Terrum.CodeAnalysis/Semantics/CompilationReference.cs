@@ -270,10 +270,12 @@ public sealed class CompilationReference
         }
         if (!interfaces.IsDefault
             && (!ForeignNativeInterfaceContract.IsValidTable(interfaces,
+                    structures.IsDefault ? [] : structures,
                     nativePointerTypes.IsDefault ? [] : nativePointerTypes,
                     nativeFunctionPointerSignatures.IsDefault
                         ? [] : nativeFunctionPointerSignatures,
-                    nativeCoreRegistration)
+                    nativeCoreRegistration,
+                    enumDefinitions.IsDefault ? [] : enumDefinitions)
                 || !NativeOutputContractValidator.IsValidInterfaceTable(
                     interfaces, structures.IsDefault ? [] : structures,
                     nativePointerTypes.IsDefault ? [] : nativePointerTypes,

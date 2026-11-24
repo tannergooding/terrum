@@ -1060,8 +1060,10 @@ internal sealed partial class Binder
             foreach (var member in definition.Members)
             {
                 if (ForeignNativeInterfaceContract.IsValidMethodSignature(
-                    member, [.. _nativePointerTypes],
-                    [.. _nativeFunctionPointerSignatures]))
+                    member, [.. _structs],
+                    [.. _nativePointerTypes],
+                    [.. _nativeFunctionPointerSignatures],
+                    [.. _enumDefinitions]))
                 {
                     continue;
                 }

@@ -2223,9 +2223,54 @@ public static partial class TrRmExecutableCompiler
         bool hasCoreContractFailureIdentityTransport = false,
         Func<BoundInterfaceMemberIdentity, uint>?
             foreignInterfaceMethodMapTokenForCall = null,
-        BoundProgram? semanticVerificationProgram = null)
+        BoundProgram? semanticVerificationProgram = null,
+        C1EnumClosureSourceEnumExports? sourceEnumExports = null,
+        TrRmFrozenScalarValueBuilder? frozenScalarValueBuilder = null)
     {
         ArgumentNullException.ThrowIfNull(program);
+        var sourceEnumProgram = semanticVerificationProgram ?? program;
+        var usesStandardNativeImportSection
+            = standardNativePointerLoads
+                || schema.UsesStandardNativeImportRows();
+        if (sourceEnumExports is not null
+            && !ReferenceEquals(sourceEnumExports.Program,
+                sourceEnumProgram))
+        {
+            throw new ArgumentException(
+                "The source enum assignments belong to a different checked program snapshot.",
+                nameof(sourceEnumExports));
+        }
+
+        if (schema.UsesForeignNativeInterfaceParameterSurface()
+            && !program.EnumDefinitions.IsEmpty
+            && (!schema.UsesEN1EnumClosure()
+                || sourceEnumExports is null
+                || program.EnumDefinitions.Length
+                    != sourceEnumExports.Exports.Length
+                || program.EnumDefinitions.Any(static definition =>
+                    definition.Identity
+                        is not BoundEnumDeclarationIdentity.Source)))
+        {
+            throw Unsupported(
+                "The selected FNI enum-closure profile requires a complete source-owned enum mapping.");
+        }
+        if (!program.EnumDefinitions.IsEmpty
+            && (!schema.UsesForeignNativeInterfaceParameterSurface()
+                || !schema.UsesEN1EnumClosure()
+                || sourceEnumExports is null))
+        {
+            throw Unsupported(
+                "Only the selected FNI enum-closure profile emits nominal enum TypeDefs from this source path.");
+        }
+        if (sourceEnumExports is not null
+            && (!schema.UsesForeignNativeInterfaceParameterSurface()
+                || program.EnumDefinitions.IsEmpty))
+        {
+            throw new ArgumentException(
+                "Source enum mappings are accepted only by the selected FNI enum-closure profile.",
+                nameof(sourceEnumExports));
+        }
+
         var standardTerrumFunctionPointerProfile
             = schema.UsesTerrumFunctionPointer(standardSchemaIdentity);
         if (BoundEnumTypes.HasStandardDeclarations(
@@ -2319,6 +2364,9 @@ public static partial class TrRmExecutableCompiler
                 && schema == TrRmArtifactSchema.C1M1Construction2Draft;
         bool IsScalarValueType(PrimitiveType type)
             => Scalar(type)
+                || (schema.UsesEN1EnumClosure()
+                    && BoundEnumTypes.IsValidType(
+                        type, program.EnumDefinitions))
                 || (generalPredicateGraphsInitializationReferenceBodies
                     && (PrimitiveTypeFacts.IsBuiltInScalar(type)
                         || (emitsConstruction2DeclarationPredicateGraphs
@@ -2548,7 +2596,11 @@ public static partial class TrRmExecutableCompiler
                 throw Unsupported($"Function '{function.Name}' has a native callable type outside the TRRM value subset.");
             }
         }
-        var blittableStructureIndexes = CollectNativeBlittableStructureIndexes(program);
+        var blittableStructureIndexes
+            = CollectNativeBlittableStructureIndexes(program,
+                allowNominalEnums:
+                    schema.UsesForeignNativeInterfaceParameterSurface()
+                    && schema.UsesEN1EnumClosure());
         var hasRegisteredQueryOperations = program.Functions
             .Any(HasStandardRegisteredQuery);
         if (schema.UsesInitializationReferenceLocalFieldLayout()
@@ -2702,6 +2754,14 @@ public static partial class TrRmExecutableCompiler
             typeDefStructureIndexes = [
                 .. Enumerable.Range(0, program.Structures.Length),
             ];
+        }
+        var enumTypeDefRows = new Dictionary<int, int>(
+            program.EnumDefinitions.Length);
+        for (var enumIndex = 0;
+            enumIndex < program.EnumDefinitions.Length; enumIndex++)
+        {
+            enumTypeDefRows.Add(enumIndex,
+                checked(typeDefStructureIndexes.Length + enumIndex + 1));
         }
         var typeDefStructureViewIndexes
             = Enumerable.Repeat(-1, typeDefStructureIndexes.Length)
@@ -3189,7 +3249,7 @@ public static partial class TrRmExecutableCompiler
         var predicateChildEdges = new List<TrRmPredicateChildEdgeRow>();
         var predicateOperations = new List<TrRmPredicateOperationRow>();
         var predicateFrozenScalarValues
-            = new TrRmFrozenScalarValueBuilder();
+            = frozenScalarValueBuilder ?? new TrRmFrozenScalarValueBuilder();
         var exports = new List<TrRmExportRow>(exportCount);
         var typeRowsList = (hasFloatingTypes ? s_typeRows : s_nonFloatTypeRows).ToList();
         var generalPredicateScalarTypeRows
@@ -3320,6 +3380,19 @@ public static partial class TrRmExecutableCompiler
 
         int TypeSpecRowFor(PrimitiveType type)
         {
+            if (BoundEnumTypes.IsType(type))
+            {
+                var enumIndex = BoundEnumTypes.Index(type);
+                if (!enumTypeDefRows.TryGetValue(enumIndex,
+                        out var typeDefRow))
+                {
+                    throw Unsupported(
+                        "A nominal enum has no selected FNI enum TypeDef row.");
+                }
+
+                return TypeDefTypeSpecRow(typeRowsList,
+                    typeDefTypeSpecRows, typeDefRow);
+            }
             if (CheckedReferenceTypes.IsType(type))
             {
                 return CheckedReferenceTypeSpecRow(type);
@@ -3339,6 +3412,121 @@ public static partial class TrRmExecutableCompiler
                 nativeFunctionPointerTypeRows, typeRowsList,
                 nativePointerTypeRows, program.NativePointerTypes,
                 structureTypeDefRows, typeDefTypeSpecRows, TypeSpecRowFor);
+        }
+
+        var enumTypeSpecRows = new uint[program.EnumDefinitions.Length];
+        for (var enumIndex = 0;
+            enumIndex < enumTypeSpecRows.Length; enumIndex++)
+        {
+            enumTypeSpecRows[enumIndex] = checked((uint)TypeSpecRowFor(
+                BoundEnumTypes.Type(enumIndex)));
+        }
+        var enumSourceNames = new (
+            int NamespaceStringRow, int NameStringRow,
+            ImmutableArray<int> ExportKeyStringRows,
+            int[] MemberKeyStringRows,
+            int[] MemberNameStringRows)[program.EnumDefinitions.Length];
+        var enumRows = new List<TrRmEnumDefRow>(
+            program.EnumDefinitions.Length);
+        var enumMemberRows
+            = new List<TrRmTypedEnumMemberDefRow>();
+        if (sourceEnumExports is not null)
+        {
+            for (var enumIndex = 0;
+                enumIndex < program.EnumDefinitions.Length; enumIndex++)
+            {
+                var definition = program.EnumDefinitions[enumIndex];
+                if (!sourceEnumExports.TryGet(definition,
+                        out var sourceExport)
+                    || !TrRmConstantSourceValueValidator
+                        .TryGetIntegerTypeCode(definition.UnderlyingType,
+                            out var underlyingTypeCode)
+                    || !schema.SupportsEnumUnderlyingTypeCode(
+                        underlyingTypeCode))
+                {
+                    throw Invalid(
+                        "The FNI enum source mapping or underlying integer type is invalid.");
+                }
+
+                var separator = definition.Name.LastIndexOf('.',
+                    StringComparison.Ordinal);
+                var namespaceName = separator < 0
+                    ? string.Empty : definition.Name[..separator];
+                var name = separator < 0
+                    ? definition.Name : definition.Name[(separator + 1)..];
+                var namespaceStringRow = names.Count + 1;
+                names.Add((namespaceName, 1));
+                var nameStringRow = names.Count + 1;
+                names.Add((name, 1));
+                var exportKeyRows
+                    = ImmutableArray.CreateBuilder<int>(
+                        sourceExport.ExportKeys.Length);
+                foreach (var exportKey in sourceExport.ExportKeys)
+                {
+                    exportKeyRows.Add(names.Count + 1);
+                    names.Add((exportKey, 1));
+                }
+
+                var memberKeyRows = new int[definition.Members.Length];
+                var memberNameRows = new int[definition.Members.Length];
+                for (var memberIndex = 0;
+                    memberIndex < definition.Members.Length; memberIndex++)
+                {
+                    memberKeyRows[memberIndex] = names.Count + 1;
+                    names.Add((sourceExport.MemberDeclarationKeys[
+                        memberIndex], 1));
+                    memberNameRows[memberIndex] = names.Count + 1;
+                    names.Add((definition.Members[memberIndex].Name, 1));
+                }
+
+                var typeDefRow = enumTypeDefRows[enumIndex];
+                foreach (var exportKeyRow in exportKeyRows)
+                {
+                    exports.Add(new TrRmExportRow(
+                        0x1300_0000u | checked((uint)typeDefRow),
+                        exportKeyRow));
+                }
+
+                enumSourceNames[enumIndex] = (
+                    namespaceStringRow, nameStringRow,
+                    exportKeyRows.MoveToImmutable(),
+                    memberKeyRows, memberNameRows);
+                var memberFirst = definition.Members.IsEmpty ? 0
+                    : checked(enumMemberRows.Count + 1);
+                for (var memberIndex = 0;
+                    memberIndex < definition.Members.Length; memberIndex++)
+                {
+                    var member = definition.Members[memberIndex];
+                    if (!BoundEnumTypes.IsValidModuleDeclarationKey(
+                            sourceExport.MemberDeclarationKeys[memberIndex])
+                        || !BoundEnumTypes.IsValidModuleDeclarationKey(
+                            member.Name)
+                        || !ScalarBits.TryFromIntegerValue(member.Value,
+                            definition.UnderlyingType, out var bits))
+                    {
+                        throw Unsupported(
+                            "An FNI enum member is invalid for its exact underlying integer type.");
+                    }
+
+                    var constant = new BoundConstant(bits,
+                        BoundEnumTypes.Type(enumIndex),
+                        definition.UnderlyingType, default);
+                    var frozenValue
+                        = predicateFrozenScalarValues.AddEN1EnumMember(
+                            constant, enumTypeSpecRows[enumIndex],
+                            definition.UnderlyingType, schema);
+                    enumMemberRows.Add(new TrRmTypedEnumMemberDefRow(
+                        typeDefRow, memberIndex + 1,
+                        memberKeyRows[memberIndex],
+                        memberNameRows[memberIndex],
+                        frozenValue.ConstantSourceRow));
+                }
+
+                enumRows.Add(new TrRmEnumDefRow(typeDefRow,
+                    0xF200_0000u | underlyingTypeCode,
+                    definition.IsFlags ? 1u : 0u, memberFirst,
+                    definition.Members.Length));
+            }
         }
 
         uint PredicateTypeUseRowFor(PrimitiveType type)
@@ -6892,7 +7080,7 @@ public static partial class TrRmExecutableCompiler
             || hasNativeFunctionPointerBodyOperations)
         {
             if (standardInitializationBodyFeatureProfile
-                && standardNativePointerLoads)
+                && usesStandardNativeImportSection)
             {
                 requiresStandardDirectNativeCalls = true;
             }
@@ -6921,6 +7109,11 @@ public static partial class TrRmExecutableCompiler
             var standardFeatures = new List<TrRmFeatureRow>(4) {
                 TrRmFeatureRow.NativeBoundaryContracts,
             };
+            if (schema.UsesForeignNativeInterface()
+                && !program.Interfaces.IsDefaultOrEmpty)
+            {
+                standardFeatures.Add(TrRmFeatureRow.NativeInterfaceCalls);
+            }
             if (registeredQueryBodyCount != 0
                 || fieldPathRows.Count != 0
                 || standardSourceImportMappings.Any(
@@ -6960,7 +7153,10 @@ public static partial class TrRmExecutableCompiler
                 || requiresStandardRootlessNativeValues
                 || requiresStandardDirectNativeCalls
                 || requiresStandardNativeOutputCells
-                || requiresStandardForeignNativeInterfaceAggregateLayoutClosure))
+                || requiresStandardForeignNativeInterfaceAggregateLayoutClosure
+                || !program.EnumDefinitions.IsEmpty
+                || (schema.UsesForeignNativeInterface()
+                    && !program.Interfaces.IsDefaultOrEmpty)))
         {
             var standardFeatures = new List<TrRmFeatureRow>(6);
             if (requiresStandardNativeBoundaryContracts)
@@ -6980,6 +7176,16 @@ public static partial class TrRmExecutableCompiler
             {
                 standardFeatures.Add(
                     TrRmFeatureRow.NativeOutputCellsCandidate);
+            }
+            if (schema.UsesForeignNativeInterface()
+                && !program.Interfaces.IsDefaultOrEmpty)
+            {
+                standardFeatures.Add(TrRmFeatureRow.NativeInterfaceCalls);
+            }
+            if (!program.EnumDefinitions.IsEmpty)
+            {
+                standardFeatures.Add(TrRmFeatureRow.TypedFrozenValues);
+                standardFeatures.Add(new TrRmFeatureRow(18, 1));
             }
             if (predicateGraphs.Count != 0)
             {
@@ -7115,7 +7321,8 @@ public static partial class TrRmExecutableCompiler
                 && featureCount != 0
                 ? new TrRmFeatureTableReader(featureBytes, featureCount, schema)
                 : default;
-        var typeDefCount = typeDefStructureIndexes.Length;
+        var typeDefCount = checked(typeDefStructureIndexes.Length
+            + program.EnumDefinitions.Length);
         var moduleRefRows = new List<TrRmModuleRefRow>(moduleImportIdentities.Length);
         foreach (var identity in moduleImportIdentities)
         {
@@ -7206,6 +7413,47 @@ public static partial class TrRmExecutableCompiler
                 surface.DefaultConstantSourceRow);
         }
         var typeDefRows = new TrRmTypeDefRow[typeDefCount];
+        var enumLayoutFirst = new int[program.EnumDefinitions.Length];
+        var enumLayoutCount = new int[program.EnumDefinitions.Length];
+        for (var enumIndex = 0;
+            enumIndex < program.EnumDefinitions.Length; enumIndex++)
+        {
+            var definition = program.EnumDefinitions[enumIndex];
+            var typeDefRow = enumTypeDefRows[enumIndex];
+            if (!TrRmConstantSourceValueValidator.TryGetIntegerTypeCode(
+                    definition.UnderlyingType, out var typeCode)
+                || !schema.SupportsEnumUnderlyingTypeCode(typeCode)
+                || definition.BlittableTargetRequirement is not (0
+                    or FixedLayoutStorage.WindowsX64TargetRequirement))
+            {
+                throw Unsupported(
+                    "The selected FNI enum has an unsupported underlying type or Blittable target.");
+            }
+
+            var namespaceName = enumSourceNames[enumIndex].NamespaceStringRow;
+            var name = enumSourceNames[enumIndex].NameStringRow;
+            var visibility = definition.IsPublic ? 2u
+                : sourceEnumExports!.TryGet(definition,
+                    out var sourceExport)
+                    && sourceExport.Declaration.IsFileLocal ? 0u : 1u;
+            enumLayoutFirst[enumIndex] = checked(layoutRows.Count + 1);
+            layoutRows.Add(new TrRmLayoutRow(typeDefRow, 0, 0, 0, 0, 0,
+                0, 0));
+            enumLayoutCount[enumIndex] = 1;
+            if (definition.BlittableTargetRequirement != 0
+                || typeCode is 0x10 or 0x11)
+            {
+                layoutRows.Add(new TrRmLayoutRow(typeDefRow, 1, 0,
+                    definition.BlittableTargetRequirement == 0 ? (byte)0
+                        : (byte)1, 0, 0, 0, 0));
+                enumLayoutCount[enumIndex]++;
+            }
+
+            typeDefRows[typeDefRow - 1] = new TrRmTypeDefRow(
+                namespaceName, name, 0x10u | visibility, 0, 0, 0, 0,
+                checked((uint)enumLayoutFirst[enumIndex]),
+                checked((uint)enumLayoutCount[enumIndex]), 0, 0);
+        }
         for (var type = 0; type < typeDefStructureIndexes.Length; type++)
         {
             var structure = TypeDefStructure(type);
@@ -7389,6 +7637,19 @@ public static partial class TrRmExecutableCompiler
                 : new TrRmImportTableReader(importBytes,
                     moduleImportRows.Count, strings, moduleRefs, typeDefs,
                     defs, default);
+        var enumMemberBytes = enumMemberRows.Count == 0 ? []
+            : TrRmEnumTablesWriter.EncodeTypedEnumMemberValues(
+                enumMemberRows, strings, typeDefs,
+                frozenScalarValueBuilder?.ConstantSourceCount ?? 0);
+        var enumMembers = new TrRmEnumMemberDefTableReader(enumMemberBytes,
+            enumMemberRows.Count, strings, typeDefs,
+            frozenScalarValueBuilder?.ConstantSourceCount ?? 0);
+        var enumDefBytes = enumRows.Count == 0 ? []
+            : TrRmEnumTablesWriter.Encode(enumRows, typeDefs, types, layouts,
+                targetProfiles, enumMembers);
+        var enumDefs = new TrRmEnumDefTableReader(enumDefBytes,
+            enumRows.Count, typeDefs, types, layouts, targetProfiles,
+            enumMembers);
         var fieldPathBytes = fieldPathRows.Count == 0 ? []
             : TrRmFieldPathTableWriter.Encode(fieldPathRows, types, fields,
                 imports);
@@ -7426,7 +7687,7 @@ public static partial class TrRmExecutableCompiler
                     nativeImportRows, strings, defs, sigs, paramReader, types,
                     contractReader, layouts);
         }
-        else if (standardNativePointerLoads)
+        else if (usesStandardNativeImportSection)
         {
             var nativeImportRows = new List<TrRmNativeImportRow>(
                     nativeImportCount);
@@ -7548,7 +7809,10 @@ public static partial class TrRmExecutableCompiler
         var predicateFrozenScalarTables
             = predicateFrozenScalarValues.FrozenValueNodeCount == 0
                 ? new TrRmFrozenScalarValueTables([], 0, [], 0, [], 0)
-                : predicateFrozenScalarValues.Encode(types);
+                : !program.EnumDefinitions.IsEmpty
+                    ? predicateFrozenScalarValues.EncodeEN1EnumClosure(
+                        types, typeDefs, enumDefs, imports)
+                    : predicateFrozenScalarValues.Encode(types);
         var predicateTypePatternBytes = predicateTypePatterns.Count == 0 ? []
             : TrRmPredicateTypePatternTableWriter.Encode(
                 predicateTypePatterns, predicateCaptures.Count,
@@ -7582,6 +7846,8 @@ public static partial class TrRmExecutableCompiler
             + (moduleRefRows.Count != 0 ? 1 : 0)
             + (typeDefRows.Length != 0 ? 1 : 0)
             + (fieldRows.Count != 0 ? 1 : 0) + (layoutRows.Count != 0 ? 1 : 0)
+            + (enumRows.Count != 0 ? 1 : 0)
+            + (enumMemberRows.Count != 0 ? 1 : 0)
             + (parameters.Count != 0 ? 1 : 0)
             + (contracts.Count != 0 ? 1 : 0) + (exports.Count != 0 ? 1 : 0)
             + (moduleImportRows.Count != 0 ? 1 : 0)
@@ -7628,6 +7894,16 @@ public static partial class TrRmExecutableCompiler
         if (typeDefRows.Length != 0)
         {
             sections.Add(new(0x13, 0, (uint)typeDefRows.Length, typeDefBytes));
+        }
+        if (enumRows.Count != 0)
+        {
+            sections.Add(new(0x0053, 0, checked((uint)enumRows.Count),
+                enumDefBytes));
+        }
+        if (enumMemberRows.Count != 0)
+        {
+            sections.Add(new(0x0054, 0,
+                checked((uint)enumMemberRows.Count), enumMemberBytes));
         }
         if (fieldRows.Count != 0)
         {
@@ -8141,7 +8417,7 @@ public static partial class TrRmExecutableCompiler
                 = generalPredicateGraphsInitializationReferenceBodies
                     && kind == 0x3D;
             var isSelectedStandardNativeImportSection
-                = standardNativePointerLoads && kind == 0x0021;
+                = usesStandardNativeImportSection && kind == 0x0021;
             var isForeignNativeInterfaceSection
                 = schema.UsesForeignNativeInterface()
                     && (kind is 0x0024 or 0x0025 or 0x004C or 0x0052
@@ -11692,7 +11968,9 @@ public static partial class TrRmExecutableCompiler
         }
     }
 
-    private static ImmutableArray<int> CollectNativeBlittableStructureIndexes(BoundProgram program)
+    private static ImmutableArray<int>
+        CollectNativeBlittableStructureIndexes(BoundProgram program,
+            bool allowNominalEnums = false)
     {
         var required = new bool[program.Structures.Length];
         var visiting = new bool[program.Structures.Length];
@@ -11744,7 +12022,15 @@ public static partial class TrRmExecutableCompiler
         {
             if (BoundEnumTypes.IsType(type))
             {
-                throw Unsupported("Standard TRRM has no assigned nominal enum TypeSpec or TypeDef encoding.");
+                if (!allowNominalEnums
+                    || !BoundEnumTypes.IsValidType(
+                        type, program.EnumDefinitions))
+                {
+                    throw Unsupported(
+                        "A native value references an enum without the selected EN1 TypeSpec and TypeDef closure.");
+                }
+
+                return;
             }
             if ((int)type is >= 100 and < BoundEnumTypes.First)
             {
@@ -11852,7 +12138,8 @@ public static partial class TrRmExecutableCompiler
     {
         if (BoundEnumTypes.IsType(type))
         {
-            throw Unsupported("Standard TRRM has no assigned nominal enum TypeSpec or TypeDef encoding.");
+            throw Unsupported(
+                "Standard TRRM has no assigned nominal enum TypeSpec or TypeDef encoding.");
         }
         var row = Array.IndexOf(s_types, type) + 1;
         if (row == 0)
@@ -12030,7 +12317,10 @@ public static partial class TrRmExecutableCompiler
 
         if (BoundEnumTypes.IsType(type))
         {
-            throw Unsupported("Standard TRRM has no assigned nominal enum TypeSpec or TypeDef encoding.");
+            return typeSpecRowOverride is not null
+                ? typeSpecRowOverride(type)
+                : throw Unsupported(
+                    "Standard TRRM has no assigned nominal enum TypeSpec or TypeDef encoding.");
         }
         if (NativePointerTypes.IsType(type))
         {
@@ -12132,7 +12422,10 @@ public static partial class TrRmExecutableCompiler
     {
         if (BoundEnumTypes.IsType(fieldType))
         {
-            throw Unsupported("Standard TRRM has no assigned enum layout/type encoding.");
+            return typeSpecRowOverride is not null
+                ? typeSpecRowOverride(fieldType)
+                : throw Unsupported(
+                    "Standard TRRM has no assigned enum layout/type encoding.");
         }
         if ((int)fieldType is >= 100 and < BoundEnumTypes.First)
         {

@@ -27,12 +27,31 @@ public static partial class TrRmExecutableCompiler
                 schema, sourceTypeExports, sourceEnumDeclarationExports);
         }
 
-        if (sourceEnumDeclarationExports is { Count: > 0 }
-            && program.EnumDefinitions.IsEmpty)
+        C1EnumClosureSourceEnumExports? sourceEnumExports = null;
+        if (program.EnumDefinitions.IsEmpty)
         {
-            throw new ArgumentException(
-                "Source enum mappings do not select an enum in this program.",
-                nameof(sourceEnumDeclarationExports));
+            if (sourceEnumDeclarationExports is { Count: > 0 })
+            {
+                throw new ArgumentException(
+                    "Source enum mappings do not select an enum in this program.",
+                    nameof(sourceEnumDeclarationExports));
+            }
+        }
+        else
+        {
+            if (!schema.UsesEN1EnumClosure()
+                || sourceEnumDeclarationExports is null
+                || program.EnumDefinitions.Any(static definition =>
+                    definition.Identity
+                        is not BoundEnumDeclarationIdentity.Source))
+            {
+                throw Unsupported(
+                    "Combined FNI source emission currently requires source-owned enums under the exact EN1 selector.");
+            }
+
+            sourceEnumExports
+                = C1EnumClosureSourceEnumExports.Capture(program,
+                    sourceEnumDeclarationExports);
         }
 
         if (!schema.UsesForeignNativeInterface()
@@ -57,7 +76,6 @@ public static partial class TrRmExecutableCompiler
             || !program.PrivateClassReferences.IsEmpty
             || !program.StandardClassDeclarations.IsEmpty
             || !program.InterfaceWitnesses.IsEmpty
-            || !program.EnumDefinitions.IsEmpty
             || !ForeignNativeInterfaceContract.IsValidTable(program))
         {
             throw Unsupported(
@@ -100,10 +118,11 @@ public static partial class TrRmExecutableCompiler
         {
             if (typeExport is null || typeExport.Namespace is null
                 || string.IsNullOrEmpty(typeExport.Name)
-                || string.IsNullOrEmpty(typeExport.ExportKey))
+                || string.IsNullOrEmpty(typeExport.ExportKey)
+                || !typeExport.EnumMemberDeclarationKeys.IsDefault)
             {
                 throw new ArgumentException(
-                    "An F+I source TypeDef mapping has invalid identity text.",
+                    "An F+I source TypeDef mapping has invalid identity text or enum-member keys.",
                     nameof(sourceTypeExports));
             }
 
@@ -140,7 +159,8 @@ public static partial class TrRmExecutableCompiler
         var requiredStructureIndexes
             = GetForeignNativeInterfaceStructureIndexes(
                 foreignNativeInterfaces, program,
-                out var exportedStructureIndexes);
+                out var exportedStructureIndexes,
+                schema.UsesEN1EnumClosure());
         var structureTypeExportNames = structureTypeExports.Select(
                 static export => string.IsNullOrEmpty(export.Namespace)
                     ? export.Name
@@ -179,7 +199,8 @@ public static partial class TrRmExecutableCompiler
                         ? export.Name
                         : string.Concat(export.Namespace, ".",
                             export.Name)]))
-            .Concat(CollectNativeBlittableStructureIndexes(program))
+            .Concat(CollectNativeBlittableStructureIndexes(program,
+                allowNominalEnums: schema.UsesEN1EnumClosure()))
             .Distinct()
             .Order()
             .ToImmutableArray();
@@ -241,13 +262,22 @@ public static partial class TrRmExecutableCompiler
             return placeholder;
         }
 
+        var frozenScalarValueBuilder
+            = schema.UsesForeignNativeInterfaceParameterSurface()
+                ? new TrRmFrozenScalarValueBuilder() : null;
         var callerArtifact = EmitDevelopment(callerProgram, moduleIdentity,
             schema, moduleTargetRequirement, structureTypeExports,
             standardInitializationReferenceBodies: true,
             standardSchemaIdentity: schemaIdentity,
             foreignInterfaceMethodMapTokenForCall:
                 GetMethodMapPlaceholder,
-            semanticVerificationProgram: program);
+            semanticVerificationProgram: program,
+            sourceEnumExports: sourceEnumExports,
+            frozenScalarValueBuilder: frozenScalarValueBuilder);
+        var enumTypeDefRows = sourceEnumExports is null
+            ? ImmutableDictionary<PrimitiveType, int>.Empty
+            : GetForeignNativeInterfaceEnumTypeDefRows(callerArtifact,
+                program, schema);
         var sourceMethodExports = SourceGenericMethodExports.Capture(
             program, moduleIdentity, []);
         var artifact = EmitGenericMethodCallsDraftSource(program,
@@ -259,14 +289,68 @@ public static partial class TrRmExecutableCompiler
             standardSchemaIdentity: schemaIdentity,
             foreignInterfaceMethodMapTokenPlaceholders:
                 methodMapPlaceholders,
-            frozenScalarValueBuilder: schema
-                .UsesForeignNativeInterfaceParameterSurface()
-                    ? new TrRmFrozenScalarValueBuilder() : null);
+            frozenScalarValueBuilder: frozenScalarValueBuilder,
+            foreignNativeInterfaceEnumTypeDefRows: enumTypeDefRows);
         artifact = AddForeignNativeInterfaceRows(artifact, program,
             interfaceTypeExports, schema);
         _ = TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
             new TrRmArtifactIndex(artifact, schema));
         return artifact;
+    }
+
+    private static ImmutableDictionary<PrimitiveType, int>
+        GetForeignNativeInterfaceEnumTypeDefRows(byte[] artifact,
+            BoundProgram program, TrRmArtifactSchema schema)
+    {
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(new TrRmArtifactIndex(artifact,
+                schema));
+        if (tables.EnumDefs.Count != program.EnumDefinitions.Length
+            || tables.TypeDefs.Count < program.EnumDefinitions.Length)
+        {
+            throw Invalid(
+                "The F+I caller artifact does not retain its complete enum TypeDef closure.");
+        }
+
+        var firstEnumTypeDefRow = tables.TypeDefs.Count
+            - program.EnumDefinitions.Length + 1;
+        var result
+            = ImmutableDictionary.CreateBuilder<PrimitiveType, int>();
+        for (var enumIndex = 0;
+            enumIndex < program.EnumDefinitions.Length; enumIndex++)
+        {
+            var definition = program.EnumDefinitions[enumIndex];
+            var enumRow = enumIndex + 1;
+            var typeDefRow = firstEnumTypeDefRow + enumIndex;
+            var separator = definition.Name.LastIndexOf('.',
+                StringComparison.Ordinal);
+            var namespaceName = separator < 0
+                ? string.Empty : definition.Name[..separator];
+            var name = separator < 0
+                ? definition.Name : definition.Name[(separator + 1)..];
+            if (definition.Identity
+                    is not BoundEnumDeclarationIdentity.Source
+                || tables.EnumDefs.GetOwnerTypeDef(enumRow)
+                    != (uint)typeDefRow
+                || tables.TypeDefs.GetKind(typeDefRow) != 4
+                || !StringComparer.Ordinal.Equals(
+                    tables.TypeDefs.GetNamespace(typeDefRow),
+                    namespaceName)
+                || !StringComparer.Ordinal.Equals(
+                    tables.TypeDefs.GetName(typeDefRow), name)
+                || !TrRmConstantSourceValueValidator.TryGetIntegerTypeCode(
+                    definition.UnderlyingType, out var typeCode)
+                || tables.EnumDefs.GetUnderlyingTypeSpecRef(enumRow)
+                    != (0xF200_0000u | typeCode)
+                || !result.TryAdd(BoundEnumTypes.Type(enumIndex),
+                    typeDefRow))
+            {
+                throw Invalid(
+                    "The F+I enum TypeDef rows do not preserve the checked source enum order and identity.");
+            }
+        }
+
+        return result.ToImmutable();
     }
 
     private static byte[] EmitForeignNativeInterfaceEnumOnlyDeclarations(
@@ -321,7 +405,8 @@ public static partial class TrRmExecutableCompiler
     private static ImmutableArray<int>
         GetForeignNativeInterfaceStructureIndexes(
         IReadOnlyList<BoundInterfaceDefinition> definitions,
-        BoundProgram program, out ImmutableArray<int> exportedIndexes)
+        BoundProgram program, out ImmutableArray<int> exportedIndexes,
+        bool allowNominalEnums)
     {
         var structureStates = new byte[program.Structures.Length];
         var pointerStates = new byte[program.NativePointerTypes.Length];
@@ -393,14 +478,31 @@ public static partial class TrRmExecutableCompiler
                 return;
             }
 
+            if (BoundEnumTypes.IsType(type))
+            {
+                if (!allowNominalEnums
+                    || !BoundEnumTypes.IsValidType(
+                        type, program.EnumDefinitions))
+                {
+                    throw Unsupported(
+                        "A ForeignNativeInterface signature references an enum without the selected EN1 closure.");
+                }
+
+                var enumDefinition
+                    = program.EnumDefinitions[BoundEnumTypes.Index(type)];
+                if (enumDefinition.BlittableTargetRequirement
+                    != FixedLayoutStorage.WindowsX64TargetRequirement)
+                {
+                    throw Unsupported(
+                        $"ForeignNativeInterface enum '{enumDefinition.Name}' has no supported Windows x64 Blittable layout.");
+                }
+
+                return;
+            }
+
             if ((int)type is < 100
                 || (int)type >= BoundEnumTypes.First)
             {
-                if (BoundEnumTypes.IsType(type))
-                {
-                    throw Unsupported(
-                        "F+I aggregate pointee signatures do not yet admit nominal enum TypeSpecs.");
-                }
                 return;
             }
 
@@ -450,10 +552,11 @@ public static partial class TrRmExecutableCompiler
             {
                 if (field is null
                     || NativeFixedArrayTypes.IsType(field.Type)
-                    || BoundEnumTypes.IsType(field.Type))
+                    || (BoundEnumTypes.IsType(field.Type)
+                        && !allowNominalEnums))
                 {
                     throw Unsupported(
-                        "The current F+I aggregate layout slice admits scalar, raw-pointer, typed-pointer, inline-struct and function-pointer fields only.");
+                        "The current F+I aggregate layout slice admits scalar, raw-pointer, typed-pointer, inline-struct, function-pointer and selected EN1 enum fields only.");
                 }
 
                 Visit(field.Type, false, depth + 1);

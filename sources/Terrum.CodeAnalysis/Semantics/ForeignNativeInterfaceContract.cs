@@ -10,18 +10,22 @@ namespace Terrum.CodeAnalysis.Semantics;
 internal static class ForeignNativeInterfaceContract
 {
     internal static bool IsValidTable(BoundProgram program) =>
-        IsValidTable(program.Interfaces, program.NativePointerTypes,
+        IsValidTable(program.Interfaces, program.Structures,
+            program.NativePointerTypes,
             program.NativeFunctionPointerSignatures,
-            program.NativeCoreRegistration);
+            program.NativeCoreRegistration, program.EnumDefinitions);
 
     internal static bool IsValidTable(
         ImmutableArray<BoundInterfaceDefinition> interfaces,
+        ImmutableArray<BoundStruct> structures,
         ImmutableArray<NativePointerTypeDefinition> pointerTypes,
         ImmutableArray<NativeFunctionPointerSignatureDefinition>
             functionPointerSignatures,
-        NativeCoreRegistrationSet? nativeCoreRegistration)
+        NativeCoreRegistrationSet? nativeCoreRegistration,
+        ImmutableArray<BoundEnumDefinition> enumDefinitions)
     {
-        if (interfaces.IsDefault || pointerTypes.IsDefault
+        if (interfaces.IsDefault || structures.IsDefault
+            || pointerTypes.IsDefault
             || functionPointerSignatures.IsDefault)
         {
             return false;
@@ -43,7 +47,8 @@ internal static class ForeignNativeInterfaceContract
             if (definition.Members.IsDefaultOrEmpty
                 || definition.Members.Any(member => member is null
                     || !IsValidMethodSignature(member,
-                        pointerTypes, functionPointerSignatures)))
+                        structures, pointerTypes,
+                        functionPointerSignatures, enumDefinitions)))
             {
                 return false;
             }
@@ -59,9 +64,11 @@ internal static class ForeignNativeInterfaceContract
 
     internal static bool IsValidMethodSignature(
         BoundInterfaceMemberDefinition member,
+        ImmutableArray<BoundStruct> structures,
         ImmutableArray<NativePointerTypeDefinition> pointerTypes,
         ImmutableArray<NativeFunctionPointerSignatureDefinition>
-            functionPointerSignatures)
+            functionPointerSignatures,
+        ImmutableArray<BoundEnumDefinition> enumDefinitions)
     {
         if (member.NativeCallableConvention is not (
                 NativeCallingConvention.Unmanaged
@@ -69,7 +76,8 @@ internal static class ForeignNativeInterfaceContract
                 or NativeCallingConvention.Stdcall)
             || member.ResultType is not BoundInterfaceType resultType
             || !TryGetNativeValueType(resultType, pointerTypes,
-                functionPointerSignatures, allowVoid: true,
+                functionPointerSignatures, enumDefinitions,
+                allowVoid: true,
                 out _)
             || member.Parameters.IsDefault
             || !TryGetReceiverType(member, pointerTypes,
@@ -80,12 +88,19 @@ internal static class ForeignNativeInterfaceContract
             return false;
         }
 
+        if (!HasValidEnumClosure(member, structures, pointerTypes,
+                functionPointerSignatures, enumDefinitions))
+        {
+            return false;
+        }
+
         foreach (var parameter in member.Parameters)
         {
             if (parameter is null
                 || parameter.Mode != BoundInterfaceParameterMode.Value
                 || !TryGetNativeValueType(parameter.Type, pointerTypes,
-                    functionPointerSignatures, allowVoid: false, out _))
+                    functionPointerSignatures, enumDefinitions,
+                    allowVoid: false, out _))
             {
                 return false;
             }
@@ -343,8 +358,10 @@ internal static class ForeignNativeInterfaceContract
             || !AreNativeOutputContractsEqual(
                 member.NativeOutputContracts,
                 foreignCall.NativeOutputContracts)
-            || !IsValidMethodSignature(member, program.NativePointerTypes,
-                program.NativeFunctionPointerSignatures))
+            || !IsValidMethodSignature(member, program.Structures,
+                program.NativePointerTypes,
+                program.NativeFunctionPointerSignatures,
+                program.EnumDefinitions))
         {
             return false;
         }
@@ -418,6 +435,7 @@ internal static class ForeignNativeInterfaceContract
         ImmutableArray<NativePointerTypeDefinition> pointerTypes,
         ImmutableArray<NativeFunctionPointerSignatureDefinition>
             functionPointerSignatures,
+        ImmutableArray<BoundEnumDefinition> enumDefinitions,
         bool allowVoid,
         out PrimitiveType nativeType)
     {
@@ -435,6 +453,30 @@ internal static class ForeignNativeInterfaceContract
         {
             nativeType = PrimitiveType.Void;
             return true;
+        }
+
+        if (BoundEnumTypes.IsType(type.PrimitiveType))
+        {
+            var enumIndex = BoundEnumTypes.Index(type.PrimitiveType);
+            if (!BoundEnumTypes.IsValidType(type.PrimitiveType,
+                    enumDefinitions)
+                || enumDefinitions[enumIndex]
+                    is not BoundEnumDefinition definition)
+            {
+                return false;
+            }
+
+            if (definition.BlittableTargetRequirement
+                    != FixedLayoutStorage.WindowsX64TargetRequirement
+                || definition.UnderlyingType is not (
+                    PrimitiveType.Int8 or PrimitiveType.Int16
+                    or PrimitiveType.Int32 or PrimitiveType.Int64
+                    or PrimitiveType.UInt8 or PrimitiveType.UInt16
+                    or PrimitiveType.UInt32 or PrimitiveType.UInt64
+                    or PrimitiveType.NativeInt or PrimitiveType.NativeUInt))
+            {
+                return false;
+            }
         }
 
         if (!DirectNativeImportContract.IsValueParameter(type.PrimitiveType,
@@ -458,6 +500,169 @@ internal static class ForeignNativeInterfaceContract
         }
 
         nativeType = type.PrimitiveType;
+        return true;
+    }
+
+    private static bool HasValidEnumClosure(
+        BoundInterfaceMemberDefinition member,
+        ImmutableArray<BoundStruct> structures,
+        ImmutableArray<NativePointerTypeDefinition> pointerTypes,
+        ImmutableArray<NativeFunctionPointerSignatureDefinition>
+            functionPointerSignatures,
+        ImmutableArray<BoundEnumDefinition> enumDefinitions)
+    {
+        if (structures.IsDefault || pointerTypes.IsDefault
+            || functionPointerSignatures.IsDefault)
+        {
+            return false;
+        }
+
+        var structureStates = new byte[structures.Length];
+        var pointerStates = new byte[pointerTypes.Length];
+        var functionPointerStates
+            = new byte[functionPointerSignatures.Length];
+
+        bool Visit(PrimitiveType current, bool throughPointer, int depth)
+        {
+            if (depth > SemanticVerifier.MaximumDepth)
+            {
+                return false;
+            }
+
+            if (NativePointerTypes.IsType(current))
+            {
+                var index = NativePointerTypes.Index(current);
+                if ((uint)index >= (uint)pointerTypes.Length
+                    || pointerTypes[index] is not NativePointerTypeDefinition
+                        pointer)
+                {
+                    return false;
+                }
+                if (pointerStates[index] == 2)
+                {
+                    return true;
+                }
+                if (pointerStates[index] == 1
+                    || !NativePointerTypeContract.IsValidType(
+                        current, pointerTypes))
+                {
+                    return false;
+                }
+
+                pointerStates[index] = 1;
+                var isValid = Visit(pointer.PointeeType, true, depth + 1);
+                pointerStates[index] = 2;
+                return isValid;
+            }
+
+            if (NativeFunctionPointerTypes.IsType(current))
+            {
+                var index = NativeFunctionPointerTypes.Index(current);
+                if ((uint)index >= (uint)functionPointerSignatures.Length
+                    || functionPointerSignatures[index]
+                        is not NativeFunctionPointerSignatureDefinition
+                            signature)
+                {
+                    return false;
+                }
+                if (functionPointerStates[index] == 2)
+                {
+                    return true;
+                }
+                if (functionPointerStates[index] == 1
+                    || signature.ParameterTypes.IsDefault)
+                {
+                    return false;
+                }
+
+                functionPointerStates[index] = 1;
+                if (!Visit(signature.ReturnType, true, depth + 1))
+                {
+                    return false;
+                }
+                foreach (var parameterType in signature.ParameterTypes)
+                {
+                    if (!Visit(parameterType, true, depth + 1))
+                    {
+                        return false;
+                    }
+                }
+                functionPointerStates[index] = 2;
+                return true;
+            }
+
+            if (BoundEnumTypes.IsType(current))
+            {
+                var index = BoundEnumTypes.Index(current);
+                return BoundEnumTypes.IsValidType(current, enumDefinitions)
+                    && enumDefinitions[index]
+                        is BoundEnumDefinition definition
+                    && definition.BlittableTargetRequirement
+                        == FixedLayoutStorage.WindowsX64TargetRequirement;
+            }
+
+            var value = (int)current;
+            if (value is < 100 || value >= BoundEnumTypes.First)
+            {
+                return true;
+            }
+
+            var structureIndex = value - 100;
+            if ((uint)structureIndex >= (uint)structures.Length)
+            {
+                return false;
+            }
+            if (structureStates[structureIndex] == 2)
+            {
+                return true;
+            }
+            if (structureStates[structureIndex] == 1)
+            {
+                return throughPointer;
+            }
+
+            var structure = structures[structureIndex];
+            if (structure is null
+                || structure.BlittableTargetRequirement
+                    != FixedLayoutStorage.WindowsX64TargetRequirement
+                || structure.LayoutKind is not (1 or 2 or 3)
+                || structure.IsUnique
+                || structure.CleanupMethod is not null
+                || structure.Fields.IsDefaultOrEmpty)
+            {
+                return false;
+            }
+
+            structureStates[structureIndex] = 1;
+            foreach (var field in structure.Fields)
+            {
+                if (field is null
+                    || NativeFixedArrayTypes.IsType(field.Type)
+                    || !Visit(field.Type, false, depth + 1))
+                {
+                    return false;
+                }
+            }
+            structureStates[structureIndex] = 2;
+            return true;
+        }
+
+        if (member.ResultType is not BoundInterfaceType resultType
+            || !Visit(resultType.PrimitiveType, false, 0))
+        {
+            return false;
+        }
+
+        foreach (var parameter in member.Parameters)
+        {
+            if (parameter is null
+                || parameter.Type is not BoundInterfaceType parameterType
+                || !Visit(parameterType.PrimitiveType, false, 0))
+            {
+                return false;
+            }
+        }
+
         return true;
     }
 

@@ -512,6 +512,12 @@ internal static class TrRmArtifactSchemaFacts
             == TrRmArtifactSchema
                 .ForeignNativeInterfaceParameterSurfaceEnumClosureDraft;
 
+    internal static bool UsesStandardNativeImportRows(
+        this TrRmArtifactSchema schema)
+        => schema
+            == TrRmArtifactSchema
+                .ForeignNativeInterfaceParameterSurfaceEnumClosureDraft;
+
     internal static bool UsesNativeParameterContracts(
         this TrRmArtifactSchema schema) =>
         schema.UsesForeignInvocationContracts()

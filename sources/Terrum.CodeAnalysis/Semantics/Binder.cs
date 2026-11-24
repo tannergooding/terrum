@@ -8464,9 +8464,55 @@ internal sealed partial class Binder
                 continue;
             }
 
+            var isBlittable = false;
+            foreach (var attribute in primaryPart.Declaration.Children
+                         .OfType<SyntaxNode>()
+                         .Where(static child =>
+                             child.Kind == SyntaxKind.Attribute))
+            {
+                var attributeName = AttributeName(attribute);
+                var registeredBlittable
+                    = _layoutCoreRegistration
+                        is LayoutCoreRegistrationSet layoutRegistration
+                        && IsRegisteredLayoutAttribute(attribute,
+                            layoutRegistration.Blittable);
+                var registeredLayout
+                    = _layoutCoreRegistration
+                        is LayoutCoreRegistrationSet selectedRegistration
+                        && IsRegisteredLayoutAttribute(attribute,
+                            selectedRegistration.Layout);
+                if (registeredBlittable)
+                {
+                    if (isBlittable || !HasNoAttributeArguments(attribute))
+                    {
+                        Report("TRM3005",
+                            "Blittable is a nonrepeatable, parameterless enum representation contract.",
+                            attribute.Span);
+                    }
+                    else
+                    {
+                        isBlittable = true;
+                    }
+                }
+                else if (registeredLayout || attributeName == "Layout")
+                {
+                    Report("TRM3005",
+                        "Layout does not apply to integer-backed enums.",
+                        attribute.Span);
+                }
+                else if (attributeName == "Blittable")
+                {
+                    Report("TRM3005",
+                        "Blittable requires its exact selected Core registration.",
+                        attribute.Span);
+                }
+            }
+
             var enumIndex = BoundEnumTypes.Index(sourceEnum.Type);
             var definition = _enumDefinitions[enumIndex] with {
                 UnderlyingType = underlyingType,
+                BlittableTargetRequirement = isBlittable
+                    ? FixedLayoutStorage.WindowsX64TargetRequirement : 0,
             };
             _enumDefinitions[enumIndex] = definition;
             var members = ImmutableArray.CreateBuilder<

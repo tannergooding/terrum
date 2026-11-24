@@ -4,6 +4,7 @@ using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
+using Terrum.CodeAnalysis.Tests.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
@@ -70,5 +71,218 @@ internal sealed class TrRmFniEnumClosureTests
             .Select(row => tables.Features.GetFeature(row).FeatureId),
             Does.Not.Contain(
                 TrRmFeatureTableReader.MethodParameterLabelsFeatureId));
+    }
+
+    [Test]
+    public void EmitsSourceOwnedEnumFniSignaturesBesideStandardNativeImports()
+    {
+        var tree = SyntaxTree.Parse("""
+            using Terrum.Interop;
+            namespace Demo {
+                [Blittable]
+                public enum Shade : int8 {
+                    Dark = -1,
+                    Light = 1
+                }
+                [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+                [ForeignNativeInterface(VTableByteOffset: uint32(0))]
+                public interface IProbe {
+                    public unsafe Shade Get();
+                    public unsafe void Set(Shade value);
+                }
+                [NativeImport("fixture.dll", "ReadValue")]
+                extern int32 ReadValue();
+            }
+            """);
+        var registration = NativeCoreRegistrationTests
+            .CreateRegistration(includeForeignNativeInterface: true);
+        var compilation = Compilation.CreateLibrary(tree,
+            new CompilationOptions {
+                NativeCoreRegistration = registration,
+                LayoutCoreRegistration =
+                    NativeCoreRegistrationTests
+                        .CreateLayoutRegistration(registration),
+            });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var enumDeclaration = tree.Root.DescendantNodes().Single(node =>
+            node.Kind == SyntaxKind.EnumDeclaration);
+        var enumDefinition = program.EnumDefinitions.Single(item =>
+            item.Identity is BoundEnumDeclarationIdentity.Source source
+            && source.Value.Parts.Any(part =>
+                part.IsPrimary && ReferenceEquals(part.Tree, tree)
+                && ReferenceEquals(part.Declaration, enumDeclaration)));
+        var enumExport = new TrRmSourceEnumDeclarationExport(program, 0,
+            enumDeclaration.Span, ["type.shade"],
+            ["shade.dark", "shade.light"]);
+        var interfaceDefinition = program.Interfaces.Single();
+        var interfaceExport = new TrRmSourceTypeExport("Demo", "IProbe",
+            "type.probe") {
+            GenericArity = 0,
+            InterfaceMethodExports = [
+                .. interfaceDefinition.Members.Select(member =>
+                    new TrRmSourceInterfaceMethodExport(
+                        member.SourceInputOrdinal,
+                        member.SourceDeclarationSpan,
+                        $"method.probe.{member.Name}")),
+            ],
+        };
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "FniEnumProvider", SchemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [interfaceExport], [enumExport]);
+        var index
+            = TrRmArtifactIndex
+                .ForForeignNativeInterfaceParameterSurfaceEnumClosureDraft(
+                    artifact);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(index);
+
+        Assert.That(tables.EnumDefs.Count, Is.EqualTo(1));
+        Assert.That(tables.EnumMembers.Count, Is.EqualTo(2));
+        Assert.That(tables.ForeignNativeInterfaces.Count, Is.EqualTo(1));
+        Assert.That(index.TryGetSection(0x0030, out _, out var sourceCount),
+            Is.True);
+        Assert.That(sourceCount, Is.EqualTo(2));
+        Assert.That(index.TryGetSection(0x0021, out _, out var nativeImportCount),
+            Is.True);
+        Assert.That(nativeImportCount, Is.EqualTo(1));
+        Assert.That(index.TryGetSection(0x0066, out _, out var surfaceCount),
+            Is.True);
+        Assert.That(surfaceCount, Is.EqualTo(1));
+
+        var enumTypeDefRow = checked((int)
+            tables.EnumDefs.GetOwnerTypeDef(1));
+        var getMethod = Enumerable.Range(1, tables.Methods.Count)
+            .Single(row => tables.Methods.GetName(row) == "Get");
+        var getSignature = tables.Methods.GetSignature(getMethod);
+        var resultType = tables.TypeSpecs.GetTypeSpecRef(
+            tables.Signatures.GetResultTypeSpec(getSignature));
+        Assert.That(resultType.Form, Is.EqualTo(0x02));
+        Assert.That(resultType.Row, Is.EqualTo(enumTypeDefRow));
+
+        var setMethod = Enumerable.Range(1, tables.Methods.Count)
+            .Single(row => tables.Methods.GetName(row) == "Set");
+        var setSignature = tables.Methods.GetSignature(setMethod);
+        var (parameterFirst, parameterCount)
+            = tables.Signatures.GetParamRange(setSignature);
+        Assert.That(parameterCount, Is.EqualTo(1));
+        var parameterType = tables.TypeSpecs.GetTypeSpecRef(
+            tables.Parameters.GetTypeSpec(parameterFirst));
+        Assert.That(parameterType.Form, Is.EqualTo(0x02));
+        Assert.That(parameterType.Row, Is.EqualTo(enumTypeDefRow));
+
+        var featureIds = Enumerable.Range(1, tables.Features.Count)
+            .Select(row => tables.Features.GetFeature(row).FeatureId)
+            .ToArray();
+        Assert.That(featureIds, Does.Contain(
+            TrRmFeatureTableReader.NativeInterfaceCallsFeatureId));
+        Assert.That(featureIds, Does.Contain(
+            TrRmFeatureTableReader.TypedFrozenValuesFeatureId));
+        Assert.That(featureIds, Does.Contain(18u));
+        Assert.That(featureIds, Does.Contain(
+            TrRmFeatureTableReader.MethodParameterLabelsFeatureId));
+        Assert.That(enumDefinition.Members.Length, Is.EqualTo(2));
+    }
+
+    [Test]
+    public void AcceptsBlittable128BitEnumInsidePointerClosure()
+    {
+        var tree = SyntaxTree.Parse("""
+            using Terrum.Interop;
+            namespace Demo {
+                [Blittable]
+                public enum Shade : int128 {
+                    Dark = -1,
+                    Light = 1
+                }
+                [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+                [ForeignNativeInterface(VTableByteOffset: uint32(0))]
+                public interface IProbe {
+                    public unsafe void Set(ptr<Shade> value);
+                }
+            }
+            """);
+        var registration = NativeCoreRegistrationTests
+            .CreateRegistration(includeForeignNativeInterface: true);
+        var compilation = Compilation.CreateLibrary(tree,
+            new CompilationOptions {
+                NativeCoreRegistration = registration,
+                LayoutCoreRegistration =
+                    NativeCoreRegistrationTests
+                        .CreateLayoutRegistration(registration),
+            });
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var enumDeclaration = tree.Root.DescendantNodes().Single(node =>
+            node.Kind == SyntaxKind.EnumDeclaration);
+        var enumExport = new TrRmSourceEnumDeclarationExport(program, 0,
+            enumDeclaration.Span, ["enum.shade"],
+            ["enum.shade.dark", "enum.shade.light"]);
+        var interfaceDefinition = program.Interfaces.Single();
+        var interfaceExport = new TrRmSourceTypeExport("Demo", "IProbe",
+            "type.probe") {
+            InterfaceMethodExports = [
+                .. interfaceDefinition.Members.Select(member =>
+                    new TrRmSourceInterfaceMethodExport(
+                        member.SourceInputOrdinal,
+                        member.SourceDeclarationSpan,
+                        $"method.probe.{member.Name}")),
+            ],
+        };
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "FniEnumPointerProvider", SchemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [interfaceExport], [enumExport]);
+        var index
+            = TrRmArtifactIndex
+                .ForForeignNativeInterfaceParameterSurfaceEnumClosureDraft(
+                    artifact);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(index);
+
+        Assert.That(tables.EnumDefs.Count, Is.EqualTo(1));
+        Assert.That(tables.ForeignNativeInterfaces.Count, Is.EqualTo(1));
+        Assert.That(tables.Signatures.Count, Is.EqualTo(1));
+    }
+
+    [TestCase("int8", false)]
+    [TestCase("int128", true)]
+    public void RejectsDirectEnumSignaturesWithoutSupportedNativeLayout(
+        string underlyingType, bool isBlittable)
+    {
+        var blittableAttribute = isBlittable ? "[Blittable]" : string.Empty;
+        var tree = SyntaxTree.Parse($"""
+            using Terrum.Interop;
+            namespace Demo {{
+                {blittableAttribute}
+                public enum Shade : {underlyingType} {{
+                    Dark = -1,
+                    Light = 1
+                }}
+                [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+                [ForeignNativeInterface(VTableByteOffset: uint32(0))]
+                public interface IProbe {{
+                    public unsafe Shade Get();
+                }}
+            }}
+            """);
+        var registration = NativeCoreRegistrationTests
+            .CreateRegistration(includeForeignNativeInterface: true);
+        var compilation = Compilation.CreateLibrary(tree,
+            new CompilationOptions {
+                NativeCoreRegistration = registration,
+                LayoutCoreRegistration =
+                    NativeCoreRegistrationTests
+                        .CreateLayoutRegistration(registration),
+            });
+
+        Assert.That(compilation.Diagnostics.Any(
+            static diagnostic => diagnostic.Code == "TRM3030"), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
     }
 }
