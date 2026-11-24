@@ -868,8 +868,7 @@ internal static class TrRmDeclarationFailureBindingContract
                 return;
             }
 
-            if (clauseOrdinal != originOrdinal
-                || !facts[clauseInputIndex].MethodImports.TryGetValue(
+            if (!facts[clauseInputIndex].MethodImports.TryGetValue(
                     clauseMethodDefRow, out var methodImports))
             {
                 throw new InvalidDataException(
