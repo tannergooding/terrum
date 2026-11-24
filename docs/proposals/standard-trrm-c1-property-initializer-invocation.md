@@ -64,6 +64,10 @@ These are inspected-source facts, not validation results:
   phase. It does not yet retain the full per-property state frame or all
   role-1/role-3 receiver alternatives across CFG joins. Removing the remaining
   checks would therefore still be incorrect.
+* The Construction-2 PI1 source producer emits source-ordered repeated
+  role-3 CallSites from a role-1 constructor Body, using direct immutable
+  scalar parameter Homes. It does not yet compose those calls with direct
+  field stores or preserve the full dynamic property-state frame.
 * [`TrRmContractTableReader.ReadConstructionClause`](../../sources/Terrum.CodeAnalysis/Modules/TrRmContractTableReader.cs)
   has provisional role-3 Q linkage. It does not supply these CallSite,
   caller-entry or lifecycle rules.
