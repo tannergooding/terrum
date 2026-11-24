@@ -1699,7 +1699,7 @@ internal sealed class TrRmC1EnumClosureSourceTests
                     public int32 ConstantValue;
                     public Box(int32 value) {
                         int32 first = value;
-                        int32 copy = first;
+                        int32 copy = first & 42;
                         int32 constant = 42;
                         Value = copy;
                         ConstantValue = constant;
@@ -1745,10 +1745,11 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 schemaIdentity);
             Assert.That(initializerBody.HomeMap[32], Is.EqualTo(3),
                 schemaIdentity);
-            Assert.That(initializerBody.Code[..24].ToArray(),
+            Assert.That(initializerBody.Code[..32].ToArray(),
                 Is.EqualTo(new byte[] {
                     0xD5, 0, 1, 0, 0xD6, 0x10, 2, 0,
-                    0xD5, 0, 2, 0, 0xD6, 0x10, 3, 0,
+                    0xD5, 0, 2, 0, 0xD4, 1, 0, 0,
+                    0xC1, 1, 0xF0, 0x10, 0xD6, 0x10, 3, 0,
                     0xD4, 1, 0, 0, 0xD6, 0x11, 4, 0,
                 }), schemaIdentity);
             Assert.That(initializerBody.ConstantCount, Is.EqualTo(1),
@@ -1805,10 +1806,11 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 Is.EqualTo(3), schemaIdentity);
             Assert.That(reemittedInitializerBody.ConstantMap.Length,
                 Is.EqualTo(sizeof(uint) * 2), schemaIdentity);
-            Assert.That(reemittedInitializerBody.Code[..24].ToArray(),
+            Assert.That(reemittedInitializerBody.Code[..32].ToArray(),
                 Is.EqualTo(new byte[] {
                     0xD5, 0, 1, 0, 0xD6, 0x10, 2, 0,
-                    0xD5, 0, 2, 0, 0xD6, 0x10, 3, 0,
+                    0xD5, 0, 2, 0, 0xD4, 1, 0, 0,
+                    0xC1, 1, 0xF0, 0x10, 0xD6, 0x10, 3, 0,
                     0xD4, 1, 0, 0, 0xD6, 0x11, 4, 0,
                 }), schemaIdentity);
             var reemittedLocalConstant

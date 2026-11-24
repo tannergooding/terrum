@@ -4974,6 +4974,18 @@ public static partial class TrRmExecutableCompiler
                             => constant.Type == variable.Type
                                 && TryGetC1M1SourceScalarTypeSpecReference(
                                     variable.Type, out _),
+                        BoundBinary binary
+                            => binary.Type == variable.Type
+                                && IsC1M1Construction2BodyIntegerType(
+                                    variable.Type)
+                                && binary.Operator is (TokenKind.Ampersand
+                                    or TokenKind.Pipe or TokenKind.Caret)
+                                && IsSupportedScalarInitializerOperand(
+                                    binary.Left, variable.Type,
+                                    local.Variable)
+                                && IsSupportedScalarInitializerOperand(
+                                    binary.Right, variable.Type,
+                                    local.Variable),
                         _ => false,
                     };
                     if (variable.IsMutable || variable.IsOut || variable.IsInit
@@ -5055,6 +5067,23 @@ public static partial class TrRmExecutableCompiler
                 assignments.Add(assignment);
             }
         }
+
+        bool IsSupportedScalarInitializerOperand(
+            BoundExpression expression, PrimitiveType type,
+            int beforeVariable)
+            => expression switch
+            {
+                BoundRead read => read.Type == type
+                    && read.Variable >= 0
+                    && read.Variable < beforeVariable
+                    && (read.Variable < function.ParameterCount
+                        || localVariables.Contains(read.Variable))
+                    && function.Variables[read.Variable].Type == type,
+                BoundConstant constant => constant.Type == type
+                    && constant.RepresentationType == type
+                    && constant.Bits.IsCanonicalFor(type),
+                _ => false,
+            };
     }
 
     private static bool IsC1M1Construction2SourceCopyType(
@@ -5379,21 +5408,20 @@ public static partial class TrRmExecutableCompiler
                     case BoundBlock nested:
                         EmitBlock(nested);
                         break;
+                    case BoundLocal local
+                        when local.Initializer is BoundBinary binary:
+                        EmitBitwiseLocal(binary, local.Variable);
+                        break;
                     case BoundLocal local:
                         byte localSourceRegister;
                         if (local.Initializer is BoundRead read)
                         {
-                            AppendHomeLoad(read.Variable);
+                            AppendHomeLoad(0, read.Variable);
                             localSourceRegister = 0;
                         }
                         else if (local.Initializer is BoundConstant constant)
                         {
-                            var constantIndex = checked((ushort)
-                                GetConstantMapIndex(constant));
-                            code.Add(0xD4);
-                            code.Add(1);
-                            code.Add((byte)constantIndex);
-                            code.Add((byte)(constantIndex >> 8));
+                            AppendConstantLoad(1, constant);
                             localSourceRegister = 1;
                         }
                         else
@@ -5402,10 +5430,8 @@ public static partial class TrRmExecutableCompiler
                                 "A Construction-2 initializer local contains an unvalidated initializer.");
                         }
 
-                        code.Add(0xD6);
-                        code.Add((byte)(0x10 | localSourceRegister));
-                        code.Add(checked((byte)local.Variable));
-                        code.Add(checked((byte)(local.Variable >> 8)));
+                        AppendLocalStore(local.Variable,
+                            localSourceRegister);
                         break;
                     case BoundFieldAssignment assignment:
                         EmitFieldAssignment(assignment);
@@ -5477,12 +5503,81 @@ public static partial class TrRmExecutableCompiler
             AppendRecordReference(0xD9, storeRecord);
         }
 
-        void AppendHomeLoad(int homeIndex)
+        void AppendHomeLoad(byte destinationRegister, int homeIndex)
         {
             code.Add(0xD5);
-            code.Add(0);
+            code.Add(destinationRegister);
             code.Add(checked((byte)homeIndex));
             code.Add(checked((byte)(homeIndex >> 8)));
+        }
+
+        void AppendConstantLoad(byte destinationRegister,
+            BoundConstant constant)
+        {
+            var constantIndex = checked((ushort)
+                GetConstantMapIndex(constant));
+            code.Add(0xD4);
+            code.Add(destinationRegister);
+            code.Add((byte)constantIndex);
+            code.Add((byte)(constantIndex >> 8));
+        }
+
+        void AppendLocalStore(int localVariable, byte sourceRegister)
+        {
+            code.Add(0xD6);
+            code.Add((byte)(0x10 | sourceRegister));
+            code.Add(checked((byte)localVariable));
+            code.Add(checked((byte)(localVariable >> 8)));
+        }
+
+        void AppendScalarOperandLoad(byte destinationRegister,
+            BoundExpression operand)
+        {
+            switch (operand)
+            {
+                case BoundRead read:
+                    AppendHomeLoad(destinationRegister, read.Variable);
+                    break;
+                case BoundConstant constant:
+                    AppendConstantLoad(destinationRegister, constant);
+                    break;
+                default:
+                    throw new InvalidDataException(
+                        "A Construction-2 initializer bitwise operand is not a validated scalar Home or constant.");
+            }
+        }
+
+        void EmitBitwiseLocal(BoundBinary binary, int localVariable)
+        {
+            if ((uint)localVariable >= (uint)function.Variables.Length
+                || localVariable < function.ParameterCount
+                || function.Variables[localVariable].Type != binary.Type
+                || binary.Left.Type != binary.Type
+                || binary.Right.Type != binary.Type
+                || !IsC1M1Construction2BodyIntegerType(binary.Type)
+                || binary.Operator is not (TokenKind.Ampersand
+                    or TokenKind.Pipe or TokenKind.Caret))
+            {
+                throw new InvalidDataException(
+                    "A Construction-2 initializer local has an unvalidated bitwise expression.");
+            }
+
+            AppendScalarOperandLoad(0, binary.Left);
+            AppendScalarOperandLoad(1, binary.Right);
+            var (opcode, control)
+                = GetC1M1Construction2IntegerBinaryEncoding(
+                    binary.Operator, binary.OverflowBehavior);
+            code.Add(opcode);
+            code.Add(control);
+            const byte destinationRegister = 0;
+            const byte leftRegister = 0;
+            const byte rightRegister = 1;
+            var payload = (ushort)(destinationRegister
+                | (0x0F << 4) | (leftRegister << 8)
+                | (rightRegister << 12));
+            code.Add((byte)payload);
+            code.Add((byte)(payload >> 8));
+            AppendLocalStore(localVariable, destinationRegister);
         }
 
         int GetConstantMapIndex(BoundConstant constant)
