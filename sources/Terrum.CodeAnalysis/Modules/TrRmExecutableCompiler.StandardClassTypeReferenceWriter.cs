@@ -14149,6 +14149,7 @@ public static partial class TrRmExecutableCompiler
 
         var methodEmissionPlans = new SortedDictionary<int,
             C1M1MethodEmissionPlan>();
+        var bodylessClassMethodStubRows = new HashSet<int>();
         foreach (var (methodRow, method) in expectedMethodsByOldRow)
         {
             var imports = methodImportsByExpectedMethodRow[methodRow];
@@ -14176,6 +14177,37 @@ public static partial class TrRmExecutableCompiler
                 new C1M1MethodEmissionPlan(
                     expectedMethodOwnersByOldRow[methodRow], method,
                     [.. imports], [], ReadOnlyMemory<byte>.Empty));
+        }
+
+        foreach (var (ownerTypeDefRow, view) in typeViewsByOldRow)
+        {
+            foreach (var method in view.Methods)
+            {
+                if (method.BodyRow != 0
+                    || !method.ExportKeys.IsEmpty
+                    || !method.SelectedExportKeys.IsEmpty)
+                {
+                    continue;
+                }
+
+                var methodRow = GetMethodDefRow(method.DefinitionId);
+                if (methodEmissionPlans.ContainsKey(methodRow))
+                {
+                    continue;
+                }
+
+                if (rootTables.Methods.GetOwnerType(methodRow)
+                        != ownerTypeDefRow
+                    || !bodylessClassMethodStubRows.Add(methodRow))
+                {
+                    throw Invalid(
+                        "A retained bodyless class MethodDef stub has an invalid owner or duplicate identity.");
+                }
+
+                methodEmissionPlans.Add(methodRow,
+                    new C1M1MethodEmissionPlan(view, method, [],
+                        [], ReadOnlyMemory<byte>.Empty));
+            }
         }
 
         foreach (var declaration in rootDeclarations)
@@ -15204,7 +15236,10 @@ public static partial class TrRmExecutableCompiler
                 };
             if ((hasBody
                     ? method.BodyRow == 0 || !plan.Imports.IsEmpty
-                    : method.BodyRow != 0 || plan.Imports.IsEmpty
+                    : method.BodyRow != 0
+                        || (plan.Imports.IsEmpty
+                            && !bodylessClassMethodStubRows.Contains(
+                                oldMethodRow))
                         || !plan.ExportKeys.IsEmpty)
                 || !constructionShapeIsSupported
                 || (method.Flags & 3) == 3
@@ -15218,7 +15253,7 @@ public static partial class TrRmExecutableCompiler
                     out var newOwnerTypeDefRow))
             {
                 throw Unsupported(
-                    "C1M1 source-free class re-emission supports bodyless public MethodDef Imports and bounded local type-formal MethodDefs with FieldDef-only Construction roles.");
+                    "C1M1 source-free class re-emission supports bodyless method stubs/imports and bounded local type-formal MethodDefs with FieldDef or PI1 PropertyDef Construction roles.");
             }
 
             if (method.ReceiverTypeSpecReference != 0)
