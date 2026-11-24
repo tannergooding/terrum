@@ -1,5 +1,6 @@
 using System;
 using System.Buffers.Binary;
+using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
@@ -702,6 +703,69 @@ internal sealed class TrRmFniEnumClosureTests
         Assert.That(NativeEmitter.EmitLibrary(loaded,
             nativeFunctionNames,
             NativeRuntimePolicy.FailFast), Is.Not.Empty);
+
+        var stagedFunctionRow = Enumerable.Range(1, tables.Methods.Count)
+            .Single(row => HasSimpleName(tables.Methods.GetName(row),
+                "InvokeStaged"));
+        var stagedBody = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(stagedFunctionRow),
+            tables.Contracts.Count);
+        var malformedTypeMap = stagedBody.TypeMap.ToArray();
+        var shadeTypeToken = 0x1100_0000u
+            | checked((uint)shadeTypeSpecRow);
+        var tintTypeToken = 0x1100_0000u
+            | checked((uint)tintTypeSpecRow);
+        var replacedTypeCount = 0;
+        for (var typeIndex = 0; typeIndex < stagedBody.TypeCount;
+            typeIndex++)
+        {
+            var offset = typeIndex * sizeof(uint);
+            if (BinaryPrimitives.ReadUInt32LittleEndian(
+                    malformedTypeMap.AsSpan(offset)) == shadeTypeToken)
+            {
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    malformedTypeMap.AsSpan(offset), tintTypeToken);
+                replacedTypeCount++;
+            }
+        }
+
+        Assert.That(replacedTypeCount, Is.GreaterThan(0));
+        var stagedBlocks = new TrRmRegisterBodyBlock[stagedBody.BlockCount];
+        for (var blockIndex = 0; blockIndex < stagedBlocks.Length;
+            blockIndex++)
+        {
+            var block = stagedBody.GetBlock(blockIndex);
+            stagedBlocks[blockIndex] = new TrRmRegisterBodyBlock(
+                BinaryPrimitives.ReadUInt32LittleEndian(block),
+                BinaryPrimitives.ReadUInt32LittleEndian(block[4..]),
+                BinaryPrimitives.ReadUInt16LittleEndian(block[8..]));
+        }
+
+        var stagedRecords
+            = new ReadOnlyMemory<byte>[stagedBody.RecordCount];
+        for (var recordIndex = 0; recordIndex < stagedRecords.Length;
+            recordIndex++)
+        {
+            stagedRecords[recordIndex]
+                = stagedBody.GetRecord(recordIndex).ToArray();
+        }
+
+        var malformedStagedBody = TrRmRegisterBodyWriter.Encode(
+            stagedBody.HomeMap.ToArray(), malformedTypeMap,
+            stagedBody.MethodMap.ToArray(), stagedBody.FieldMap.ToArray(),
+            stagedBody.ConstantMap.ToArray(), stagedBlocks, stagedRecords,
+            stagedBody.Code.ToArray(), tables.Contracts.Count,
+            TrRmArtifactSchema
+                .ForeignNativeInterfaceParameterSurfaceEnumClosureDraft);
+        var malformedArtifact = ReplaceRegisterBody(artifact,
+            TrRmArtifactSchema
+                .ForeignNativeInterfaceParameterSurfaceEnumClosureDraft,
+            SchemaIdentity,
+            tables.Methods.GetBodyRow(stagedFunctionRow),
+            malformedStagedBody);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(malformedArtifact,
+                "FniEnumBodyProvider", [coreProvider.Input]));
     }
 
     [Test]
@@ -1471,5 +1535,70 @@ internal sealed class TrRmFniEnumClosureTests
         Assert.That(compilation.Diagnostics.Any(
             static diagnostic => diagnostic.Code == "TRM3030"), Is.True,
             string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    private static byte[] ReplaceRegisterBody(byte[] artifact,
+        TrRmArtifactSchema schema, string standardSchemaIdentity, int bodyRow,
+        byte[] replacementBody)
+    {
+        var index
+            = TrRmArtifactIndex
+                .ForForeignNativeInterfaceParameterSurfaceEnumClosureDraft(
+                    artifact);
+        if (!index.TryGetSection(0x0020, out var bodySection,
+                out var bodyCount)
+            || bodyRow <= 0 || bodyRow > bodyCount)
+        {
+            throw new InvalidOperationException(
+                "The FNI enum test artifact has no selected Body row.");
+        }
+
+        var offsetBytes = checked((bodyCount + 1) * sizeof(uint));
+        var bodyRows = new byte[bodyCount][];
+        var bodyDataLength = 0;
+        for (var row = 1; row <= bodyCount; row++)
+        {
+            var start = checked((int)BinaryPrimitives
+                .ReadUInt32LittleEndian(bodySection[((row - 1)
+                    * sizeof(uint))..]));
+            var end = checked((int)BinaryPrimitives
+                .ReadUInt32LittleEndian(bodySection[(row
+                    * sizeof(uint))..]));
+            var rowBytes = row == bodyRow
+                ? (byte[])replacementBody.Clone()
+                : bodySection.Slice(offsetBytes + start,
+                    end - start).ToArray();
+            bodyRows[row - 1] = rowBytes;
+            bodyDataLength = checked(bodyDataLength + rowBytes.Length);
+        }
+
+        var newBodySection = new byte[checked(offsetBytes + bodyDataLength)];
+        var nextOffset = 0;
+        for (var rowIndex = 0; rowIndex < bodyRows.Length; rowIndex++)
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                newBodySection.AsSpan(rowIndex * sizeof(uint)),
+                checked((uint)nextOffset));
+            var rowBytes = bodyRows[rowIndex];
+            rowBytes.CopyTo(newBodySection, offsetBytes + nextOffset);
+            nextOffset = checked(nextOffset + rowBytes.Length);
+        }
+
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            newBodySection.AsSpan(bodyCount * sizeof(uint)),
+            checked((uint)nextOffset));
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var sectionIndex = 0;
+            sectionIndex < index.SectionCount; sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var section, out var recordCount);
+            sections.Add(new TrRmSection(kind, flags,
+                checked((uint)recordCount),
+                kind == 0x0020 ? newBodySection : section.ToArray()));
+        }
+
+        return TrRmArtifactWriter.Encode(sections, schema,
+            standardSchemaIdentity: standardSchemaIdentity);
     }
 }
