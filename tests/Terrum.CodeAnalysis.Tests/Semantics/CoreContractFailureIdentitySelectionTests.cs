@@ -76,6 +76,28 @@ internal sealed class CoreContractFailureIdentitySelectionTests
     }
 
     [Test]
+    public void StandardFailureMapValidationAcceptsNoPhaseAttachments()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-"
+            + "generic-method-calls-1-class-mutability-1-construction-2";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public void Empty() {}
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, "sample.module", schemaIdentity, 1);
+        var input = new TrRmStandardArtifactInput(schemaIdentity, artifact);
+
+        Assert.That(() =>
+                TrRmDeclarationFailureBindingContract
+                    .ValidateForStandardInputs(input, [], "sample.module",
+                        [], [], []),
+            Throws.Nothing);
+    }
+
+    [Test]
     public void SelectionAllowsOnlyRolesNeededByTheModule()
     {
         var requirementOnly = CreateSelection() with {
