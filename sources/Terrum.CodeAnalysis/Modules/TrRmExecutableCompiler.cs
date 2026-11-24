@@ -231,6 +231,18 @@ public static partial class TrRmExecutableCompiler
             || StringComparer.Ordinal.Equals(schemaIdentity,
                 StandardC1M1Construction2L1R1SchemaIdentity)
             || StringComparer.Ordinal.Equals(schemaIdentity,
+                StandardC1M1ConstructionL1R1PropertyInitializedStateSchemaIdentity)
+            || StringComparer.Ordinal.Equals(schemaIdentity,
+                StandardC1M1Construction2L1R1PropertyInitializedStateSchemaIdentity)
+            || StringComparer.Ordinal.Equals(schemaIdentity,
+                StandardC1M1ConstructionL1R1PropertyInitializedStateEnumClosureSchemaIdentity)
+            || StringComparer.Ordinal.Equals(schemaIdentity,
+                StandardC1M1Construction2L1R1PropertyInitializedStateEnumClosureSchemaIdentity)
+            || StringComparer.Ordinal.Equals(schemaIdentity,
+                StandardC1M1ConstructionL1R1PropertyInitializedStateClassInstanceLayoutSchemaIdentity)
+            || StringComparer.Ordinal.Equals(schemaIdentity,
+                StandardC1M1Construction2L1R1PropertyInitializedStateClassInstanceLayoutSchemaIdentity)
+            || StringComparer.Ordinal.Equals(schemaIdentity,
                 StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsSchemaIdentity)
             || StringComparer.Ordinal.Equals(schemaIdentity,
                 StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceSchemaIdentity)
@@ -1475,6 +1487,18 @@ public static partial class TrRmExecutableCompiler
                     StandardC1M1ConstructionL1R1SchemaIdentity)
                 || StringComparer.Ordinal.Equals(schemaIdentity,
                     StandardC1M1Construction2L1R1SchemaIdentity)
+                || StringComparer.Ordinal.Equals(schemaIdentity,
+                    StandardC1M1ConstructionL1R1PropertyInitializedStateSchemaIdentity)
+                || StringComparer.Ordinal.Equals(schemaIdentity,
+                    StandardC1M1Construction2L1R1PropertyInitializedStateSchemaIdentity)
+                || StringComparer.Ordinal.Equals(schemaIdentity,
+                    StandardC1M1ConstructionL1R1PropertyInitializedStateEnumClosureSchemaIdentity)
+                || StringComparer.Ordinal.Equals(schemaIdentity,
+                    StandardC1M1Construction2L1R1PropertyInitializedStateEnumClosureSchemaIdentity)
+                || StringComparer.Ordinal.Equals(schemaIdentity,
+                    StandardC1M1ConstructionL1R1PropertyInitializedStateClassInstanceLayoutSchemaIdentity)
+                || StringComparer.Ordinal.Equals(schemaIdentity,
+                    StandardC1M1Construction2L1R1PropertyInitializedStateClassInstanceLayoutSchemaIdentity)
                 || StringComparer.Ordinal.Equals(schemaIdentity,
                     StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsSchemaIdentity)
                 || StringComparer.Ordinal.Equals(schemaIdentity,

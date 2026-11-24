@@ -4684,6 +4684,58 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
                     declarationIndex, invalidDeclaration),
                 reference.GenericNominalTypeDefinitions),
             Is.False);
+
+        var sourceFreeCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(""), reference);
+        Assert.That(sourceFreeCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                sourceFreeCompilation.Diagnostics));
+        var reemitted = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)sourceFreeCompilation.Program!,
+            "PI1ClassProviderReemitted",
+            C1M1Construction2PropertyInitializedStateSchemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var reloaded = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(
+                C1M1Construction2PropertyInitializedStateSchemaIdentity,
+                reemitted),
+            "PI1ClassProviderReemitted", [], ["BoxKey"]);
+        var reloadedView = reloaded.StandardClassDeclarations.Single(
+            static declaration => declaration.Declaration.Name == "Box")
+            .Declaration;
+        var reloadedProperty = reloadedView.Properties.Single(
+            static candidate => candidate.Name == "Value");
+        Assert.That(reloadedProperty.BackingFieldDefinitionId >> 24,
+            Is.EqualTo(0x14u));
+        Assert.That(reloadedProperty.InitMethodDefinitionId >> 24,
+            Is.EqualTo(0x16u));
+        Assert.That(reloadedProperty.SelectedExportKeys,
+            Is.EqualTo(new[] { "Box.Value" }));
+        var reloadedTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForC1M1Construction2L1R1PropertyInitializedStateDraft(
+                        reemitted));
+        Assert.That(reloadedTables.Exports.TryGetDefinitionForKey(1,
+            "Box.Value", out var reloadedPropertyDefinition), Is.True);
+        var reloadedInitializer = Enumerable.Range(
+                1, reloadedTables.Methods.Count)
+            .Single(method => reloadedTables.Contracts
+                .HasConstructionClause(method)
+                && reloadedTables.Contracts.GetConstructionClause(method)
+                    .RoleTag == 1);
+        Assert.That(reloadedTables.Contracts.GetConstructionClause(
+                reloadedInitializer).InitializedMemberDefIds,
+            Is.EqualTo(new[] { reloadedPropertyDefinition }));
+        var reloadedInitMethod = Enumerable.Range(
+                1, reloadedTables.Methods.Count)
+            .Single(method => reloadedTables.Contracts
+                .HasConstructionClause(method)
+                && reloadedTables.Contracts.GetConstructionClause(method)
+                    .RoleTag == 3);
+        Assert.That(reloadedTables.Contracts.GetConstructionClause(
+                reloadedInitMethod).PropertyDefRow,
+            Is.EqualTo(reloadedPropertyDefinition & 0x00FF_FFFFu));
     }
 
     [Test]

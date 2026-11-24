@@ -52,11 +52,15 @@ not validation results:
   now retains PropertyDef identities, selected keys, type references, and
   getter/setter/init/backing edges. Standard class-view validation and
   compatibility compare those edges through the corresponding MethodDef and
-  FieldDef ordinals; source-free re-emission still rejects imported PI1
-  backing closure, so provider replacement and remapping are not complete.
+  FieldDef ordinals. The exact Construction-2 PI1 class source-free writer now
+  remaps local selected PropertyDefs, backing fields, accessor MethodDefs,
+  role-1 property guarantees and role-3 init links. Imported expected PI1
+  PropertyDef/accessor/backing views and their provider replacement/remapping
+  remain incomplete.
   [`TrRmStandardClassTypeProviderBindingTests`](../../tests/Terrum.CodeAnalysis.Tests/Modules/TrRm/TrRmStandardClassTypeProviderBindingTests.cs)
-  covers the PI1 view and a malformed missing-backing rejection; these tests
-  remain unverified under the active execution hold.
+  covers PI1 view capture, malformed missing-backing rejection and local
+  source-free re-emission/reload; these tests remain unverified under the
+  active execution hold.
 * [`TrRmStandardClassSourceEmissionTests`](../../tests/Terrum.CodeAnalysis.Tests/Modules/TrRm/TrRmStandardClassSourceEmissionTests.cs)
   covers auto-getter, setter, init-accessor and constructor CallSite producer
   cases, including repeated calls, multiple properties and source-order

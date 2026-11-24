@@ -32,6 +32,18 @@ public static partial class TrRmExecutableCompiler
                 => TrRmArtifactSchema.C1M1ConstructionParameterLabelsReceiverAccessDraft,
             StandardC1M1Construction2L1R1SchemaIdentity
                 => TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessDraft,
+            StandardC1M1ConstructionL1R1PropertyInitializedStateSchemaIdentity
+                => TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateDraft,
+            StandardC1M1Construction2L1R1PropertyInitializedStateSchemaIdentity
+                => TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateDraft,
+            StandardC1M1ConstructionL1R1PropertyInitializedStateEnumClosureSchemaIdentity
+                => TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft,
+            StandardC1M1Construction2L1R1PropertyInitializedStateEnumClosureSchemaIdentity
+                => TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft,
+            StandardC1M1ConstructionL1R1PropertyInitializedStateClassInstanceLayoutSchemaIdentity
+                => TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft,
+            StandardC1M1Construction2L1R1PropertyInitializedStateClassInstanceLayoutSchemaIdentity
+                => TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft,
             StandardC1M1ConstructionL1R1EnumClosureInitializerCopyEvidenceSchemaIdentity
                 => TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureInitializerCopyEvidenceDraft,
             StandardC1M1Construction2L1R1EnumClosureInitializerCopyEvidenceSchemaIdentity
@@ -71,7 +83,11 @@ public static partial class TrRmExecutableCompiler
     private sealed record C1M1TypeDefEmissionView(
         byte Kind, string Namespace, string Name, uint TypeDefFlags,
         ImmutableArray<BoundStandardClassFieldDeclaration> Fields,
-        ImmutableArray<BoundStandardClassLayoutVariant> Layouts);
+        ImmutableArray<BoundStandardClassLayoutVariant> Layouts)
+    {
+        internal ImmutableArray<BoundStandardClassPropertyDeclaration>
+            Properties { get; init; } = [];
+    }
 
     private sealed record C1M1IndependentClassTypeDefPlan(
         BoundSourceTypeProviderSnapshot Provider,
@@ -1857,11 +1873,6 @@ public static partial class TrRmExecutableCompiler
                     fieldName = field.Name;
                     fieldType = field.Type;
                     fieldFlags = field.Flags;
-                    if ((fieldFlags & 0x10u) != 0)
-                    {
-                        throw Unsupported(
-                            "Imported PI1 property backing closure requires retained PropertyDef expectations.");
-                    }
                 }
                 else
                 {
@@ -14048,7 +14059,11 @@ public static partial class TrRmExecutableCompiler
             sourceModuleRows, sourceSnapshotsByModuleRow,
             typeDefViewsByOldRow, exportsByOldRow,
             [.. methodConstraintTypeSpecSeeds,
-                .. moduleFunctionTypeSpecSeeds]);
+                .. moduleFunctionTypeSpecSeeds,
+                .. typeDefViewsByOldRow.Values
+                    .SelectMany(static view => view.Properties)
+                    .Select(static property =>
+                        property.TypeSpecReference)]);
 
         var methodBindingsByImportRow = new SortedDictionary<int,
             BoundStandardClassMethodExpectation>();
@@ -14926,6 +14941,9 @@ public static partial class TrRmExecutableCompiler
         var typeDefNames = new List<(string Namespace, string Name)>();
         var fieldRowMap = new Dictionary<int, int>();
         var fieldNames = new List<string>();
+        var propertyRows = new List<TrRmPropertyDefRow>();
+        var propertyNames = new List<string>();
+        var propertyRowMap = new Dictionary<int, int>();
         var methodRows = Enumerable.Repeat(
             default(TrRmMethodDefRow), methodDefRowOrder.Count).ToList();
         var methodSignatureRows = new List<TrRmMethodSigRow>();
@@ -14966,6 +14984,7 @@ public static partial class TrRmExecutableCompiler
         {
             var view = typeDefViewsByOldRow[oldTypeDefRow];
             if (view.Fields.Length > 0xFF_FFFF
+                || view.Properties.Length > 0xFF_FFFF
                 || view.Layouts.IsEmpty
                 || view.Layouts.Length > 0xFF_FFFF)
             {
@@ -15002,6 +15021,94 @@ public static partial class TrRmExecutableCompiler
                 fieldRows.Add(new TrRmFieldDefRow(newTypeDefRow,
                     0, remappedTypeSpec, field.Flags));
                 fieldNames.Add(field.Name);
+            }
+
+            foreach (var property in view.Properties)
+            {
+                if (!schema.UsesPropertyInitializedState()
+                    || (property.DefinitionId >> 24) != 0x1E
+                    || property.OwnerDefinitionId
+                        != (0x1300_0000u
+                            | checked((uint)oldTypeDefRow))
+                    || !propertyRowMap.TryAdd(
+                        checked((int)(property.DefinitionId
+                            & 0x00FF_FFFFu)),
+                        propertyRows.Count + 1)
+                    || (property.GetterMethodDefinitionId >> 24) != 0x16
+                    || !methodDefRowMap.TryGetValue(
+                        checked((int)(property.GetterMethodDefinitionId
+                            & 0x00FF_FFFFu)), out var getterMethodRow)
+                    || (property.SetterMethodDefinitionId != 0
+                        && ((property.SetterMethodDefinitionId >> 24) != 0x16
+                            || !methodDefRowMap.TryGetValue(
+                                checked((int)(
+                                    property.SetterMethodDefinitionId
+                                        & 0x00FF_FFFFu)),
+                                out _)))
+                    || (property.InitMethodDefinitionId != 0
+                        && ((property.InitMethodDefinitionId >> 24) != 0x16
+                            || !methodDefRowMap.TryGetValue(
+                                checked((int)(
+                                    property.InitMethodDefinitionId
+                                        & 0x00FF_FFFFu)),
+                                out _)))
+                    || (property.BackingFieldDefinitionId != 0
+                        && ((property.BackingFieldDefinitionId >> 24) != 0x14
+                            || !fieldRowMap.TryGetValue(
+                                checked((int)(
+                                    property.BackingFieldDefinitionId
+                                        & 0x00FF_FFFFu)),
+                                out _)))
+                {
+                    throw Unsupported(
+                        "A retained PI1 PropertyDef does not have complete remapped getter, accessor, and backing rows.");
+                }
+
+                var getterRow = getterMethodRow;
+                var setterRow = property.SetterMethodDefinitionId == 0 ? 0
+                    : methodDefRowMap[checked((int)(
+                        property.SetterMethodDefinitionId
+                            & 0x00FF_FFFFu))];
+                var initializerRow = property.InitMethodDefinitionId == 0
+                    ? 0 : methodDefRowMap[checked((int)(
+                        property.InitMethodDefinitionId
+                            & 0x00FF_FFFFu))];
+                var backingRow = property.BackingFieldDefinitionId == 0 ? 0
+                    : fieldRowMap[checked((int)(
+                        property.BackingFieldDefinitionId
+                            & 0x00FF_FFFFu))];
+                var remappedPropertyTypeSpec
+                    = RemapC1M1ClassTypeSpec(rootTables,
+                        property.TypeSpecReference, typeDefRowMap,
+                        importRowMap, outputTypeSpecRows, typeSpecRowMap,
+                        activeTypeSpecRows, depth: 0);
+                propertyRows.Add(new TrRmPropertyDefRow(newTypeDefRow,
+                    0, remappedPropertyTypeSpec, getterRow,
+                    property.Flags) {
+                    SetterMethodDefRow = setterRow,
+                    InitMethodDefRow = initializerRow,
+                    BackingFieldDefRow = backingRow,
+                });
+                propertyNames.Add(property.Name);
+
+                if (!exportsByOldRow[oldTypeDefRow].IsEmpty)
+                {
+                    foreach (var propertyExportKey in property.ExportKeys)
+                    {
+                        if (!AddExportKey(
+                                rootTables.TypeDefs.GetOwnerModule(
+                                    oldTypeDefRow), propertyExportKey))
+                        {
+                            throw new InvalidDataException(
+                                "C1M1 PI1 PropertyDef ExportKeys must be unique within the Module.");
+                        }
+
+                        exportRows.Add((
+                            0x1E00_0000u
+                                | checked((uint)(propertyRows.Count)),
+                            propertyExportKey));
+                    }
+                }
             }
 
             var layoutFirst = layoutRows.Count + 1;
@@ -15082,6 +15189,15 @@ public static partial class TrRmExecutableCompiler
                         && (method.InitializerMethodDefinitionId
                             & 0x00FF_FFFFu) != 0
                         && method.ConstructionPropertyDefinitionId == 0
+                        && method.InitializedMemberDefinitionIds
+                            .IsDefaultOrEmpty,
+                    3 => schema.UsesPropertyInitializedState()
+                        && method.InitializerMethodDefinitionId == 0
+                        && (method.ConstructionPropertyDefinitionId >> 24)
+                            == 0x1Eu
+                        && propertyRowMap.ContainsKey(checked((int)(
+                            method.ConstructionPropertyDefinitionId
+                                & 0x00FF_FFFFu)))
                         && method.InitializedMemberDefinitionIds
                             .IsDefaultOrEmpty,
                     _ => false,
@@ -15353,7 +15469,7 @@ public static partial class TrRmExecutableCompiler
                 methodContractCount++;
             }
 
-            if (method.ConstructionRole is 1 or 2)
+            if (method.ConstructionRole is 1 or 2 or 3)
             {
                 byte[] constructionPayload;
                 if (method.ConstructionRole == 1)
@@ -15369,29 +15485,48 @@ public static partial class TrRmExecutableCompiler
                         var memberDefinitionId
                             = method.InitializedMemberDefinitionIds[
                                 memberIndex];
-                        if ((memberDefinitionId >> 24) != 0x14
+                        var memberKind = memberDefinitionId >> 24;
+                        if ((memberKind != 0x14 && memberKind != 0x1E)
+                            || (memberKind == 0x1E
+                                && !schema.UsesPropertyInitializedState())
                             || !seenMembers.Add(memberDefinitionId))
                         {
                             throw Unsupported(
-                                "The bounded class-reference re-emitter supports Construction guarantees only for unique FieldDef members.");
+                                "The bounded class-reference re-emitter supports Construction guarantees only for unique FieldDef and PI1 PropertyDef members.");
                         }
 
-                        var oldFieldRow = GetFieldDefRow(
-                            memberDefinitionId);
-                        if (rootTables.Fields.GetOwnerTypeDef(oldFieldRow)
-                                != ownerTypeDefRow
-                            || (rootTables.Fields.GetFlags(oldFieldRow)
-                                & 0x08) != 0
-                            || !fieldRowMap.TryGetValue(oldFieldRow,
-                                out var newFieldRow))
+                        if (memberKind == 0x14)
+                        {
+                            var oldFieldRow = GetFieldDefRow(
+                                memberDefinitionId);
+                            if (rootTables.Fields.GetOwnerTypeDef(oldFieldRow)
+                                    != ownerTypeDefRow
+                                || (rootTables.Fields.GetFlags(oldFieldRow)
+                                    & 0x08) != 0
+                                || !fieldRowMap.TryGetValue(oldFieldRow,
+                                    out var newFieldRow))
+                            {
+                                throw new InvalidDataException(
+                                    "A retained Construction guarantee does not resolve to an emitted instance FieldDef.");
+                            }
+
+                            initializedMemberIds[memberIndex]
+                                = 0x1400_0000u
+                                    | checked((uint)newFieldRow);
+                        }
+                        else if (propertyRowMap.TryGetValue(checked((int)(
+                                     memberDefinitionId & 0x00FF_FFFFu)),
+                                     out var newPropertyRow))
+                        {
+                            initializedMemberIds[memberIndex]
+                                = 0x1E00_0000u
+                                    | checked((uint)newPropertyRow);
+                        }
+                        else
                         {
                             throw new InvalidDataException(
-                                "A retained Construction guarantee does not resolve to an emitted instance FieldDef.");
+                                "A retained Construction guarantee does not resolve to an emitted PI1 PropertyDef.");
                         }
-
-                        initializedMemberIds[memberIndex]
-                            = 0x1400_0000u
-                                | checked((uint)newFieldRow);
                     }
 
                     constructionPayload = new byte[checked(
@@ -15410,7 +15545,7 @@ public static partial class TrRmExecutableCompiler
                             initializedMemberIds[memberIndex]);
                     }
                 }
-                else
+                else if (method.ConstructionRole == 2)
                 {
                     var oldInitializerMethodRow = GetMethodDefRow(
                         method.InitializerMethodDefinitionId);
@@ -15437,6 +15572,31 @@ public static partial class TrRmExecutableCompiler
                     constructionPayload
                         = EncodeC1M1Construction2ProjectionContract(
                             newInitializerMethodRow);
+                }
+                else
+                {
+                    var sourceConstruction = rootTables.Contracts
+                        .GetConstructionClause(oldMethodRow);
+                    var oldPropertyRow = checked((int)(
+                        method.ConstructionPropertyDefinitionId
+                            & 0x00FF_FFFFu));
+                    if (sourceConstruction.RoleTag != 3
+                        || sourceConstruction.PropertyDefRow
+                            != (uint)oldPropertyRow
+                        || !propertyRowMap.TryGetValue(oldPropertyRow,
+                            out var newPropertyRow)
+                        || rootTables.Properties.GetInitMethod(
+                            oldPropertyRow) != oldMethodRow)
+                    {
+                        throw new InvalidDataException(
+                            "A retained role-3 MethodDef lost its exact PI1 PropertyDef association.");
+                    }
+
+                    constructionPayload = new byte[8];
+                    constructionPayload[0] = 3;
+                    BinaryPrimitives.WriteUInt32LittleEndian(
+                        constructionPayload.AsSpan(4),
+                        checked((uint)newPropertyRow));
                 }
 
                 if (contractFirst == 0)
@@ -16884,7 +17044,8 @@ public static partial class TrRmExecutableCompiler
         var methodClosureRowCount = (long)methodRows.Count
             + methodSignatureRows.Count + parameterRows.Count
             + genericParamRows.Count + genericConstraintRows.Count
-            + parameterSurfaceRows.Count + contractRows.Count
+            + parameterSurfaceRows.Count + propertyRows.Count
+            + contractRows.Count
             + bodyRows.Count + fieldPathRows.Count
             + frozenScalarValueBuilder.BlobCount
             + frozenScalarValueBuilder.FrozenValueNodeCount
@@ -16895,6 +17056,7 @@ public static partial class TrRmExecutableCompiler
             || genericParamRows.Count > 0xFF_FFFF
             || genericConstraintRows.Count > 0xFF_FFFF
             || parameterSurfaceRows.Count > 0xFF_FFFF
+            || propertyRows.Count > 0xFF_FFFF
             || contractRows.Count > 0xFF_FFFF
             || bodyRows.Count > 0xFF_FFFF
             || fieldPathRows.Count > 0xFF_FFFF
@@ -17011,7 +17173,14 @@ public static partial class TrRmExecutableCompiler
 
         foreach (var fieldName in fieldNames)
         {
-            AddString(fieldName);
+            if (fieldName.Length != 0)
+            {
+                AddString(fieldName);
+            }
+        }
+        foreach (var propertyName in propertyNames)
+        {
+            AddString(propertyName);
         }
         foreach (var methodName in methodNames)
         {
@@ -17075,7 +17244,15 @@ public static partial class TrRmExecutableCompiler
         for (var fieldIndex = 0; fieldIndex < fieldRows.Count; fieldIndex++)
         {
             fieldRows[fieldIndex] = fieldRows[fieldIndex] with {
-                NameStringRow = stringRows[fieldNames[fieldIndex]],
+                NameStringRow = (fieldRows[fieldIndex].Flags & 0x10u) != 0
+                    ? 0 : stringRows[fieldNames[fieldIndex]],
+            };
+        }
+        for (var propertyIndex = 0;
+            propertyIndex < propertyRows.Count; propertyIndex++)
+        {
+            propertyRows[propertyIndex] = propertyRows[propertyIndex] with {
+                NameStringRow = stringRows[propertyNames[propertyIndex]],
             };
         }
         for (var methodIndex = 0; methodIndex < methodRows.Count;
@@ -17273,6 +17450,14 @@ public static partial class TrRmExecutableCompiler
             : new TrRmMethodDefTableReader(methodBytes, methodRows.Count,
                 strings, moduleTables, typeDefs, signatures,
                 contractRows.Count, bodyRows.Count, schema);
+        var propertyBytes = propertyRows.Count == 0 ? []
+            : TrRmPropertyDefTableWriter.Encode(propertyRows, strings,
+                typeDefs, typeSpecs, methods, signatures, schema, fields,
+                parameters);
+        var properties = propertyRows.Count == 0 ? default
+            : new TrRmPropertyDefTableReader(propertyBytes,
+                propertyRows.Count, strings, typeDefs, typeSpecs, methods,
+                signatures, false, null, schema, fields, parameters);
         var classImportRows = CreateC1M1ClassImports(
             bindingsByImportRow, fieldBindingsByImportRow,
             methodBindingsByImportRow,
@@ -17285,11 +17470,11 @@ public static partial class TrRmExecutableCompiler
                 schema);
         var importBytes = classImportRows.Length == 0 ? []
             : TrRmImportTableWriter.Encode(classImportRows, strings,
-                moduleRefs, typeDefs, methods, default, default, default,
+                moduleRefs, typeDefs, methods, properties, default, default,
                 fields, featureReader, moduleTables, schema);
         var imports = classImportRows.Length == 0 ? default
             : new TrRmImportTableReader(importBytes, classImportRows.Length,
-                strings, moduleRefs, typeDefs, methods, default, default,
+                strings, moduleRefs, typeDefs, methods, properties, default,
                 default, fields, featureReader, moduleTables, schema);
         var genericParamBytes = genericParamRows.Count == 0 ? []
             : TrRmGenericParamTableWriter.Encode(genericParamRows,
@@ -17330,7 +17515,7 @@ public static partial class TrRmExecutableCompiler
                 ? TrRmContractTableWriter
                     .EncodeConstructionDraftForSchema(contractRows,
                         typeDefs, methods, signatures, parameters, typeSpecs,
-                        fields, default, default, featureReader, moduleTables,
+                        fields, properties, imports, featureReader, moduleTables,
                         predicateGraphCount: 0, schema: schema)
                 : TrRmContractTableWriter.EncodeWithPredicateGraphs(
                     contractRows, typeDefs, methods, signatures, parameters,
@@ -17371,6 +17556,11 @@ public static partial class TrRmExecutableCompiler
         {
             sections.Add(new TrRmSection(0x0014, 0,
                 checked((uint)fieldRows.Count), fieldBytes));
+        }
+        if (propertyRows.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x001E, 0,
+                checked((uint)propertyRows.Count), propertyBytes));
         }
         if (layoutFieldCount != 0)
         {
@@ -23843,7 +24033,9 @@ public static partial class TrRmExecutableCompiler
         TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
         int typeDefRow, BoundStandardClassTypeView view)
         => new(tables.TypeDefs.GetKind(typeDefRow), view.Namespace,
-            view.Name, view.TypeDefFlags, view.Fields, view.Layouts);
+            view.Name, view.TypeDefFlags, view.Fields, view.Layouts) {
+            Properties = view.Properties,
+        };
 
     private static C1M1TypeDefEmissionView CreateC1M1TypeDefEmissionView(
         TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,

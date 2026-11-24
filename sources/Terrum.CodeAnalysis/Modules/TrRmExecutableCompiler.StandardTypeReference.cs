@@ -4336,10 +4336,16 @@ public static partial class TrRmExecutableCompiler
             or StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsTypeBindingViewsSchemaIdentity
             or StandardC1M1ConstructionL1R1SchemaIdentity
             or StandardC1M1Construction2L1R1SchemaIdentity
+            or StandardC1M1ConstructionL1R1PropertyInitializedStateSchemaIdentity
+            or StandardC1M1Construction2L1R1PropertyInitializedStateSchemaIdentity
             or StandardC1M1ConstructionL1R1EnumClosureSchemaIdentity
             or StandardC1M1Construction2L1R1EnumClosureSchemaIdentity
+            or StandardC1M1ConstructionL1R1PropertyInitializedStateEnumClosureSchemaIdentity
+            or StandardC1M1Construction2L1R1PropertyInitializedStateEnumClosureSchemaIdentity
             or StandardC1M1ConstructionL1R1EnumClosureInitializerCopyEvidenceSchemaIdentity
             or StandardC1M1Construction2L1R1EnumClosureInitializerCopyEvidenceSchemaIdentity
+            or StandardC1M1ConstructionL1R1PropertyInitializedStateClassInstanceLayoutSchemaIdentity
+            or StandardC1M1Construction2L1R1PropertyInitializedStateClassInstanceLayoutSchemaIdentity
             or StandardC1M1ConstructionL1R1ClassInstanceLayoutInitializerCopyEvidenceSchemaIdentity
             or StandardC1M1Construction2L1R1ClassInstanceLayoutInitializerCopyEvidenceSchemaIdentity
             or StandardC1M1ConstructionL1R1ClassInstanceLayoutSchemaIdentity
