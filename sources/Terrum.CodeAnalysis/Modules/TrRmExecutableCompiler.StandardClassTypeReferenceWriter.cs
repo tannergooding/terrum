@@ -5107,18 +5107,8 @@ public static partial class TrRmExecutableCompiler
         {
             if (function.Variables.Length != function.ParameterCount
                 || branch.Else is not BoundStatement elseBranch
-                || branch.Condition is not BoundRead conditionRead
-                || conditionRead.Variable <= 0
-                || conditionRead.Variable >= function.ParameterCount
-                || conditionRead.Type != PrimitiveType.Bool
-                || function.Variables[conditionRead.Variable].Type
-                    != PrimitiveType.Bool
-                || function.Variables[conditionRead.Variable].IsMutable
-                || function.Variables[conditionRead.Variable].IsOut
-                || function.Variables[conditionRead.Variable].IsInit
-                || function.Variables[conditionRead.Variable].IsImplicitRef
-                || function.Variables[conditionRead.Variable]
-                    .IsInitializationLocal
+                || !IsC1M1Construction2InitializerCondition(
+                    branch.Condition, function)
                 || !branch.GenericUniquePropertyWhenTrue.IsEmpty
                 || !branch.GenericUniquePropertyWhenFalse.IsEmpty
                 || branch.GenericUniquePropertyKnownResult is not null)
@@ -5186,6 +5176,56 @@ public static partial class TrRmExecutableCompiler
                 AddFieldAssignment(assignment, fields, localVariables, result);
             }
         }
+    }
+
+    private static bool IsC1M1Construction2InitializerCondition(
+        BoundExpression condition, BoundFunction function)
+    {
+        if (function.IsStatic)
+        {
+            return false;
+        }
+
+        bool IsValueParameter(BoundRead read)
+        {
+            if (read.Variable <= 0
+                || read.Variable >= function.ParameterCount
+                || read.Type != function.Variables[read.Variable].Type)
+            {
+                return false;
+            }
+
+            var variable = function.Variables[read.Variable];
+            return !variable.IsMutable && !variable.IsOut && !variable.IsInit
+                && !variable.IsImplicitRef
+                && !variable.IsInitializationLocal;
+        }
+
+        if (condition is BoundRead booleanRead)
+        {
+            return booleanRead.Type == PrimitiveType.Bool
+                && IsValueParameter(booleanRead);
+        }
+
+        if (condition is not BoundBinary {
+                Left: BoundRead left,
+                Right: BoundRead right,
+            } comparison
+            || comparison.Type != PrimitiveType.Bool
+            || !IsValueParameter(left)
+            || !IsValueParameter(right))
+        {
+            return false;
+        }
+
+        return left.Type == PrimitiveType.Bool
+            && right.Type == PrimitiveType.Bool
+            && comparison.Operator is (TokenKind.EqualsEquals
+                or TokenKind.BangEquals)
+            || left.Type == right.Type
+                && IsC1M1Construction2BodyIntegerType(left.Type)
+                && IsC1M1Construction2IntegerComparisonOperator(
+                    comparison.Operator);
     }
 
     private static bool IsC1M1Construction2SourceCopyType(
@@ -5763,12 +5803,8 @@ public static partial class TrRmExecutableCompiler
         var function = initializer.Function;
         if (function.Variables.Length != function.ParameterCount
             || conditional.Else is not BoundStatement elseBranch
-            || conditional.Condition is not BoundRead conditionRead
-            || conditionRead.Variable <= 0
-            || conditionRead.Variable >= function.ParameterCount
-            || conditionRead.Type != PrimitiveType.Bool
-            || function.Variables[conditionRead.Variable].Type
-                != PrimitiveType.Bool)
+            || !IsC1M1Construction2InitializerCondition(
+                conditional.Condition, function))
         {
             throw new InvalidDataException(
                 "A Construction-2 conditional initializer differs from its checked input and branch contract.");
@@ -5829,11 +5865,10 @@ public static partial class TrRmExecutableCompiler
         };
         var edgeRecordIndex = AddRecord(
             TrRmRegisterBodyRecordWriter.EncodeConditionalEdge(1, 2));
-        var conditionCode = new List<byte>(8);
-        AppendHomeLoad(conditionCode, 0, conditionRead.Variable);
-        AppendRecordReference(conditionCode, 0xE4, edgeRecordIndex);
+        var conditionCode = EncodeCondition(conditional.Condition,
+            checked((ushort)edgeRecordIndex));
         var codeBlocks = new[] {
-            conditionCode.ToArray(),
+            conditionCode,
             EmitArm(trueAssignments),
             EmitArm(falseAssignments),
         };
@@ -5863,6 +5898,64 @@ public static partial class TrRmExecutableCompiler
             contractCount: contractCount, schema: schema,
             generalPredicateGraphsInitializationReferenceBodies
                 : schema.UsesGeneralPredicateGraphs());
+
+        byte[] EncodeCondition(BoundExpression condition,
+            ushort edgeIndex)
+        {
+            var conditionCode = new List<byte>(16);
+            if (condition is BoundRead read)
+            {
+                AppendHomeLoad(conditionCode, 0, read.Variable);
+            }
+            else if (condition is BoundBinary {
+                         Left: BoundRead left,
+                         Right: BoundRead right,
+                     } comparison)
+            {
+                AppendHomeLoad(conditionCode, 0, left.Variable);
+                AppendHomeLoad(conditionCode, 1, right.Variable);
+                const byte destinationRegister = 0;
+                const byte leftRegister = 0;
+                const byte rightRegister = 1;
+                var payload = (ushort)(destinationRegister
+                    | (0x0F << 4) | (leftRegister << 8)
+                    | (rightRegister << 12));
+                if (left.Type == PrimitiveType.Bool
+                    && right.Type == PrimitiveType.Bool)
+                {
+                    conditionCode.Add(0xC2);
+                    conditionCode.Add(comparison.Operator
+                        == TokenKind.EqualsEquals ? (byte)0x01 : (byte)0x02);
+                    conditionCode.Add((byte)payload);
+                    conditionCode.Add((byte)(payload >> 8));
+                }
+                else
+                {
+                    conditionCode.Add(0xC2);
+                    conditionCode.Add(0);
+                    conditionCode.Add((byte)payload);
+                    conditionCode.Add((byte)(payload >> 8));
+                    var predicatePayload = (ushort)(
+                        destinationRegister
+                        | (destinationRegister << 4) | (0x0F << 8)
+                        | (0x0F << 12));
+                    conditionCode.Add(0xC3);
+                    conditionCode.Add(
+                        GetC1M1Construction2IntegerComparisonPredicate(
+                            comparison.Operator));
+                    conditionCode.Add((byte)predicatePayload);
+                    conditionCode.Add((byte)(predicatePayload >> 8));
+                }
+            }
+            else
+            {
+                throw new InvalidDataException(
+                    "A Construction-2 conditional initializer lost its checked condition.");
+            }
+
+            AppendRecordReference(conditionCode, 0xE4, edgeIndex);
+            return conditionCode.ToArray();
+        }
 
         ImmutableArray<BoundFieldAssignment> CollectArm(
             BoundStatement arm)
