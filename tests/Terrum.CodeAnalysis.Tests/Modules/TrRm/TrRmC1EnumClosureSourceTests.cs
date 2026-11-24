@@ -1690,16 +1690,19 @@ internal sealed class TrRmC1EnumClosureSourceTests
     }
 
     [Test]
-    public void EmitsScalarLocalCopiesInConstructionInitializerBodies()
+    public void EmitsScalarLocalValuesInConstructionInitializerBodies()
     {
         var tree = SyntaxTree.Parse("""
             namespace Demo {
                 public class Box {
                     public int32 Value;
+                    public int32 ConstantValue;
                     public Box(int32 value) {
                         int32 first = value;
                         int32 copy = first;
+                        int32 constant = 42;
                         Value = copy;
+                        ConstantValue = constant;
                     }
                 }
             }
@@ -1709,7 +1712,8 @@ internal sealed class TrRmC1EnumClosureSourceTests
             string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = (BoundProgram)compilation.Program!;
         var classExport = CreateSourceClassExport(program, tree, "Box",
-            "type.box", "constructor.box", (0, "field.box.value"));
+            "type.box", "constructor.box", (0, "field.box.value"),
+            (1, "field.box.constant"));
         foreach (var schemaIdentity in s_initializerCopyEvidenceSchemaIdentities)
         {
             var artifact = EmitClassArtifact(program, "LocalCopyProvider",
@@ -1729,7 +1733,7 @@ internal sealed class TrRmC1EnumClosureSourceTests
             var initializerBody = tables.Bodies.GetRegisterBody(
                 tables.Methods.GetBodyRow(initializerMethodRow),
                 tables.Contracts.Count);
-            Assert.That(initializerBody.HomeCount, Is.EqualTo(4),
+            Assert.That(initializerBody.HomeCount, Is.EqualTo(5),
                 schemaIdentity);
             Assert.That(initializerBody.HomeMap[0], Is.EqualTo(1),
                 schemaIdentity);
@@ -1739,11 +1743,29 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 schemaIdentity);
             Assert.That(initializerBody.HomeMap[24], Is.EqualTo(3),
                 schemaIdentity);
-            Assert.That(initializerBody.Code[..16].ToArray(),
+            Assert.That(initializerBody.HomeMap[32], Is.EqualTo(3),
+                schemaIdentity);
+            Assert.That(initializerBody.Code[..24].ToArray(),
                 Is.EqualTo(new byte[] {
                     0xD5, 0, 1, 0, 0xD6, 0x10, 2, 0,
                     0xD5, 0, 2, 0, 0xD6, 0x10, 3, 0,
+                    0xD4, 1, 0, 0, 0xD6, 0x10, 4, 0,
                 }), schemaIdentity);
+            Assert.That(initializerBody.ConstantCount, Is.EqualTo(1),
+                schemaIdentity);
+            var localConstant = TrRmConstantSourceValueValidator
+                .MaterializeFrozenScalar(
+                    checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+                        initializerBody.ConstantMap.Slice(sizeof(uint)))),
+                    BinaryPrimitives.ReadUInt32LittleEndian(
+                        initializerBody.ConstantMap),
+                    1, tables.Modules.GetRequirements(1).TargetRequirement,
+                    tables.ConstantSources, tables.FrozenValueNodes,
+                    tables.Blobs, tables.TypeSpecs, tables.Features,
+                    tables.Modules, tables.TypeDefs, tables.EnumDefs,
+                    tables.Imports, tables.A3LayoutResourceLedger,
+                    tables.Fields);
+            Assert.That(localConstant.Value, Is.EqualTo(42), schemaIdentity);
 
             var reference = TrRmExecutableCompiler.CreateStandardReference(
                 new TrRmStandardArtifactInput(schemaIdentity, artifact),
@@ -1779,11 +1801,36 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 Is.EqualTo(3), schemaIdentity);
             Assert.That(reemittedInitializerBody.HomeMap[24],
                 Is.EqualTo(3), schemaIdentity);
-            Assert.That(reemittedInitializerBody.Code[..16].ToArray(),
+            Assert.That(reemittedInitializerBody.HomeMap[32],
+                Is.EqualTo(3), schemaIdentity);
+            Assert.That(reemittedInitializerBody.ConstantMap.Length,
+                Is.EqualTo(sizeof(uint) * 2), schemaIdentity);
+            Assert.That(reemittedInitializerBody.Code[..24].ToArray(),
                 Is.EqualTo(new byte[] {
                     0xD5, 0, 1, 0, 0xD6, 0x10, 2, 0,
                     0xD5, 0, 2, 0, 0xD6, 0x10, 3, 0,
+                    0xD4, 1, 0, 0, 0xD6, 0x10, 4, 0,
                 }), schemaIdentity);
+            var reemittedLocalConstant
+                = TrRmConstantSourceValueValidator.MaterializeFrozenScalar(
+                    checked((int)BinaryPrimitives
+                        .ReadUInt32LittleEndian(
+                            reemittedInitializerBody.ConstantMap.Slice(
+                                sizeof(uint)))),
+                    BinaryPrimitives.ReadUInt32LittleEndian(
+                        reemittedInitializerBody.ConstantMap),
+                    1, reemittedTables.Modules.GetRequirements(1)
+                        .TargetRequirement,
+                    reemittedTables.ConstantSources,
+                    reemittedTables.FrozenValueNodes,
+                    reemittedTables.Blobs, reemittedTables.TypeSpecs,
+                    reemittedTables.Features, reemittedTables.Modules,
+                    reemittedTables.TypeDefs, reemittedTables.EnumDefs,
+                    reemittedTables.Imports,
+                    reemittedTables.A3LayoutResourceLedger,
+                    reemittedTables.Fields);
+            Assert.That(reemittedLocalConstant.Value, Is.EqualTo(42),
+                schemaIdentity);
         }
     }
 

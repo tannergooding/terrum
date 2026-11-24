@@ -4951,30 +4951,40 @@ public static partial class TrRmExecutableCompiler
                 {
                     if (local.Variable != nextLocalVariable
                         || (uint)local.Variable
-                            >= (uint)function.Variables.Length
-                        || local.Initializer is not BoundRead initialRead)
+                            >= (uint)function.Variables.Length)
                     {
                         throw Unsupported(
                             "A Construction-2 initializer local must be an ordered scalar copy from a value Home.");
                     }
 
                     var variable = function.Variables[local.Variable];
+                    var hasSupportedInitializer = local.Initializer switch {
+                        BoundRead initialRead
+                            => initialRead.Type == variable.Type
+                                && initialRead.Variable >= 0
+                                && initialRead.Variable < local.Variable
+                                && (initialRead.Variable
+                                        < function.ParameterCount
+                                    || localVariables.Contains(
+                                        initialRead.Variable))
+                                && function.Variables[
+                                    initialRead.Variable].Type
+                                    == variable.Type,
+                        BoundConstant constant
+                            => constant.Type == variable.Type
+                                && TryGetC1M1SourceScalarTypeSpecReference(
+                                    variable.Type, out _),
+                        _ => false,
+                    };
                     if (variable.IsMutable || variable.IsOut || variable.IsInit
                         || variable.IsImplicitRef
                         || variable.IsInitializationLocal
                         || !TryGetC1M1SourceScalarTypeSpecReference(
                             variable.Type, out _)
-                        || initialRead.Type != variable.Type
-                        || initialRead.Variable < 0
-                        || initialRead.Variable >= local.Variable
-                        || (initialRead.Variable >= function.ParameterCount
-                            && !localVariables.Contains(
-                                initialRead.Variable))
-                        || function.Variables[initialRead.Variable].Type
-                            != variable.Type)
+                        || !hasSupportedInitializer)
                     {
                         throw Unsupported(
-                            "A Construction-2 initializer local must copy an initialized same-typed scalar parameter or earlier local.");
+                            "A Construction-2 initializer local must copy an initialized same-typed scalar Home or constant.");
                     }
 
                     _ = localVariables.Add(local.Variable);
@@ -5369,9 +5379,26 @@ public static partial class TrRmExecutableCompiler
                     case BoundBlock nested:
                         EmitBlock(nested);
                         break;
-                    case BoundLocal local
-                        when local.Initializer is BoundRead read:
-                        AppendHomeLoad(read.Variable);
+                    case BoundLocal local:
+                        if (local.Initializer is BoundRead read)
+                        {
+                            AppendHomeLoad(read.Variable);
+                        }
+                        else if (local.Initializer is BoundConstant constant)
+                        {
+                            var constantIndex = checked((ushort)
+                                GetConstantMapIndex(constant));
+                            code.Add(0xD4);
+                            code.Add(1);
+                            code.Add((byte)constantIndex);
+                            code.Add((byte)(constantIndex >> 8));
+                        }
+                        else
+                        {
+                            throw new InvalidDataException(
+                                "A Construction-2 initializer local contains an unvalidated initializer.");
+                        }
+
                         code.Add(0xD6);
                         code.Add(0x10);
                         code.Add(checked((byte)local.Variable));
