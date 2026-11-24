@@ -54,7 +54,9 @@ public sealed class CompilationReference
         ImmutableArray<TrRmPreconditionFailureBinding>
             preconditionFailureBindings = default,
         ImmutableArray<TrRmPostconditionConstructionBinding>
-            postconditionConstructionBindings = default)
+            postconditionConstructionBindings = default,
+        ImmutableArray<TrRmExceptionInterfaceBinding>
+            exceptionInterfaceBindings = default)
     {
         if (foreignNativeInterfaceSchemaIdentity is { } foreignSchema
             && (string.IsNullOrWhiteSpace(foreignSchema)
@@ -346,12 +348,22 @@ public sealed class CompilationReference
         var selectedPostconditionConstructionBindings
             = postconditionConstructionBindings.IsDefault
                 ? [] : postconditionConstructionBindings;
+        var selectedExceptionInterfaceBindings
+            = exceptionInterfaceBindings.IsDefault
+                ? [] : exceptionInterfaceBindings;
         if (!TrRmDeclarationFailureBindingContract.IsValidShape(
                 selectedPreconditionFailureBindings,
                 selectedPostconditionConstructionBindings))
         {
             throw new ArgumentException(
                 "The declaration failure-binding tables are invalid.");
+        }
+        if (!TrRmExceptionInterfaceBindingContract.IsValidTable(
+                selectedExceptionInterfaceBindings))
+        {
+            throw new ArgumentException(
+                "The exception-interface binding table is invalid.",
+                nameof(exceptionInterfaceBindings));
         }
 
         Structures = structures;
@@ -391,6 +403,7 @@ public sealed class CompilationReference
             = selectedPreconditionFailureBindings;
         PostconditionConstructionBindings
             = selectedPostconditionConstructionBindings;
+        ExceptionInterfaceBindings = selectedExceptionInterfaceBindings;
         PrivateNominalTypeOrigins = privateNominalTypeOrigins.IsDefault
             ? [] : privateNominalTypeOrigins;
         Classes = classes.IsDefault ? [] : classes;
@@ -598,6 +611,10 @@ public sealed class CompilationReference
     public ImmutableArray<TrRmPostconditionConstructionBinding>
         PostconditionConstructionBindings { get; }
 
+    /// <summary>Exact originating-Module Core IException interface selections retained from Standard inputs.</summary>
+    public ImmutableArray<TrRmExceptionInterfaceBinding>
+        ExceptionInterfaceBindings { get; }
+
     /// <summary>Returns a reference that explicitly selects one checked provider definition as Core Task.</summary>
     public CompilationReference SelectCoreTaskType(BoundGenericNominalTypeIdentity identity)
     {
@@ -632,6 +649,7 @@ public sealed class CompilationReference
             preconditionFailureBindings: PreconditionFailureBindings,
             postconditionConstructionBindings:
                 PostconditionConstructionBindings,
+            exceptionInterfaceBindings: ExceptionInterfaceBindings,
             lazyInitializationCoreRegistration:
                 LazyInitializationCoreRegistration,
             nativeOutputCoreRegistration:
@@ -668,6 +686,7 @@ public sealed class CompilationReference
             preconditionFailureBindings: PreconditionFailureBindings,
             postconditionConstructionBindings:
                 PostconditionConstructionBindings,
+            exceptionInterfaceBindings: ExceptionInterfaceBindings,
             lazyInitializationCoreRegistration:
                 LazyInitializationCoreRegistration,
             nativeOutputCoreRegistration:

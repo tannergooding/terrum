@@ -66,6 +66,7 @@ public static partial class TrRmExecutableCompiler
         if (selectedReferences.Any(static reference =>
                 !reference.PreconditionFailureBindings.IsEmpty
                 || !reference.PostconditionConstructionBindings.IsEmpty
+                || !reference.ExceptionInterfaceBindings.IsEmpty
                 || reference.Functions.Any(static function =>
                     !function.DeclarationContractClauses.IsDefaultOrEmpty)))
         {

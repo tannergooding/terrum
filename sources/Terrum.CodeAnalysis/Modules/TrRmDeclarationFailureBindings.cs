@@ -210,6 +210,8 @@ internal static class TrRmDeclarationFailureBindingContract
         string moduleIdentity,
         ImmutableArray<CoreContractFailureIdentitySelection>
             coreSelections,
+        ImmutableArray<TrRmExceptionInterfaceBinding>
+            exceptionInterfaceBindings,
         ImmutableArray<TrRmPreconditionFailureBinding> preconditions,
         ImmutableArray<TrRmPostconditionConstructionBinding>
             postconditions)
@@ -228,6 +230,8 @@ internal static class TrRmDeclarationFailureBindingContract
 
         if (!CoreContractFailureIdentitySelectionContract.IsValidTable(
                 coreSelections)
+            || !TrRmExceptionInterfaceBindingContract.IsValidTable(
+                exceptionInterfaceBindings)
             || !AreCapturedInputs(inputs, preconditions, postconditions))
         {
             throw new ArgumentException(
@@ -320,6 +324,12 @@ internal static class TrRmDeclarationFailureBindingContract
                     pendingModules.Enqueue(providerModule);
                 }
             }
+        }
+
+        foreach (var binding in exceptionInterfaceBindings)
+        {
+            ValidateExceptionInterfaceBinding(inputs, moduleLocations,
+                binding);
         }
 
         var preconditionClauseKeys = new HashSet<(int InputIndex,
@@ -451,7 +461,11 @@ internal static class TrRmDeclarationFailureBindingContract
 
         foreach (var binding in preconditions)
         {
+            ValidateRequiredExceptionInterfaceAnchor(facts, inputs,
+                moduleLocations, retainedModules, exceptionInterfaceBindings,
+                binding.OriginArtifact, binding.OriginMethodDefRow);
             ValidateOriginAndPlan(facts, inputs, coreSelections,
+                exceptionInterfaceBindings,
                 binding.ClauseArtifact, binding.MethodDefRow,
                 binding.PhaseLocalOrdinal, binding.OriginArtifact,
                 binding.OriginMethodDefRow,
@@ -463,12 +477,97 @@ internal static class TrRmDeclarationFailureBindingContract
 
         foreach (var binding in postconditions)
         {
+            ValidateRequiredExceptionInterfaceAnchor(facts, inputs,
+                moduleLocations, retainedModules, exceptionInterfaceBindings,
+                binding.OriginArtifact, binding.OriginMethodDefRow);
             ValidateOriginAndPlan(facts, inputs, coreSelections,
+                exceptionInterfaceBindings,
                 binding.ClauseArtifact, binding.MethodDefRow,
                 binding.PhaseLocalOrdinal, binding.OriginArtifact,
                 binding.OriginMethodDefRow,
                 binding.OriginPhaseLocalOrdinal,
                 binding.ConstructorPlan, requirePostcondition: true);
+        }
+    }
+
+    private static void ValidateExceptionInterfaceBinding(
+        IReadOnlyList<TrRmStandardArtifactInput> inputs,
+        IReadOnlyDictionary<string, (int InputIndex, int ModuleRow)>
+            moduleLocations,
+        TrRmExceptionInterfaceBinding binding)
+    {
+        if (!moduleLocations.ContainsKey(binding.UsingModuleIdentity)
+            || !moduleLocations.TryGetValue(binding.ProviderIdentity,
+                out var provider))
+        {
+            throw new InvalidDataException(
+                "A Core exception-interface binding names a Module absent from the captured input set.");
+        }
+
+        var artifact = inputs[provider.InputIndex];
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                artifact.Artifact.ToArray(),
+                TrRmExecutableCompiler.GetForeignInvocationSchema(
+                    artifact.SchemaIdentity),
+                standardSchemaIdentity: artifact.SchemaIdentity));
+        if (!tables.Exports.TryGetDefinitionForKey(provider.ModuleRow,
+                binding.ExportKey, out var interfaceDefinition)
+            || (interfaceDefinition >> 24) != 0x13)
+        {
+            throw new InvalidDataException(
+                "A Core exception-interface ExportKey does not select a public TypeDef.");
+        }
+
+        var typeDefRow = GetTypeDefRow(interfaceDefinition);
+        if (tables.TypeDefs.GetKind(typeDefRow) != 3)
+        {
+            throw new InvalidDataException(
+                "A Core exception-interface anchor must select an interface TypeDef.");
+        }
+
+        var interfaceDefRow
+            = tables.Interfaces.GetInterfaceDefForTypeDef(typeDefRow);
+        var (firstFormal, formalCount)
+            = tables.TypeDefs.GetGenericRange(typeDefRow);
+        var selfFormal
+            = tables.Interfaces.GetSelfGenericParam(interfaceDefRow);
+        if (interfaceDefRow == 0 || formalCount != 1
+            || selfFormal != firstFormal
+            || tables.GenericParams.GetOwnerDefId(selfFormal)
+                != interfaceDefinition
+            || tables.GenericParams.GetOrdinal(selfFormal) != 0
+            || tables.GenericParams.GetFormalKind(selfFormal) != 1)
+        {
+            throw new InvalidDataException(
+                "The Core exception-interface anchor must have exactly one owned self Type formal.");
+        }
+    }
+
+    private static void ValidateRequiredExceptionInterfaceAnchor(
+        InputFacts[] facts,
+        IReadOnlyList<TrRmStandardArtifactInput> inputs,
+        IReadOnlyDictionary<string, (int InputIndex, int ModuleRow)>
+            moduleLocations,
+        HashSet<(int InputIndex, int ModuleRow)> retainedModules,
+        ImmutableArray<TrRmExceptionInterfaceBinding> bindings,
+        TrRmStandardArtifactInput originArtifact, uint originMethodDefRow)
+    {
+        var originInputIndex = FindReference(inputs, originArtifact);
+        var originModuleRow = GetMethodOwner(facts[originInputIndex],
+            originMethodDefRow);
+        var usingModuleIdentity
+            = facts[originInputIndex].ModuleIdentities[originModuleRow];
+        var binding = bindings.FirstOrDefault(candidate =>
+            StringComparer.Ordinal.Equals(candidate.UsingModuleIdentity,
+                usingModuleIdentity));
+        if (binding is null
+            || !moduleLocations.TryGetValue(binding.ProviderIdentity,
+                out var provider)
+            || !retainedModules.Contains(provider))
+        {
+            throw new InvalidDataException(
+                "A retained declaration failure clause requires its originating Module's selected Core exception-interface provider in the retained closure.");
         }
     }
 
@@ -663,6 +762,8 @@ internal static class TrRmDeclarationFailureBindingContract
         IReadOnlyList<TrRmStandardArtifactInput> inputs,
         ImmutableArray<CoreContractFailureIdentitySelection>
             coreSelections,
+        ImmutableArray<TrRmExceptionInterfaceBinding>
+            exceptionInterfaceBindings,
         TrRmStandardArtifactInput clauseArtifact, uint clauseMethodDefRow,
         uint clauseOrdinal, TrRmStandardArtifactInput originArtifact,
         uint originMethodDefRow, uint originOrdinal,
@@ -693,6 +794,14 @@ internal static class TrRmDeclarationFailureBindingContract
         var originModuleIdentity
             = facts[originInputIndex].ModuleIdentities[
                 origin.OwnerModuleRow];
+        if (!exceptionInterfaceBindings.Any(binding =>
+                StringComparer.Ordinal.Equals(
+                    binding.UsingModuleIdentity, originModuleIdentity)))
+        {
+            throw new InvalidDataException(
+                "A retained declaration failure clause has no exact originating-Module IException interface anchor.");
+        }
+
         var role = coreSelections.FirstOrDefault(selection =>
             StringComparer.Ordinal.Equals(
                 selection.UsingModuleIdentity, originModuleIdentity));

@@ -164,6 +164,8 @@ internal sealed partial class Binder
         _preconditionFailureBindings;
     private readonly ImmutableArray<TrRmPostconditionConstructionBinding>
         _postconditionConstructionBindings;
+    private readonly ImmutableArray<TrRmExceptionInterfaceBinding>
+        _exceptionInterfaceBindings;
     private readonly CoreContractFailureIdentitySelection?
         _coreContractFailureIdentitySelection;
     private readonly CoreEvaluationFormIdentitySelection?
@@ -365,6 +367,8 @@ internal sealed partial class Binder
             = reference?.PreconditionFailureBindings ?? [];
         _postconditionConstructionBindings
             = reference?.PostconditionConstructionBindings ?? [];
+        _exceptionInterfaceBindings
+            = reference?.ExceptionInterfaceBindings ?? [];
         _coreContractFailureIdentitySelection
             = coreContractFailureIdentitySelection;
         _coreEvaluationFormIdentitySelection
@@ -1365,6 +1369,7 @@ internal sealed partial class Binder
                 _preconditionFailureBindings,
             PostconditionConstructionBindings =
                 _postconditionConstructionBindings,
+            ExceptionInterfaceBindings = _exceptionInterfaceBindings,
             CoreContractFailureIdentitySelection =
                 _coreContractFailureIdentitySelection,
             CoreEvaluationFormIdentitySelection

@@ -481,6 +481,12 @@ public static partial class SemanticVerifier
         {
             throw Invalid();
         }
+        if (!Terrum.CodeAnalysis.Modules
+                .TrRmExceptionInterfaceBindingContract.IsValidTable(
+                    program.ExceptionInterfaceBindings))
+        {
+            throw Invalid();
+        }
         if (program.CoreContractFailureIdentitySelection is
                 CoreContractFailureIdentitySelection currentContractFailureSelection
             && (!CoreContractFailureIdentitySelectionContract.IsValidTable(

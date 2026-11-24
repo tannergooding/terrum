@@ -22,6 +22,31 @@ internal sealed class CoreContractFailureIdentitySelectionTests
     }
 
     [Test]
+    public void ExceptionInterfaceBindingsAreUniquePerOriginatingModule()
+    {
+        var binding = new TrRmExceptionInterfaceBinding("sample.consumer",
+            "core.contracts", "iexception");
+        Assert.That(TrRmExceptionInterfaceBindingContract.IsValidTable(
+            [binding]), Is.True);
+        Assert.That(TrRmExceptionInterfaceBindingContract.IsValidTable(
+            [binding, binding with {
+                ProviderIdentity = "core.replacement",
+            }]), Is.False);
+        Assert.That(TrRmExceptionInterfaceBindingContract.IsValidTable(
+            [binding with { ExportKey = "bad\u0000key" }]), Is.False);
+
+        var reference = new CompilationReference([], [],
+            BoundRuntimePolicy.FailFast,
+            exceptionInterfaceBindings: [binding]);
+        var consumer = Compilation.Create(SyntaxTree.Parse(
+            "int32 Main() { return 0; }"), reference);
+        Assert.That(consumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumer.Diagnostics));
+        Assert.That(consumer.Program!.ExceptionInterfaceBindings,
+            Is.EqualTo([binding]));
+    }
+
+    [Test]
     public void DeclarationFailureBindingsRequireCapturedInputsAndUniqueClauseKeys()
     {
         var artifact = new TrRmStandardArtifactInput("exact-schema",
@@ -59,7 +84,7 @@ internal sealed class CoreContractFailureIdentitySelectionTests
         Assert.That(() =>
                 TrRmDeclarationFailureBindingContract
                     .ValidateForStandardInputs(root, [], "sample.root",
-                        [], [], []),
+                        [], [], [], []),
             Throws.TypeOf<NotSupportedException>());
 
         var origin = new TrRmStandardArtifactInput("unselected-schema",
@@ -71,7 +96,7 @@ internal sealed class CoreContractFailureIdentitySelectionTests
         Assert.That(() =>
                 TrRmDeclarationFailureBindingContract
                     .ValidateForStandardInputs(root, [], "sample.root",
-                        [], [uncapturedOrigin], []),
+                        [], [], [uncapturedOrigin], []),
             Throws.TypeOf<ArgumentException>());
     }
 
@@ -93,7 +118,7 @@ internal sealed class CoreContractFailureIdentitySelectionTests
         Assert.That(() =>
                 TrRmDeclarationFailureBindingContract
                     .ValidateForStandardInputs(input, [], "sample.module",
-                        [], [], []),
+                        [], [], [], []),
             Throws.Nothing);
     }
 

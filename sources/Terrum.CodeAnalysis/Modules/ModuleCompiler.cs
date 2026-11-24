@@ -8511,7 +8511,8 @@ public static partial class ModuleCompiler
                     || !function.DeclarationContractClauses.IsEmpty
                     || !function.CheckedOutputStatePredicates.IsDefaultOrEmpty)
             || !program.PreconditionFailureBindings.IsDefaultOrEmpty
-            || !program.PostconditionConstructionBindings.IsDefaultOrEmpty)
+            || !program.PostconditionConstructionBindings.IsDefaultOrEmpty
+            || !program.ExceptionInterfaceBindings.IsDefaultOrEmpty)
         {
             throw new ModuleContractException(
                 "The private semantic module format does not retain declaration clauses, failure bindings, or general OutputState predicates.");

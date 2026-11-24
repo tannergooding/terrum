@@ -1320,7 +1320,8 @@ internal sealed partial class PeCompiler
         CancellationToken cancellationToken = default)
     {
         if (!program.PreconditionFailureBindings.IsDefaultOrEmpty
-            || !program.PostconditionConstructionBindings.IsDefaultOrEmpty)
+            || !program.PostconditionConstructionBindings.IsDefaultOrEmpty
+            || !program.ExceptionInterfaceBindings.IsDefaultOrEmpty)
         {
             throw new NotSupportedException(
                 "Native lowering does not yet consume declaration failure-binding maps.");

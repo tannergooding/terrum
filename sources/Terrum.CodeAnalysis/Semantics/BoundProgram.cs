@@ -767,6 +767,9 @@ public sealed record BoundProgram(ImmutableArray<BoundFunction> Functions, int E
     internal ImmutableArray<TrRmPostconditionConstructionBinding>
         PostconditionConstructionBindings { get; init; } = [];
 
+    internal ImmutableArray<TrRmExceptionInterfaceBinding>
+        ExceptionInterfaceBindings { get; init; } = [];
+
     internal CoreContractFailureIdentitySelection?
         CoreContractFailureIdentitySelection { get; init; }
 

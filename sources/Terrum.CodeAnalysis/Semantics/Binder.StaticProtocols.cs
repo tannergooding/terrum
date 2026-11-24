@@ -14673,6 +14673,8 @@ internal sealed partial class Binder
                     proofBinder._preconditionFailureBindings,
                 PostconditionConstructionBindings =
                     proofBinder._postconditionConstructionBindings,
+                ExceptionInterfaceBindings =
+                    proofBinder._exceptionInterfaceBindings,
                 CoreEvaluationFormIdentitySelection =
                     proofEvaluationFormSelection,
                 CoreEvaluationFormIdentitySelections =
