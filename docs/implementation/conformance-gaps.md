@@ -97,8 +97,15 @@ authorized and remain labeled provisional.
 composer now preserves exact class target-layout variants across disjoint
 provider Modules and binds queries against both roots in memory. The EN1
 declaration emitter can emit and reload one bounded query function whose
-primitive class layout roots span distinct providers. Reference composition
-also remaps direct inline-struct dependencies with scalar and selected enum
+primitive class layout roots span distinct providers. Alongside that query,
+it now emits bounded top-level unit consumers with immutable scalar and direct
+nongeneric selected class-handle value parameters, preserving their
+MethodSig/Param/HomeMap/TypeMap, MethodDef/Export and ReturnUnit Body rows
+through source-free re-emission. The producer/re-emission/downstream-binding
+regression is authored but remains unverified under the active hold. Broader
+value-returning, field/method Body, effect/default and provider-composition
+forms remain open. Reference composition also remaps direct inline-struct
+dependencies with scalar and selected enum
 fields across distinct providers and class-handle fields when their exact
 provider TypeDefs are selected roots or imported dependencies. EN1 reconciles
 direct and imported class views, preserves provider expectations, and remaps

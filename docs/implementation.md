@@ -267,8 +267,9 @@ enforce that owner constraint. These paths remain unverified;
 same-class call-binary Bodies also retain writable receiver access through
 TypeSpec qualifiers and `sourceUse=4` without a MethodDef receiver flag.
 imported I/P expectations, broader Bodies, field use, multi-provider output,
-source-free re-emission of top-level functions and ordinary EN1 class
-consumers remain open. The label-free Construction-2 source-provider CLI
+Construction-2 source-free re-emission of top-level functions and EN1 class
+consumers beyond the bounded query-plus-unit-consumer slice remain open. The
+label-free Construction-2 source-provider CLI
 pairing now has a separate unapproved version-3 proposal for one combined
 method/type/field reference under the three Copy-evidence schemas. The strict
 reader, schema pairing and single-call dispatch are implemented; end-to-end
@@ -2277,6 +2278,13 @@ Direct/nested load/JIT, multiple-query, exact-successor re-emission/reload and
 native executable-image emission through both the direct emitter and Standard
 native binding plan are added but unverified under the active hold; no image
 execution is established.
+Alongside the bounded class-query Body, EN1 now also emits top-level unit
+consumers with immutable scalar and direct nongeneric selected class-handle
+value parameters. Their MethodSig/Param/HomeMap/TypeMap, MethodDef/Export and
+ReturnUnit Body survive source-free re-emission and downstream binding; the
+regression is authored but unverified under the active hold. Value-returning
+or operation-bearing consumers, effect/default forms and broader provider
+combinations remain open.
 Broader Body composition, provider
 replacement and nontrivial dependency remapping, optional folding, additional
 class representations, runtime/AOT and CLI support remain open.

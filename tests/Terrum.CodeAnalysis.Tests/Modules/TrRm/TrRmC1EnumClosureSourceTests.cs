@@ -2956,6 +2956,160 @@ internal sealed class TrRmC1EnumClosureSourceTests
     }
 
     [Test]
+    public void EmitsClassReferenceConsumerAlongsideEN1ClassQuery()
+    {
+        var schemaIdentity
+            = $"{s_schemaIdentities[0]}-class-instance-layout-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        var providerTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public class Box {
+                    public int32 Value;
+                    public Box(int32 value) { Value = value; }
+                }
+            }
+            """);
+        var providerCompilation = Compilation.CreateLibrary(providerTree);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, providerCompilation.Diagnostics));
+        var providerProgram = (BoundProgram)providerCompilation.Program!;
+        var classExport = CreateSourceClassExport(providerProgram,
+            providerTree, "Box", "type.box", "constructor.box",
+            (0, "field.box.value"));
+        var providerArtifact = EmitClassArtifact(providerProgram,
+            "EN1ClassConsumerProvider", schemaIdentity, [classExport]);
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            providerArtifact);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            providerInput, "EN1ClassConsumerProvider", [],
+            ["type.box"], ["field.box.value"]);
+        var consumerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                namespace Demo {
+                    public void Consume(Box value) {}
+                    public nint Offset() {
+                        return unsafe(offsetof(Box, Value));
+                    }
+                }
+                """), reference, new CompilationOptions {
+                LayoutCoreRegistration
+                    = LayoutCoreRegistrationTestData.Create(),
+            });
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            consumerCompilation.Program!, "EN1ClassConsumer",
+            schemaIdentity, targetRequirement);
+        var consumerTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                consumerArtifact, SchemaFor(schemaIdentity), null,
+                usesNativePointerLoads: false,
+                standardSchemaIdentity: schemaIdentity));
+        var consumeMethodRow = Enumerable.Range(1,
+                consumerTables.Methods.Count)
+            .Single(row =>
+                consumerTables.Methods.GetOwnerType(row) == 0
+                && consumerTables.Methods.GetName(row) == "Consume");
+        var consumeSignature = consumerTables.Methods.GetSignature(
+            consumeMethodRow);
+        var (consumeParameterStart, consumeParameterCount)
+            = consumerTables.Signatures.GetParamRange(consumeSignature);
+        Assert.That(consumeParameterCount, Is.EqualTo(1));
+        var consumeParameterTypeSpec
+            = consumerTables.Parameters.GetTypeSpec(
+                consumeParameterStart);
+        Assert.That(consumerTables.TypeSpecs
+                .GetTypeSpecRef(consumeParameterTypeSpec).Form,
+            Is.EqualTo((byte)0x03));
+        var consumeBody = consumerTables.Bodies.GetRegisterBody(
+            consumerTables.Methods.GetBodyRow(consumeMethodRow),
+            consumerTables.Contracts.Count);
+        Assert.That(consumeBody.HomeCount, Is.EqualTo(1));
+        Assert.That(consumeBody.HomeMap[0], Is.EqualTo(2));
+        var consumeHomeTypeMapIndex
+            = BinaryPrimitives.ReadUInt16LittleEndian(
+                consumeBody.HomeMap.Slice(2));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                consumeBody.TypeMap.Span.Slice(
+                    consumeHomeTypeMapIndex * sizeof(uint))),
+            Is.EqualTo(0x1100_0000u | consumeParameterTypeSpec));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+                consumeBody.HomeMap.Slice(4)),
+            Is.Zero);
+        Assert.That(consumeBody.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] { 0x18, 0 }));
+        Assert.That(consumerTables.TargetLayoutDependencies.Count,
+            Is.EqualTo(1));
+
+        var consumerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            consumerArtifact);
+        var loaded = TrRmExecutableCompiler.LoadStandard(consumerInput,
+            "EN1ClassConsumer", [providerInput]);
+        Assert.That(loaded.Functions.Select(static function => function.Name),
+            Does.Contain("Consume").And.Contain("Offset"));
+        var sourceFreeCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), loaded);
+        Assert.That(sourceFreeCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                sourceFreeCompilation.Diagnostics));
+        var reemitted = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)sourceFreeCompilation.Program!,
+            "EN1ClassConsumerReemitted", schemaIdentity, targetRequirement);
+        var reemittedTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                reemitted, SchemaFor(schemaIdentity), null,
+                usesNativePointerLoads: false,
+                standardSchemaIdentity: schemaIdentity));
+        var reemittedConsumeRow = Enumerable.Range(
+                1, reemittedTables.Methods.Count)
+            .Single(row =>
+                reemittedTables.Methods.GetOwnerType(row) == 0
+                && reemittedTables.Methods.GetName(row) == "Consume");
+        var reemittedConsumeBody = reemittedTables.Bodies.GetRegisterBody(
+            reemittedTables.Methods.GetBodyRow(reemittedConsumeRow),
+            reemittedTables.Contracts.Count);
+        var reemittedConsumeSignature
+            = reemittedTables.Methods.GetSignature(reemittedConsumeRow);
+        var (reemittedParameterStart, reemittedParameterCount)
+            = reemittedTables.Signatures.GetParamRange(
+                reemittedConsumeSignature);
+        Assert.That(reemittedParameterCount, Is.EqualTo(1));
+        var reemittedParameterTypeSpec
+            = reemittedTables.Parameters.GetTypeSpec(
+                reemittedParameterStart);
+        Assert.That(reemittedTables.TypeSpecs
+                .GetTypeSpecRef(reemittedParameterTypeSpec).Form,
+            Is.EqualTo((byte)0x03));
+        var reemittedHomeTypeMapIndex
+            = BinaryPrimitives.ReadUInt16LittleEndian(
+                reemittedConsumeBody.HomeMap.Slice(2));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                reemittedConsumeBody.TypeMap.Span.Slice(
+                    reemittedHomeTypeMapIndex * sizeof(uint))),
+            Is.EqualTo(0x1100_0000u
+                | reemittedParameterTypeSpec));
+        Assert.That(reemittedConsumeBody.HomeMap.ToArray(),
+            Is.EqualTo(consumeBody.HomeMap.ToArray()));
+        Assert.That(reemittedConsumeBody.GetBlockCode(0).ToArray(),
+            Is.EqualTo(consumeBody.GetBlockCode(0).ToArray()));
+        var reemittedReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, reemitted),
+                "EN1ClassConsumerReemitted", [providerInput],
+                ["type.box"], ["field.box.value"]);
+        var downstream = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            namespace Demo {
+                public void Forward(Box value) { Consume(value); }
+            }
+            """), reemittedReference);
+        Assert.That(downstream.HasErrors, Is.False,
+            string.Join(Environment.NewLine, downstream.Diagnostics));
+    }
+
+    [Test]
     public void SelectsClassInstanceLayoutThroughExactSchemaSuccessors()
     {
         var sourceTree = SyntaxTree.Parse("""

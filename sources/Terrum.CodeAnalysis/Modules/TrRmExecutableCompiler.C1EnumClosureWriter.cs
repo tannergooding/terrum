@@ -45,14 +45,32 @@ public static partial class TrRmExecutableCompiler
         {
             return null;
         }
+
+        var queryFunctions = moduleFunctions.Where(function =>
+            {
+                if (function.ReturnType != PrimitiveType.NativeInt
+                    || function.ParameterCount != 0
+                    || function.Body.Statements.Length != 1
+                    || function.Body.Statements[0]
+                        is not BoundReturn { Value: not null })
+                {
+                    return false;
+                }
+
+                return !GetEN1ClassLayoutQueries(function).IsEmpty;
+            }).ToArray();
+        if (queryFunctions.Length == 0)
+        {
+            return null;
+        }
         if (!IsSelectedC1ClassInstanceLayoutSchemaIdentity(schemaIdentity)
-            || moduleFunctions.Length != 1)
+            || queryFunctions.Length != 1)
         {
             throw Unsupported(
-                "The bounded EN1 Body route accepts one parameterless nint method with authorized class-root OffsetOfType queries.");
+                "The bounded EN1 Body route accepts one parameterless nint class-query method alongside supported class consumers.");
         }
 
-        var function = moduleFunctions[0];
+        var function = queryFunctions[0];
         if (function.ReturnType != PrimitiveType.NativeInt
             || function.ParameterCount != 0
             || function.IsExternal || function.IsConstructor
@@ -155,6 +173,115 @@ public static partial class TrRmExecutableCompiler
         }
 
         return function;
+    }
+
+    private static bool IsSupportedEN1ClassConsumerFunction(
+        BoundFunction function, BoundProgram program)
+    {
+        if (function.DeclaringStruct is not null
+            || function.ReturnType != PrimitiveType.Void
+            || function.ParameterCount == 0
+            || function.ParameterCount != function.Variables.Length
+            || function.IsExternal
+            || function.IsConstructor
+            || function.IsClassConstructor
+            || function.IsPartialConstructor
+            || function.ClassConstructor >= 0
+            || function.ConstructionHomeIndex >= 0
+            || function.StaticConstructorIdentity is not null
+            || function.StaticInitializationTrigger is not null
+            || function.StaticFieldInitializerIndex >= 0
+            || function.Intrinsic != BoundIntrinsic.None
+            || function.InterfaceRequirement is not null
+            || function.ExplicitInterfaceOwner is not null
+            || function.DirectNativeImport is not null
+            || function.NativeOutputRole is not null
+            || !function.NativeOutputContracts.IsEmpty
+            || function.NativeFunctionPointerType is not null
+            || function.NativeCallableConvention is not null
+            || function.NativeCallableEntryName is not null
+            || function.HasNativeExport
+            || function.NativeExportEntryName is not null
+            || function.NativeExportUsesDeclarationName
+            || function.NativeVTableMethod is not null
+            || function.ModuleImport is not null
+            || function.IsModuleReference
+            || function.GenericMethodInstantiation is not null
+            || function.ImportedGenericMethod is not null
+            || function.RequiresUnsafeCaller
+            || function.DeclaredRequiresUnsafeCaller
+            || function.DoesNotReturn
+            || function.NoFailureProof
+            || function.HasPureEvaluationForm
+            || function.IsCleanup
+            || function.IsOperator
+            || !function.CapturedParameters.IsEmpty
+            || !function.DeclarationContractClauses.IsEmpty
+            || !function.FriendTargets.IsEmpty
+            || !function.DependencyContracts.IsEmpty
+            || function.HasOrdinaryParameterDefaultSurface
+            || !function.OrdinaryParameterDefaults.IsEmpty
+            || function.PropertyName is not null
+            || function.PropertyAccessorKind
+                != BoundPropertyAccessorKind.None
+            || (function.IsPrivate && function.IsInternal)
+            || !function.Body.RetiredManagedLocals.IsEmpty
+            || !function.CheckedOutputStatePredicates.IsEmpty
+            || function.HasPrivateCheckedOutputStateMetadata
+            || function.HasStandardCheckedOutputStateMetadata
+            || (!function.Body.Statements.IsEmpty
+                && (function.Body.Statements.Length != 1
+                    || function.Body.Statements[0]
+                        is not BoundReturn { Value: null })))
+        {
+            return false;
+        }
+
+        var hasClassParameter = false;
+        foreach (var variable in function.Variables)
+        {
+            if (variable.IsMutable || variable.IsOut || variable.IsInit
+                || variable.IsImplicitRef
+                || variable.IsInitializationLocal)
+            {
+                return false;
+            }
+
+            if (PrimitiveTypeFacts.IsBuiltInScalar(variable.Type))
+            {
+                continue;
+            }
+
+            if (!BoundGenericNominalTypeContract.IsNominalClassType(
+                    variable.Type, program.GenericNominalTypeInstances,
+                    program.GenericNominalTypeDefinitions))
+            {
+                return false;
+            }
+
+            var instanceIndex
+                = BoundGenericNominalTypeTypes.Index(variable.Type);
+            if ((uint)instanceIndex
+                >= (uint)program.GenericNominalTypeInstances.Length)
+            {
+                return false;
+            }
+
+            var instance = program.GenericNominalTypeInstances[
+                instanceIndex];
+            if (instance is null || !instance.Arguments.IsEmpty
+                || instance.Qualifiers != 0
+                || !program.StandardClassDeclarations.Any(declaration =>
+                    declaration.Declaration.Identity == instance.Definition
+                    && !declaration.SelectedExportKeys.IsDefaultOrEmpty))
+            {
+                return false;
+            }
+
+            hasClassParameter = true;
+        }
+
+        return hasClassParameter;
     }
 
     private static ImmutableArray<BoundLayoutQuery>
@@ -399,6 +526,22 @@ public static partial class TrRmExecutableCompiler
 
         var classQueryFunction = GetEN1ClassLayoutQueryFunction(program,
             schemaIdentity);
+        var classConsumerFunctions = classQueryFunction is null
+            ? Array.Empty<BoundFunction>()
+            : program.Functions.Where(function =>
+                    function.DeclaringStruct is null
+                    && !ReferenceEquals(function, classQueryFunction))
+                .ToArray();
+        if (classConsumerFunctions.Length != 0
+            && (!hasStandardClassDeclarations
+                || classConsumerFunctions.Any(function =>
+                    !IsSupportedEN1ClassConsumerFunction(function,
+                        program))))
+        {
+            throw Unsupported(
+                "The bounded EN1 class-reference consumer route accepts only bodyful unit functions with immutable scalar and selected nongeneric class-handle value parameters.");
+        }
+
         var classQueryRootIdentities
             = new HashSet<BoundGenericNominalTypeIdentity>();
         if (classQueryFunction is not null)
@@ -7034,6 +7177,100 @@ public static partial class TrRmExecutableCompiler
                     0x1600_0000u | checked((uint)methodRow),
                     methodNameRow));
             }
+
+            foreach (var consumerFunction in classConsumerFunctions)
+            {
+                var consumerMethodRow = checked(methodRows.Count + 1);
+                var signatureRow
+                    = checked(methodSignatureRows.Count + 1);
+                var parameterFirst = consumerFunction.ParameterCount == 0
+                    ? 0 : checked(parameterRows.Count + 1);
+                var parameterTypeTokens
+                    = new uint[consumerFunction.ParameterCount];
+                for (var parameterIndex = 0;
+                    parameterIndex < consumerFunction.ParameterCount;
+                    parameterIndex++)
+                {
+                    var typeSpecReference
+                        = BoundGenericNominalTypeTypes.IsType(
+                            consumerFunction.Variables[parameterIndex].Type)
+                            ? GetClassQueryRootTypeSpecReference(
+                                consumerFunction.Variables[
+                                    parameterIndex].Type)
+                            : GetC1M1SourceScalarTypeSpecReference(
+                                consumerFunction.Variables[
+                                    parameterIndex].Type);
+                    parameterTypeTokens[parameterIndex]
+                        = CreateStandardBodyTypeMapToken(
+                            typeSpecReference);
+                    parameterRows.Add(new TrRmParamRow(signatureRow,
+                        parameterIndex, typeSpecReference, 0, 0));
+                    if (schema.UsesGeneralMethodParameterLabels())
+                    {
+                        var parameterName = consumerFunction.Variables[
+                            parameterIndex].Name;
+                        methodParameterLabelRows.Add((
+                            consumerMethodRow, parameterIndex,
+                            parameterName));
+                        _ = AddString(parameterName);
+                    }
+                }
+
+                methodSignatureRows.Add(new TrRmMethodSigRow(
+                    0xF200_0000u, 0, parameterFirst,
+                    consumerFunction.ParameterCount, 0, 0));
+
+                var maps = TrRmRegisterBodyMapBuilder.Create(
+                    parameterTypeTokens, []);
+                var homeMap = new byte[checked(
+                    consumerFunction.ParameterCount * 8)];
+                for (var parameterIndex = 0;
+                    parameterIndex < consumerFunction.ParameterCount;
+                    parameterIndex++)
+                {
+                    var home = homeMap.AsSpan(parameterIndex * 8, 8);
+                    home[0] = 2;
+                    BinaryPrimitives.WriteUInt16LittleEndian(home[2..],
+                        maps.GetTypeMapIndex(
+                            parameterTypeTokens[parameterIndex]));
+                    BinaryPrimitives.WriteUInt16LittleEndian(home[4..],
+                        checked((ushort)parameterIndex));
+                }
+
+                var entryStateRecord = new ReadOnlyMemory<byte>(
+                    new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 });
+                var body = TrRmRegisterBodyWriter.Encode(homeMap,
+                    maps.TypeMap, default, default, default,
+                    [new TrRmRegisterBodyBlock(0, 2, 0)],
+                    [entryStateRecord], new byte[] { 0x18, 0 },
+                    contractCount: contractRows.Count, schema: schema,
+                    generalPredicateGraphsInitializationReferenceBodies
+                        : schema.UsesGeneralPredicateGraphs());
+                var consumerBodyRow = checked(bodyRows.Count + 1);
+                bodyRows.Add(body);
+
+                var consumerVisibility = consumerFunction.IsPrivate ? 0u
+                    : consumerFunction.IsInternal ? 1u : 2u;
+                var consumerNameRow = AddString(consumerFunction.Name);
+                methodRows.Add(new TrRmMethodDefRow(0,
+                    consumerNameRow, signatureRow, consumerVisibility,
+                    0, 0, consumerBodyRow));
+                if (consumerVisibility == 2)
+                {
+                    if (!BoundEnumTypes.IsValidModuleDeclarationKey(
+                            consumerFunction.Name))
+                    {
+                        throw Unsupported(
+                            "An exported EN1 class consumer function has an invalid declaration name.");
+                    }
+
+                    exportRows.Add(new TrRmExportRow(
+                        0x1600_0000u
+                            | checked((uint)consumerMethodRow),
+                        consumerNameRow));
+                }
+            }
+
         }
 
         foreach (var typeName in typeDefNames)
