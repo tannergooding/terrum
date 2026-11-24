@@ -66,6 +66,26 @@ internal sealed class NativeCoreRegistrationTests
         IntPtr source, int tag, IntPtr fallback);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int NativePointerOutputOuterCallFunction(
+        IntPtr receiver, IntPtr source, int tag, int fallback);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int NativePointerObserveCallback(
+        IntPtr receiver, IntPtr value);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int NativePointerObserveTaggedCallback(
+        IntPtr receiver, IntPtr value, int tag);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int NativePointerObserveMultipleCallback(
+        IntPtr receiver, IntPtr value, int status, int mode);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int NativePointerStatusCallback(
+        IntPtr receiver, IntPtr source, int tag);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int NativeFniReadPairCallback(IntPtr receiver,
         int first, int second);
 
@@ -8436,6 +8456,27 @@ internal sealed class NativeCoreRegistrationTests
         }));
     }
 
+    [TestCase(1)]
+    [TestCase(2)]
+    public async Task StandardForeignNativeInterfacePointerOutputOuterCallExecutesWithNestedCallsOnWindowsX64(
+        int nestedCallCount)
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+
+        var program = CreatePointerOutputConsumerProgram(
+            pointerOutputOuterCall: true,
+            successNestedCallCount: nestedCallCount);
+        var image = NativeEmitter.EmitLibrary(program, ["InvokePointer"],
+            NativeRuntimePolicy.FailFast);
+        Assert.That(image[..2], Is.EqualTo(new byte[] {
+            (byte)'M', (byte)'Z',
+        }));
+        await AssertPointerOutputOuterCallAsync(image, "InvokePointer",
+                nestedCallCount)
+            .ConfigureAwait(true);
+    }
+
     [Test]
     public void StandardForeignNativeInterfaceReadsFunctionPointerOutputUnderPs1()
     {
@@ -14427,6 +14468,206 @@ internal sealed class NativeCoreRegistrationTests
             if (fallback != IntPtr.Zero)
             {
                 Marshal.FreeHGlobal(fallback);
+            }
+            if (source != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(source);
+            }
+            if (vtable != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(vtable);
+            }
+            if (receiver != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(receiver);
+            }
+            await TestFileCleanup.DeleteWithRetryAsync(path)
+                .ConfigureAwait(true);
+        }
+    }
+
+    private static async Task AssertPointerOutputOuterCallAsync(byte[] image,
+        string functionName, int nestedCallCount)
+    {
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"native-fni-pointer-output-outer-call-{Guid.NewGuid():N}.dll");
+        var module = IntPtr.Zero;
+        var receiver = IntPtr.Zero;
+        var vtable = IntPtr.Zero;
+        var source = IntPtr.Zero;
+        NativePointerOutputCallback? outputCallback = null;
+        NativePointerObserveCallback? observePointerCallback = null;
+        NativePointerObserveTaggedCallback? observeTaggedCallback = null;
+        NativePointerObserveMultipleCallback? observeMultipleCallback = null;
+        NativePointerStatusCallback? getStatusCallback = null;
+        NativePointerStatusCallback? getModeCallback = null;
+        try
+        {
+            await File.WriteAllBytesAsync(path, image).ConfigureAwait(true);
+            module = NativeLibrary.Load(path);
+            receiver = Marshal.AllocHGlobal(IntPtr.Size);
+            vtable = Marshal.AllocHGlobal(
+                (nestedCallCount + 2) * IntPtr.Size);
+            source = Marshal.AllocHGlobal(sizeof(int));
+            Marshal.WriteInt32(source, 17);
+            var succeeds = true;
+            var outputCalls = 0;
+            var statusCalls = 0;
+            var modeCalls = 0;
+            var observeCalls = 0;
+            var callOrder = new List<string>();
+            outputCallback = (actualReceiver, actualSource, tag,
+                out IntPtr value) => {
+                outputCalls++;
+                value = source;
+                if (actualReceiver != receiver
+                    || actualSource != source || tag != 7)
+                {
+                    return 0;
+                }
+
+                return succeeds ? 1 : 0;
+            };
+            if (nestedCallCount == 0)
+            {
+                observePointerCallback
+                    = (actualReceiver, actualValue) => {
+                        observeCalls++;
+                        return actualReceiver == receiver
+                            && actualValue == source
+                            && Marshal.ReadInt32(actualValue) == 17
+                            ? 33 : -1;
+                    };
+                Marshal.WriteIntPtr(vtable,
+                    Marshal.GetFunctionPointerForDelegate(outputCallback));
+                Marshal.WriteIntPtr(vtable, IntPtr.Size,
+                    Marshal.GetFunctionPointerForDelegate(
+                        observePointerCallback));
+            }
+            else if (nestedCallCount == 1)
+            {
+                getStatusCallback = (actualReceiver, actualSource, tag) => {
+                    statusCalls++;
+                    if (actualReceiver != receiver
+                        || actualSource != source || tag != 7)
+                    {
+                        return -1;
+                    }
+
+                    callOrder.Add("status");
+                    return 17;
+                };
+                observeTaggedCallback = (actualReceiver, actualValue, tag) => {
+                    observeCalls++;
+                    return actualReceiver == receiver
+                        && actualValue == source
+                        && tag == 17
+                        && callOrder.SequenceEqual(["status"])
+                        && Marshal.ReadInt32(actualValue) == 17
+                        ? 17 : -1;
+                };
+                Marshal.WriteIntPtr(vtable,
+                    Marshal.GetFunctionPointerForDelegate(outputCallback));
+                Marshal.WriteIntPtr(vtable, IntPtr.Size,
+                    Marshal.GetFunctionPointerForDelegate(
+                        observeTaggedCallback));
+                Marshal.WriteIntPtr(vtable, IntPtr.Size * 2,
+                    Marshal.GetFunctionPointerForDelegate(
+                        getStatusCallback));
+            }
+            else if (nestedCallCount == 2)
+            {
+                getModeCallback = (actualReceiver, actualSource, tag) => {
+                    modeCalls++;
+                    if (actualReceiver != receiver
+                        || actualSource != source || tag != 7)
+                    {
+                        return -1;
+                    }
+
+                    callOrder.Add("mode");
+                    return 27;
+                };
+                getStatusCallback = (actualReceiver, actualSource, tag) => {
+                    statusCalls++;
+                    if (actualReceiver != receiver
+                        || actualSource != source || tag != 7)
+                    {
+                        return -1;
+                    }
+
+                    callOrder.Add("status");
+                    return 17;
+                };
+                observeMultipleCallback
+                    = (actualReceiver, actualValue, status, mode) => {
+                        observeCalls++;
+                        return actualReceiver == receiver
+                            && actualValue == source
+                            && status == 17 && mode == 27
+                            && callOrder.SequenceEqual(
+                                ["mode", "status"])
+                            && Marshal.ReadInt32(actualValue) == 17
+                            ? 44 : -1;
+                    };
+                Marshal.WriteIntPtr(vtable,
+                    Marshal.GetFunctionPointerForDelegate(outputCallback));
+                Marshal.WriteIntPtr(vtable, IntPtr.Size,
+                    Marshal.GetFunctionPointerForDelegate(
+                        observeMultipleCallback));
+                Marshal.WriteIntPtr(vtable, IntPtr.Size * 2,
+                    Marshal.GetFunctionPointerForDelegate(getModeCallback));
+                Marshal.WriteIntPtr(vtable, IntPtr.Size * 3,
+                    Marshal.GetFunctionPointerForDelegate(
+                        getStatusCallback));
+            }
+            else
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(nestedCallCount));
+            }
+
+            Marshal.WriteIntPtr(receiver, vtable);
+            var invoke = Marshal.GetDelegateForFunctionPointer<
+                NativePointerOutputOuterCallFunction>(
+                    NativeLibrary.GetExport(module, functionName));
+            var result = invoke(receiver, source, 7, 42);
+            Assert.That(result, Is.EqualTo(nestedCallCount switch {
+                0 => 33,
+                1 => 17,
+                2 => 44,
+                _ => throw new ArgumentOutOfRangeException(
+                    nameof(nestedCallCount)),
+            }));
+            Assert.That(outputCalls, Is.EqualTo(1));
+            Assert.That(observeCalls, Is.EqualTo(1));
+            Assert.That(statusCalls, Is.EqualTo(nestedCallCount > 0 ? 1 : 0));
+            Assert.That(modeCalls, Is.EqualTo(nestedCallCount > 1 ? 1 : 0));
+
+            succeeds = false;
+            outputCalls = 0;
+            statusCalls = 0;
+            modeCalls = 0;
+            observeCalls = 0;
+            callOrder.Clear();
+            result = invoke(receiver, source, 7, 42);
+            Assert.That(result, Is.EqualTo(42));
+            Assert.That(outputCalls, Is.EqualTo(1));
+            Assert.That(observeCalls, Is.Zero);
+            Assert.That(statusCalls, Is.Zero);
+            Assert.That(modeCalls, Is.Zero);
+            GC.KeepAlive(outputCallback);
+            GC.KeepAlive(observePointerCallback);
+            GC.KeepAlive(observeTaggedCallback);
+            GC.KeepAlive(observeMultipleCallback);
+            GC.KeepAlive(getStatusCallback);
+            GC.KeepAlive(getModeCallback);
+        }
+        finally
+        {
+            if (module != IntPtr.Zero)
+            {
+                NativeLibrary.Free(module);
             }
             if (source != IntPtr.Zero)
             {
