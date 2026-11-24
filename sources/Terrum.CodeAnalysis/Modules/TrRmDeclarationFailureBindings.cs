@@ -875,31 +875,20 @@ internal static class TrRmDeclarationFailureBindingContract
                     .MethodOwnerModuleRows[clauseMethodDefRow];
             var expectedDefinition = 0x1600_0000u
                 | checked((uint)originMethodDefRow);
-            var matchesOrigin = false;
-            foreach (var methodImport in methodImports)
-            {
-                if (methodImport.OwnerModuleRow != clauseOwnerModuleRow
-                    || !StringComparer.Ordinal.Equals(
-                        methodImport.ProviderIdentity, originModuleIdentity))
-                {
-                    continue;
-                }
-
-                if (!originFacts.ExportsByKey.TryGetValue(
-                        (originModuleRow, methodImport.ExportKey),
-                        out var exportedDefinition)
-                    || exportedDefinition != expectedDefinition)
-                {
-                    continue;
-                }
-
-                matchesOrigin = true;
-            }
-
-            if (!matchesOrigin)
+            var clauseImports = methodImports
+                .Where(import => import.OwnerModuleRow == clauseOwnerModuleRow)
+                .Distinct()
+                .ToArray();
+            if (clauseImports.Length != 1
+                || !StringComparer.Ordinal.Equals(
+                    clauseImports[0].ProviderIdentity, originModuleIdentity)
+                || !originFacts.ExportsByKey.TryGetValue(
+                    (originModuleRow, clauseImports[0].ExportKey),
+                    out var exportedDefinition)
+                || exportedDefinition != expectedDefinition)
             {
                 throw new InvalidDataException(
-                    "A declaration failure-binding origin is not the exact public MethodDef imported by its clause.");
+                    "A declaration failure-binding origin does not match the clause's unique exact public MethodDef import.");
             }
         }
 
