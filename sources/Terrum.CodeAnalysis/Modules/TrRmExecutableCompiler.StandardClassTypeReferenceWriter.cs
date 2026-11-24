@@ -4916,6 +4916,12 @@ public static partial class TrRmExecutableCompiler
         var localVariables = new HashSet<int>();
         var nextLocalVariable = function.ParameterCount;
         var returned = false;
+        if (function.Body.Statements.Length == 1
+            && function.Body.Statements[0] is BoundIf conditional)
+        {
+            return CollectConditionalFieldAssignments(conditional);
+        }
+
         Collect(function.Body);
         if (nextLocalVariable != function.Variables.Length)
         {
@@ -5010,62 +5016,73 @@ public static partial class TrRmExecutableCompiler
                     continue;
                 }
 
-                if (statement is not BoundFieldAssignment assignment
-                    || assignment.Variable != 0
-                    || !assignment.NestedFields.IsEmpty
-                    || assignment.IsUnsafeAuthorized
-                    || assignment.Field < 0
-                    || assignment.Field >= @class.Fields.Length
-                    || !assignedFields.Add(assignment.Field))
+                if (statement is not BoundFieldAssignment assignment)
                 {
                     throw Unsupported(
                         "The bounded Construction-2 initializer supports only direct field stores with each field initialized once.");
                 }
 
-                var fieldType = @class.Fields[assignment.Field].Type;
-                if (assignment.Value is BoundRead read)
-                {
-                    var isSupportedValueHome
-                        = read.Variable < function.ParameterCount
-                            ? IsC1M1Construction2SourceCopyType(read.Type,
-                                program, schema, schemaIdentity,
-                                sourceStructDeclarations)
-                            : localVariables.Contains(read.Variable)
-                                && TryGetC1M1SourceScalarTypeSpecReference(
-                                    read.Type, out _);
-                    if (read.Variable <= 0
-                        || read.Variable >= function.Variables.Length
-                        || read.Type != fieldType
-                        || function.Variables[read.Variable].Type
-                            != read.Type
-                        || !isSupportedValueHome)
-                    {
-                        throw Unsupported(
-                            "A Construction-2 initializer store must copy a matching checked value formal or initialized scalar local.");
-                    }
-                }
-                else if (assignment.Value is BoundConstant constant)
-                {
-                    if (constant.Type != fieldType
-                        || (!TryGetC1M1SourceScalarTypeSpecReference(
-                                constant.Type, out _)
-                            && (!schema.UsesC1EnumClosure()
-                                || !BoundEnumTypes.IsValidType(
-                                    constant.Type,
-                                    program.EnumDefinitions.Length))))
-                    {
-                        throw Unsupported(
-                            "A Construction-2 initializer constant store must match a supported scalar or nominal enum field type.");
-                    }
-                }
-                else
+                AddFieldAssignment(assignment, assignedFields,
+                    localVariables, assignments);
+            }
+        }
+
+        void AddFieldAssignment(BoundFieldAssignment assignment,
+            HashSet<int> fields, HashSet<int> availableLocals,
+            ImmutableArray<BoundFieldAssignment>.Builder destination)
+        {
+            if (assignment.Variable != 0
+                || !assignment.NestedFields.IsEmpty
+                || assignment.IsUnsafeAuthorized
+                || assignment.Field < 0
+                || assignment.Field >= @class.Fields.Length
+                || !fields.Add(assignment.Field))
+            {
+                throw Unsupported(
+                    "The bounded Construction-2 initializer supports only direct field stores with each field initialized once.");
+            }
+
+            var fieldType = @class.Fields[assignment.Field].Type;
+            if (assignment.Value is BoundRead read)
+            {
+                var isSupportedValueHome
+                    = read.Variable < function.ParameterCount
+                        ? IsC1M1Construction2SourceCopyType(read.Type,
+                            program, schema, schemaIdentity,
+                            sourceStructDeclarations)
+                        : availableLocals.Contains(read.Variable)
+                            && TryGetC1M1SourceScalarTypeSpecReference(
+                                read.Type, out _);
+                if (read.Variable <= 0
+                    || read.Variable >= function.Variables.Length
+                    || read.Type != fieldType
+                    || function.Variables[read.Variable].Type != read.Type
+                    || !isSupportedValueHome)
                 {
                     throw Unsupported(
-                        "A Construction-2 initializer store must use a direct formal or scalar constant.");
+                        "A Construction-2 initializer store must copy a matching checked value formal or initialized scalar local.");
                 }
-
-                assignments.Add(assignment);
             }
+            else if (assignment.Value is BoundConstant constant)
+            {
+                if (constant.Type != fieldType
+                    || (!TryGetC1M1SourceScalarTypeSpecReference(
+                            constant.Type, out _)
+                        && (!schema.UsesC1EnumClosure()
+                            || !BoundEnumTypes.IsValidType(constant.Type,
+                                program.EnumDefinitions.Length))))
+                {
+                    throw Unsupported(
+                        "A Construction-2 initializer constant store must match a supported scalar or nominal enum field type.");
+                }
+            }
+            else
+            {
+                throw Unsupported(
+                    "A Construction-2 initializer store must use a direct formal or scalar constant.");
+            }
+
+            destination.Add(assignment);
         }
 
         bool IsSupportedScalarInitializerOperand(
@@ -5084,6 +5101,91 @@ public static partial class TrRmExecutableCompiler
                     && constant.Bits.IsCanonicalFor(type),
                 _ => false,
             };
+
+        ImmutableArray<BoundFieldAssignment>
+            CollectConditionalFieldAssignments(BoundIf branch)
+        {
+            if (function.Variables.Length != function.ParameterCount
+                || branch.Else is not BoundStatement elseBranch
+                || branch.Condition is not BoundRead conditionRead
+                || conditionRead.Variable <= 0
+                || conditionRead.Variable >= function.ParameterCount
+                || conditionRead.Type != PrimitiveType.Bool
+                || function.Variables[conditionRead.Variable].Type
+                    != PrimitiveType.Bool
+                || function.Variables[conditionRead.Variable].IsMutable
+                || function.Variables[conditionRead.Variable].IsOut
+                || function.Variables[conditionRead.Variable].IsInit
+                || function.Variables[conditionRead.Variable].IsImplicitRef
+                || function.Variables[conditionRead.Variable]
+                    .IsInitializationLocal
+                || !branch.GenericUniquePropertyWhenTrue.IsEmpty
+                || !branch.GenericUniquePropertyWhenFalse.IsEmpty
+                || branch.GenericUniquePropertyKnownResult is not null)
+            {
+                throw Unsupported(
+                    "A Construction-2 conditional initializer requires one side-effect-free Boolean value formal and no locals.");
+            }
+
+            var trueAssignments = CollectArm(branch.Then);
+            var falseAssignments = CollectArm(elseBranch);
+            if (trueAssignments.Length != falseAssignments.Length)
+            {
+                throw Unsupported(
+                    "Both Construction-2 initializer branches must initialize the same ordered fields.");
+            }
+
+            for (var index = 0; index < trueAssignments.Length; index++)
+            {
+                if (trueAssignments[index].Field
+                    != falseAssignments[index].Field)
+                {
+                    throw Unsupported(
+                        "Both Construction-2 initializer branches must initialize the same ordered fields.");
+                }
+            }
+
+            return trueAssignments;
+
+            ImmutableArray<BoundFieldAssignment> CollectArm(
+                BoundStatement arm)
+            {
+                var result = ImmutableArray.CreateBuilder<
+                    BoundFieldAssignment>();
+                var fields = new HashSet<int>();
+                CollectArmStatements(arm, result, fields);
+                return result.ToImmutable();
+            }
+
+            void CollectArmStatements(BoundStatement statement,
+                ImmutableArray<BoundFieldAssignment>.Builder result,
+                HashSet<int> fields)
+            {
+                if (statement is BoundBlock block)
+                {
+                    if (!block.RetiredManagedLocals.IsEmpty)
+                    {
+                        throw Unsupported(
+                            "A Construction-2 conditional initializer cannot retire managed locals.");
+                    }
+
+                    foreach (var nestedStatement in block.Statements)
+                    {
+                        CollectArmStatements(nestedStatement, result, fields);
+                    }
+
+                    return;
+                }
+
+                if (statement is not BoundFieldAssignment assignment)
+                {
+                    throw Unsupported(
+                        "A Construction-2 conditional initializer branch supports only direct field stores.");
+                }
+
+                AddFieldAssignment(assignment, fields, localVariables, result);
+            }
+        }
     }
 
     private static bool IsC1M1Construction2SourceCopyType(
@@ -5338,6 +5440,15 @@ public static partial class TrRmExecutableCompiler
         int contractCount, TrRmArtifactSchema schema)
     {
         var function = initializer.Function;
+        if (function.Body.Statements.Length == 1
+            && function.Body.Statements[0] is BoundIf conditional)
+        {
+            return EncodeC1M1Construction2ConditionalInitializerBody(
+                program, initializer, conditional,
+                fieldDefRowByClassAndIndex, typeSpecReferenceFor,
+                frozenScalarValueBuilder, contractCount, schema);
+        }
+
         var typeTokens = function.Variables
             .Select(variable => CreateStandardBodyTypeMapToken(
                 typeSpecReferenceFor(variable.Type)))
@@ -5637,6 +5748,308 @@ public static partial class TrRmExecutableCompiler
             var index = checked((ushort)recordIndex);
             code.Add((byte)index);
             code.Add((byte)(index >> 8));
+        }
+    }
+
+    private static byte[] EncodeC1M1Construction2ConditionalInitializerBody(
+        BoundProgram program, C1M1Construction2SourceInitializer initializer,
+        BoundIf conditional,
+        Dictionary<(int ClassIndex, int FieldIndex), int>
+            fieldDefRowByClassAndIndex,
+        Func<PrimitiveType, uint> typeSpecReferenceFor,
+        TrRmFrozenScalarValueBuilder frozenScalarValueBuilder,
+        int contractCount, TrRmArtifactSchema schema)
+    {
+        var function = initializer.Function;
+        if (function.Variables.Length != function.ParameterCount
+            || conditional.Else is not BoundStatement elseBranch
+            || conditional.Condition is not BoundRead conditionRead
+            || conditionRead.Variable <= 0
+            || conditionRead.Variable >= function.ParameterCount
+            || conditionRead.Type != PrimitiveType.Bool
+            || function.Variables[conditionRead.Variable].Type
+                != PrimitiveType.Bool)
+        {
+            throw new InvalidDataException(
+                "A Construction-2 conditional initializer differs from its checked input and branch contract.");
+        }
+
+        var trueAssignments = CollectArm(conditional.Then);
+        var falseAssignments = CollectArm(elseBranch);
+        if (trueAssignments.Length != initializer.FieldAssignments.Length
+            || falseAssignments.Length != initializer.FieldAssignments.Length)
+        {
+            throw new InvalidDataException(
+                "A Construction-2 conditional initializer differs from its checked field set.");
+        }
+
+        for (var index = 0; index < initializer.FieldAssignments.Length;
+            index++)
+        {
+            var field = initializer.FieldAssignments[index].Field;
+            if (trueAssignments[index].Field != field
+                || falseAssignments[index].Field != field)
+            {
+                throw new InvalidDataException(
+                    "A Construction-2 conditional initializer changes its ordered field set.");
+            }
+        }
+
+        var typeTokens = function.Variables
+            .Select(variable => CreateStandardBodyTypeMapToken(
+                typeSpecReferenceFor(variable.Type)))
+            .Concat(trueAssignments.Select(assignment =>
+                CreateStandardBodyTypeMapToken(
+                    typeSpecReferenceFor(assignment.Value.Type))))
+            .Concat(falseAssignments.Select(assignment =>
+                CreateStandardBodyTypeMapToken(
+                    typeSpecReferenceFor(assignment.Value.Type))))
+            .ToArray();
+        var maps = TrRmRegisterBodyMapBuilder.Create(typeTokens, []);
+        var homeMap = new byte[checked(function.Variables.Length * 8)];
+        for (var variableIndex = 0;
+            variableIndex < function.Variables.Length; variableIndex++)
+        {
+            var home = homeMap.AsSpan(variableIndex * 8, 8);
+            home[0] = variableIndex == 0 ? (byte)1 : (byte)2;
+            BinaryPrimitives.WriteUInt16LittleEndian(home[2..],
+                checked((ushort)maps.GetTypeMapIndex(
+                    CreateStandardBodyTypeMapToken(
+                        typeSpecReferenceFor(
+                            function.Variables[variableIndex].Type)))));
+            if (variableIndex != 0)
+            {
+                BinaryPrimitives.WriteUInt16LittleEndian(home[4..],
+                    checked((ushort)(variableIndex - 1)));
+            }
+        }
+
+        var records = new List<ReadOnlyMemory<byte>> {
+            new(new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 }),
+        };
+        var edgeRecordIndex = AddRecord(
+            TrRmRegisterBodyRecordWriter.EncodeConditionalEdge(1, 2));
+        var conditionCode = new List<byte>(8);
+        AppendHomeLoad(conditionCode, 0, conditionRead.Variable);
+        AppendRecordReference(conditionCode, 0xE4, edgeRecordIndex);
+        var codeBlocks = new[] {
+            conditionCode.ToArray(),
+            EmitArm(trueAssignments),
+            EmitArm(falseAssignments),
+        };
+        var blocks = new List<TrRmRegisterBodyBlock>(codeBlocks.Length);
+        var code = new List<byte>();
+        foreach (var blockCode in codeBlocks)
+        {
+            blocks.Add(new TrRmRegisterBodyBlock(
+                checked((uint)code.Count),
+                checked((uint)blockCode.Length), 0));
+            code.AddRange(blockCode);
+        }
+
+        var constantMap = new byte[checked(constantRows.Count * 8)];
+        for (var index = 0; index < constantRows.Count; index++)
+        {
+            var offset = index * 8;
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                constantMap.AsSpan(offset), constantRows[index].TypeSpecRef);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                constantMap.AsSpan(offset + sizeof(uint)),
+                constantRows[index].ConstantSourceRow);
+        }
+
+        return TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
+            default, default, constantMap, blocks, records, code.ToArray(),
+            contractCount: contractCount, schema: schema,
+            generalPredicateGraphsInitializationReferenceBodies
+                : schema.UsesGeneralPredicateGraphs());
+
+        ImmutableArray<BoundFieldAssignment> CollectArm(
+            BoundStatement arm)
+        {
+            var assignments
+                = ImmutableArray.CreateBuilder<BoundFieldAssignment>();
+            CollectArmStatements(arm, assignments);
+            return assignments.ToImmutable();
+        }
+
+        void CollectArmStatements(BoundStatement statement,
+            ImmutableArray<BoundFieldAssignment>.Builder assignments)
+        {
+            if (statement is BoundBlock block)
+            {
+                if (!block.RetiredManagedLocals.IsEmpty)
+                {
+                    throw new InvalidDataException(
+                        "A Construction-2 conditional initializer branch has managed-local retirement.");
+                }
+
+                foreach (var nested in block.Statements)
+                {
+                    CollectArmStatements(nested, assignments);
+                }
+
+                return;
+            }
+
+            if (statement is not BoundFieldAssignment assignment)
+            {
+                throw new InvalidDataException(
+                    "A Construction-2 conditional initializer branch contains an unsupported statement.");
+            }
+
+            assignments.Add(assignment);
+        }
+
+        byte[] EmitArm(
+            ImmutableArray<BoundFieldAssignment> assignments)
+        {
+            var armCode = new List<byte>();
+            foreach (var assignment in assignments)
+            {
+                if (!fieldDefRowByClassAndIndex.TryGetValue((
+                        initializer.ClassIndex, assignment.Field),
+                        out var fieldDefRow))
+                {
+                    throw new InvalidDataException(
+                        "A Construction-2 conditional initializer field has no emitted FieldDef.");
+                }
+
+                var fieldTypeToken = CreateStandardBodyTypeMapToken(
+                    typeSpecReferenceFor(assignment.Value.Type));
+                var selectionRecord = AddRecord(
+                    TrRmRegisterBodyRecordWriter.EncodePlaceSelection(
+                        targetKind: 2, accessKind: 3, destinationKind: 1,
+                        baseKind: 2, destinationIndex: 0, baseIndex: 0,
+                        indexKind: 0, targetRefKind: 1, indexIndex: 0,
+                        targetRef: checked((uint)fieldDefRow),
+                        referentTypeMapIndex: checked((ushort)
+                            maps.GetTypeMapIndex(fieldTypeToken)),
+                        schema));
+                AppendRecordReference(armCode, 0xD8, selectionRecord);
+
+                byte sourceKind;
+                ushort sourceIndex;
+                if (assignment.Value is BoundRead read)
+                {
+                    sourceKind = 2;
+                    sourceIndex = checked((ushort)read.Variable);
+                }
+                else if (assignment.Value is BoundConstant constant)
+                {
+                    sourceKind = 1;
+                    sourceIndex = 1;
+                    AppendConstantLoad(armCode, 1, constant);
+                }
+                else
+                {
+                    throw new InvalidDataException(
+                        "A Construction-2 conditional initializer field has an unsupported value.");
+                }
+
+                var storeRecord = AddRecord(
+                    TrRmRegisterBodyRecordWriter.EncodeSemanticStore(
+                        placeKind: 1, sourceKind: sourceKind, transition: 1,
+                        sourceUse: 1, placeIndex: 0, sourceIndex: sourceIndex,
+                        schema: schema));
+                AppendRecordReference(armCode, 0xD9, storeRecord);
+            }
+
+            armCode.Add(0x18);
+            armCode.Add(0);
+            return armCode.ToArray();
+        }
+
+        int AddRecord(ReadOnlyMemory<byte> record)
+        {
+            if (records.Count > ushort.MaxValue)
+            {
+                throw Unsupported(
+                    "A Construction-2 conditional initializer exceeds the Body record limit.");
+            }
+
+            var index = records.Count;
+            records.Add(record);
+            return index;
+        }
+
+        void AppendHomeLoad(List<byte> destinationCode,
+            byte destinationRegister, int homeIndex)
+        {
+            destinationCode.Add(0xD5);
+            destinationCode.Add(destinationRegister);
+            destinationCode.Add(checked((byte)homeIndex));
+            destinationCode.Add(checked((byte)(homeIndex >> 8)));
+        }
+
+        void AppendConstantLoad(List<byte> destinationCode,
+            byte destinationRegister, BoundConstant constant)
+        {
+            var constantIndex = checked((ushort)
+                GetConstantMapIndex(constant));
+            destinationCode.Add(0xD4);
+            destinationCode.Add(destinationRegister);
+            destinationCode.Add((byte)constantIndex);
+            destinationCode.Add((byte)(constantIndex >> 8));
+        }
+
+        void AppendRecordReference(List<byte> destinationCode, byte opcode,
+            int recordIndex)
+        {
+            destinationCode.Add(opcode);
+            destinationCode.Add(0);
+            var index = checked((ushort)recordIndex);
+            destinationCode.Add((byte)index);
+            destinationCode.Add((byte)(index >> 8));
+        }
+
+        int GetConstantMapIndex(BoundConstant constant)
+        {
+            var typeSpecReference
+                = typeSpecReferenceFor(constant.Type);
+            TrRmFrozenScalarValueReference frozenValue;
+            if (BoundEnumTypes.IsType(constant.Type))
+            {
+                if (!schema.UsesC1EnumClosure()
+                    || !BoundEnumTypes.IsValidType(constant.Type,
+                        program.EnumDefinitions.Length))
+                {
+                    throw Unsupported(
+                        "A Construction-2 conditional initializer enum constant has no checked nominal definition.");
+                }
+
+                var enumDefinition
+                    = program.EnumDefinitions[
+                        BoundEnumTypes.Index(constant.Type)];
+                frozenValue = frozenScalarValueBuilder.AddEN1EnumMember(
+                    constant, typeSpecReference,
+                    enumDefinition.UnderlyingType, schema);
+            }
+            else
+            {
+                frozenValue = frozenScalarValueBuilder.Add(constant);
+            }
+
+            if (frozenValue.TypeSpecRef != typeSpecReference)
+            {
+                throw Unsupported(
+                    "A Construction-2 conditional initializer ConstantMap requires the exact field TypeSpecRef.");
+            }
+
+            var index = constantRows.IndexOf(frozenValue);
+            if (index < 0)
+            {
+                if (constantRows.Count > ushort.MaxValue)
+                {
+                    throw Unsupported(
+                        "A Construction-2 conditional initializer exceeds the ConstantMap index limit.");
+                }
+
+                index = constantRows.Count;
+                constantRows.Add(frozenValue);
+            }
+
+            return index;
         }
     }
 
