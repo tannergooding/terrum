@@ -1039,6 +1039,60 @@ internal static class TrRmDeclarationFailureBindingContract
                 continue;
             }
 
+            var interfaceTypeDefRow
+                = classTables.TypeSpecs.GetNominalTypeDefRow(
+                    nominalInterfaceTypeSpecRef, classTables.TypeDefs,
+                    classTables.Imports);
+            var interfaceDefRow
+                = classTables.Interfaces.GetInterfaceDefForTypeDef(
+                    interfaceTypeDefRow);
+            var (_, baseCount)
+                = classTables.Interfaces.GetBaseRange(interfaceDefRow);
+            if (baseCount != 0)
+            {
+                throw new NotSupportedException(
+                    "The selected Core exception-interface witness has inherited requirements outside the current validator subset.");
+            }
+
+            var (methodFirst, methodCount)
+                = classTables.Interfaces.GetMethodRange(interfaceDefRow);
+            var (memberFirst, memberCount)
+                = classTables.InterfaceWitnesses.GetMemberRange(witnessRow);
+            if (memberCount != methodCount)
+            {
+                throw new InvalidDataException(
+                    "The selected exception-class witness does not cover every direct IException requirement.");
+            }
+
+            for (var methodOrdinal = 0; methodOrdinal < methodCount;
+                methodOrdinal++)
+            {
+                var requiredMethod = classTables.InterfaceMethods
+                    .GetMethodDefRow(methodFirst + methodOrdinal);
+                var matchingBindings = 0;
+                for (var memberOrdinal = 0; memberOrdinal < memberCount;
+                    memberOrdinal++)
+                {
+                    var memberRow = memberFirst + memberOrdinal;
+                    if (classTables.WitnessMembers
+                            .GetRequirementMethodDef(memberRow)
+                            == requiredMethod
+                        && classTables.TypeSpecs.AreEquivalentTypeSpecRefs(
+                            classTables.WitnessMembers
+                                .GetDeclaringInterfaceTypeSpecRef(memberRow),
+                            interfaceTypeSpecRef))
+                    {
+                        matchingBindings++;
+                    }
+                }
+
+                if (matchingBindings != 1)
+                {
+                    throw new InvalidDataException(
+                        "The selected exception-class witness has a missing or ambiguous direct IException requirement binding.");
+                }
+            }
+
             witnessCount++;
         }
 
