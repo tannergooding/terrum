@@ -1843,11 +1843,11 @@ internal sealed class TrRmC1EnumClosureSourceTests
             namespace Demo {
                 public class Box {
                     public int32 Value;
-                    public Box(bool takeLeft, int32 left, int32 right) {
-                        if (takeLeft) {
-                            Value = left;
+                    public Box(bool takeConstant, int32 value) {
+                        if (takeConstant) {
+                            Value = 42;
                         } else {
-                            Value = right;
+                            Value = value;
                         }
                     }
                 }
@@ -1882,6 +1882,12 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 tables.Contracts.Count);
             Assert.That(initializerBody.BlockCount, Is.EqualTo(3),
                 schemaIdentity);
+            Assert.That(initializerBody.ConstantCount, Is.EqualTo(1),
+                schemaIdentity);
+            Assert.That(initializerBody.GetBlockCode(1)[4],
+                Is.EqualTo((byte)0xD4), schemaIdentity);
+            Assert.That(ReadSingleConstant(initializerBody, tables),
+                Is.EqualTo(new BigInteger(42)), schemaIdentity);
             Assert.That(initializerBody.GetBlockCode(0).ToArray(),
                 Is.EqualTo(new byte[] {
                     0xD5, 0, 1, 0, 0xE4, 0, 1, 0,
@@ -1918,9 +1924,35 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 reemittedTables.Contracts.Count);
             Assert.That(reemittedBody.BlockCount, Is.EqualTo(3),
                 schemaIdentity);
+            Assert.That(reemittedBody.ConstantCount, Is.EqualTo(1),
+                schemaIdentity);
+            Assert.That(ReadSingleConstant(reemittedBody, reemittedTables),
+                Is.EqualTo(new BigInteger(42)), schemaIdentity);
             Assert.That(reemittedBody.GetBlockCode(0).ToArray(),
                 Is.EqualTo(initializerBody.GetBlockCode(0).ToArray()),
                 schemaIdentity);
+            Assert.That(reemittedBody.GetBlockCode(1).ToArray(),
+                Is.EqualTo(initializerBody.GetBlockCode(1).ToArray()),
+                schemaIdentity);
+        }
+
+        static BigInteger ReadSingleConstant(
+            TrRmRegisterBodyReader body,
+            TrRmStructuralMetadataValidator.ValidatedExecutionTables tables)
+        {
+            var constantTypeSpec = BinaryPrimitives.ReadUInt32LittleEndian(
+                body.ConstantMap);
+            var constantSourceRow = checked((int)
+                BinaryPrimitives.ReadUInt32LittleEndian(
+                    body.ConstantMap.Slice(sizeof(uint))));
+            return TrRmConstantSourceValueValidator.MaterializeFrozenScalar(
+                constantSourceRow, constantTypeSpec, 1,
+                tables.Modules.GetRequirements(1).TargetRequirement,
+                tables.ConstantSources, tables.FrozenValueNodes,
+                tables.Blobs, tables.TypeSpecs, tables.Features,
+                tables.Modules, tables.TypeDefs, tables.EnumDefs,
+                tables.Imports, tables.A3LayoutResourceLedger,
+                tables.Fields).Value;
         }
     }
 
