@@ -2494,10 +2494,10 @@ public static partial class TrRmExecutableCompiler
                 || !IsSupportedForeignNativeInterfaceValueType(
                     nestedTarget.ReturnType, program, schema)
                 || !nestedTarget.NativeOutputContracts.IsEmpty
-                || nestedTarget.ParameterCount != 0
                 || nestedTarget.ParameterCount
                     != nestedCall.Arguments.Length
                 || nestedForeignCall.Receiver is not BoundRead receiver
+                || receiver.Variable != 0
                 || (uint)receiver.Variable >= (uint)fallbackLocal
                 || receiver.Type != PrimitiveType.NativeRawPointer
                 || function.Variables[receiver.Variable].Type
@@ -6458,7 +6458,6 @@ public static partial class TrRmExecutableCompiler
                 || !DirectNativeImportContract.IsScalar(
                     nestedTarget.ReturnType)
                 || !nestedTarget.NativeOutputContracts.IsEmpty
-                || nestedTarget.ParameterCount != 0
                 || nestedTarget.ParameterCount
                     != successNestedCall.Arguments.Length
                 || nestedForeignCall.Receiver is not BoundRead {
@@ -6470,9 +6469,48 @@ public static partial class TrRmExecutableCompiler
                     $"Function '{function.Name}' has a side-effecting success input outside the scalar no-output FNI subset.");
             }
 
-            successNestedInputs = new TrRmRegisterBodyCallInput[1];
+            successNestedInputs = new TrRmRegisterBodyCallInput[
+                nestedTarget.ParameterCount + 1];
             successNestedInputs[0]
                 = new TrRmRegisterBodyCallInput(2, 1, 0);
+            var nestedArgumentsByFormal
+                = new BoundRead?[nestedTarget.ParameterCount];
+            for (var argumentIndex = 0;
+                argumentIndex < successNestedCall.Arguments.Length;
+                argumentIndex++)
+            {
+                var formal = successNestedCall.ParameterIndex(argumentIndex);
+                var argument = successNestedCall.Arguments[argumentIndex];
+                if ((uint)formal >= (uint)nestedTarget.ParameterCount
+                    || nestedArgumentsByFormal[formal] is not null
+                    || argument is not BoundRead read
+                    || read.Variable <= 0
+                    || read.Variable >= fallbackVariable
+                    || read.Type != nestedTarget.Variables[formal].Type
+                    || function.Variables[read.Variable].Type != read.Type
+                    || function.Variables[read.Variable].IsOut
+                    || function.Variables[read.Variable].IsInit
+                    || !(IsSupportedForeignNativeInterfaceValueType(
+                            read.Type, program, schema)
+                        || read.Type == PrimitiveType.NativeRawPointer))
+                {
+                    throw Unsupported(
+                        $"Function '{function.Name}' has a side-effecting success input outside the direct-Home subset.");
+                }
+
+                nestedArgumentsByFormal[formal] = read;
+            }
+
+            for (var formal = 0;
+                formal < nestedArgumentsByFormal.Length; formal++)
+            {
+                var argument = nestedArgumentsByFormal[formal]
+                    ?? throw Invalid(
+                        "A Standard F+I conditional-output nested success call omits a formal input.");
+                successNestedInputs[formal + 1]
+                    = new TrRmRegisterBodyCallInput(2, 1,
+                        checked((ushort)argument.Variable));
+            }
 
             successNestedMethodMapToken
                 = methodMapTokenForForeignInterface(
@@ -12868,6 +12906,8 @@ public static partial class TrRmExecutableCompiler
                     + 3 + successCallSiteCount)
             || callSiteInvocationCount > 13
             || successCallSiteCount > 2
+            || (hasSuccessCall
+                && callSiteInvocationCount + 1 + successCallSiteCount > 13)
             || (!hasCallSiteInputs && !hasSuccessCall
                 && body.MethodCount != 1)
             || ((hasCallSiteInputs || hasSuccessCall)
@@ -14593,7 +14633,7 @@ public static partial class TrRmExecutableCompiler
 
             var nestedPayload = nestedRecord[4..];
             if (nestedRecord[0] != 0x02
-                || nestedPayload.Length != 20
+                || nestedPayload.Length < 20
                 || nestedPayload[0] != 1
                 || nestedPayload[1] != 1
                 || BinaryPrimitives.ReadUInt16LittleEndian(
@@ -14601,12 +14641,10 @@ public static partial class TrRmExecutableCompiler
                 || BinaryPrimitives.ReadUInt16LittleEndian(
                     nestedPayload[6..]) != 1
                 || BinaryPrimitives.ReadUInt32LittleEndian(
-                    nestedPayload[8..]) != 1
-                || BinaryPrimitives.ReadUInt32LittleEndian(
                     nestedPayload[12..]) != 0)
             {
                 throw Invalid(
-                    "The Standard F+I conditional-output nested success CallSite is outside the parameterless scalar call subset.");
+                    "The Standard F+I conditional-output nested success CallSite is malformed.");
             }
 
             var nestedMethodMapIndex
@@ -14652,14 +14690,18 @@ public static partial class TrRmExecutableCompiler
                 || !DirectNativeImportContract.IsScalar(nestedResultType)
                 || nestedMember.DoesNotReturn
                 || !nestedMember.NativeOutputContracts.IsEmpty
-                || nestedMember.Parameters.Length != 0
                 || nestedMember.NativeCallableConvention is not
                     NativeCallingConvention nestedConvention
                 || nestedForeignTarget.Definition.ForeignNativeInterface
-                    is not BoundForeignNativeInterfaceLayout nestedLayout)
+                    is not BoundForeignNativeInterfaceLayout nestedLayout
+                || BinaryPrimitives.ReadUInt32LittleEndian(
+                    nestedPayload[8..])
+                    != (uint)(nestedMember.Parameters.Length + 1)
+                || nestedPayload.Length
+                    != 20 + (nestedMember.Parameters.Length * 4))
             {
                 throw Invalid(
-                    "The Standard F+I conditional-output nested success target is outside the parameterless scalar no-output subset.");
+                    "The Standard F+I conditional-output nested success target is outside the scalar no-output direct-Home subset.");
             }
 
             var nestedReceiverInput = nestedPayload[16..];
@@ -14670,6 +14712,49 @@ public static partial class TrRmExecutableCompiler
             {
                 throw Invalid(
                     "The Standard F+I conditional-output nested success CallSite has no direct receiver Home.");
+            }
+
+            var nestedArguments
+                = ImmutableArray.CreateBuilder<BoundExpression>(
+                    nestedMember.Parameters.Length);
+            var nestedParameterIndices
+                = ImmutableArray.CreateBuilder<int>(
+                    nestedMember.Parameters.Length);
+            var nestedInputOffset = 20;
+            for (var nestedFormal = 0;
+                nestedFormal < nestedMember.Parameters.Length;
+                nestedFormal++)
+            {
+                var parameter = nestedMember.Parameters[nestedFormal];
+                var formalType = parameter.Type.PrimitiveType;
+                var input = nestedPayload.Slice(nestedInputOffset, 4);
+                var homeIndex = BinaryPrimitives
+                    .ReadUInt16LittleEndian(input[2..]);
+                if (parameter.Type.Kind
+                        != BoundInterfaceTypeKind.Primitive
+                    || !(DirectNativeImportContract.IsScalar(formalType)
+                        || formalType
+                            == PrimitiveType.NativeRawPointer
+                        || NativePointerTypes.IsType(formalType)
+                        || NativeFunctionPointerTypes.IsType(formalType))
+                    || input[0] != 2 || input[1] != 1
+                    || homeIndex == 0
+                    || homeIndex >= inputVariableLimit
+                    || homeRoles[homeIndex] != 2
+                    || homeVariables[homeIndex] != homeIndex
+                    || homeTypes[homeIndex] != formalType
+                    || variables[homeIndex].IsOut
+                    || variables[homeIndex].IsInit)
+                {
+                    throw Invalid(
+                        "A Standard F+I conditional-output nested success input does not match a direct scalar or pointer parameter Home.");
+                }
+
+                _ = inputHomeVariables.Add(homeIndex);
+                nestedArguments.Add(new BoundRead(
+                    homeVariables[homeIndex], formalType, default));
+                nestedParameterIndices.Add(nestedFormal);
+                nestedInputOffset += 4;
             }
 
             var nestedDeclarationKey = nestedMember.DeclarationKey;
@@ -14700,7 +14785,7 @@ public static partial class TrRmExecutableCompiler
                 nestedDeclarationKey);
             successNestedCall = new BoundCall(
                 BoundCall.ForeignInterfaceFunction,
-                ImmutableArray<BoundExpression>.Empty, nestedResultType,
+                nestedArguments.MoveToImmutable(), nestedResultType,
                 default) {
                 IsUnsafeAuthorized = true,
                 ForeignInterfaceCall = new BoundForeignNativeInterfaceCall(
@@ -14710,7 +14795,8 @@ public static partial class TrRmExecutableCompiler
                     nestedConvention, nestedMember.RequiresMutableReceiver,
                     nestedMember.DoesNotReturn,
                     nestedMember.NativeOutputContracts),
-                ArgumentParameterIndices = [],
+                ArgumentParameterIndices
+                    = nestedParameterIndices.MoveToImmutable(),
             };
         }
 

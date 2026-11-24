@@ -8585,7 +8585,7 @@ internal sealed class NativeCoreRegistrationTests
         var tagSourceType = floatInputConversion ? "float64" : "int32";
         var tagExpression = floatInputConversion ? "int32(tag)" : "tag";
         var nestedSuccessInterfaceMethod = sideEffectingSuccessArgument
-            ? "public unsafe int32 GetStatus();"
+            ? "public unsafe int32 GetStatus(ptr<int32> source, int32 tag);"
             : string.Empty;
         var outerCallInterfaceMethod = !usesOuterCall
             ? string.Empty
@@ -8604,7 +8604,7 @@ internal sealed class NativeCoreRegistrationTests
                     ? "return IPointerProbe.Observe(value, statusValue: statusValue);"
                     : "return IPointerProbe.Observe(value);"
                 : sideEffectingSuccessArgument
-                    ? "return IPointerProbe.Observe(receiver, value, tag: IPointerProbe.GetStatus(receiver));"
+                    ? "return IPointerProbe.Observe(receiver, value, tag: IPointerProbe.GetStatus(receiver, tag: tag, source: source));"
                     : multipleOutputs
                         ? "return IPointerProbe.Observe(receiver, statusValue: statusValue, value: value);"
                         : "return IPointerProbe.Observe(receiver, value);"
@@ -9037,6 +9037,23 @@ internal sealed class NativeCoreRegistrationTests
                                 }
                             });
                         Assert.That(nestedCall, Is.Not.Null);
+                        var selectedNestedCall = nestedCall
+                            ?? throw new AssertionException(
+                                "Expected the FNI GetStatus call.");
+                        Assert.That(selectedNestedCall.Arguments,
+                            Has.Length.EqualTo(2));
+                        Assert.That(selectedNestedCall.ParameterIndex(0),
+                            Is.Zero);
+                        Assert.That(selectedNestedCall.ParameterIndex(1),
+                            Is.EqualTo(1));
+                        Assert.That(selectedNestedCall.Arguments[0],
+                            Is.TypeOf<BoundRead>());
+                        Assert.That(((BoundRead)selectedNestedCall.Arguments[0])
+                            .Variable, Is.EqualTo(1));
+                        Assert.That(selectedNestedCall.Arguments[1],
+                            Is.TypeOf<BoundRead>());
+                        Assert.That(((BoundRead)selectedNestedCall.Arguments[1])
+                            .Variable, Is.EqualTo(2));
                     }
                     else
                     {
